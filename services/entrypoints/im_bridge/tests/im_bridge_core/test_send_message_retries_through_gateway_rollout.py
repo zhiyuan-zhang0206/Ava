@@ -17,12 +17,10 @@ from services.entrypoints.im_bridge.tests.test_im_bridge_core import (
     FakeGateway,
     FakePlainAdapter,
     FakeTypingAdapter,
-    assert_effort_layer_after_pro,
-    assert_model_layer_after_coder,
-    assert_preset_layer,
+    assert_effort_layer,
+    assert_model_layer,
     create_test_core,
     models_data,
-    preset,
     reply_text,
     row,
 )
@@ -235,27 +233,20 @@ async def test_typing_gives_up_after_timeout(monkeypatch: pytest.MonkeyPatch) ->
 
 async def test_spawn_menu_layers_render_with_summary_button() -> None:
     async with owned_tasks() as _owned_tasks:
-        gateway = FakeGateway(
-            presets=[preset(1, "coder"), preset(2, "reviewer", label="Code Reviewer")],
-            models=models_data(),
-        )
+        gateway = FakeGateway(models=models_data())
         core = create_test_core(gateway, tasks=_owned_tasks)
         state = ChatState("telegram", "12345")
 
-        assert_preset_layer(await core._cmd_spawn(state))
-        assert_model_layer_after_coder(await core._handle_spawn_menu(state, "spawn:preset:1"))
-        assert_effort_layer_after_pro(
-            await core._handle_spawn_menu(state, "spawn:model:deepseek-v4-pro")
-        )
+        assert_model_layer(await core._cmd_spawn(state))
+        assert_effort_layer(await core._handle_spawn_menu(state, "spawn:model:deepseek-v4-pro"))
 
 
 async def test_spawn_menu_effort_fallback_without_model_options() -> None:
     async with owned_tasks() as _owned_tasks:
-        gateway = FakeGateway(presets=[], models=models_data())
+        gateway = FakeGateway(models=models_data())
         core = create_test_core(gateway, tasks=_owned_tasks)
         state = ChatState("telegram", "12345")
         await core._cmd_spawn(state)
-        await core._handle_spawn_menu(state, "spawn:preset:none")
         out = await core._handle_spawn_menu(state, "spawn:model:deepseek-v4-flash")
         assert isinstance(out, Reply)
         labels = [b[0] for b in out.buttons or []]
@@ -266,62 +257,36 @@ async def test_spawn_menu_effort_fallback_without_model_options() -> None:
 
 async def test_spawn_menu_every_layer_completable() -> None:
     async with owned_tasks() as _owned_tasks:
-        gateway = FakeGateway(presets=[preset(1, "coder")], models=models_data())
+        gateway = FakeGateway(models=models_data())
         core = create_test_core(gateway, tasks=_owned_tasks)
         state = ChatState("telegram", "12345")
 
         await core._cmd_spawn(state)
         out = await core._handle_spawn_menu(state, "spawn:go")
         assert isinstance(out, Reply)
-        assert gateway.spawned == [(None, {})]
+        assert gateway.spawned == [{}]
         assert copy.SPAWNED_PLAIN.format(agent_id=777) in out.text
         assert out.buttons == [(copy.SPAWN_SWITCH_BUTTON.format(agent_id=777), "/switch 777")]
 
         await core._cmd_spawn(state)
-        await core._handle_spawn_menu(state, "spawn:preset:1")
         await core._handle_spawn_menu(state, "spawn:model:deepseek-v4-pro")
         await core._handle_spawn_menu(state, "spawn:effort:max")
         out2 = await core._handle_spawn_menu(state, "spawn:go")
         assert isinstance(out2, Reply)
-        assert gateway.spawned[-1] == (
-            "coder",
-            {"llm_model": "deepseek-v4-pro", "reasoning_effort": "max"},
-        )
-        assert copy.SPAWNED_WITH_PRESET.format(preset="coder", agent_id=777) in out2.text
+        assert gateway.spawned[-1] == {"llm_model": "deepseek-v4-pro", "reasoning_effort": "max"}
+        assert copy.SPAWNED_PLAIN.format(agent_id=777) in out2.text
 
 
 async def test_spawn_menu_provider_default_effort_means_unset() -> None:
     async with owned_tasks() as _owned_tasks:
-        gateway = FakeGateway(presets=[preset(1, "coder")], models=models_data())
+        gateway = FakeGateway(models=models_data())
         core = create_test_core(gateway, tasks=_owned_tasks)
         state = ChatState("telegram", "12345")
         await core._cmd_spawn(state)
-        await core._handle_spawn_menu(state, "spawn:preset:1")
         await core._handle_spawn_menu(state, "spawn:model:deepseek-v4-pro")
         await core._handle_spawn_menu(state, "spawn:effort:")
         await core._handle_spawn_menu(state, "spawn:go")
-        assert gateway.spawned[-1] == ("coder", {"llm_model": "deepseek-v4-pro"})
-
-
-async def test_spawn_skips_preset_layer_when_no_presets() -> None:
-    async with owned_tasks() as _owned_tasks:
-        gateway = FakeGateway(presets=[], models=models_data())
-        core = create_test_core(gateway, tasks=_owned_tasks)
-        state = ChatState("telegram", "12345")
-        out = await core._cmd_spawn(state)
-        assert isinstance(out, Reply)
-        assert out.text == copy.SPAWN_LAYER_MODEL
-
-
-async def test_spawn_menu_stale_preset_reports_error() -> None:
-    async with owned_tasks() as _owned_tasks:
-        gateway = FakeGateway(presets=[preset(1, "coder")], models=models_data())
-        core = create_test_core(gateway, tasks=_owned_tasks)
-        state = ChatState("telegram", "12345")
-        await core._cmd_spawn(state)
-        out = await core._handle_spawn_menu(state, "spawn:preset:99")
-        assert isinstance(out, Reply)
-        assert copy.SPAWN_PRESET_GONE in out.text
+        assert gateway.spawned[-1] == {"llm_model": "deepseek-v4-pro"}
 
 
 async def test_commands_lists_everything() -> None:

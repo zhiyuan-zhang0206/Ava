@@ -20,7 +20,6 @@ Overview of the Ava subsystem.
 - [[ava/agents/docs/agents.ava.okf.md|Agents]]
 - [[files.ava.okf.md|Files]]
 - [[docs/mcps/mcps.ava.okf.md|Mcps]]
-- [[presets.ava.okf.md|Presets]]
 - [[sdk-surface.ava.okf.md|Sdk Surface]]
 - [[ava/self/docs/self.ava.okf.md|Self]]
 - [[ava/shell/docs/shell.ava.okf.md|Shell]]

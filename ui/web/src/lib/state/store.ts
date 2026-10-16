@@ -18,9 +18,6 @@
 //   UI slice: pure-client UI state (activeId, toast, sidebar drawer, search).
 //   Cluster slice: SSE-reconnect + cluster-update coordination.
 //
-// Nothing here is persisted: this is volatile per-session UI state. Durable
-// preferences (including the spawn picker's model/preset/effort) are DB rows via
-// useUserSettings, not zustand persist.
 
 "use client";
 
@@ -70,10 +67,6 @@ interface UISlice {
   openTasksNotice: OpenTasksHint | null;
   showOpenTasksNotice: (notice: OpenTasksHint) => void;
   dismissOpenTasksNotice: () => void;
-
-  // Spawn picker selections (model / preset / reasoning effort) are DB-backed
-  // user preferences now (behavior.spawn_* via useUserSettings), so they sync
-  // across frontends — SpawnButton reads/writes them directly, not the store.
 
   /** Search query for filtering agents in the sidebar by label / ID. */
   searchQuery: string;

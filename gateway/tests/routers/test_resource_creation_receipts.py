@@ -3,88 +3,64 @@ from typing import Any
 
 import psycopg
 import pytest
-from psycopg import sql
 
 import base.db
 from base.api_contracts.idempotency import keyed_headers
 from base.db.code_version_gate import ProcessDbGate
-from gateway.routers import presets
 from gateway.routers.receipts import creation as creation_receipts
 from gateway.schedules import router as schedules
 from tests.fixtures.gateway_config import gateway_test_client
 
-
-@pytest.fixture(params=["preset", "schedule"])
-def resource(request: pytest.FixtureRequest) -> tuple[str, dict[str, Any], str]:
-    if request.param == "preset":
-        return (
-            "/api/presets",
-            {
-                "name": "receipt",
-                "label": "worker",
-                "config": {"plugin_secret": "private-test-value"},
-            },
-            "agent_presets",
-        )
-    return "/api/schedules", {"name": "receipt", "script": "pass"}, "schedules"
+_SCHEDULE_BODY = {"name": "receipt", "script": "pass"}
 
 
 def test_lost_response_retry_replays_original_created_resource(
-    db_conn: psycopg.Connection, resource: tuple[str, dict[str, Any], str]
+    db_conn: psycopg.Connection,
 ) -> None:
-    path, body, table = resource
     with gateway_test_client() as client:
         headers = keyed_headers("one-create")
-        first = client.post(path, json=body, headers=headers)
-        second = client.post(path, json=body, headers=headers)
+        first = client.post("/api/schedules", json=_SCHEDULE_BODY, headers=headers)
+        second = client.post("/api/schedules", json=_SCHEDULE_BODY, headers=headers)
     assert first.status_code == second.status_code == 201
     assert second.json() == first.json()
-    assert db_conn.execute(
-        sql.SQL("SELECT count(*) FROM {}").format(sql.Identifier(table))
-    ).fetchone() == (1,)
-    if table == "schedules":
-        assert db_conn.execute("SELECT count(*) FROM schedule_versions").fetchone() == (1,)
+    assert db_conn.execute("SELECT count(*) FROM schedules").fetchone() == (1,)
+    assert db_conn.execute("SELECT count(*) FROM schedule_versions").fetchone() == (1,)
 
 
 def test_creation_receipt_ignores_later_rename_delete_and_name_reuse(
-    db_conn: psycopg.Connection, resource: tuple[str, dict[str, Any], str]
+    db_conn: psycopg.Connection,
 ) -> None:
-    path, body, _table = resource
     with gateway_test_client() as client:
         headers = keyed_headers("original")
-        first = client.post(path, json=body, headers=headers)
+        first = client.post("/api/schedules", json=_SCHEDULE_BODY, headers=headers)
         sid = first.json()["id"]
-        if path == "/api/presets":
-            assert client.patch(f"{path}/{sid}", json={"name": "renamed"}).status_code == 200
-        else:
-            assert client.put(f"{path}/{sid}", json={"name": "renamed"}).status_code == 200
-        other = client.post(path, json=body, headers=keyed_headers("new-intent"))
+        assert client.put(f"/api/schedules/{sid}", json={"name": "renamed"}).status_code == 200
+        other = client.post(
+            "/api/schedules", json=_SCHEDULE_BODY, headers=keyed_headers("new-intent")
+        )
         assert other.status_code == 201
         assert other.json()["id"] != sid
-        assert client.delete(f"{path}/{sid}").status_code == 200
-        replay = client.post(path, json=body, headers=headers)
+        assert client.delete(f"/api/schedules/{sid}").status_code == 200
+        replay = client.post("/api/schedules", json=_SCHEDULE_BODY, headers=headers)
         assert replay.status_code == 201
         assert replay.json() == first.json()
-        assert client.get(f"{path}/{sid}").status_code == 404
+        assert client.get(f"/api/schedules/{sid}").status_code == 404
 
 
 def test_same_creation_key_with_changed_valid_body_conflicts(
-    db_conn: psycopg.Connection, resource: tuple[str, dict[str, Any], str]
+    db_conn: psycopg.Connection,
 ) -> None:
-    path, body, _table = resource
+    body = _SCHEDULE_BODY
     with gateway_test_client() as client:
         headers = keyed_headers("immutable")
-        assert client.post(path, json=body, headers=headers).status_code == 201
-        assert (
-            client.post(path, json={**body, "name": "different"}, headers=headers).status_code
-            == 409
-        )
+        assert client.post("/api/schedules", json=body, headers=headers).status_code == 201
+        r = client.post("/api/schedules", json={**body, "name": "different"}, headers=headers)
+        assert r.status_code == 409
     assert db_conn.execute("SELECT count(*) FROM resource_creation_receipts").fetchone() == (1,)
 
 
-@pytest.mark.parametrize("kind", ["preset", "schedule"])
 def test_concurrent_creation_commits_one_resource_and_receipt(
-    db_conn: psycopg.Connection, kind: str, *, database_gate: ProcessDbGate
+    db_conn: psycopg.Connection, *, database_gate: ProcessDbGate
 ) -> None:
     with (
         base.db.pool(max_size=4, gate=database_gate) as pool,
@@ -92,10 +68,6 @@ def test_concurrent_creation_commits_one_resource_and_receipt(
     ):
 
         def create(_worker: int) -> tuple[Any, ...]:
-            if kind == "preset":
-                return presets.create_blocking(
-                    pool, presets.PresetCreate(name="concurrent", label="worker"), "create"
-                )
             return schedules.create_blocking(
                 pool, schedules.ScheduleCreate(name="concurrent", script="pass"), "create"
             )
@@ -103,21 +75,16 @@ def test_concurrent_creation_commits_one_resource_and_receipt(
         results = list(workers.map(create, range(4)))
     assert all(row == results[0] for row in results)
     assert db_conn.execute("SELECT count(*) FROM resource_creation_receipts").fetchone() == (1,)
-    if kind == "schedule":
-        assert db_conn.execute("SELECT count(*) FROM schedule_versions").fetchone() == (1,)
+    assert db_conn.execute("SELECT count(*) FROM schedule_versions").fetchone() == (1,)
 
 
-def test_receipt_contains_no_raw_opaque_config_request(db_conn: psycopg.Connection) -> None:
+def test_receipt_contains_no_raw_script_request(db_conn: psycopg.Connection) -> None:
     value_marker = "private-test-value"
     with gateway_test_client() as client:
         assert (
             client.post(
-                "/api/presets",
-                json={
-                    "name": "opaque",
-                    "label": "worker",
-                    "config": {"plugin_secret": value_marker},
-                },
+                "/api/schedules",
+                json={"name": "opaque", "script": f"x = {value_marker!r}"},
                 headers=keyed_headers("opaque-create"),
             ).status_code
             == 201
@@ -127,7 +94,6 @@ def test_receipt_contains_no_raw_opaque_config_request(db_conn: psycopg.Connecti
     ).fetchone()
     assert value is not None
     assert value_marker not in value[0]
-    assert "plugin_secret" not in value[0]
 
 
 def test_receipt_failure_rolls_back_created_resource_and_version(
@@ -161,7 +127,7 @@ def test_creation_identity_is_bound_to_verified_principal(
             {
                 "type": "http",
                 "method": "POST",
-                "path": "/api/presets",
+                "path": "/api/schedules",
                 "headers": [(b"idempotency-key", b"same"), (b"idempotency-scope", b"principal-v1")],
             }
         )
@@ -169,11 +135,11 @@ def test_creation_identity_is_bound_to_verified_principal(
         return creation_receipts.operation_key(request)
 
     with base.db.pool(gate=database_gate) as pool:
-        first = presets.create_blocking(
-            pool, presets.PresetCreate(name="one", label="worker"), scoped_key("one")
+        first = schedules.create_blocking(
+            pool, schedules.ScheduleCreate(name="one", script="pass"), scoped_key("one")
         )
-        second = presets.create_blocking(
-            pool, presets.PresetCreate(name="two", label="worker"), scoped_key("two")
+        second = schedules.create_blocking(
+            pool, schedules.ScheduleCreate(name="two", script="pass"), scoped_key("two")
         )
     assert first[0] != second[0]
     assert db_conn.execute("SELECT count(*) FROM resource_creation_receipts").fetchone() == (2,)
@@ -194,9 +160,9 @@ def test_invalid_creation_identity_cannot_reserve_resource(
     with gateway_test_client() as client:
         assert (
             client.post(
-                "/api/presets", json={"name": "invalid", "label": "worker"}, headers=headers
+                "/api/schedules", json={"name": "invalid", "script": "pass"}, headers=headers
             ).status_code
             == 400
         )
-    assert db_conn.execute("SELECT count(*) FROM agent_presets").fetchone() == (0,)
+    assert db_conn.execute("SELECT count(*) FROM schedules").fetchone() == (0,)
     assert db_conn.execute("SELECT count(*) FROM resource_creation_receipts").fetchone() == (0,)

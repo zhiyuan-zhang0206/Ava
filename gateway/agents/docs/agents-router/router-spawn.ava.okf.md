@@ -1,27 +1,26 @@
 ---
 type: doc
 title: Agent Spawn Boundary
-description: Preset and fork configuration, durable creation acceptance and launch retries.
+description: Fork configuration, durable creation acceptance and launch retries.
 tags:
 - gateway
 - agents
 ---
 
-# Spawn Boundary: Presets and the Fork Config Rule
+# Spawn Boundary: Fork Config and Creation Acceptance
 
-`POST /api/keyed/v1/agents` resolves a preset named inside the config overlay
-(`config["preset"]`) at the spawn boundary: the preset's stored config is the
-base and the explicit fields win per key; the row stores the RESOLVED overlay
-plus `agents_meta.preset_name` for display (diff semantics in the inspector).
-Spawn requests reject unknown top-level fields with 422, including `preset`
-even when null. Preset selection belongs only in `config["preset"]`.
+`POST /api/keyed/v1/agents` takes an explicit per-agent config overlay. The row
+stores it as sent, and the agent applies it at boot
+(`apply_config_overlay`, only `per_agent=True` fields), so an unknown field —
+including a leftover `config["preset"]` — fails that boot. Spawn requests
+reject unknown top-level fields with 422.
 
 A fork must keep the source's effective config so its inherited context stays
 cache-valid: only ADDITIONS to `skills_to_inject_into_system_prompt` /
 `skills_to_expand_at_start` are allowed (supersets — rejected otherwise with
 `fork_config_change_not_allowed`); the added skills ride the fork inbound
 payload and load at the context tail. A fork without config inherits the
-source's overlay + preset verbatim. See
+source's overlay verbatim. See
 [decision](../../../../docs/decisions/runtime/config/2026-09-10-preset-in-config-overlay-fork-cache.md).
 
 The POST receipt adds `accepted=true`, `execution_observed=false`, an observed
@@ -56,7 +55,7 @@ the key to the authenticated principal namespace. The immutable request hash and
 key commit as an `agent_creation_snapshots` record with the agent row, the fork
 marker and first prompt. Concurrent retries serialize the same birth, return its
 existing ID, and recover a still-unadmitted launch using its committed attempt
-and config. Receipt lookup precedes mutable model/preset/fork validation.
+and config. Receipt lookup precedes mutable model and fork validation.
 Reusing the key with changed request data returns 409. Creation snapshots are
 never pruned. A replay never
 launches an agent that has since been admitted or terminated. The SDK supplies

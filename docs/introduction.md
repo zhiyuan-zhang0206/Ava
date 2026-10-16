@@ -241,7 +241,7 @@ for the full surface.
 | `ava agents` | observe + control agents (ls / cancel / restart / terminate) |
 | `ava schedules` | gateway-supervised schedules (cron jobs agents create and own) |
 | `ava skill install <src>` | install Agent Skills from a git URL or local path |
-| `ava plugins` / `ava mcp` / `ava presets` | manage plugins, MCP servers, and agent config presets |
+| `ava plugins` / `ava mcp` | manage plugins and MCP servers |
 | `ava memory` | shared memory pool operations |
 | `ava config` / `ava notices` / `ava trace` | config get/set, the notification queue, the trace mirror |
 

@@ -112,12 +112,6 @@ class Reply:
 
 @dataclass
 class SpawnDraft:
-    """The /spawn menu's in-flight selections (preset -> model -> effort).
-    Lives on ChatState; cleared when the spawn executes."""
-
-    preset_id: int | None = None
-    preset_name: str | None = None
-    preset_label: str | None = None
     model: str | None = None
     effort: str | None = None
 

@@ -167,7 +167,6 @@ export default tseslint.config(
     // Shadcn's Input renders a native input, but the rule cannot follow the
     // custom component through the wrapping label in these existing editors.
     files: [
-      "src/app/control/presets/page.tsx",
       "src/app/control/schedules/page.tsx",
     ],
     rules: {

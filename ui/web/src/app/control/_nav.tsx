@@ -1,33 +1,16 @@
 "use client";
 
 // Left anchor-nav for the two vertical anchor-nav pages (Control and Insights).
-// Two levels — section, then its sub-anchors — mirroring the caller's section
-// list, with Presets' subs derived dynamically from the presets query cache
-// (one link per preset; a no-op on lists without a Presets section, e.g.
-// Insights). Clicking jumps the target to the top of the scroll container
-// (instant — this is in-page navigation, not a scroll gesture worth animating)
-// and writes the URL hash; a scroll-spy highlights whichever anchor is
-// currently near the top. On narrow viewports the whole nav collapses into a
-// "Jump to…" disclosure. The page-level back-to-conversation link lives in the
-// page header (page.tsx), not here.
 //
 // The sections list, the scroll-container id it spies on, and its aria-label
 // are props so one component drives both pages.
 
-import { useQuery } from "@tanstack/react-query";
 import { useTranslations } from "next-intl";
 import { useCallback, useEffect, useMemo, useState } from "react";
 
-import { api } from "@/lib/transport/api";
 import { useBreakpoint } from "@/lib/layout/breakpoint";
-import type { PresetView } from "@/lib/contracts/types";
 
-import {
-  controlAnchorIds,
-  type ControlSectionDef,
-  PRESETS_QUERY_KEY,
-  presetAnchorId,
-} from "./_sections";
+import { controlAnchorIds, type ControlSectionDef } from "./_sections";
 import { FLEX, FLEX_1, FLEX_COL, MIN_H_0 } from "@/lib/layout/layout";
 import { cn } from "@/lib/format/utils";
 
@@ -54,33 +37,6 @@ export function pickActiveAnchor(
     if (top !== null && top <= line) current = id;
   }
   return current;
-}
-
-/**
- * The section list the nav renders: the caller's base list with Presets'
- * sub-anchors filled in from the presets cache (one per preset). The query is
- * `enabled: false` — the Presets section owns the fetch; this observer only
- * reads the cache and re-renders when it changes, so the nav adds no request
- * of its own. Lists without a Presets section (Insights) pass through
- * unchanged — the map only rewrites the `presets` entry.
- */
-function useControlSections(base: readonly ControlSectionDef[]): ControlSectionDef[] {
-  const { data: presets } = useQuery<PresetView[]>({
-    queryKey: PRESETS_QUERY_KEY,
-    queryFn: api.listPresets,
-    enabled: false,
-  });
-  return useMemo(() => {
-    if (!presets || presets.length === 0) return base as ControlSectionDef[];
-    return base.map((s) =>
-      s.id === "presets"
-        ? {
-            ...s,
-            subs: presets.map((p) => ({ id: presetAnchorId(p.name), label: p.label })),
-          }
-        : s,
-    );
-  }, [base, presets]);
 }
 
 /**
@@ -132,7 +88,7 @@ function scrollToAnchor(id: string) {
 }
 
 export function ControlNav({
-  sections: baseSections,
+  sections,
   scrollId,
   ariaLabel,
 }: {
@@ -146,13 +102,8 @@ export function ControlNav({
   // with CSS media queries). Switch point preserved from the old CSS `md`
   // rule: the rail shows at >= 768px, the disclosure below it.
   const { isNarrow } = useBreakpoint();
-  // A section/sub renders its translated label when a labelKey is present,
-  // else its raw English label (data-driven labels like preset names have no
-  // key). The type cast is safe: labelKey values are hand-kept in sync with
-  // the control.sections catalog (messages/en is the canonical English source).
   const labelOf = (labelKey: string | undefined, label: string) =>
     labelKey ? t(labelKey as Parameters<typeof t>[0]) : label;
-  const sections = useControlSections(baseSections);
   const anchorIds = useMemo(() => controlAnchorIds(sections), [sections]);
   const activeId = useScrollSpy(anchorIds, scrollId);
   // Mobile disclosure open/closed. Desktop ignores this (nav is always shown).

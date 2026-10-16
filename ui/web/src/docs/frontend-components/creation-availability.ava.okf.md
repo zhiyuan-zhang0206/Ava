@@ -17,15 +17,14 @@ runner, the button sends directly; with multiple eligible runners it opens a
 popover. The disabled trigger's tooltip sits on a wrapper so it still appears
 when the button itself cannot receive pointer events.
 
-Spawn model, preset, and reasoning-effort selections are DB-backed
+Spawn model and reasoning-effort selections are DB-backed
 `behavior.spawn_*` settings. The effort select appears only when a resolved
 model's `/api/models` entry publishes a `reasoning_effort_options` ladder. Every
 spawnable catalog model publishes a concrete `reasoning_effort_default`; the
 control shows the ladder's concrete levels with that default selected, without
 a synthetic default option. Stored effort is re-derived against the current
-model's ladder, so an unavailable level is never sent. A preset's
-`llm_model` and `reasoning_effort` override the pickers when selected; a later
-explicit pick still wins per key in the backend merge.
+model's ladder, so an unavailable level is never sent. An explicit model pick
+is always sent as spawn config, even when it equals the cluster default.
 
 The model picker has model name, USD per million input/cache-read/output tokens,
 and vendor reference output TPS columns. Standard and Fast service IDs have
@@ -51,7 +50,7 @@ rates cover the current base tier, and includes declared 5-minute/1-hour
 cache-write rates. Longer contexts and recurring rate windows can select
 different rates for actual billing.
 
-Guide, preset, schedule, and package-draft creation toasts say "created" and
+Guide, schedule, and package-draft creation toasts say "created" and
 point to the conversation for progress; they do not claim that a turn started.
 The conversation does not render a host-admission or launch-availability strip.
 

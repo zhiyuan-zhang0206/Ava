@@ -48,14 +48,6 @@ def test_fresh_schema_sql_bootstrap_is_baselined(machine_identity: MachineIdenti
             expected_stamped = {(name,) for name in schema_sql_stamped_migration_names()}
             row = conn.execute("SELECT name FROM schema_migrations").fetchall()
             assert set(row) == expected_stamped
-            presets = conn.execute("SELECT name FROM agent_presets").fetchall()
-            assert {r[0] for r in presets} == {
-                "coder",
-                "reviewer",
-                "researcher",
-                "orchestrator",
-                "explorer",
-            }
             default_model = conn.execute(
                 "SELECT llm_model FROM cluster_defaults WHERE id = 1"
             ).fetchone()
@@ -150,15 +142,6 @@ def test_schema_sql_has_r1_deploy_state_tables() -> None:
     schema = SCHEMA_SQL.read_text()
     for table in ("host_deploy_state",):
         assert f"CREATE TABLE {table}" in schema, f"{table} missing from baseline"
-
-
-def test_schema_sql_seeds_presets_without_a_skill_index() -> None:
-    """The baseline must agree with the migrated state: a fresh DB's seed presets
-    carry no skills_to_inject_into_system_prompt, so fresh and upgraded clusters
-    do not disagree about what a `coder` is."""
-    seed_block = SCHEMA_SQL.read_text().split("INSERT INTO agent_presets")[1]
-    seed_block = seed_block.split("ON CONFLICT")[0]
-    assert "skills_to_inject_into_system_prompt" not in seed_block
 
 
 # ── Contraction of the retired deploy and watcher storage ──

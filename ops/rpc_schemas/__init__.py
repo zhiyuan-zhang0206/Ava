@@ -76,11 +76,6 @@ class SpawnAgentRequest(BaseModel):
     prompt_source: str | None = Field(default=None, min_length=1, max_length=64)
     # Target physical host (multi-machine placement); None = local. The gateway creates the row (create_agent_row) and forwards a launch op.
     machine: str | None = Field(default=None, min_length=1, max_length=64)
-    # Per-agent config overlay; only per_agent=True fields are accepted (enforced
-    # at agent boot via apply_config_overlay). May carry `config["preset"] =
-    # "<name>"` — the spawn-boundary preset reference; the gateway resolves the
-    # named preset's stored overlay as the base, explicit fields win per-key, and
-    # the runner only ever sees the resolved map.
     config: dict[str, object] | None = Field(default=None)
     # Optional initial label (spawner-assigned role). Stored sticky so the
     # labeler does not overwrite it; the agent can change it via ava.self.set_label.

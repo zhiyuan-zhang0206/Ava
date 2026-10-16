@@ -90,8 +90,8 @@ skill directories, MCP registries and marketplaces, and prompt sources. Start
 with sources relevant to the task and widen if they miss the capability; do not
 stop at GitHub search or assume any one directory covers every provider.
 Follow a listing to its original publisher and verify its actual package shape.
-For a role assembled from prompts and multiple capabilities, use
-[Preset Maker](../../presets/SKILL.md) to compose the result.
+For a role assembled from prompts and multiple capabilities, write the standing
+instructions as a role-card skill (`skill-creator`).
 
 **MCP servers — the official registry** (no auth, no key):
 

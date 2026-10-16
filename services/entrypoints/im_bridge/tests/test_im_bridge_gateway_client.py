@@ -138,13 +138,10 @@ def test_creation_key_survives_caller_retry_without_automatic_ambiguous_retry() 
             client = gateway_client()
             client._client = http
             with pytest.raises(httpx.ReadTimeout):
-                await client.spawn_agent(preset="coder", config=None, idempotency_key="event-a")
+                await client.spawn_agent(config=None, idempotency_key="event-a")
             assert len(requests) == 1
-            assert (
-                await client.spawn_agent(preset="coder", config=None, idempotency_key="event-a")
-                == 42
-            )
-            await client.spawn_agent(preset="coder", config=None, idempotency_key="event-b")
+            assert await client.spawn_agent(config=None, idempotency_key="event-a") == 42
+            await client.spawn_agent(config=None, idempotency_key="event-b")
         assert [request.headers["Idempotency-Key"] for request in requests] == [
             "event-a",
             "event-a",

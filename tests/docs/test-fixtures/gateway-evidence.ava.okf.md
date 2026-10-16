@@ -17,6 +17,6 @@ must be assembled in the real lifespan order. Use the `memory_search_app` and
 `gateway_test_client` owners: a bare client without startup does not establish
 that application-state contract.
 
-Preset tests combine real database state with `local_spawn_in_process`, a local
-runner-operation substitute. They establish preset/API composition without
-proving the network daemon path.
+Creation tests combine real database state with `local_spawn_in_process`, a
+local runner-operation substitute. They establish creation/API composition
+without proving the network daemon path.

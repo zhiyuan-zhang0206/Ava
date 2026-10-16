@@ -41,7 +41,6 @@ _SURFACE: dict[str, list[str]] = {
         "get_status",
         "list_agents",
         "list_machines",
-        "presets",
         "restart",
         "retry_launch",
         "resurrect",

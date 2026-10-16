@@ -6,7 +6,7 @@ description: "Manages Ava agents and configuration overlays. Use when spawning, 
 # Agent-Level Concepts
 
 This sub-skill covers the concepts that live at the agent layer: agents
-themselves, commands, presets, and schedules.
+themselves, commands, and schedules.
 
 ## Agents (running AI process)
 
@@ -63,37 +63,6 @@ conversation"), distinct from the `ava` CLI (ops-level, runs in shell, operates
 the deployment itself). Peers discover each other's commands via the read-only
 `ava.agents.commands()` (name + description + instruction-hint, no body).
 
-## Preset (Agent configuration template)
-
-A **preset** is a named, reusable agent config template — bundles model choice,
-plugin config fields, and other per-agent settings into a config overlay, so
-spawning an agent picks a preset instead of hand-writing config each time.
-
-SDK usage: `ava.agents.presets.list()` lists all presets,
-`ava.agents.presets.get(name)` fetches one (raises `PresetNotFoundError` if
-missing). Spawn with `ava.agents.spawn(..., config_overlay={"preset": "name"})`
-— the preset is resolved into config on the gateway side.
-
-Preset vs `config_overlay`: preset is the **base**, `config_overlay` is the
-**precise override** — when the overlay names a preset beside explicit fields,
-those fields override the preset's same-named ones. Preset values are
-validated only at child startup; only the explicit `config_overlay` is validated
-locally at spawn time.
-
-### Managing presets
-
-Four paths to manage presets:
-
-| Path | Use case |
-|---|---|
-| **CLI** `ava presets` | Shell-level CRUD — list, get, create, update, delete. Best for operators and agents that prefer a single command over HTTP calls. |
-| **REST API** `/api/presets` | Programmatic CRUD from schedules or scripts (GET list/get, POST create, PATCH update, DELETE). |
-| **Frontend** `/control#presets` | Open Preset Maker to create or improve a preset; edit metadata or delete a saved preset in place. |
-| **SDK** `ava.agents.presets` | In-agent code: `list()` / `get(name)` for reading (write ops go through CLI or API — the SDK is read-only for presets). |
-
-To compose a preset from user needs, prompts, skills, and MCP tools, load
-`ava.skills.ava_guide.presets` ([Preset Maker](../presets/SKILL.md)).
-
 ## Schedules (time-based / condition-triggered persistent tasks)
 
 The gateway hosts **schedules**: scripts written by agents, run persistently in
@@ -108,16 +77,15 @@ handling, writes a resumable script, then `POST /api/schedules` to create).
 
 ## Config adjustment (modifying system configuration)
 
-Ava's config surface has four layers, each with its own adjustment path. Know
+Ava's config surface has three layers, each with its own adjustment path. Know
 which layer you're touching before picking the tool.
 
-### The four config layers
+### The three config layers
 
 | Layer | What it controls | Where it lives |
 |---|---|---|
 | **Cluster / host config** | Model keys, DB URLs, service ports, timezone, feature flags — the `.env` fields. | `$AVA_HOME/.env` (gateway's for cluster fields; each host's for host fields) |
-| **Agent per-agent config** | Per-agent overrides: model, skills, reasoning effort — the fields a spawn/restart overlay carries. | Passed at spawn (`config_overlay`, naming a preset or explicit fields), snapshotted into the agent row |
-| **Presets** | Named bundles of per-agent config — templates for spawn. | `agent_presets` DB table |
+| **Agent per-agent config** | Per-agent overrides: model, skills, reasoning effort — the fields a spawn/restart overlay carries. | Passed at spawn as `config_overlay` fields, snapshotted into the agent row |
 | **User settings** | Frontend display preferences (timeline density, theme, etc.) — per-user, synced across frontends. | `user_settings` DB table (TanStack Query + `useUserSettings`) |
 
 ### Adjustment paths by layer
@@ -143,33 +111,21 @@ Passed at spawn time — not edited on a running agent:
 ```python
 from uuid import uuid4
 
-# Via preset (base layer)
-ava.agents.spawn(prompt="...", config_overlay={"preset": "coder"}, idempotency_key=str(uuid4()))
-
-# Via explicit fields (precise override)
-# model id from the registry roster — see the models sub-skill
+# Explicit fields — model id from the registry roster, see the models sub-skill
 ava.agents.spawn(prompt="...", config_overlay={"llm_model": "deepseek-flash"}, idempotency_key=str(uuid4()))
 
-# Both (explicit fields win per-key)
+# Several fields at once — every key must be a per_agent field
 ava.agents.spawn(prompt="...",
-                 config_overlay={"preset": "coder", "llm_model": "claude-opus-5"}, idempotency_key=str(uuid4()))
+                 config_overlay={"llm_model": "deepseek-flash", "reasoning_effort": "high"},
+                 idempotency_key=str(uuid4()))
 ```
 
-Per-agent config is snapshotted into the agent row at spawn; changing a preset
-after spawn does NOT affect agents already spawned from it.
+Per-agent config is snapshotted into the agent row at spawn; a later
+cluster-default change does not affect agents already spawned.
 
 To change an agent's config after spawn: restart it with a new `config_overlay`
 (`ava.agents.restart(agent_id)` in SDK, or `ava agents restart <id>` in CLI —
 the restart path accepts a config_overlay).
-
-#### Presets
-
-| Path | Command / URL |
-|---|---|
-| **CLI** | `ava presets ls` / `get <id>` / `create --name ...` / `update <id> ...` / `delete <id>` |
-| **REST API** | `GET/POST /api/presets`, `GET/PATCH/DELETE /api/presets/{id}` |
-| **Frontend** | `/control/presets` |
-| **SDK** | `ava.agents.presets.list()` / `.get(name)` (read-only) |
 
 #### User settings
 

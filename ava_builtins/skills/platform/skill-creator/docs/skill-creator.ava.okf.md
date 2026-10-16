@@ -1,7 +1,7 @@
 ---
 type: doc
 title: skill-creator skill — Create/modify/review skill
-description: Authoring and evaluation workflow for Ava skills, informed by Anthropic and OpenAI. Owns cases, metrics, baseline comparison, evidence, precise discovery, and progressive disclosure; Preset Maker uses the same evaluation contract.
+description: Authoring and evaluation workflow for Ava skills, informed by Anthropic and OpenAI. Owns cases, metrics, baseline comparison, evidence, precise discovery, and progressive disclosure.
 tags:
 - extensions
 - agent-instruction
@@ -13,8 +13,8 @@ tags:
 An **authoring and evaluation method** for Ava skills
 (`$AVA_HOME/skills/skill-creator/`), informed by Anthropic and OpenAI and adapted
 to Ava's tools. `SKILL.md` carries the concise workflow;
-`../ava-guide/references/evaluation.md` is the single shared evaluation contract
-for skills and presets, bundled in Guide for complete external publication.
+`../ava-guide/references/evaluation.md` is the single shared evaluation
+contract, bundled in Guide for complete external publication.
 `evals/evals.json` and `evals/metrics.md` carry the creator's own
 authoring cases and grading definitions. Run artifacts stay outside the package.
 
@@ -25,7 +25,7 @@ inputs; the metrics distinguish packaging checks, proxies, and live execution.
 
 ## Judgments carried
 - **Three-level loading model**: metadata (name+description, always in context) / SKILL.md body (loaded when triggered) / bundled resources (scripts/references/assets, on demand). When writing a skill, distribute content across these three levels — description should let the agent determine "when to reach for it."
-- **When to create a skill**: when an instruction has no existing config field to carry it, and will be used repeatedly, creating a small skill is cleaner and more reusable than piling into config (same origin as [[ava/docs/presets.ava.okf.md|presets]]'s "no carrying field, just create a small skill").
+- **When to create a skill**: when an instruction has no existing config field to carry it, and will be used repeatedly, creating a small skill is cleaner and more reusable than piling into config: no carrying config field exists, so create a small skill.
 - **skill vs plugin**: skill is a pure markdown instruction package, no runtime state; to modify agent behavior / inject hooks, use plugin.
 - **Evaluation is a deliverable**: cases, metric definitions, acceptance criteria,
   and a baseline precede execution. Results retain per-case output/trace evidence

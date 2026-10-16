@@ -159,7 +159,6 @@ def create_and_assign(
     description: str,
     *,
     operation_key: str,
-    preset: str | None = None,
     label: str | None = None,
     config_overlay: dict[str, Any] | None = None,
     machine: str | None = None,
@@ -173,9 +172,9 @@ def create_and_assign(
     The result proves acceptance; query task and agent state to observe
     current progress. Borrowed leases are unsupported.
 
-    Arguments have the same meaning as in create() and ava.agents.spawn().
-    With no preset selected, current defaults apply; machine defaults to your
-    own machine. The parent must exist and be open before either object is born.
+    Arguments have the same meaning as in create() and ava.agents.spawn();
+    machine defaults to your own machine. The parent must exist and be open before
+    either object is born.
 
     Returns:
         A TaskAssignment; it unpacks as `task, agent_id`.
@@ -185,7 +184,6 @@ def create_and_assign(
     operation_key = validate_idempotency_key(operation_key)
     title = coerce_str(title, "title")
     description = coerce_str(description, "description")
-    preset = coerce_str(preset, "preset", allow_none=True)
     label = coerce_str(label, "label", allow_none=True)
     config_overlay = coerce_typed(config_overlay, "config_overlay", dict, allow_none=True)
     machine = coerce_str(machine, "machine", allow_none=True)
@@ -198,7 +196,6 @@ def create_and_assign(
         title,
         description,
         parent=parent,
-        preset=preset,
         label=label,
         config_overlay=config_overlay,
         machine=machine,

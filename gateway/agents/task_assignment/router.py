@@ -52,7 +52,6 @@ def commit_assignment(
     body: TaskAssignmentIn,
     spawn: SpawnAgentRequest,
     target: str,
-    preset_name: str | None,
     *,
     catalog: ModelCatalog,
     authority: ConfigAuthority,
@@ -72,7 +71,6 @@ def commit_assignment(
                 spawner=f"agent:{body.actor_agent_id}",
                 config=spawn.config,
                 label=spawn.label,
-                preset_name=preset_name,
                 creation_key=key,
                 creation_request_hash=creation_request_hash(request),
             )
@@ -185,7 +183,7 @@ async def post_task_assignment(
         )
         try:
             catalog = require_model_catalog(request)
-            preset_name, _, _ = await asyncio.to_thread(
+            await asyncio.to_thread(
                 creation.spawn_preflight_blocking,
                 db,
                 target,
@@ -207,7 +205,6 @@ async def post_task_assignment(
                 body,
                 spawn,
                 target,
-                preset_name,
                 catalog=catalog,
                 authority=request.app.state.config_authority,
             )

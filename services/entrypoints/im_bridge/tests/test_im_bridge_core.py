@@ -60,7 +60,6 @@ class FakeGateway:
         self,
         agents: list[dict[str, Any]] | None = None,
         timeline: list[dict[str, Any]] | None = None,
-        presets: list[dict[str, Any]] | None = None,
         models: dict[str, Any] | None = None,
         *,
         send_failures: int = 0,
@@ -71,12 +70,11 @@ class FakeGateway:
             dict(item, source_message_id=f"stored-{index}", source_block_idx=0)
             for index, item in enumerate(timeline or [])
         ]
-        self.presets = presets or []
         self.models = models or {"models": {}, "default": "deepseek-v4-pro"}
         self.commands: list[dict[str, Any]] | None = None
         self.sent: list[tuple[int, str, str]] = []
         self.sent_keys: list[str | None] = []
-        self.spawned: list[tuple[str | None, dict[str, object] | None]] = []
+        self.spawned: list[dict[str, object] | None] = []
         self.creation_keys: list[str | None] = []
         self.timeline_limits: list[int | None] = []
         self.send_failures = send_failures
@@ -128,20 +126,16 @@ class FakeGateway:
             },
         ]
 
-    async def list_presets(self) -> list[dict[str, Any]]:
-        return self.presets
-
     async def list_models(self) -> dict[str, Any]:
         return self.models
 
     async def spawn_agent(
         self,
         *,
-        preset: str | None,
         config: dict[str, object] | None,
         idempotency_key: str | None = None,
     ) -> int:
-        self.spawned.append((preset, config))
+        self.spawned.append(config)
         self.creation_keys.append(idempotency_key)
         return 777
 
@@ -642,16 +636,6 @@ class FakePlainAdapter(FakeTypingAdapter):
 # --- v4: /spawn layered menu + /commands ---
 
 
-def preset(preset_id: int, name: str, label: str | None = None) -> dict[str, Any]:
-    return {
-        "id": preset_id,
-        "name": name,
-        "label": label or name,
-        "description": None,
-        "config": {},
-    }
-
-
 def models_data() -> dict[str, Any]:
     return {
         "providers": {"deepseek": ["deepseek-v4-pro", "deepseek-v4-flash"]},
@@ -667,32 +651,20 @@ def models_data() -> dict[str, Any]:
     }
 
 
-def assert_preset_layer(out: object) -> None:
-    assert isinstance(out, Reply)
-    assert out.text == copy.SPAWN_LAYER_PRESET
-    labels = [b[0] for b in out.buttons or []]
-    assert labels[0] == copy.SPAWN_BUTTON_NO_PRESET
-    assert "coder" in labels and "Code Reviewer" in labels
-    assert labels[-1] == copy.SPAWN_BUTTON_SUMMARY_PREFIX + " / ".join(
-        [copy.SPAWN_BUTTON_DEFAULT_VALUE] * 3
-    )
-
-
-def assert_model_layer_after_coder(out: object) -> None:
+def assert_model_layer(out: object) -> None:
     assert isinstance(out, Reply)
     assert out.text == copy.SPAWN_LAYER_MODEL
     labels = [b[0] for b in out.buttons or []]
     assert "deepseek-v4-pro" in labels and "deepseek-v4-flash" in labels
     assert labels[-1] == (
         copy.SPAWN_BUTTON_SUMMARY_PREFIX
-        + "coder / "
         + copy.SPAWN_BUTTON_DEFAULT_VALUE
         + " / "
         + copy.SPAWN_BUTTON_DEFAULT_VALUE
     )
 
 
-def assert_effort_layer_after_pro(out: object) -> None:
+def assert_effort_layer(out: object) -> None:
     assert isinstance(out, Reply)
     assert out.text == copy.SPAWN_LAYER_EFFORT
     labels = [b[0] for b in out.buttons or []]
@@ -700,9 +672,7 @@ def assert_effort_layer_after_pro(out: object) -> None:
     assert labels[1] == "effort: low"
     assert "effort: max" in labels
     assert labels[-1] == (
-        copy.SPAWN_BUTTON_SUMMARY_PREFIX
-        + "coder / deepseek-v4-pro / "
-        + copy.SPAWN_BUTTON_DEFAULT_VALUE
+        copy.SPAWN_BUTTON_SUMMARY_PREFIX + "deepseek-v4-pro / " + copy.SPAWN_BUTTON_DEFAULT_VALUE
     )
 
 

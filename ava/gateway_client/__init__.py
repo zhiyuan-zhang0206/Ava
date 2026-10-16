@@ -443,10 +443,3 @@ def list_machines() -> list[dict]:
     resp = _transport.get("/api/cluster/machines", context=_ctx(None))
     _transport.raise_from_response(resp)
     return list(resp.json())
-
-
-def list_presets() -> list[dict]:
-    """GET /api/presets → list of preset dicts, ordered by name."""
-    resp = _transport.get("/api/presets", context=_ctx(None))
-    _transport.raise_from_response(resp)
-    return list(resp.json())

@@ -37,7 +37,6 @@ def _sdk(body: dict[str, Any], **overrides: Any) -> TaskAssignment:
         body["task"]["title"],
         body["task"]["description"],
         parent=body["task"]["parent"],
-        preset=overrides.pop("preset", "coder"),
         machine="local-test",
         operation_key="sdk-compound",
         **overrides,
@@ -136,10 +135,7 @@ def test_borrowed_lease_is_rejected_before_http_or_validation(
         ({"operation_key": True}, TypeError),
         ({"operation_key": "x", "require_idempotency": True}, TypeError),
         ({"operation_key": "x", "require_idempotency": False}, TypeError),
-        (
-            {"operation_key": "x", "preset": "coder", "config_overlay": {"preset": "coder"}},
-            ValueError,
-        ),
+        ({"operation_key": "x", "preset": "coder"}, TypeError),
     ],
 )
 def test_missing_invalid_key_and_retired_flag_fail_before_http(
@@ -173,9 +169,8 @@ def test_same_principal_key_actor_drift_conflicts(
     assert db_conn.execute("SELECT count(*) FROM task_assignment_receipts").fetchone() == (1,)
 
 
-@pytest.mark.parametrize("preset_in_overlay", [False, True])
-def test_assignment_uses_only_the_requested_preset(
-    client: TestClient, body: dict[str, Any], db_conn: psycopg.Connection, preset_in_overlay: bool
+def test_assignment_sends_only_explicit_config(
+    client: TestClient, body: dict[str, Any], db_conn: psycopg.Connection
 ) -> None:
     http = MagicMock()
     submitted: list[dict[str, Any]] = []
@@ -188,11 +183,9 @@ def test_assignment_uses_only_the_requested_preset(
 
     http.post.side_effect = submit
     with use_client(http):
-        task, agent_id = _sdk(
-            body, preset=None, config_overlay={"preset": "coder"} if preset_in_overlay else None
-        )
+        task, agent_id = _sdk(body, config_overlay={"reasoning_effort": "high"})
     assert task.owner == agent_id
-    assert submitted[0]["agent"]["config"] == ({"preset": "coder"} if preset_in_overlay else {})
+    assert submitted[0]["agent"]["config"] == {"reasoning_effort": "high"}
     assert db_conn.execute(
-        "SELECT preset_name FROM agents_meta WHERE id=%s", (agent_id,)
-    ).fetchone() == ("coder" if preset_in_overlay else None,)
+        "SELECT config_overlay FROM agents_meta WHERE id=%s", (agent_id,)
+    ).fetchone() == ({"reasoning_effort": "high"},)

@@ -163,7 +163,6 @@ _PER_TEST_TRUNCATE_TABLES = (
     "schedules",
     "schedule_versions",
     "schedule_runs",
-    "agent_presets",
     "mcp_clients",
     "mcp_credential_creation_receipts",
     "api_idempotency",

@@ -56,7 +56,7 @@ HELP_TEXT = (
     "/list: live agents (tap one to switch)\n"
     "/spawn: spawn an agent (layered menu)\n"
     "/status: current agent status details\n"
-    "/commands: all Ava slash commands (skills, presets)\n"
+    "/commands: all Ava slash commands (skills, templates)\n"
     "/help: this list\n"
     "Other text: sent to the current agent"
 )
@@ -77,19 +77,15 @@ STATUS_LABELS = {
 
 # -- /spawn menu ------------------------------------------------------------
 
-SPAWN_LAYER_PRESET = "Spawn (1/3): preset:"
-SPAWN_LAYER_MODEL = "Spawn (2/3): model:"
-SPAWN_LAYER_EFFORT = "Spawn (3/3): reasoning effort:"
-SPAWN_BUTTON_NO_PRESET = "No preset"
+SPAWN_LAYER_MODEL = "Spawn (1/2): model:"
+SPAWN_LAYER_EFFORT = "Spawn (2/2): reasoning effort:"
 SPAWN_BUTTON_PROVIDER_DEFAULT = "Default"
 SPAWN_BUTTON_SUMMARY_PREFIX = "Spawn:"
 SPAWN_BUTTON_DEFAULT_VALUE = "Default"
 SPAWN_NO_MODELS = "No models available: spawn failed before it started."
-SPAWN_PRESET_GONE = "That preset no longer exists: start over with /spawn."
 SPAWN_UNKNOWN_ACTION = "Unknown menu action: start over with /spawn."
 SPAWN_NOTHING_TO_SPAWN = "Nothing to spawn: run /spawn to start."
 SPAWN_FAILED = "Spawn failed: {exc}"
-SPAWNED_WITH_PRESET = "Spawned {preset} (agent #{agent_id})."
 SPAWNED_PLAIN = "Spawned agent #{agent_id}."
 SPAWNED_TAP_TO_SWITCH = "Tap the button to switch:"
 SPAWN_SWITCH_BUTTON = "Switch to #{agent_id}"

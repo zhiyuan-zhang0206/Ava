@@ -372,54 +372,17 @@ class TestSpawnConfig:
         agents.spawn(config_overlay={"llm_model": "claude-sonnet-5"}, idempotency_key=str(uuid4()))
         assert seen["config"] == {"llm_model": "claude-sonnet-5"}
 
-    def test_spawn_preset_inside_config_passes_through(
+    def test_spawn_rejects_preset_overlay_key(
         self, monkeypatch: pytest.MonkeyPatch, model_installation: Installation
     ) -> None:
-        """config_overlay={"preset": name} is the primary input surface and rides
-        the config map untouched."""
-        from ava import agents
-
-        monkeypatch.setattr(ava, "__plugin_installation__", model_installation, raising=False)
-        seen: dict[str, Any] = {}
-        monkeypatch.setattr(gateway_client, "spawn", lambda **kw: seen.update(kw) or 3)  # pyright: ignore[reportUnknownArgumentType]
-        monkeypatch.setattr(ava, "AGENT_ID", 1, raising=False)
-        agents.spawn(
-            config_overlay={"preset": "coder", "llm_model": "claude-sonnet-5"},
-            idempotency_key=str(uuid4()),
-        )
-        assert seen["config"] == {"preset": "coder", "llm_model": "claude-sonnet-5"}
-
-    def test_spawn_preset_key_must_be_nonempty_string(
-        self, monkeypatch: pytest.MonkeyPatch, model_installation: Installation
-    ) -> None:
-        from ava import agents
-
-        monkeypatch.setattr(ava, "__plugin_installation__", model_installation, raising=False)
-        monkeypatch.setattr(ava, "AGENT_ID", 1, raising=False)
-        with pytest.raises(ValueError, match="non-empty string"):
-            agents.spawn(config_overlay={"preset": ""}, idempotency_key=str(uuid4()))
-
-    def test_spawn_config_with_preset_skips_preset_key_in_overlay_validation(
-        self, monkeypatch: pytest.MonkeyPatch, model_installation: Installation
-    ) -> None:
-        """The `preset` key is spawn-boundary metadata: the overlay validators
-        (which reject unknown keys) must not see it, while the other fields are
-        still validated."""
         from ava import agents
         from base.packages.plugins.plugin_errors import InvalidConfigOverlay
 
         monkeypatch.setattr(ava, "__plugin_installation__", model_installation, raising=False)
-        seen: dict[str, Any] = {}
-        monkeypatch.setattr(gateway_client, "spawn", lambda **kw: seen.update(kw) or 3)  # pyright: ignore[reportUnknownArgumentType]
         monkeypatch.setattr(ava, "AGENT_ID", 1, raising=False)
-        agents.spawn(
-            config_overlay={"preset": "coder", "llm_model": "claude-sonnet-5"},
-            idempotency_key=str(uuid4()),
-        )
-        assert seen["config"] == {"preset": "coder", "llm_model": "claude-sonnet-5"}
         with pytest.raises(InvalidConfigOverlay):
             agents.spawn(
-                config_overlay={"preset": "coder", "db_url": "postgres://nope"},
+                config_overlay={"preset": "coder", "llm_model": "claude-sonnet-5"},
                 idempotency_key=str(uuid4()),
             )
 

@@ -1,16 +1,15 @@
-# Evaluating skills and presets
+# Evaluating skills
 
 Read this when defining or running an evaluation for a new skill, changed
-instructions, trigger description, or preset composition. `skill-creator` owns
-this authoring evaluation contract; Preset Maker uses it for the complete
-configuration. The canonical file is bundled with Ava Guide so its external
+instructions, or trigger description. `skill-creator` owns this authoring
+evaluation contract. The canonical file is bundled with Ava Guide so its external
 Codex and Claude Code copies include every reading dependency. Skill Creator
 links here rather than maintaining a second copy. This is an instruction-level
 workflow, not a new runtime API or automatic evaluation service.
 
 ## Save the evaluation before running it
 
-Every new skill or preset, and every behavioral improvement, carries:
+Every new skill, and every behavioral improvement, carries:
 
 - **Cases:** realistic prompts, input fixtures, relevant environment, expected
   outcomes, and observable checks. Prefer actual user tasks; mark constructed
@@ -29,15 +28,13 @@ small set demonstrates those cases, not a population-wide quality guarantee.
 
 For a skill, keep portable inputs in `evals/evals.json` and metric definitions
 in `evals/metrics.md`. Put sensitive deployment cases in private storage and
-record their location. For a preset with a role card, its evaluation can live
-beside that card. For a config-only preset, keep a separate evaluation directory
-in the maker's workspace or private deployment storage. Never invent evaluation
-fields in the preset's config: its API carries configuration, not test data.
-Record the evaluation location in the handover.
+record their location. Never invent evaluation fields in a skill's config or
+frontmatter: its API carries instructions, not test data. Record the evaluation
+location in the handover.
 
 ### Case record
 
-The creator and Preset Maker bundle their own case sets in this shape. It is a
+The creator bundles its own case sets in this shape. It is a
 file convention for evaluators, not input accepted by Ava's replay harness.
 
 ```json
@@ -70,8 +67,6 @@ regrade both versions; do not silently move the target to fit the candidate.
 |---|---|---|
 | New skill | Same task without the added skill | Same task with the skill available or explicitly loaded |
 | Existing skill | Snapshot of the previous instruction package | Edited package |
-| New preset | Same task under the normal default configuration | Proposed effective configuration |
-| Existing preset | Snapshot of its previous effective config and referenced skills | Proposed config and skill revisions |
 
 For skill execution tests, explicitly load the skill to measure its workflow.
 For discovery tests, make it available in the ordinary index without preloading
@@ -80,11 +75,10 @@ For a no-skill baseline, remove the added skill from the available catalog; do
 not merely omit its path while leaving it discoverable. Isolate old and new
 versions so registry resolution cannot select the wrong one.
 
-Resolve a preset's effective config and referenced skill revisions before the
-run. If the preset or role card changes midway, it is a different candidate;
-do not aggregate it into the same result. Comparing the whole preset shows the
-combination's value; attributing that value to one skill requires a separate
-controlled comparison.
+Resolve a skill's effective revision before the run. If the skill changes
+midway, it is a different candidate; do not aggregate it into the same result.
+Comparing a bundle shows the combination's value; attributing that value to one
+skill requires a separate controlled comparison.
 
 ## Define metrics for the actual job
 
@@ -138,7 +132,7 @@ establish. Blind the evaluator to candidate labels when feasible and review
 its evidence rather than accepting a score without rationale.
 
 Use disposable fixtures or test services for writing tasks. Replaying an old
-request does not authorize production preset changes, messages, installations,
+request does not authorize production config changes, messages, installations,
 or MCP writes. Preserve the user's scope and the installation/operation owner's
 authorization requirements.
 
@@ -150,7 +144,7 @@ skill's `scripts/evaluate.py` launch/poll/gather flow. This separate built-in
 is available through Ava's capability index, not bundled with an external
 Guide copy; confirm its availability before choosing replay. It requires dataset trace
 records and a live agent identity for launch; it does not ingest the case JSON
-above, install a candidate skill snapshot, or resolve a preset comparison for
+above, install a candidate skill snapshot, or resolve a bundle comparison for
 you. Its completion and efficiency scores are proxies, so also grade the
 task-specific checks. Respect its replay and leak-audit gates and the documented
 limits of isolation.
@@ -159,7 +153,7 @@ For authored cases or side-effecting workflows that this harness cannot replay,
 use the available execution surface with explicit test fixtures and equivalent
 baseline setup. If no suitable isolation or runner is available, deliver the
 cases and metrics with an incomplete evaluation report. Do not bypass a gate or
-claim a ready preset from a successful registration or dependency listing.
+claim a ready candidate from a successful registration or dependency listing.
 
 ## Compare and report
 

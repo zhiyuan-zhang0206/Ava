@@ -82,7 +82,7 @@ describe("InsightsPage shell", () => {
 
   it("does NOT render the Control-only sections (they live on /control)", () => {
     wrap(<InsightsPage />);
-    for (const label of ["Guide", "Config", "Presets", "Display", "Plugins", "MCP", "Skills", "Schedules"]) {
+    for (const label of ["Guide", "Config", "Display", "Plugins", "MCP", "Skills", "Schedules"]) {
       expect(screen.queryByRole("heading", { name: label })).toBeNull();
     }
   });

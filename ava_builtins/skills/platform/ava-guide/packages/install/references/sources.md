@@ -1,6 +1,6 @@
 # Sources for skills, MCP servers, and prompts
 
-Use this map when finding a capability or assembling a preset. It covers major
+Use this map when finding a capability or assembling a role. It covers major
 publishers and discovery services, not a complete or ranked inventory. Start
 with the directories and publishers relevant to the task; widen the search when
 they miss it. Links were checked on 2026-10-08; recheck the candidate's current
@@ -72,6 +72,6 @@ Report inaccessible sources and look elsewhere rather than claiming coverage
 from an unread listing.
 
 - For a capability installation, return to [packages.install](../SKILL.md).
-- For a composed role, return to [Preset Maker](../../../presets/SKILL.md);
-  standing instructions become a role-card skill, reusable settings become
-  preset config, and the current mission remains the spawn prompt.
+- For a composed role, write the standing instructions as a role-card skill
+  (`skill-creator`); reusable settings ride the spawn's `config_overlay`, and
+  the current mission remains the spawn prompt.

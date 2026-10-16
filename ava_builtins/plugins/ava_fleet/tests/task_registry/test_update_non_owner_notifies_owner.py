@@ -291,7 +291,6 @@ def test_create_and_assign_signature() -> None:
         "title",
         "description",
         "operation_key",
-        "preset",
         "label",
         "config_overlay",
         "machine",
@@ -300,7 +299,6 @@ def test_create_and_assign_signature() -> None:
         "priority",
     ]
     assert params["operation_key"].default is inspect.Parameter.empty
-    assert params["preset"].default is None
     assert params["label"].default is None
     assert params["config_overlay"].default is None
     assert params["machine"].default is None

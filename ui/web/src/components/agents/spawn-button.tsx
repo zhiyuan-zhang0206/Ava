@@ -1,7 +1,5 @@
 "use client";
 
-// Spawn button + cross-machine placement picker + model/preset/reasoning-effort selectors.
-//
 // Pulls /api/status to inspect cluster.machines. Agent processes only run on
 // agent-runner machines (the gateway refuses local spawn with HTTP 400 —
 // see `gateway/agents/router.py:post_agents`), so the spawn target list requires
@@ -40,7 +38,6 @@ import { cn } from "@/lib/format/utils";
 interface SpawnOpts {
   machine?: string;
   model?: string;
-  preset?: string;
   reasoning_effort?: string;
 }
 
@@ -64,13 +61,6 @@ export function SpawnButton({ onSpawn, variant }: Props) {
     staleTime: Infinity,
   });
   const modelsData = modelsQuery.error ? undefined : modelsQuery.data;
-  const { data: presetsData } = useQuery({
-    queryKey: ["presets"],
-    queryFn: () => api.listPresets(),
-    // Presets change rarely (managed on the Control page); a short stale window
-    // keeps the picker fresh without polling.
-    staleTime: 30_000,
-  });
   const [open, setOpen] = useState(false);
   const [modelOpen, setModelOpen] = useState(false);
   // Picker selections are DB-backed user preferences (behavior.spawn_*) so they
@@ -81,8 +71,6 @@ export function SpawnButton({ onSpawn, variant }: Props) {
   const { settings, setSetting } = useUserSettings();
   const selectedModel = (settings["behavior.spawn_model"] as string | null) ?? undefined;
   const setSelectedModel = (v: string | undefined) => setSetting("behavior.spawn_model", v ?? null);
-  const selectedPreset = (settings["behavior.spawn_preset"] as string | null) ?? undefined;
-  const setSelectedPreset = (v: string | undefined) => setSetting("behavior.spawn_preset", v ?? null);
   const selectedReasoningEffort = (settings["behavior.spawn_reasoning_effort"] as string | null) ?? undefined;
   const setSelectedReasoningEffort = (v: string | undefined) =>
     setSetting("behavior.spawn_reasoning_effort", v ?? null);
@@ -111,12 +99,6 @@ export function SpawnButton({ onSpawn, variant }: Props) {
   );
   const defaultModel = modelsData?.default;
 
-  // Resolve the effective model: an explicit selection is ALWAYS sent —
-  // even when it equals the cluster default — because the preset merge on the
-  // backend lets explicit config beat the preset's per key, and a preset that
-  // pins llm_model must not silently win over a model the user visibly picked.
-  // Never touched (no stored spawn_model) → undefined = omit config, so the
-  // cluster default (or the preset's model) applies.
   const effectiveModel = selectedModel;
 
   // Resolved model name: explicit selection or cluster default. Used to look
@@ -151,13 +133,10 @@ export function SpawnButton({ onSpawn, variant }: Props) {
       ? selectedReasoningEffort
       : (modelDefaultEffort ?? undefined);
 
-  const presets = presetsData ?? [];
-
   function buildOpts(machine?: string): SpawnOpts {
     return {
       machine,
       model: effectiveModel,
-      preset: selectedPreset,
       reasoning_effort: effectiveReasoningEffort,
     };
   }
@@ -255,90 +234,6 @@ export function SpawnButton({ onSpawn, variant }: Props) {
       </select>
     ) : null;
 
-  // Only shown when presets exist — an empty catalog leaves the spawn header
-  // uncluttered. The blank option is "no preset" (a raw spawn); a selection
-  // seeds the new agent's config from that preset. A preset that carries a
-  // model (config.llm_model) or an effort (config.reasoning_effort) OVERRIDES
-  // the pickers with those values (task #568) — picking "Ultra Speed Worker"
-  // must visibly switch to its mimo model instead of silently spawning on
-  // whatever model was selected before. The preset remains the seed: the
-  // override is written into the stored spawn_model / spawn_reasoning_effort
-  // settings, and a later explicit pick still wins (backend merge: explicit
-  // config beats preset config per key).
-  // #723 round 2 (user ruling): preset / model / effort pickers get FIXED
-  // widths (no width jitter as names change length) with ellipsis overflow.
-  // A native <select> cannot render an ellipsis (its text is the selected
-  // <option>'s, truncated without a marker), so the preset picker — whose
-  // names are the long ones — becomes a Popover button like the model
-  // picker; effort (short ladder values) stays a native select.
-  const [presetOpen, setPresetOpen] = useState(false);
-  const selectPreset = (name: string | undefined) => {
-    setSelectedPreset(name);
-    setPresetOpen(false);
-    const preset = presets.find((p) => p.name === name);
-    if (preset) {
-      const presetModel = preset.config.llm_model;
-      if (typeof presetModel === "string" && presetModel !== "") {
-        setSelectedModel(presetModel);
-      }
-      const presetEffort = preset.config.reasoning_effort;
-      if (typeof presetEffort === "string" && presetEffort !== "") {
-        setSelectedReasoningEffort(presetEffort);
-      }
-    }
-  };
-  const presetSelect =
-    presets.length > 0 ? (
-      <Popover.Root open={presetOpen} onOpenChange={setPresetOpen}>
-        <Popover.Trigger asChild>
-          <button
-            type="button"
-            aria-label={t("preset")}
-            className={cn("w-[120px] inline-flex items-center gap-0.5 truncate text-xs bg-transparent border border-border rounded px-1 py-0.5 text-muted-foreground hover:text-foreground focus:outline-none focus:ring-1 focus:ring-ring cursor-pointer", MIN_W_0)}
-          >
-            <span className="truncate">{selectedPreset ?? t("noPreset")}</span>
-            <ChevronDown className="size-3 shrink-0 opacity-50" />
-          </button>
-        </Popover.Trigger>
-        <Popover.Portal>
-          <Popover.Content
-            sideOffset={6}
-            align="start"
-            className="z-50 min-w-[180px] max-w-[90vw] rounded-md border border-border bg-popover text-popover-foreground shadow-md outline-none"
-          >
-            <div className="px-3 py-2 border-b border-border text-xs font-medium text-muted-foreground">
-              {t("presets")}
-            </div>
-            <ul className="py-1 max-h-[320px] overflow-y-auto">
-              <li>
-                <button
-                  type="button"
-                  onClick={() => selectPreset(undefined)}
-                  className="w-full text-left px-3 py-1.5 text-sm hover:bg-sidebar-accent"
-                >
-                  {t("noPreset")}
-                </button>
-              </li>
-              {presets.map((preset) => (
-                <li key={preset.id}>
-                  <button
-                    type="button"
-                    onClick={() => selectPreset(preset.name)}
-                    className={
-                      "w-full text-left px-3 py-1.5 text-sm hover:bg-sidebar-accent flex items-center justify-between gap-3" +
-                      (preset.name === selectedPreset ? " bg-sidebar-accent/50" : "")
-                    }
-                  >
-                    <span className="truncate">{preset.label}</span>
-                  </button>
-                </li>
-              ))}
-            </ul>
-          </Popover.Content>
-        </Popover.Portal>
-      </Popover.Root>
-    ) : null;
-
   if (modelsQuery.error) {
     return (
       <div className={cn(FLEX, "items-center gap-2 text-xs text-muted-foreground")}>
@@ -377,7 +272,6 @@ export function SpawnButton({ onSpawn, variant }: Props) {
       // flex-nowrap + min-w-0: as the resizable sidebar narrows, the pickers
       // shrink instead of pushing the row wider than its panel.
       <div className={cn("flex-nowrap items-center gap-1 w-full", FLEX, MIN_W_0)}>
-        {presetSelect}
         {modelPicker}
         {reasoningEffortSelect}
         <span className={cn(FLEX_1, MIN_W_0)} aria-hidden="true" />
@@ -440,7 +334,6 @@ export function SpawnButton({ onSpawn, variant }: Props) {
     // flex-nowrap + min-w-0: same shrink-with-the-panel contract as the
     // single-machine branch above.
     <div className={cn("flex-nowrap items-center gap-1 w-full", FLEX, MIN_W_0)}>
-      {presetSelect}
       {modelPicker}
       {reasoningEffortSelect}
       <span className={cn(FLEX_1, MIN_W_0)} aria-hidden="true" />
@@ -504,10 +397,6 @@ function TriggerButton({ variant, ...rest }: TriggerProps) {
       </button>
     );
   }
-  // Height matches the adjacent preset / model / effort pickers: they are
-  // native selects styled as text-xs + py-0.5 + border, so the Spawn button
-  // uses the same formula (instead of buttonVariants' h-8) to sit level with
-  // them in the spawn row (user report: the button was visibly taller).
   return (
     <button
       type="button"
