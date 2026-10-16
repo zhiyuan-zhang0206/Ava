@@ -77,7 +77,7 @@ DeepSeek uses its Anthropic-compatible endpoint for ordinary chat and tools.
 `with_structured_output(method="json_schema")` uses the same configured model on its
 Responses endpoint, submitting a native schema with strict mode and retaining raw usage.
 This transport belongs to the provider; feature callers do not construct vendor clients
-or change model selection. See [reply-suggestion verification](../../../gateway/agents/docs/reply-suggestion.ava.okf.md#verification-scope)
+or change model selection. See [reply-suggestion verification](../../../gateway/agents/docs/reply-suggestion/verification.ava.okf.md)
 for the observed limits of the provider's schema-adherence guarantee.
 
 ## Loading and startup

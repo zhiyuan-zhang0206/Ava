@@ -45,8 +45,10 @@ a 200. An unknown agent is 404 and an unreadable checkpoint is the history read'
 1. The agent must exist and be idle; the cluster switch must be on.
 2. `load_current_messages` reads the checkpoint and the shared timeline renderer turns it
    into items. The excerpt is the newest human message (`user` or `ui:page:*`) and the
-   text of the last turn (everything after the newest inbound), cut from the end to
-   `reply_suggestion_max_input_tokens`.
+   text of the last turn (everything after the newest inbound), cut to
+   `reply_suggestion_max_input_tokens`. The user's message has the budget's first claim:
+   a long agent turn cannot evict the message the suggestion answers, and whichever part
+   must be cut keeps its newest words.
 3. Gate: `decide(reply_suggestion_gate_model, ...)` asks one `YesNo`, "would suggesting
    a reply help the user at this point in the conversation?". Below
    `reply_suggestion_gate_threshold` the answer is `not_useful`. This judges the value
@@ -81,33 +83,24 @@ leaves, which stops the in-flight model call.
 
 ## Configuration
 
-Cluster settings in `LmSettings`, read live by the gateway: `reply_suggestion_enabled`,
-`reply_suggestion_model`, `reply_suggestion_gate_model`, `reply_suggestion_gate_threshold`,
-`reply_suggestion_max_input_tokens`. At boot, with the feature on, the draft model must be a
+Cluster settings in `LmSettings`, read by the gateway from the configuration snapshot
+captured at its process start: `reply_suggestion_enabled`, `reply_suggestion_model`,
+`reply_suggestion_gate_model`, `reply_suggestion_gate_threshold`,
+`reply_suggestion_max_input_tokens`. A changed value takes effect on the next gateway
+restart. The per-user `behavior.replySuggestions` preference is separate and takes effect
+without one. At boot, with the feature on, the draft model must be a
 registered chat model and the gate model a registered decision model
 (see [[base/lm/docs/decision-models.ava.okf.md]]); anything else stops the gateway.
 
 Code: `gateway/agents/reply_suggestion/` (`router.py`, `service.py`, `excerpt.py`,
 `configuration.py`).
 
-## Verification scope
+Verification scope: [[gateway/agents/docs/reply-suggestion/verification.ava.okf.md]].
 
-Unit tests inject fake decision and chat models. They verify gating, validation, candidate
-transport, caching and keyboard behaviour, including preserving model-returned counts
-above three. They do not evaluate the usefulness judgement or generated reply quality;
-those require a benchmark with representative conversations and actual model outputs.
-
-Factory tests exercise the real LangChain and vendor SDKs with injected mock HTTP
-transports. They verify the Responses URL, `text.format.type="json_schema"`, `strict=true`,
-schema, reasoning settings and raw usage. Separate construction assertions verify the
-ordinary Anthropic transport, endpoint, key and disabled-thinking configuration.
-
-Live compatibility probes on 2026-10-13 UTC used the official OpenAI SDK and LangChain
-against DeepSeek's endpoints. An ordinary draft with the reply schema succeeded. Adversarial
-prompts also produced schema violations (wrong enum values, additional fields and non-string
-array items) on Responses and Beta strict tool calls. Thus the client requests native strict
-structured output as documented, but these probes do not establish a server-side constrained
-decoding guarantee. Boundary validation remains required. These are protocol probes, not a
-generation-quality benchmark. Official contracts:
-[Responses schema output](https://api-docs.deepseek.com/api/create-response/),
-[strict tool calls](https://api-docs.deepseek.com/guides/tool_calls/#strict-mode-beta).
+```ava-contract
+id = "excerpt-budget-priority"
+kind = "invariant"
+statement = "The excerpt fits the user's latest message before the agent's last-turn text: the message survives whole whenever it fits the budget, a longer agent turn keeps its newest words instead of evicting it, and whichever part must be cut keeps its tail."
+code = ["gateway/agents/reply_suggestion/excerpt.py:<module>"]
+tests = ["gateway/agents/reply_suggestion/tests/test_excerpt.py::test_an_oversized_reply_still_keeps_the_user_message", "gateway/agents/reply_suggestion/tests/test_excerpt.py::test_an_oversized_user_message_keeps_its_newest_words_and_displaces_the_reply"]
+```
