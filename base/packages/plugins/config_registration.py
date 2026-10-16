@@ -1,13 +1,3 @@
-"""Validate declared plugin config images and bind them into caller-owned mappings.
-
-The SDK installer owns the resolved boot image. Agent views receive that image
-explicitly, and exec-child overlays produce replacement frozen config instances.
-Config classes are derived from their instances; no separate global registry is
-needed. Gateway and ops validate overlays using enabled declarations without
-installing an SDK surface. See ``docs/plugin-config.ava.okf.md`` for lifecycle,
-authority images, schema validation and overlay contracts.
-"""
-
 import json
 import math
 from collections.abc import Callable, Mapping
@@ -31,17 +21,6 @@ from base.paths.home import resolve_ava_home
 def bind_plugin_config(
     plugin: str, cls: type[BaseModel], configs: dict[str, BaseModel]
 ) -> Callable[[], None]:
-    """Bind `plugin`'s declared Config class from its disk image; returns the undo.
-
-    Reads the disk image (a missing one is written with the defaults), validates it against `cls`,
-    instantiates it and stores it in the supplied bindings. Only the installer calls this.
-
-    Raises:
-        TypeError: cls is not a BaseModel subclass — typo (passed dataclass / plain class).
-        DuplicateRegistration: this plugin already has a bound config.
-        SchemaDriftError: disk image field set inconsistent with cls (plugin upgraded schema).
-        InvalidConfigData: disk image JSON parse failure / Pydantic validation failure.
-    """
     if not (isinstance(cls, type) and issubclass(cls, BaseModel)):
         raise TypeError(
             f"plugin {plugin!r} declared config {cls!r}, which is not a BaseModel subclass — "
@@ -61,26 +40,18 @@ def bind_plugin_config(
 
 
 def _instantiate_from_disk(plugin: str, cls: type[BaseModel]) -> BaseModel:
-    """Read disk image (auto-write default if missing), validate schema, return instance."""
     from base.packages.plugin_config_images import PluginConfigChangedError
     from base.packages.plugins.config_view import with_cluster_policy
 
     config_path = disk_image_path(plugin)
     read_plugin_config(plugin, cls, config_path)
     if not config_path.exists():
-        # Another boot may create the authority; bind its validated image below.
         with suppress(PluginConfigChangedError):
             write_default_disk_image(plugin, cls)
     return with_cluster_policy(plugin, config_from_image(cls, config_path.read_text(), config_path))
 
 
 def read_config_image[C: BaseModel](cls: type[C], config_path: Path) -> C:
-    """Read a plugin's full config image without binding or writing it.
-
-    A missing image uses the declared defaults, including before first converge.
-    An existing image must contain exactly the declared fields and validate;
-    malformed data is never repaired or replaced with defaults.
-    """
     try:
         content = config_path.read_text()
     except FileNotFoundError:
@@ -90,7 +61,6 @@ def read_config_image[C: BaseModel](cls: type[C], config_path: Path) -> C:
 
 
 def config_from_image[C: BaseModel](cls: type[C], content: str, config_path: Path) -> C:
-    """Validate one captured full image using the same contract as its disk reader."""
     try:
         disk_data = json.loads(content)
     except json.JSONDecodeError as e:
@@ -125,17 +95,11 @@ def config_from_image[C: BaseModel](cls: type[C], content: str, config_path: Pat
 
 
 def disk_image_path(plugin: str) -> Path:
-    """Disk image path — `~/.ava/configs/<plugin>/config.json`. Does not pre-create directory."""
     return resolve_ava_home().resolve() / "configs" / plugin / "config.json"
 
 
 def write_default_disk_image(plugin: str, cls: type[BaseModel]) -> Path:
-    """Serialize full defaults only when the whole image is absent.
-
-    Used for `ava start` first boot + `ava plugins update` writing initial
-    image for new plugin. Concurrent creation is rejected rather than overwriting an existing image.
-    """
-    instance = cls()  # All defaults; cls fields lacking default raise ValidationError
+    instance = cls()
     config_path = disk_image_path(plugin)
     config_path.parent.mkdir(parents=True, exist_ok=True)
     from base.packages.plugin_config_images import (
@@ -155,11 +119,6 @@ def write_default_disk_image(plugin: str, cls: type[BaseModel]) -> Path:
 def reconcile_config_image[C: BaseModel](
     cls: type[C], content: str | None, config_path: Path
 ) -> tuple[C, set[str], set[str]]:
-    """Validate an upgrade candidate before writing or importing legacy values.
-
-    Keep and validate stored fields the schema still declares, fill missing
-    fields with defaults, and drop retired fields. Added fields may adopt legacy values.
-    """
     if content is None:
         return cls(), set(cls.model_fields), set()
     try:
@@ -182,29 +141,8 @@ def reconcile_config_image[C: BaseModel](
     return candidate, cls_keys - disk_keys, disk_keys - cls_keys
 
 
+# ava:ref base/packages/plugins/docs/plugin-config.ava.okf.md#schema-reconciliation
 def merge_disk_image_schema(plugin: str, cls: type[BaseModel]) -> tuple[set[str], set[str]]:
-    """Used by `ava plugins update` — auto-merge disk image and cls schema diff.
-
-    Behavior:
-    - New fields (in cls, not on disk): write cls default value to disk image
-    - Removed fields (on disk, not in cls): dropped from the disk image so it
-      converges to exactly the current schema's field set. This is what lets the
-      strict-equality check in `_instantiate_from_disk` pass after an upgrade
-      that removed a field — keeping the stale field would leave every agent
-      spawn failing with SchemaDriftError.
-    - Type changed (new cls field type incompatible with old disk value via Pydantic):
-      raise InvalidConfigData, user must manually migrate
-    - No diff: no-op, don't write disk
-
-    Disk missing → write default for first-boot scenario, returns (all_fields, set()).
-
-    Returns:
-        (added, removed) — for CLI log display.
-
-    Raises:
-        InvalidConfigData: disk JSON malformed or post-merge Pydantic validation
-            failure (type incompatibility).
-    """
     config_path = disk_image_path(plugin)
 
     if not config_path.exists():
@@ -239,45 +177,24 @@ def get_plugin_config[T: BaseModel](plugin: str, slices: AgentSlices, cls: type[
 def get_plugin_config(
     plugin: str, slices: AgentSlices, cls: type[BaseModel] | None = None
 ) -> BaseModel:
-    """Read plugin config instance — already bound by the install — for the agent whose `slices` are given.
-
-    Pass `cls` to let pyright narrow the return type (e.g. `get_plugin_config("ava_compact",
-    slices, CompactConfig).auto_compact_tokens`). Runtime does not validate cls matches
-    actual instance — caller's responsibility.
-
-    Agent-scoped: the agent's `config_overlay` is layered over the bound disk image
-    (`base/packages/plugins/config_view.py`); a hook reads `runtime.context.require_agent()`.
-
-    Raises:
-        KeyError: plugin declares no config or it is not installed yet — typo / wrong ordering.
-    """
     _ = cls
     return slices.plugin_config(plugin)
 
 
 def all_plugin_configs(slices: AgentSlices) -> dict[str, BaseModel]:
-    """All bound plugin config instances for the agent whose `slices` are given. See
-    `get_plugin_config` on scoping."""
     return slices.plugin_configs()
 
 
 def process_plugin_config(plugin: str, configs: Mapping[str, BaseModel]) -> BaseModel:
-    """This process's own instance of `plugin`'s config — what boot's `apply_config_overlay`
-    rebuilt with the process's agent overlay merged in (the exec child, a script)."""
     return configs[plugin]
 
 
 def _schema_extra(info: FieldInfo) -> dict[str, Any]:
-    """Collapse pydantic's `FieldInfo.json_schema_extra` (typed as
-    dict | callable | None, its dict branch partially Unknown) to a plain
-    `dict[str, Any]` for the per_agent metadata lookups. Mirrors
-    `base/config/__init__.schema_extra`."""
     extra = info.json_schema_extra
     return cast("dict[str, Any]", extra) if isinstance(extra, dict) else {}
 
 
 def _per_agent_fields_for(cls: type[BaseModel]) -> set[str]:
-    """Set of field names with `json_schema_extra={"per_agent": True}` (on that cls)."""
     out: set[str] = set()
     for name, info in cls.model_fields.items():
         if _schema_extra(info).get("per_agent") is True:
@@ -288,12 +205,6 @@ def _per_agent_fields_for(cls: type[BaseModel]) -> set[str]:
 def overlay_config_classes(
     configs: Mapping[str, BaseModel] | None = None,
 ) -> dict[str, type[BaseModel]]:
-    """The plugin config classes a per-agent overlay may name, by plugin.
-
-    The class every ENABLED plugin declares in its `default_config.py` config face, read from disk — so
-    the gateway and ops, which bind no plugin config, validate against the same classes as the agent
-    process — with a class this process has bound taking precedence.
-    """
     from base.packages.plugins import enable_config
     from base.packages.plugins.config_face import enabled_config_classes
 
@@ -310,27 +221,10 @@ def overlay_config_classes(
     }
 
 
+# ava:ref base/packages/plugins/docs/plugin-config.ava.okf.md#overlay-admission
 def resolve_overlay_targets(
     overlay: dict[str, object], configs: Mapping[str, BaseModel] | None = None
 ) -> dict[str, tuple[str | None, str]]:
-    """Dispatch overlay flat keys to framework Settings or a specific plugin Config.
-
-    PR-E design: `ava.self.restart(config_overlay={"auto_compact_fraction": 0.7})` —
-    flat dict, each key must **uniquely** match either a framework Settings
-    field or a plugin Config field. Validates per_agent=True, uniqueness,
-    field existence.
-
-    Returns:
-        dict[overlay_key] = (plugin_name_or_None, field_name). plugin=None for
-        framework Settings fields; plugin=<name> for plugin fields.
-
-    Raises:
-        InvalidConfigOverlay: field does not exist / same name collision across
-            framework+plugin / not per_agent. Detailed message marks key + reason.
-    """
-    # Deferred import to avoid module init cycle. `settings` is decomposed into
-    # per-domain sub-models; the overlay keys are flat field names, so resolve
-    # against the flat name set / per-agent set the config package exposes.
     from base.config import field_names, per_agent_field_names
 
     framework_per_agent = per_agent_field_names()
@@ -380,11 +274,6 @@ def resolve_overlay_targets(
 def _validate_model_membership(
     value: object, models: Mapping[str, object], *, kind: str = "model"
 ) -> str | None:
-    """A model-name overlay field must be a registered id (the model catalog,
-    plugin-registered models included). An unregistered id would pass
-    the Pydantic str type check, persist, and crash the next boot at model
-    build (Task #1704 — the deepseek-v4-flash-vision incident). `kind` names the
-    table checked ("model" or "decision model")."""
     if isinstance(value, str) and value in models:
         return None
     valid_models = ", ".join(sorted(models))
@@ -394,8 +283,6 @@ def _validate_model_membership(
 def _validate_reasoning_effort_range(value: object) -> str | None:
     from base.lm.effort import EFFORT_VOCAB
 
-    # None = unset (the field is `str | None` and a None overlay is a no-op) —
-    # accepted, matching the pre-PR behavior.
     if value is None:
         return None
     valid_values = ("", *EFFORT_VOCAB)
@@ -411,18 +298,6 @@ def _range_validator(
     ge: float | None = None,
     le: float | None = None,
 ) -> Callable[[object], str | None]:
-    """Numeric bound validator for overlay fields.
-
-    - None passes (a `T | None` field's unset sentinel — the type layer
-      already decided None is legal).
-    - NaN / ±Inf are rejected outright: a NaN timeout never fires (hang), an
-      Inf heartbeat limit defeats the cap, an Inf fraction is meaningless.
-    - Then the bounds apply: ``gt`` (strictly greater), ``ge`` (at least),
-      ``le`` (at most). All bounds inclusive-exclusive as named.
-
-    Non-numeric values (bool included) fall through — the Pydantic type
-    validation that runs before this step owns them.
-    """
 
     def check(value: object) -> str | None:
         if value is None:
@@ -442,21 +317,9 @@ def _range_validator(
     return check
 
 
-# Semantic range validators for framework overlay fields — Pydantic type
-# validation (above) accepts any string / any number, so fields whose legal
-# values form a named universe get an explicit range check here. Model-name
-# fields check model-catalog membership (an unknown id would crash the next boot at
-# model build); numeric fields get finite + bound checks (NaN/Inf/negative
-# timeouts and out-of-window fractions would wedge or corrupt the runtime).
-# Plugin config fields are deliberately not range-checked (their schemas own
-# their semantics). The bound set below is the complete per_agent overlay
-# surface — every field with a universe is listed; the rest are bool / list /
-# Literal / free-form str, already fully enforced by their own types or the
-# field validators in base/config/*.py.
+# ava:ref base/packages/plugins/docs/plugin-config.ava.okf.md#framework-range-validators
 _FRAMEWORK_RANGE_VALIDATORS: dict[str, Callable[[object], str | None]] = {
-    # reasoning-effort vocabulary ("" pins the provider default; None = unset)
     "reasoning_effort": _validate_reasoning_effort_range,
-    # durations / timeouts — strictly positive and finite
     "heartbeat_pause_max_seconds": _range_validator(gt=0),
     "llm_stream_inter_chunk_timeout_seconds": _range_validator(gt=0),
     "llm_stream_total_timeout_seconds": _range_validator(gt=0),
@@ -464,14 +327,11 @@ _FRAMEWORK_RANGE_VALIDATORS: dict[str, Callable[[object], str | None]] = {
     "memory_recall_deadline_seconds": _range_validator(gt=0),
     "skill_recall_deadline_seconds": _range_validator(gt=0),
     "memory_write_check_deadline_seconds": _range_validator(gt=0),
-    # probabilities — [0, 1]
     "memory_recall_inject_threshold": _range_validator(ge=0, le=1),
     "memory_write_dedup_threshold": _range_validator(ge=0, le=1),
-    # fractions — (0, 1]
     "auto_compact_fraction": _range_validator(gt=0, le=1),
     "compact_reminder_fraction": _range_validator(gt=0, le=1),
     "skill_recall_threshold": _range_validator(gt=0, le=1),
-    # counts / budgets — non-negative and finite
     "auto_compact_ceiling_tokens": _range_validator(ge=0),
     "claude_thinking_budget_tokens": _range_validator(ge=0),
     "history_dump_keep": _range_validator(ge=0),
@@ -490,26 +350,10 @@ def _validate_framework_overlay_ranges(updates: dict[str, object]) -> None:
             raise InvalidConfigOverlay(f"overlay key {field!r} {error}")
 
 
+# ava:ref base/packages/plugins/docs/plugin-config.ava.okf.md#overlay-admission
 def validate_config_overlay_shape(
     overlay: dict[str, object], configs: Mapping[str, BaseModel] | None = None
 ) -> None:
-    """SDK-side validation — called before `ava.self.restart(config_overlay=overlay)` writes to DB.
-
-    Type validation relies on Pydantic: splice overlay into a fresh declaring
-    sub-model instance and try to build (framework field via its declaring
-    model, plugin field via the corresponding cls). The overlay surface spans
-    every config domain (28 of 38 fields are agent-domain), while a boundary
-    gateway or ops process constructs only its profile's domains. Reading the
-    old process settings therefore raised the profile fail-fast AttributeError
-    at the HTTP boundary (500, task #4423). A fresh sub-model starts from env +
-    defaults, matching the child settings base before its overlay is applied, so
-    the validation verdict cannot depend on the validating process. Framework
-    fields with a named value universe then run their semantic range validator.
-    Failure raises InvalidConfigOverlay.
-
-    Success = overlay is valid; does **not** modify settings or the supplied config image —
-    that's `apply_config_overlay`'s job at new process boot.
-    """
     from base.config import field_domain
     from base.config.service_read import domain_model_classes
 
@@ -521,11 +365,6 @@ def validate_config_overlay_shape(
     for plugin, updates in grouped.items():
         try:
             if plugin is None:
-                # Validate each framework field against its owning sub-model — the
-                # decomposed `settings` holds the field on `settings.<domain>`, so a
-                # flat {field: value} overlay is grouped by domain and each sub-model
-                # re-validated with the update merged in (runs its field/model
-                # validators, e.g. the comma-list split).
                 by_domain: dict[str, dict[str, object]] = {}
                 for f, v in updates.items():
                     by_domain.setdefault(field_domain(f), {})[f] = v
@@ -534,8 +373,6 @@ def validate_config_overlay_shape(
                     sub = cls()
                     cls.model_validate({**sub.model_dump(), **upd})
             else:
-                # The gateway and ops bind no plugin config: validate against the declared class,
-                # layered over this process's bound instance when it has one, else the defaults.
                 cls = overlay_config_classes(configs)[plugin]
                 held = None if configs is None else configs.get(plugin)
                 current = (held if held is not None else cls()).model_dump()
@@ -550,8 +387,6 @@ def validate_config_overlay_shape(
         _validate_framework_overlay_ranges(grouped[None])
 
 
-# Overlay fields naming a decision model: checked against the catalog's decision table, which is
-# separate from the chat-model table because a decision model never appears in `models`.
 _DECISION_MODEL_FIELDS = ("skill_recall_model",)
 
 
@@ -562,11 +397,6 @@ def validate_config_overlay(
     models: Mapping[str, object],
     decision_models: Mapping[str, object] | None = None,
 ) -> None:
-    """Validate shape and catalog membership before an overlay is admitted or persisted.
-
-    `decision_models` is the catalog's decision table. It may be left out only by a caller whose
-    overlay names no decision-model field: an overlay that does fails here rather than
-    being admitted unchecked."""
     validate_config_overlay_shape(overlay, configs)
     if "llm_model" in overlay:
         error = _validate_model_membership(overlay["llm_model"], models)
@@ -593,16 +423,6 @@ def apply_config_overlay(
     scope: Literal["framework", "plugin", "all"] = "all",
     set_framework_field: Callable[[str, object], None] | None = None,
 ) -> dict[str, BaseModel]:
-    """Apply framework fields and return a resolved plugin config image.
-
-    The exec child applies framework fields before loading the SDK and plugin
-    fields afterwards. ``scope="framework"`` preserves the supplied plugin
-    image; ``scope="plugin"`` preserves core settings. Plugin instances are
-    rebuilt from their owning image without mutating the input mapping.
-    Core fields use the supplied root setter at their existing boot stage.
-    Plugin-only operations need no framework mutation capability.
-    Invalid plugin values raise ``InvalidConfigOverlay``.
-    """
     targets = resolve_overlay_targets(overlay, configs)
     resolved = dict(configs or {})
     grouped: dict[str | None, dict[str, object]] = {}
@@ -634,12 +454,6 @@ def apply_config_overlay(
 
 
 def _field_is_sensitive(extra: object) -> bool:
-    """True when a field's `json_schema_extra` marks it `sensitive=True`.
-
-    SecretStr values are already masked by pydantic's model_dump, but a
-    sensitive field that is NOT a SecretStr (or one that later changes type)
-    would otherwise be emitted verbatim — test the marker, not the value shape.
-    """
     if not isinstance(extra, dict):
         return False
     extras = cast(dict[str, Any], extra)
@@ -647,18 +461,10 @@ def _field_is_sensitive(extra: object) -> bool:
 
 
 def registered_plugin_config_names(configs: Mapping[str, BaseModel]) -> tuple[str, ...]:
-    """Sorted names of plugins with a bound config instance."""
     return tuple(sorted(configs))
 
 
 def is_per_agent_field(plugin: str, field: str, configs: Mapping[str, BaseModel]) -> bool:
-    """Whether the field is marked `json_schema_extra={"per_agent": True}` — used for
-    PR-E CLI overlay validation (per_agent=False fields do not allow per-agent
-    override, enforcing cluster consistency).
-
-    plugin / field not found → False (this is a query helper, should not raise;
-    let the CLI decide).
-    """
     instance = configs.get(plugin)
     if instance is None:
         return False
@@ -669,7 +475,6 @@ def is_per_agent_field(plugin: str, field: str, configs: Mapping[str, BaseModel]
 
 
 def service_config_packet(plugin: str, config: BaseModel) -> str:
-    """Canonical, non-secret config for the existing unit environment/hash path."""
     for name, field in type(config).model_fields.items():
         if _field_is_sensitive(field.json_schema_extra):
             raise InvalidConfigData(f"service config {plugin}.{name} is sensitive")
@@ -681,12 +486,8 @@ def service_config_packet(plugin: str, config: BaseModel) -> str:
     )
 
 
+# ava:ref base/packages/plugins/docs/plugin-config.ava.okf.md#service-birth-snapshot
 def read_service_config[C: BaseModel](plugin: str, cls: type[C]) -> C | None:
-    """Validate this service's birth snapshot; None outside a launched service.
-
-    A present packet must name this plugin and contain its complete declared
-    image. A malformed packet cannot fall back to disk or defaults.
-    """
     from base.host.env.bootstrap import service_plugin_config_packet
 
     packet = service_plugin_config_packet()
@@ -719,14 +520,12 @@ def read_service_config[C: BaseModel](plugin: str, cls: type[C]) -> C | None:
 
 
 def read_plugin_config[C: BaseModel](plugin: str, cls: type[C], config_path: Path) -> C:
-    """Resolve local host authority and the current gateway cluster projection."""
     from base.packages.plugins.config_view import with_cluster_policy
 
     return with_cluster_policy(plugin, read_config_image(cls, config_path))
 
 
 def plugin_bootstrap_config() -> str:
-    """Serialize only declared, non-secret cluster policy from plugin authority images."""
     import json
 
     from base.config import schema_extra

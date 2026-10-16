@@ -78,3 +78,4 @@ only a small bottom padding.
 
 - [[ui/web/src/docs/frontend-components/frontend-components.ava.okf.md|Frontend Components]] — the catalog this node was split out of; the sidebar, composer, and inspector live there.
 - [[ui/web/src/docs/frontend-state/timeline-cache.ava.okf.md|Per-Thread Timeline Cache]] — the store that feeds this view, including the compact-replace edge and the retention re-attach.
+- [[ui/web/src/docs/frontend-components/timeline-view/markers.ava.okf.md|System markers]] — system-marker dispatch and the fail-loud unrecognized alarm.

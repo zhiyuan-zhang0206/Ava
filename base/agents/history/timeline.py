@@ -1,19 +1,3 @@
-"""Timeline view of LangGraph state.messages — wire type + pure renderer.
-
-Both the producer (the agent, which renders from its in-memory state at each
-node enter) and the gateway (`GET /api/agents/{id}/timeline`, which renders
-from the checkpoint it reads from disk) call `build_timeline_items` on the
-same rule, and both serialize `TimelineItem` as the response model. Living in
-`base/` (leaf) lets both import it without an agent <-> gateway package
-cycle.
-
-Why a single render function: streaming delta events render directly on the
-frontend, but a committed inbound HumanMessage renders only via a snapshot.
-Having the agent build the snapshot from its in-memory state removes the old
-race where the gateway re-read the checkpoint before the async commit landed
-and produced a snapshot missing the just-claimed inbound.
-"""
-
 from __future__ import annotations
 
 from collections.abc import Callable, Mapping, Sequence
@@ -30,9 +14,6 @@ from langchain_core.messages import (
 from base.agents.history.timeline_inputs import TimelineReadInputs
 from base.agents.history.timeline_item import TimelineItem as TimelineItem
 from base.agents.impersonation.history import ImpersonationMetadata
-
-# Re-export: TimelineItem's home is base/agents/history/timeline_item.py (file line budget);
-# callers keep importing it from here.
 from base.agents.messages.kwargs import (
     AvaMessageKwargs,
     AvaMsgType,
@@ -50,11 +31,7 @@ __all__ = [
 ]
 
 
-# system_note tags whose chip hides the wall-clock ts: memory and skill recall (ambient
-# context) and the one-time guidance notes (compact reminder, the SDK
-# hint, the agent-reply pointer, the silent idle-continue). They read as
-# context, not events, so a timestamp is noise. Heartbeats and lifecycle_*
-# transitions are real events and keep their ts (the default True).
+# ava:ref base/agents/history/docs/timeline.ava.okf.md#note-timestamp-policy
 _NO_TIMESTAMP_NOTE_TAGS = frozenset(
     {
         NoteTag.MEMORY,
@@ -67,7 +44,6 @@ _NO_TIMESTAMP_NOTE_TAGS = frozenset(
         NoteTag.AGENT_REPLY,
         NoteTag.SILENT_IDLE_CONTINUE,
         NoteTag.SECURITY,
-        # Historical heartbeat-pause notes: one-time guidance, same family.
         NoteTag.HEARTBEAT_PAUSE,
         NoteTag.CONTEXT,
         NoteTag.PROJECT_SKILLS,
@@ -78,22 +54,9 @@ _NO_TIMESTAMP_NOTE_TAGS = frozenset(
         NoteTag.TIMEZONE,
     }
 )
-# Deliberately absent: NoteTag.NEW_SKILLS. Its siblings PROJECT_SKILLS /
-# PRELOADED_SKILLS are standing head content whose ts only says when the window
-# opened, but a drift note reports that a skill appeared at a moment mid-window —
-# and this note is the only place that install is visible at all, so the ts is
-# the information, not noise.
 
 
 def _inbound_text(content: str | list[str | dict[str, Any]]) -> str:
-    """The renderable text of an inbound message.
-
-    A plain-text inbound has string content. A multimodal inbound has list
-    content — a text block plus native image blocks; join the text blocks and
-    drop the image blocks (their base64 is never rendered; the timeline shows
-    thumbnails from ava_image_urls instead). Any non-text block a future writer
-    adds is ignored here rather than str()-d in.
-    """
     from base.lm.reasoning import content_blocks
 
     if isinstance(content, str):
@@ -109,6 +72,7 @@ def _inbound_text(content: str | list[str | dict[str, Any]]) -> str:
     return str(content)
 
 
+# ava:ref base/agents/history/docs/timeline.ava.okf.md#timeline-window-contract
 def build_timeline_items(
     messages: Sequence[BaseMessage],
     *,
@@ -116,36 +80,11 @@ def build_timeline_items(
     start: int = 0,
     segment_prefix: str = "",
 ) -> tuple[list[TimelineItem], int]:
-    """Render state.messages into timeline items + return msg_count.
-
-    `start` renders only `messages[start:]` (incremental snapshot path: the
-    caller holds a per-agent cursor of the last published msg_idx). Item ids
-    keep their ABSOLUTE msg_idx (`enumerate(..., start=start)`), so streaming
-    SSE item_ids stay aligned.
-
-    msg_count is ALWAYS the full `len(messages)`, never the window length —
-    the frontend's future-partial boundary (`msg_idx == msg_count`) depends
-    on the full value. This is a hard invariant of the incremental design.
-
-    `segment_prefix` is reserved for cold-loaded compact history. It prefixes
-    every locally rendered `msg_idx.block_idx` after rendering, preserving the
-    same message dispatch while keeping historical ids globally distinct.
-
-    Dispatch errors (unrecognized message shape) raise — fail-loud surfaces
-    a missing branch immediately instead of a silently truncated timeline.
-    """
     items: list[TimelineItem] = []
     sdk_by_id = sdk_calls_by_tool_call_id(messages, start)
     msg_count = len(messages)
-    # msg_idx is 1:1 with the position in state.messages; streaming SSE events
-    # use the same `len(state.messages)` to compute item_id, keeping the two
-    # sides' stable keys aligned. `start` keeps absolute positions on the
-    # incremental path.
     for msg_idx, msg in enumerate(messages[start:], start=start):
         if isinstance(msg, SystemMessage):
-            # The agent's system prompt — built once at birth, persisted as
-            # state.messages[0], never streamed. created_at stays None: it
-            # carries no read time, and it is always the first item.
             raw_content = message_content(msg)
             items.append(
                 _system_prompt_item(
@@ -169,7 +108,6 @@ def build_timeline_items(
 
 
 def _add_source_coordinates(items: list[TimelineItem], messages: Sequence[BaseMessage]) -> None:
-    """Attach persisted source coordinates without changing UI position keys."""
     for item in items:
         msg_idx, block_idx = (int(part) for part in item.item_id.split("."))
         message = messages[msg_idx]
@@ -190,7 +128,6 @@ def _message_items(
     sdk_by_id: dict[str, Any],
     inputs: TimelineReadInputs,
 ) -> list[TimelineItem]:
-    """The timeline items of one non-system, non-inbound message (empty for an unknown shape)."""
     raw_content = message_content(msg)
     content = raw_content if isinstance(raw_content, str) else str(raw_content)
     ava_type = kwargs.get("ava_msg_type")
@@ -227,10 +164,6 @@ def _message_items(
             )
         ]
     if isinstance(msg, AIMessage):
-        # AIMessage.content (ChatAnthropic + bind_tools shape) is a
-        # list-of-blocks: thinking / text / tool_use each takes a slot;
-        # one timeline item per block, block_idx = anthropic
-        # content_block_index, aligned with streaming SSE item_id.
         return list(ai_message_items(msg, msg_idx, sdk_by_id))
     if isinstance(msg, HumanMessage):
         return [_fallback_human_item(msg_idx, content, created_at)]
@@ -238,7 +171,6 @@ def _message_items(
 
 
 def _system_prompt_item(msg_idx: int, content: str) -> TimelineItem:
-    """The agent's system prompt item (state.messages[0], never streamed)."""
     return TimelineItem(
         item_id=f"{msg_idx}.0",
         kind="system_prompt",
@@ -254,13 +186,6 @@ def _inbound_item(
     raw_content: str | list[str | dict[str, Any]],
     kwargs: AvaMessageKwargs,
 ) -> TimelineItem:
-    """Render one inbound HumanMessage.
-
-    A multimodal inbound carries list content (a text block + base64 image
-    blocks); render the text part only, never str()-ing the base64 into the
-    payload. Its image urls ride on ava_image_urls. `inbound_id` is the
-    message's own embedded `ava_inbound_id`, or None when it has none.
-    """
     embedded_id = None
     if "ava_inbound_id" in kwargs:
         embedded_id = kwargs["ava_inbound_id"]
@@ -279,7 +204,6 @@ def _inbound_item(
 
 
 def _attach_images(content: str | list[str | dict[str, Any]]) -> list[str] | None:
-    """Data-URI image urls from attach ``image_url`` blocks; other media ignored."""
     from base.lm.reasoning import content_blocks
 
     if not isinstance(content, list):
@@ -288,7 +212,6 @@ def _attach_images(content: str | list[str | dict[str, Any]]) -> list[str] | Non
     for block in content_blocks(content):
         if not isinstance(block, dict) or block.get("type") != "image_url":
             continue
-        # `image_url` is not a ContentBlock key — cast through the dict arm.
         image_url = cast("dict[str, Any] | None", block.get("image_url"))
         if image_url is None:
             continue
@@ -298,19 +221,8 @@ def _attach_images(content: str | list[str | dict[str, Any]]) -> list[str] | Non
     return urls or None
 
 
+# ava:ref base/agents/history/docs/timeline.ava.okf.md#attach-caption-pairing
 def _attach_image_captions(content: str | list[str | dict[str, Any]]) -> list[str] | None:
-    """Per-image caption lines of an attach message, aligned with ``_attach_images``.
-
-    The modern pack (``base/lm/attach/packing.py``) interleaves content blocks —
-    ``[text(notice), text(line1), image1, text(line2), image2, ...]`` — so each
-    ``image_url`` block is immediately preceded by its own caption line: read
-    the preceding text block and the pairing is structural, no text parsing.
-
-    Legacy attach messages carried ONE caption text block followed by all image
-    blocks; there the per-image lines cannot be recovered (skipped entries are
-    indistinguishable), so this returns None and the frontend falls back to the
-    legacy all-text-then-all-images layout.
-    """
     from base.lm.reasoning import content_blocks
 
     if not isinstance(content, list):
@@ -339,7 +251,6 @@ def _attach_image_captions(content: str | list[str | dict[str, Any]]) -> list[st
 def _attach_item(
     msg_idx: int, raw_content: str | list[str | dict[str, Any]], created_at: str | None
 ) -> TimelineItem:
-    """Attachment message item — caption only; thumbnails ride on ``images`` (data URIs)."""
     return TimelineItem(
         item_id=f"{msg_idx}.0",
         kind="attach",
@@ -355,7 +266,6 @@ def _attach_item(
 def _exec_output_item(
     msg_idx: int, content: str, created_at: str | None, exec_ms: Any
 ) -> TimelineItem:
-    """One tool result (`code_output`) item; exec_ms drives the ran-in chip."""
     return TimelineItem(
         item_id=f"{msg_idx}.0",
         kind="code_output",
@@ -370,14 +280,6 @@ def _exec_output_item(
 def _system_note_item(
     msg_idx: int, content: str, note_tag: Any, created_at: str | None
 ) -> TimelineItem:
-    """A framework-injected system note (one-time guidance + lifecycle).
-
-    The ava_note_tag (a NoteTag) is the discriminator the frontend dispatches
-    on to pick a chip; it passes straight through as `source`. A note carrying
-    no tag is pre-change historical data (the field is required now) —
-    source=None then renders as the red UnknownMarkerChip, the same fail-loud
-    treatment as the catch-all.
-    """
     return TimelineItem(
         item_id=f"{msg_idx}.0",
         kind="system_marker",
@@ -398,9 +300,6 @@ def _compact_item(
     *,
     inputs: TimelineReadInputs,
 ) -> TimelineItem:
-    """A compact summary / compact request item; payload gets a ts prefix when
-    the supplied timestamp policy is on. `compact_id` is the run that
-    produced the summary (ava_compact_id), None for pre-anchor summaries."""
     ts = f" {inputs.clock_factory().now_timestamp()}" if inputs.timestamps_enabled() else ""
     label = "Compact summary" if kind == "inbound_compact_summary" else "Compact request"
     return TimelineItem(
@@ -414,18 +313,8 @@ def _compact_item(
     )
 
 
+# ava:ref base/agents/history/docs/timeline.ava.okf.md#human-fallback-fail-loud
 def _fallback_human_item(msg_idx: int, content: str, created_at: str | None) -> TimelineItem:
-    """Catch-all for HumanMessages no explicit branch above claims.
-
-    All current framework-injected HumanMessages are tagged with ava_msg_type
-    via agent/messages/__init__.py helpers and take a branch above; anything landing
-    here renders as a system_marker the frontend flags red (UnknownMarkerChip)
-    — fail-loud, don't silently mis-render. Retired marker types also land
-    here: e.g. the old LLM-cancel marker (cancels no longer record anything),
-    or pre-tag system notes (old ava_msg_type='lifecycle' / a system_note with
-    no ava_note_tag), which a pre-change checkpoint may still carry — a red
-    chip on those rare historical rows is acceptable.
-    """
     return TimelineItem(
         item_id=f"{msg_idx}.0",
         kind="system_marker",
@@ -436,25 +325,12 @@ def _fallback_human_item(msg_idx: int, content: str, created_at: str | None) -> 
     )
 
 
-# Default tail-window size for the timeline (cold-load endpoint default +
-# the agent-published snapshot trim) — config: display.timeline_default_limit
-# (AVA_TIMELINE_DEFAULT_LIMIT, default 50). The unit is timeline items (one
-# turn fans out into reasoning/code/output items), not state.messages, so 50
-# is several screenfuls. The same value drives both producers so a streaming
-# turn always lands inside the window the frontend already holds. Read through
-# `timeline_default_limit()` (this module sits in both the gateway's and the
-# agent's import closure; consumers must not capture the value at import).
+# ava:ref base/agents/history/docs/timeline.ava.okf.md#timeline-window-unit
 def timeline_default_limit(*, limit_reader: Callable[[], int]) -> int:
-    """The configured default timeline window (``display.timeline_default_limit``)."""
     return limit_reader()
 
 
 def tail_window(items: list[TimelineItem], limit: int) -> tuple[list[TimelineItem], bool]:
-    """Return the newest `limit` items + whether older items exist before them.
-
-    `limit <= 0` or fewer items than the limit returns everything with
-    `has_more=False`.
-    """
     if limit <= 0 or len(items) <= limit:
         return items, False
     return items[-limit:], True
@@ -463,14 +339,6 @@ def tail_window(items: list[TimelineItem], limit: int) -> tuple[list[TimelineIte
 def _fold_addl_reasoning_into_content(
     content: str | list[Any], additional_kwargs: dict[str, Any]
 ) -> str | list[Any]:
-    """Fold `additional_kwargs["reasoning_content"]` into content as a
-    canonical thinking block, so the render loop below never branches on
-    provider style.
-
-    Only applies when content does not already carry thinking blocks
-    (ReasoningContentChatModel produces canonical blocks — no double-render).
-    Non-string / empty / whitespace-only reasoning is silently skipped.
-    """
     from base.lm.reasoning import ContentBlock
 
     addl_reasoning = additional_kwargs.get("reasoning_content")
@@ -495,31 +363,7 @@ def ai_message_items(
     msg_idx: int,
     sdk_by_id: Mapping[str, list[SdkCall]],
 ) -> list[TimelineItem]:
-    """Split one AIMessage into per-block timeline items.
-
-    Narration (text) and reasoning (thinking) are content blocks, rendered at
-    their content position. Code items come from the normalized `msg.tool_calls`
-    view, not provider blocks: anthropic carries each call as a `tool_use`
-    block, gemini / openai only in `tool_calls` — one provider-agnostic rule.
-
-    Each tool call's `block_idx = <number of distinct text/thinking content
-    block indices> + <ordinal in tool_calls>` — equal to anthropic's
-    `tool_use` content_block_index, well-defined for gemini / openai, and
-    aligned with the streaming side's identical offset (`agent/graph/_callbacks.py`)
-    so SSE `*_start` ids match the committed snapshot.
-
-    legacy / no-tools coerce path: when msg.content is a string, treat the
-    whole thing as chat with block_idx=0.
-    """
     out: list[TimelineItem] = []
-    # Reasoning summary attached per thinking block:
-    # - reasoning_ms is per-block (each thinking block timed independently by
-    #   the llm node, keyed by block_idx) — a model that interleaves several
-    #   thinking blocks gets one duration per block, never one turn-spanning
-    #   total. `ava_reasoning_ms_by_block` maps str(block_idx) -> ms.
-    # - reasoning_tokens stays turn-level (usage_metadata reports one total for
-    #   the turn, not per block) and is attached to the first thinking item
-    #   only; `reasoning_attached` flips after the first block claims it.
     kwargs = read_ava_kwargs(msg)
     created_at = kwargs_read_time(kwargs)
     reasoning_ms_by_block = kwargs.get("ava_reasoning_ms_by_block")
@@ -530,20 +374,8 @@ def ai_message_items(
         extract_reasoning_tokens(msg.usage_metadata, content=message_content(msg)) or None
     )
     reasoning_attached = False
-    # Distinct content-block indices for text/thinking — its size is the offset
-    # where tool-call code items begin. A set (not a running count) so a
-    # signature-only thinking block sharing its sibling's index does not inflate
-    # the offset, matching the streaming side's index set.
     content_indices: set[int] = set()
-    # Fold provider-native reasoning (openai `reasoning`) to the canonical
-    # `thinking` shape (`base.lm.reasoning`) on a copy — the stored message stays
-    # native for the provider round-trip; only this render reads the normalized
-    # view, so the loop below only ever sees text / thinking.
     content = to_canonical_reasoning(message_content(msg))
-    # The community ChatMoonshot package carries reasoning in
-    # `additional_kwargs["reasoning_content"]` rather than content blocks.
-    # Fold it into the normalized content list as a thinking block so the
-    # loop below never branches on provider style.
     content = _fold_addl_reasoning_into_content(content, message_addl_kwargs(msg))
     if isinstance(content, str):
         if content:
@@ -574,7 +406,6 @@ def ai_message_items(
 
 
 def _chat_item(msg_idx: int, block_idx: int, payload: str, created_at: str | None) -> TimelineItem:
-    """A narrated text item (`agent_chat`) — one content block of an AIMessage."""
     return TimelineItem(
         item_id=f"{msg_idx}.{block_idx}",
         kind="agent_chat",
@@ -585,6 +416,7 @@ def _chat_item(msg_idx: int, block_idx: int, payload: str, created_at: str | Non
     )
 
 
+# ava:ref base/agents/history/docs/timeline.ava.okf.md#reasoning-timing
 def _content_block_item(
     block: str | dict[str, Any],
     pos: int,
@@ -595,27 +427,14 @@ def _content_block_item(
     *,
     reasoning_attached: bool,
 ) -> tuple[TimelineItem | None, int | None, bool]:
-    """Render one text/thinking content block.
-
-    Returns ``(item, block_idx, reasoning_attached)``: ``item`` is None when
-    the block renders nothing (signature-only / redacted thinking, empty
-    text); ``block_idx`` is the block's index for text/thinking (None for any
-    other block type — tool_use / function_call render via `_tool_call_items`
-    instead); ``reasoning_attached`` is the caller's flag advanced by one when
-    this block claimed the turn-level reasoning_tokens.
-    """
     from base.lm.reasoning import ContentBlock
 
     if not isinstance(block, dict):
         return None, None, reasoning_attached
     if (typed_block := cast(ContentBlock, block)).get("type") not in ("text", "thinking"):
-        # tool_use (anthropic) / function_call (openai) and any other block
-        # kind are rendered from msg.tool_calls below.
         return None, None, reasoning_attached
     block_idx = typed_block.get("index", pos)
     if typed_block.get("type") == "thinking":
-        # signature_delta block: type=thinking but only carries signature
-        # (server verifier), no thinking text — skip render.
         t = typed_block.get("thinking")
         if not (isinstance(t, str) and t):
             return None, block_idx, reasoning_attached
@@ -633,13 +452,13 @@ def _content_block_item(
             reasoning_tokens=None if reasoning_attached else reasoning_tokens,
         )
         return item, block_idx, True
-    # text
     t = typed_block.get("text")
     if not (isinstance(t, str) and t):
         return None, block_idx, reasoning_attached
     return _chat_item(msg_idx, block_idx, t, created_at), block_idx, reasoning_attached
 
 
+# ava:ref base/agents/history/docs/timeline.ava.okf.md#tool-call-block-offset
 def _tool_call_items(
     msg: AIMessage,
     msg_idx: int,
@@ -648,12 +467,6 @@ def _tool_call_items(
     created_at: str | None,
     sdk_by_id: Mapping[str, list[SdkCall]],
 ) -> list[TimelineItem]:
-    """Render each tool call as an `agent_code` item from `msg.tool_calls`,
-    its `sdk_calls` read from `sdk_by_id` by the tool call's id.
-
-    Each item's ``block_idx = <distinct text/thinking block indices> + <ordinal
-    in tool_calls>`` — the same offset the streaming side computes (SSE ids align).
-    """
     out: list[TimelineItem] = []
     tool_calls: list[ToolCall] = getattr(msg, "tool_calls", None) or []
     for ordinal, tc in enumerate(tool_calls):
