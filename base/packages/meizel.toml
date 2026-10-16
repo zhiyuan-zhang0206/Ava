@@ -1,4 +1,4 @@
-exports = ["composer_commands.py", "dashboard_supply.py", "docs", "extensions", "plugin_config_admin.py", "plugin_config_images.py", "plugin_providers.py", "plugins", "skills", "tests"]
+exports = ["composer_commands.py", "dashboard_supply.py", "docs", "extensions", "plugin_config_admin.py", "plugin_config_images.py", "plugin_providers.py", "plugins", "skills", "tests", "text_budget.py"]
 
 [uses]
 "composer_commands.py" = ["docs", "skills"]
@@ -8,7 +8,7 @@ exports = ["composer_commands.py", "dashboard_supply.py", "docs", "extensions", 
 "plugin_providers.py" = ["plugins"]
 "plugins" = ["plugin_config_images.py", "skills"]
 "skills" = ["docs"]
-"tests" = ["composer_commands.py", "extensions", "plugin_config_admin.py", "plugin_providers.py", "plugins", "skills"]
+"tests" = ["composer_commands.py", "extensions", "plugin_config_admin.py", "plugin_providers.py", "plugins", "skills", "text_budget.py"]
 
 [external]
 "dashboard_supply.py" = "loads discovered plugins, built-in or user-installed; core does not depend on them"

@@ -7,8 +7,9 @@ tags: [base]
 
 # Package primitives
 
-`base/packages/` owns documentation parsing, package installation and plugin configuration.
-Its component nodes describe the current contracts and implementation.
+`base/packages/` owns documentation parsing, package installation, plugin configuration
+and the shared text-length budget primitive. Its component nodes describe the current
+contracts and implementation.
 
 `plugin_config_images.py` owns whole-image validation, revisions and the locked
 atomic writer shared by plugin installation and the config admin API. It stays
@@ -35,6 +36,7 @@ gateway and the ops runner). The agent's claim node receives the catalog through
 ## Documented components
 
 - [[base/packages/docs/composer-commands.ava.okf.md]] — Composer command discovery and expansion.
+- [[base/packages/docs/text-budget.ava.okf.md]] — Text-length budgets: CJK-aware measurement and the soft/hard verdict.
 - [[base/packages/extensions/docs/install_registry/install_registry.ava.okf.md]] — Install Registry (`installed.json`).
 - [[base/packages/extensions/docs/write-path.ava.okf.md]] — Install Registry Write Path.
 - [[base/packages/plugins/docs/enable_config.ava.okf.md]] — Plugin Enable Config.
