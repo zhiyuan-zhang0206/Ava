@@ -3,6 +3,7 @@ from __future__ import annotations
 import sys
 from typing import TextIO
 
+from base.host.atomic_io import SYSTEM_FS, AtomicWriter
 from base.native_process.os_platform import LockTimeoutError
 from base.sessions.pty import allocation_freeze
 
@@ -28,7 +29,9 @@ def _print_freeze(
 
 def cmd_pty_freeze(*, holder: str, reason: str) -> int:
     try:
-        snapshot = allocation_freeze.freeze(holder=holder, reason=reason)
+        snapshot = allocation_freeze.freeze(
+            holder=holder, reason=reason, writer=AtomicWriter(SYSTEM_FS)
+        )
     except (OSError, ValueError, RuntimeError) as exc:
         print(f"PTY allocation freeze refused: {exc}", file=sys.stderr)
         _print_freeze(allocation_freeze.read(), stream=sys.stderr)
@@ -45,7 +48,7 @@ def cmd_pty_status() -> int:
 
 def cmd_pty_resume(*, generation: str) -> int:
     try:
-        resumed = allocation_freeze.resume(generation)
+        resumed = allocation_freeze.resume(generation, writer=AtomicWriter(SYSTEM_FS))
     except (
         LockTimeoutError,
         OSError,

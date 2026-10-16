@@ -24,6 +24,7 @@ import psutil
 import pytest
 
 import base.sessions.backend as sb
+from base.host.atomic_io import SYSTEM_FS, AtomicWriter
 from base.sessions.backend import PosixProcSessionBackend, PtySessionBackend
 from base.sessions.protocol import SessionBackend
 from base.sessions.pty import allocation_freeze, client
@@ -300,9 +301,11 @@ def test_started_ats_answers_every_name_from_the_service_epochs(unit_home: Path)
 def test_session_generation_is_the_one_the_session_was_admitted_under(unit_home: Path) -> None:
     _new("ava-agent-1-shell-1", unit_home)
     assert _backend().session_generation("ava-agent-1-shell-1") is None
-    frozen = allocation_freeze.freeze(holder="operator", reason="generation flip")
+    frozen = allocation_freeze.freeze(
+        holder="operator", reason="generation flip", writer=AtomicWriter(SYSTEM_FS)
+    )
     assert frozen.generation is not None
-    assert allocation_freeze.resume(frozen.generation)
+    assert allocation_freeze.resume(frozen.generation, writer=AtomicWriter(SYSTEM_FS))
     _new("ava-agent-1-shell-2", unit_home)
     assert _backend().session_generation("ava-agent-1-shell-2") == frozen.generation
     assert _backend().session_generation("ava-agent-1-shell-9") is None
@@ -348,11 +351,13 @@ def test_new_session_refused_by_the_service_returns_false_and_warns(
 def test_new_session_under_an_allocation_freeze_returns_false_and_warns(
     unit_home: Path, caplog: pytest.LogCaptureFixture
 ) -> None:
-    frozen = allocation_freeze.freeze(holder="operator", reason="cleanup")
+    frozen = allocation_freeze.freeze(
+        holder="operator", reason="cleanup", writer=AtomicWriter(SYSTEM_FS)
+    )
     assert frozen.generation is not None
     assert _backend().new_session("s", "", unit_home, env={}) is False
     assert "allocation refused" in caplog.text
-    assert allocation_freeze.resume(frozen.generation)
+    assert allocation_freeze.resume(frozen.generation, writer=AtomicWriter(SYSTEM_FS))
     assert _backend().new_session("s", "", unit_home, env={}) is True
 
 
