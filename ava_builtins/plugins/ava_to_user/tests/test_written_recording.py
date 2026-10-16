@@ -102,3 +102,23 @@ def test_an_edit_wrap_records_a_panel_edit(state: Any, agent: int) -> None:
     plugin.wrapped_edit(inner, panel, "beta", "gamma")
     assert panel.read_text(encoding="utf-8") == "alpha gamma\n"
     assert getattr(state, _PANEL_KEY) is True
+
+
+def test_an_append_wrap_records_a_panel_append(state: Any, agent: int) -> None:
+    calls: list[tuple[object, object]] = []
+
+    def inner(path: str | Path, content: str) -> None:
+        calls.append((path, content))
+
+    plugin.wrapped_append(inner, _panel(agent), "more")
+    assert calls == [(_panel(agent), "more")]
+    assert getattr(state, _PANEL_KEY) is True
+
+
+def test_the_append_wrap_lets_its_exception_through_untouched(state: Any, agent: int) -> None:
+    def inner(path: str | Path, content: str) -> None:
+        raise RuntimeError("disk full")
+
+    with pytest.raises(RuntimeError, match="disk full"):
+        plugin.wrapped_append(inner, _panel(agent), "more")
+    assert getattr(state, _PANEL_KEY) is False
