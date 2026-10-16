@@ -44,6 +44,6 @@ def test_healthy_http_needs_no_root_or_socket_census(monkeypatch: pytest.MonkeyP
         pytest.fail("frontend availability is an HTTP observation")
 
     monkeypatch.setattr("psutil.process_iter", forbidden)
-    monkeypatch.setattr(client, "owned_process", forbidden)
+    monkeypatch.setattr(client, "root_process", forbidden)
     monkeypatch.setattr(hc.subprocess, "run", Mock(return_value=subprocess.CompletedProcess([], 0)))
     assert hc.probe_frontend().alive

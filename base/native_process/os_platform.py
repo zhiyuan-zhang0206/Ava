@@ -79,11 +79,6 @@ def launchd_job_label() -> str | None:
 
 
 def _launchd_print(label: str) -> subprocess.CompletedProcess[str] | None:
-    """One ``launchctl print`` resolution for a gui-domain label; None off macOS.
-
-    Shared by :func:`launchd_job_loaded` (verdict) and
-    :func:`descends_from_launchd_job` (live pid): the dump on success is the
-    caller's to parse; off macOS there is nothing to ask."""
     if not is_macos():
         return None
     return subprocess.run(  # noqa: S603
@@ -92,20 +87,6 @@ def _launchd_print(label: str) -> subprocess.CompletedProcess[str] | None:
         text=True,
         check=False,
     )
-
-
-def launchd_job_loaded(label: str) -> bool:
-    """Whether launchd currently holds a job under ``label`` (macOS; False elsewhere).
-
-    ``launchctl print`` exits non-zero for a label the domain does not know —
-    the only question asked here; the large dump it writes on success is
-    ignored. Mirrors the gate layer's ``_job_loaded`` checks (same verdict) as
-    the shared surface they can converge onto — no in-tree production consumer
-    yet; the reload guards consume :func:`descends_from_launchd_job`, and the
-    tests pin this verdict.
-    """
-    result = _launchd_print(label)
-    return result is not None and result.returncode == 0
 
 
 def descends_from_launchd_job(label: str) -> bool:

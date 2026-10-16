@@ -474,9 +474,7 @@ class TestConnectionChurn:
 
 
 @pytest.mark.parametrize("state", [None, "unknown", 7, [], {}])
-async def test_owned_process_rejects_uncertain_unit_state(short_tmp: Path, state: object) -> None:
-    from base.native_process.root_control.client import owned_process
-
+async def test_status_rejects_uncertain_unit_state(short_tmp: Path, state: object) -> None:
     unit: dict[str, object] = {"id": "gateway"}
     if state is not None:
         unit["state"] = state
@@ -484,32 +482,12 @@ async def test_owned_process_rejects_uncertain_unit_state(short_tmp: Path, state
     async def status(_request: RequestPayload) -> ResponsePayload:
         return ok_response({"root": _root_row(), "units": [unit]})
 
-    server = ControlServer(root_run_dir(short_tmp) / "ava-root.sock", status)
+    sock_path = root_run_dir(short_tmp) / "ava-root.sock"
+    server = ControlServer(sock_path, status)
     await server.start()
     try:
         with pytest.raises(RootClientError, match="unit state"):
-            await asyncio.to_thread(owned_process, "gateway", home=short_tmp)
-    finally:
-        await server.close()
-
-
-@pytest.mark.parametrize("state", ["running", "stopped", "absent"])
-async def test_owned_process_preserves_known_state_semantics(short_tmp: Path, state: str) -> None:
-    from base.native_process.root_control.client import owned_process
-
-    units = [] if state == "absent" else [{"id": "gateway", "state": state, **_root_row()}]
-
-    async def status(_request: RequestPayload) -> ResponsePayload:
-        return ok_response({"root": _root_row(), "units": units})
-
-    server = ControlServer(root_run_dir(short_tmp) / "ava-root.sock", status)
-    await server.start()
-    try:
-        result = await asyncio.to_thread(owned_process, "gateway", home=short_tmp)
-        if state == "running":
-            assert result == OwnedProcess.capture(psutil.Process())
-        else:
-            assert result is None
+            await asyncio.to_thread(RootClient(sock_path).status)
     finally:
         await server.close()
 

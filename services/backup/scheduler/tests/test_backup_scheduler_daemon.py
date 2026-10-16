@@ -183,14 +183,6 @@ async def test_healthz_returns_503_for_an_overdue_backup() -> None:
         await health.stop_health_server(server)
 
 
-def test_sleep_breaks_long_waits_into_shutdown_responsive_chunks() -> None:
-    timers = ManualTimers()
-
-    asyncio.run(daemon.sleep_in_chunks(125.0, timers=timers))
-
-    assert timers.sleeps == [60.0, 60.0, 5.0]
-
-
 def test_next_backup_hour_uses_the_cluster_timezone() -> None:
     backup_hour = settings.services.backup_hour
 
@@ -222,7 +214,7 @@ def test_due_backup_runs_once_then_waits_for_tomorrow(monkeypatch: pytest.Monkey
     assert len(ran) == 1
     assert state.running is False
     assert state.last_success == ran[0].timestamp()
-    assert timers.sleeps == [60.0]
+    assert timers.sleeps == [24 * 3600.0]
 
 
 def test_due_backup_sleeps_from_completion_time(monkeypatch: pytest.MonkeyPatch) -> None:

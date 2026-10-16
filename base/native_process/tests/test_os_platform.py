@@ -19,7 +19,6 @@ from base.native_process.os_platform import (
     Platform,
     descends_from_launchd_job,
     ensure_line_buffered_stdio,
-    launchd_job_loaded,
     primary_disk_path,
     pty_max,
 )
@@ -108,15 +107,6 @@ class TestEnsureLineBufferedStdio:
 
 
 class TestLaunchdOwnership:
-    """`launchd_job_loaded` / `descends_from_launchd_job` — the ownership checks
-    behind the self-reload guards (`base/host/system/cron`, `base/os_watchdog_probe`).
-
-    The inherited `XPC_SERVICE_NAME` is not trustworthy: only the job's direct
-    child reads the label, every exec'd descendant reads "0" (2026-09-17,
-    docs/postmortems/0008). So the tree check asks launchd for the job's pid and
-    walks this process's ancestry with ps.
-    """
-
     def _fake(
         self,
         monkeypatch: pytest.MonkeyPatch,
@@ -138,13 +128,6 @@ class TestLaunchdOwnership:
     def test_off_macos_is_never_owned(self, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setattr(plat, "is_macos", lambda: False)
         assert descends_from_launchd_job("com.x") is False
-        assert launchd_job_loaded("com.x") is False
-
-    def test_loaded_follows_launchctl_verdict(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        self._fake(monkeypatch, print_rc=0, print_out="", ps={})
-        assert launchd_job_loaded("com.x") is True
-        self._fake(monkeypatch, print_rc=113, print_out="", ps={})
-        assert launchd_job_loaded("com.x") is False
 
     def test_unloaded_job_owns_no_process(self, monkeypatch: pytest.MonkeyPatch) -> None:
         self._fake(monkeypatch, print_rc=113, print_out="Could not find service", ps={})

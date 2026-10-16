@@ -277,7 +277,7 @@ def test_backend_health_needs_no_native_owner(monkeypatch: pytest.MonkeyPatch) -
     def forbidden(*_args: object, **_kwargs: object) -> None:
         pytest.fail("backend protocol health must not inspect native ownership")
 
-    monkeypatch.setattr(client, "owned_process", forbidden)
+    monkeypatch.setattr(client, "root_process", forbidden)
 
     def ready(_name: str) -> DaemonProbe:
         return DaemonProbe.up("ready")
