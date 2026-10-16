@@ -29,13 +29,15 @@ the criteria and evaluation cases owned by `skill-creator/references/audit.md`.
 
 ## Communication & user interaction
 Launch web pages to display content or collect structured replies, read SMS
-verification codes on macOS, and a full Gmail client.
+verification codes on macOS, run live immersive sessions with the human,
+and a full Gmail client.
 
 | Skill | Purpose | Detail |
 |-------|---------|--------|
 | ava-guide.pages | Compose page publishing and user input with reusable frontend resources | [[ava_builtins/skills/platform/ava-guide/pages/docs/pages.ava.okf.md]] |
 | sms | Read SMS/iMessage verification codes via macOS Messages.app (on-demand script, not a daemon) | [[ava_builtins/skills/integrations/sms/docs/sms.ava.okf.md]] |
 | gmail | Full Gmail client (read/search/send/reply/forward/draft + newsletter, pure stdlib IMAP/SMTP) | [[ava_builtins/skills/integrations/gmail/docs/gmail.ava.okf.md]] |
+| ava-immersive | Keep a live human conversation fed during an opt-in session while heavy work runs in parallel | [[ava_builtins/skills/coordination/ava-immersive/docs/ava-immersive.ava.okf.md]] |
 
 ## Ops, scheduling & lifecycle
 Operating and extending Ava, scheduling timed tasks, background watchers, and
