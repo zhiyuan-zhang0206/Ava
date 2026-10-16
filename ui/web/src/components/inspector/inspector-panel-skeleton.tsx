@@ -50,12 +50,7 @@ export function LiveSectionsSkeleton() {
 
 export function WindowedSectionsSkeleton() {
   const t = useTranslations("inspector");
-  return (
-    <>
-      <SectionSkeleton title={t("sectionCost")} rows={4} />
-      <SectionSkeleton title={t("sectionActivity")} rows={4} />
-    </>
-  );
+  return <SectionSkeleton title={t("sectionCostActivity")} rows={4} />;
 }
 
 export function InspectorPanelSkeleton() {

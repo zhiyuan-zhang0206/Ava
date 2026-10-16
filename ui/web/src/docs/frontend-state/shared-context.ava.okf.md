@@ -12,7 +12,7 @@ The home page displays the selected agent's workspace document beside its messag
 stream. Desktop gives the narrow agent tree 16% by default, then divides messages
 and shared context 4:3. To user / Inspector tabs sit at the top of the entire
 right panel. To user contains notifications above the shared document; Inspector
-replaces that entire body with its original queries and a category selector.
+replaces that entire body with the Inspector's own queries and its ordered section list.
 The To user body stays mounted while hidden so switching tabs preserves reply
 drafts and the document reading position. Below the desktop breakpoint the shared
 context opens as a full-screen reading view with a return-to-messages control.

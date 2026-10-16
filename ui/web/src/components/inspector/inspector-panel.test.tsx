@@ -1,4 +1,3 @@
-
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import {
   act,
@@ -341,7 +340,7 @@ describe("InspectorPanel", () => {
     expect(screen.getByText("142")).toBeTruthy();
     expect(screen.getByText("91.70%")).toBeTruthy();
 
-    const activitySection = screen.getByText("Activity").closest("section");
+    const activitySection = screen.getByText("Cost + Activity").closest("section");
     expect(activitySection).not.toBeNull();
     expect(within(activitySection!).getByText("TPS")).toBeTruthy();
     expect(within(activitySection!).getByText("42.5")).toBeTruthy();
@@ -414,8 +413,7 @@ describe("InspectorPanel", () => {
     expect(screen.getByLabelText("Persistent shells loading")).toBeTruthy();
     expect(screen.getByLabelText("Liveness loading")).toBeTruthy();
     expect(screen.getByLabelText("Configuration overlay loading")).toBeTruthy();
-    expect(screen.getByLabelText("Cost loading")).toBeTruthy();
-    expect(screen.getByLabelText("Activity loading")).toBeTruthy();
+    expect(screen.getByLabelText("Cost + Activity loading")).toBeTruthy();
     expect(screen.queryByLabelText("Notice loading")).toBeNull();
     expect(screen.queryByText("Loading…")).toBeNull();
   });
@@ -432,11 +430,11 @@ describe("InspectorPanel", () => {
 
     await waitFor(() => expect(screen.getByText("dev-server")).toBeTruthy());
     expect(screen.queryByLabelText("Persistent shells loading")).toBeNull();
-    expect(screen.getByLabelText("Cost loading")).toBeTruthy();
+    expect(screen.getByLabelText("Cost + Activity loading")).toBeTruthy();
 
     releaseWindowed(fixture({ window_hours: 24 }));
     await waitFor(() => expect(screen.getByText("$0.4213")).toBeTruthy());
-    expect(screen.queryByLabelText("Cost loading")).toBeNull();
+    expect(screen.queryByLabelText("Cost + Activity loading")).toBeNull();
     expect(screen.queryByLabelText("Persistent shells loading")).toBeNull();
   });
 
@@ -481,7 +479,7 @@ describe("InspectorPanel", () => {
       expect(getAgentInspectStatistics).toHaveBeenCalledWith(1, 1, expect.any(AbortSignal)),
     );
     expect(screen.queryByText("$0.4213")).toBeNull();
-    expect(screen.getByLabelText("Cost loading")).toBeTruthy();
+    expect(screen.getByLabelText("Cost + Activity loading")).toBeTruthy();
     expect(screen.getByText("dev-server")).toBeTruthy();
   });
 
@@ -573,8 +571,8 @@ describe("InspectorPanel", () => {
     );
     render(<InspectorPanel agentId={1} />);
 
-    await waitFor(() => expect(screen.getByText("Activity")).toBeTruthy());
-    const activitySection = screen.getByText("Activity").closest("section");
+    await waitFor(() => expect(screen.queryByLabelText("Cost + Activity loading")).toBeNull());
+    const activitySection = screen.getByText("Cost + Activity").closest("section");
     expect(activitySection).not.toBeNull();
     expect(within(activitySection!).getByText(expected)).toBeTruthy();
   });
@@ -593,7 +591,7 @@ describe("InspectorPanel", () => {
     );
     render(<InspectorPanel agentId={1} />);
 
-    await waitFor(() => expect(screen.getByText("Activity")).toBeTruthy());
+    await waitFor(() => expect(screen.queryByLabelText("Cost + Activity loading")).toBeNull());
     expect(screen.getByText("24d 3h")).toBeTruthy();
     expect(screen.getAllByText("1h").length).toBeGreaterThanOrEqual(2);
   });
@@ -615,8 +613,8 @@ describe("InspectorPanel", () => {
       fixture({ activity: { active_seconds: 0, alive_seconds: 0, active_rate: 0, llm_seconds: 0, exec_seconds: 0 } }),
     );
     render(<InspectorPanel agentId={1} />);
-    await waitFor(() => expect(screen.getByText("Activity")).toBeTruthy());
-    const activitySection = screen.getByText("Activity").closest("section");
+    await waitFor(() => expect(screen.queryByLabelText("Cost + Activity loading")).toBeNull());
+    const activitySection = screen.getByText("Cost + Activity").closest("section");
     expect(activitySection).not.toBeNull();
     expect(within(activitySection!).getAllByText("—")).toHaveLength(3);
     expect(within(activitySection!).getByText("42.5")).toBeTruthy();
@@ -1356,17 +1354,62 @@ describe("InspectorToggle", () => {
 });
 
 describe("InspectorPanel manual refresh", () => {
-  it("the header refresh button re-fires the inspect fetch (no fast poll behind it)", async () => {
+  it("the Cost + Activity refresh re-fires only the windowed statistics read", async () => {
     getAgentInspectStatistics.mockResolvedValue(fixture());
     render(<InspectorPanel agentId={1} />);
     await waitFor(() => expect(screen.getByText("Persistent shells")).toBeTruthy());
-    const callsAfterOpen = getAgentInspectStatistics.mock.calls.length;
+    const statsCallsAfterOpen = getAgentInspectStatistics.mock.calls.length;
     const liveCallsAfterOpen = getAgentInspectLive.mock.calls.length;
-    fireEvent.click(screen.getByRole("button", { name: "Refresh inspector data" }));
+    const widgetCallsAfterOpen = getAgentInspectWidgets.mock.calls.length;
+    fireEvent.click(screen.getByRole("button", { name: "Refresh cost and activity" }));
     await waitFor(() =>
-      expect(getAgentInspectStatistics.mock.calls.length).toBe(callsAfterOpen + 1),
+      expect(getAgentInspectStatistics.mock.calls.length).toBe(statsCallsAfterOpen + 1),
     );
-    expect(getAgentInspectLive.mock.calls.length).toBe(liveCallsAfterOpen + 1);
+    expect(getAgentInspectLive.mock.calls.length).toBe(liveCallsAfterOpen);
+    expect(getAgentInspectWidgets.mock.calls.length).toBe(widgetCallsAfterOpen);
+  });
+
+  it("keeps the window picker and refresh control inside the Cost + Activity section", async () => {
+    render(<InspectorPanel agentId={1} />);
+    await waitFor(() => expect(screen.getByText("Cost + Activity")).toBeTruthy());
+    const section = screen.getByText("Cost + Activity").closest("section");
+    expect(section).not.toBeNull();
+    expect(within(section!).getByLabelText("Cost + activity window")).toBeTruthy();
+    expect(
+      within(section!).getByRole("button", { name: "Refresh cost and activity" }),
+    ).toBeTruthy();
+  });
+});
+
+describe("InspectorPanel section layout", () => {
+  it("renders the run timeline entry first, Cost + Activity second, then the runtime sections", async () => {
+    render(<InspectorPanel agentId={1} />);
+    await waitFor(() => expect(screen.getByText("Persistent shells")).toBeTruthy());
+
+    const runLink = screen.getByRole("link", { name: "Open run timeline" });
+    const costActivity = screen.getByText("Cost + Activity");
+    const shells = screen.getByText("Persistent shells");
+    const liveness = screen.getByText("Liveness");
+    const configOverlay = screen.getByText("Configuration overlay");
+    const before = (first: Node, second: Node) =>
+      first.compareDocumentPosition(second) & Node.DOCUMENT_POSITION_FOLLOWING;
+    expect(before(runLink, costActivity)).toBeTruthy();
+    expect(before(costActivity, shells)).toBeTruthy();
+    expect(before(shells, liveness)).toBeTruthy();
+    expect(before(liveness, configOverlay)).toBeTruthy();
+  });
+
+  it("embedded: renders without the header bar or the category selector", async () => {
+    render(<InspectorPanel agentId={1} embedded />);
+    await waitFor(() => expect(screen.getByText("Cost + Activity")).toBeTruthy());
+
+    expect(screen.queryByText("Inspector", { selector: "span" })).toBeNull();
+    expect(screen.queryByLabelText("Inspector category")).toBeNull();
+    const runLink = screen.getByRole("link", { name: "Open run timeline" });
+    const costActivity = screen.getByText("Cost + Activity");
+    expect(
+      runLink.compareDocumentPosition(costActivity) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
   });
 });
 
@@ -1610,7 +1653,7 @@ describe("InspectorPanel plugin widgets", () => {
     );
   });
 
-  it("slots a widget into the section order (750: between the run link and the notice)", async () => {
+  it("slots a widget into the section order (750: between the configuration overlay and the notice)", async () => {
     getAgentInspectLive.mockResolvedValue(liveFixture({ notice: widgetNotice }));
     getAgentInspectWidgets.mockResolvedValue([widgetFixture({ order: 750 })]);
     render(<InspectorPanel agentId={1} />);
@@ -1618,8 +1661,12 @@ describe("InspectorPanel plugin widgets", () => {
     const runLink = await screen.findByRole("link", { name: "Open run timeline" });
     const widgetLink = await screen.findByRole("link", { name: /Ship the inspector fix/ });
     const reply = screen.getByRole("textbox");
+    const configOverlay = screen.getByText("Configuration overlay");
     expect(
       runLink.compareDocumentPosition(widgetLink) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+    expect(
+      configOverlay.compareDocumentPosition(widgetLink) & Node.DOCUMENT_POSITION_FOLLOWING,
     ).toBeTruthy();
     expect(
       widgetLink.compareDocumentPosition(reply) & Node.DOCUMENT_POSITION_FOLLOWING,
@@ -1645,8 +1692,7 @@ describe("InspectorPanel plugin widgets", () => {
     render(<InspectorPanel agentId={1} />);
 
     await screen.findByRole("link", { name: "Open run timeline" });
-    await screen.findAllByText("Cost");
-    expect(screen.getAllByText("Activity").length).toBeGreaterThan(0);
+    await screen.findAllByText("Cost + Activity");
     expect(screen.queryByText("Tasks")).toBeNull();
   });
 });
@@ -1737,7 +1783,7 @@ describe("persisted metric evidence is internal (task #3869)", () => {
     data.metadata.lifecycle = { availability: "unavailable", sources: [] };
     getAgentInspectStatistics.mockResolvedValue(data);
     render(<InspectorPanel agentId={1} />);
-    await screen.findByText("Activity");
+    await screen.findByText("Cost + Activity");
     await waitFor(() => expect(getAgentInspectStatistics).toHaveBeenCalled());
     expect(screen.queryByText("$0.0000")).toBeNull();
     expect(screen.queryByText("0.00 tok/s")).toBeNull();
@@ -1790,7 +1836,7 @@ describe("internal duration evidence never renders (task #3869)", () => {
     data.metadata.turns.reason = "missing_turn_durations";
     getAgentInspectStatistics.mockResolvedValue(data);
     render(<InspectorPanel agentId={1} />);
-    await screen.findByText("Activity");
+    await screen.findByText("Cost + Activity");
     await waitFor(() => expect(getAgentInspectStatistics).toHaveBeenCalled());
     expect(
       screen.queryByText("Some recorded turns have no duration; throughput is unavailable."),
