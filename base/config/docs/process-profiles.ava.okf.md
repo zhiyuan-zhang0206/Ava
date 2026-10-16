@@ -26,7 +26,10 @@ Gateway endpoints and agent-published timeline snapshots both consume display
 defaults. Agent lifecycle notification and delivery consume daemon settings.
 Runner browser MCP consumes sandbox connection timeouts, ops lifecycle consumes
 the model setting, and support-daemon event emission consumes observability
-settings. These reads explain domains that span more than one process profile.
+settings. The To user read guards (`to_user`) span all three profiles: the ops
+listener and the gateway enforce them, and the reading functions sit in the
+agent-face closure. These reads explain domains that span more than one process
+profile.
 
 An omitted profile argument reads the launcher's environment marker; explicit
 `profile=None` constructs the complete model. `PROFILE_UNSET` distinguishes those

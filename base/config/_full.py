@@ -37,6 +37,7 @@ from base.config.domains.sandbox import SandboxSettings
 from base.config.domains.services.settings import ServiceSettings
 from base.config.domains.storage.data_plane import DataPlaneSettings
 from base.config.domains.storage.walg import WalgSettings
+from base.config.domains.to_user import ToUserSettings
 from base.config.domains.web import WebSettings
 from base.config.profiles import (
     PROCESS_PROFILES,
@@ -74,6 +75,7 @@ class Settings(BaseModel):
     sandbox: SandboxSettings = Field(default_factory=SandboxSettings)
     agent: AgentSettings = Field(default_factory=AgentSettings)
     web: WebSettings = Field(default_factory=WebSettings)
+    to_user: ToUserSettings = Field(default_factory=ToUserSettings)
     gateway: GatewaySettings = Field(default_factory=GatewaySettings)
     daemon: DaemonSettings = Field(default_factory=DaemonSettings)
     # DataPlaneSettings has required no-default fields (db_url / redis_url) that
@@ -225,6 +227,7 @@ def facade_exports() -> dict[str, Any]:
         "TelegramSettings": TelegramSettings,
         "WalgSettings": WalgSettings,
         "WebSettings": WebSettings,
+        "ToUserSettings": ToUserSettings,
     }
 
 

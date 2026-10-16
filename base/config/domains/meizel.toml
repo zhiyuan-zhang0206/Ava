@@ -1,4 +1,4 @@
-exports = ["agent", "channels", "daemon", "display.py", "gateway.py", "general.py", "lm.py", "observability", "packages.py", "sandbox.py", "services", "storage", "tests", "web.py"]
+exports = ["agent", "channels", "daemon", "display.py", "gateway.py", "general.py", "lm.py", "observability", "packages.py", "sandbox.py", "services", "storage", "tests", "to_user.py", "web.py"]
 
 [uses]
-"tests" = ["display.py", "sandbox.py"]
+"tests" = ["display.py", "sandbox.py", "to_user.py"]

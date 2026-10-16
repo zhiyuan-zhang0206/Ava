@@ -4,13 +4,13 @@ from pathlib import Path
 import pytest
 
 from base.agents.to_user import (
-    MAX_DOCUMENT_BYTES,
-    MAX_RESOURCE_BYTES,
     ToUserReadRequest,
     ensure_document,
     read_document,
     read_resource,
+    resolve_reference,
 )
+from base.config import settings
 
 
 def test_missing_empty_and_legacy_html(tmp_path: Path) -> None:
@@ -52,7 +52,7 @@ def test_symlinks_devices_invalid_encoding_and_oversize_are_refused(tmp_path: Pa
     target.write_bytes(b"\xff")
     with pytest.raises(UnicodeError):
         read_document(tmp_path)
-    target.write_bytes(b"x" * (MAX_DOCUMENT_BYTES + 1))
+    target.write_bytes(b"x" * (settings.to_user.max_document_bytes + 1))
     with pytest.raises(ValueError, match="byte limit"):
         read_document(tmp_path)
 
@@ -118,7 +118,7 @@ def test_resource_limits_and_removed_file(tmp_path: Path) -> None:
     (tmp_path / "to_user.md").write_text("[file](data.bin)")
     target = tmp_path / "data.bin"
     with target.open("wb") as stream:
-        stream.truncate(MAX_RESOURCE_BYTES + 1)
+        stream.truncate(settings.to_user.max_resource_bytes + 1)
     resource = next(iter(read_document(tmp_path).resources.values()))
     with pytest.raises(ValueError, match="byte limit"):
         read_resource(tmp_path, [resource.id])
@@ -127,8 +127,9 @@ def test_resource_limits_and_removed_file(tmp_path: Path) -> None:
         read_resource(tmp_path, [resource.id])
     with pytest.raises(ValueError):
         ToUserReadRequest(agent_id=1, references=["/etc/passwd"])
-    with pytest.raises(ValueError):
-        ToUserReadRequest(agent_id=1, references=["0" * 64] * 9)
+    depth = settings.to_user.max_chain_depth
+    with pytest.raises(ValueError, match=f"between one and {depth}"):
+        resolve_reference(tmp_path, ["0" * 64] * (depth + 1))
 
 
 def test_home_reference_and_symlink_target(tmp_path: Path) -> None:

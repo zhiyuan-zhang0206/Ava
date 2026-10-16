@@ -50,10 +50,11 @@ the runner's OS identity. External URLs are never fetched by this resolver.
 `POST /to-user/resource` on the existing authenticated ops listener transports
 bounded binary bytes, using the ops worker pool, admission and shutdown accounting.
 The gateway authenticates the user and isolates evaluation readers before resolving
-the owner machine. Both ends enforce a 20 MiB per-resource bound. The current
-transport buffers a bounded resource; it does not support ranges or large media
-streaming. Markdown stays capped at 256 KiB, 256 local references per document
-and eight linked-document hops. HTML and other active documents download; inline
+the owner machine. Both ends enforce the configured per-resource bound
+(`settings.to_user.max_resource_bytes`, 64 MiB by default). The current transport
+buffers a bounded resource; it does not support ranges or large media streaming.
+Markdown stays capped by the configured `settings.to_user` limits — 1 MiB per
+document, 1024 local references and 16 linked-document hops by default. HTML and other active documents download; inline
 previews carry a sandbox CSP and nosniff. No resource response is publicly cached.
 
 One shallow scanner per ops process polls numeric workspace roots and only their

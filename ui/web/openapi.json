@@ -632,7 +632,6 @@
                 "type": "string"
               },
               "minItems": 1,
-              "maxItems": 8,
               "title": "Reference"
             }
           }

@@ -76,8 +76,9 @@ within its limit; `every_time` reminds on every over-limit write.
 - The panel's word count is a policy unit of this reminder, not a property of the
   document format: `base/agents/to_user/` (read face, reference resolution, size caps)
   is unchanged.
-- The hard caps stay: 256 KiB per Markdown document, 256 local references, 8 reference
-  hops ([Markdown shared context decision](../../../../docs/decisions/frontend/documents/2026-10-15-markdown-context-and-file-references.md)).
+- The read-side caps are config (`settings.to_user`): by default 1 MiB per Markdown
+  document, 1024 local references, 16 reference hops and 64 MiB per referenced file
+  ([limits decision](../../../../docs/decisions/frontend/documents/2026-10-17-to-user-panel-limits-configurable.md)).
 
 ## Contracts
 
