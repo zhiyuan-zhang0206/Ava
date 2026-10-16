@@ -425,6 +425,7 @@ class OtlpBackend:
 
     def shutdown(self, timeout: float = 2.0) -> DrainResult:
         """Close admission and observe this exporter within one local deadline."""
+        # ava:ref base/telemetry/otlp/docs/telemetry-otlp/exit-flush.ava.okf.md#two-wait-classes-one-deadline
         if not math.isfinite(timeout) or timeout < 0:
             raise ValueError("OTLP timeout must be finite and non-negative")
         deadline = time.monotonic() + timeout
@@ -774,8 +775,9 @@ class ExportingEventPipeline(EventPipeline):
         return super().stopped and self._exports_finished
 
     def stop(self, timeout: float = 5.0) -> DrainResult:
+        # ava:ref base/telemetry/otlp/docs/telemetry-otlp/exit-flush.ava.okf.md#two-wait-classes-one-deadline
         deadline = time.monotonic() + timeout
-        result = super().stop(timeout)
+        result = super().stop(max(0.0, deadline - time.monotonic()))
         if result.status is DrainStatus.UNFINISHED:
             return result
         result = self._exporter.shutdown(timeout=max(0.0, deadline - time.monotonic()))
