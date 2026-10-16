@@ -182,12 +182,17 @@ export function InspectorPanel({ agentId, embedded = false }: { agentId: number;
     <div className={cn("items-center gap-2", FLEX)}>
       <Link
         href={`/insights/run/${agentId}`}
-        className="inline-flex items-center gap-1 font-mono text-[11px] text-muted-foreground underline underline-offset-2 hover:text-foreground"
+        className={cn(
+          "items-center gap-2 rounded bg-sidebar-accent/40 px-2 py-1.5 font-mono text-[11px] text-foreground hover:bg-sidebar-accent group",
+          FLEX,
+          MIN_W_0,
+          FLEX_1,
+        )}
       >
-        {t("openRunTimeline")}
-        <ExternalLink className="size-3" aria-hidden />
+        <ExternalLink className="size-3 shrink-0 text-muted-foreground group-hover:text-foreground" aria-hidden />
+        <span className="truncate">{t("openRunTimeline")}</span>
       </Link>
-      {hasStaleError ? <span className="ml-auto"><StaleDot /></span> : null}
+      {hasStaleError ? <span className="shrink-0"><StaleDot /></span> : null}
     </div>
   );
   sections.push({
