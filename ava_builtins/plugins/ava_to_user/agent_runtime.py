@@ -14,10 +14,10 @@ from base.agents.context import AvaContext
 from base.agents.to_user import DOCUMENT_FILENAME, read_document
 from base.log import logger
 from base.packages.plugins.extensions import PluginContributions
+from base.packages.text_budget import count_words
 from base.paths import workspace_dir
 
 from ._state import OVER_LIMIT, AvaToUserState
-from .counting import count_panel_words
 
 
 def state_handle() -> PluginStateHandle[AvaToUserState]:
@@ -73,7 +73,8 @@ class _ToUserLimitHook(Hook):
                 "to_user soft limit: the panel could not be read; no reminder"
             )
             return cleared
-        count = count_panel_words(document.content or "")
+        # ava:ref ava_builtins/plugins/ava_to_user/docs/ava_to_user.ava.okf.md#shared-word-metric
+        count = count_words(document.content or "")
         limit = agent.prompt.to_user_soft_limit_words
         if count <= limit:
             return handle.delta(
