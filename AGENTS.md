@@ -2,8 +2,11 @@
 
 Read [docs/contributing.md](docs/contributing.md) before repository work. It is
 the contributor entry point for setup, scoped validation, self-review and PRs.
-Follow the user's authorized scope; discuss unresolved design choices before
-changing them. A request to inspect or discuss does not authorize edits.
+Follow the user's authorized scope. Before discussing or reviewing code, read
+the revision in question: the named branch, PR or worktree; the deployed
+generation for runtime behavior; otherwise a freshly fetched `origin/main`
+(read with `git show` or a new worktree, never by pulling a deployment
+checkout). If you cannot fetch, name the revision you read.
 
 ## Project invariants
 
@@ -21,8 +24,8 @@ changing them. A request to inspect or discuss does not authorize edits.
 - A public SDK entry must guard an invariant or make a frequent operation
   shorter or harder to misuse; pure aliases are removed. See
   [when a public SDK entry earns its place](docs/conventions/python-conventions.md#when-a-public-sdk-entry-earns-its-place).
-- Behavior changes need meaningful tests. Trace consumers before changing a
-  contract; do not widen local checks into unrelated suites.
+- Trace consumers before changing a contract; do not widen local checks into
+  unrelated suites.
 - Development is separate from a running deployment. Use an isolated checkout,
   its own real virtualenv and a temporary `AVA_HOME` for development tools that
   import application code. Pytest supplies its own isolation.
@@ -34,8 +37,7 @@ changing them. A request to inspect or discuss does not authorize edits.
 ## Code and documentation boundaries
 
 - [Python conventions](docs/conventions/python-conventions.md) own coding and
-  structure rules: import direction, file/directory and function budgets,
-  no `TYPE_CHECKING` imports, no framework `print()`, and no decorative emoji.
+  structure rules: import direction, file/directory and function budgets.
 - [Import layering](docs/conventions/import-layering.md) explains the layering the
   `meizel.toml` manifests state; [technology selection](docs/conventions/technology-selection.md)
   explains dependency choices.
@@ -52,7 +54,6 @@ changing them. A request to inspect or discuss does not authorize edits.
 
 | Task | Reference |
 |---|---|
-| Prepare a contribution | [docs/contributing.md](docs/contributing.md) |
 | Set up development | [Development setup](docs/conventions/dev-setup.md) |
 | Run relevant tests | [Testing](docs/conventions/testing.md) |
 | Review this contribution | [review-contribution](.agents/skills/review-contribution/SKILL.md) |
