@@ -12,11 +12,8 @@ def _pool() -> str:
 
 RESERVED = {"MEMORY.md", "AGENTS.md", "index.md", "log.md"}
 
-# Directory-level index (2026-08-06 user ruling): MEMORY.md points at root
-# entry notes (full desc, never truncated) and at directories — links get
-# deeper as structure does; the cap stays 20000 untouched.
 
-
+# ava:ref ava_builtins/plugins/ava_memory/skills/scripts/docs/rebuild-memory-index.ava.okf.md#indexed-entries
 def frontmatter(rel):
     with open(os.path.join(_pool(), rel), encoding="utf-8") as f:
         content = f.read()
@@ -25,10 +22,11 @@ def frontmatter(rel):
         return {}
     try:
         return yaml.safe_load(m.group(1)) or {}
-    except yaml.YAMLError:  # malformed frontmatter: the note is indexed without one
+    except yaml.YAMLError:
         return {}
 
 
+# ava:ref ava_builtins/plugins/ava_memory/skills/scripts/docs/rebuild-memory-index.ava.okf.md#indexed-entries
 def collect():
     files = []
     for dirpath, _dirnames, filenames in os.walk(_pool()):
@@ -54,7 +52,6 @@ files = collect()
 root_files = [f for f in files if "/" not in f]
 dirs = dir_notes(files)
 
-# --- root entry notes: one line each, full desc ---
 lines = []
 for rel in root_files:
     fm = frontmatter(rel)
@@ -62,7 +59,6 @@ for rel in root_files:
     desc = str(fm.get("description") or "").replace("\n", " ")
     lines.append(f"- [{title}]({rel}) \u2014 {desc}")
 
-# --- directories: one line per dir with notes (full subdir breakdown) ---
 sub = {}
 for d in sorted(dirs):
     if not d:
@@ -94,7 +90,7 @@ content = ""
 if os.path.exists(memory_path):
     with open(memory_path, encoding="utf-8") as f:
         content = f.read()
-# The heading line, not a prose mention of it (the template's intro quotes `## Pointers`).
+# ava:ref ava_builtins/plugins/ava_memory/skills/scripts/docs/rebuild-memory-index.ava.okf.md#pointer-rebuild
 heading = re.search(r"^## Pointers[ \t]*$", content, re.M)
 head = content[: heading.start()] if heading else (content.rstrip("\n") + "\n\n").lstrip("\n")
 new = head + "## Pointers\n\n\n" + "\n".join(lines) + "\n"
