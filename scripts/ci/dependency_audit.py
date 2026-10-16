@@ -1,23 +1,4 @@
 #!/usr/bin/env python
-"""Weekly dependency report: locked-dependency vulnerabilities and pinned-binary freshness.
-
-Run by `.github/workflows/dependency-audit.yml` (weekly + manual). Three sections land in one
-markdown report, kept in ONE tracked GitHub issue (found by its marker, updated in place, closed
-when a run comes back clean):
-
-- Python: `uv audit` over `uv.lock`. Its JSON carries no severity, so each advisory is looked up
-  in OSV (GitHub's reviewed severity); an advisory OSV cannot grade is listed as `unknown` and
-  counts as actionable rather than being dropped.
-- Frontend: `npm audit` over `ui/web/package-lock.json`.
-- Binaries: the version constants Ava downloads or installs outside the lockfiles (zonky Postgres,
-  pgvector, wal-g, otelcol-contrib, uv, Grafana) against their upstream's newest release.
-
-The issue is actionable when any vulnerability is high/critical/unknown or any pinned binary is
-behind. The report never changes a pin: moving one is a dependency upgrade that needs approval.
-
-Usage: `dependency_audit.py --out REPORT.md [--sync-issue]` (`GH_TOKEN` and `GITHUB_REPOSITORY`
-for the GitHub calls).
-"""
 
 from __future__ import annotations
 
@@ -39,7 +20,7 @@ _UV_PIN = ("uv", "base/host/brew_pin.py", r'^UV_VERSION = "([^"]+)"')
 _SEVERITY_RANK = {"critical": 4, "high": 3, "moderate": 2, "low": 1, "unknown": 0}
 _ACTIONABLE_SEVERITIES = frozenset({"critical", "high", "unknown"})
 
-Fetch = Callable[[str], Any]  # decoded JSON: the shape is each upstream's, read by key
+Fetch = Callable[[str], Any]
 
 
 @dataclass(frozen=True)
@@ -51,6 +32,7 @@ class Vulnerability:
     severity: str
     fix: str
     summary: str
+    dev_only_no_fix: bool = False
 
 
 @dataclass(frozen=True)
@@ -70,18 +52,18 @@ def _version_key(version: str) -> tuple[int, ...]:
 
 
 def _fetch_json(url: str) -> Any:
-    request = urllib.request.Request(url, headers={"Accept": "application/json"})  # noqa: S310 — fixed https upstream URLs
-    with urllib.request.urlopen(request, timeout=30) as response:  # noqa: S310
+    request = urllib.request.Request(url, headers={"Accept": "application/json"})
+    with urllib.request.urlopen(request, timeout=30) as response:
         return json.load(response)
 
 
 def _fetch_text(url: str) -> str:
-    with urllib.request.urlopen(url, timeout=30) as response:  # noqa: S310 — fixed https upstream URLs
+    with urllib.request.urlopen(url, timeout=30) as response:
         return response.read().decode()
 
 
 def _gh_api(path: str) -> Any:
-    result = subprocess.run(  # noqa: S603 — fixed gh invocation, path is a repo-relative API route
+    result = subprocess.run(
         ["gh", "api", path],
         capture_output=True,
         text=True,
@@ -91,11 +73,8 @@ def _gh_api(path: str) -> Any:
     return json.loads(result.stdout)
 
 
-# ── vulnerabilities ──────────────────────────────────────────────────────────
-
-
+# ava:ref scripts/ci/docs/dependency-audit.ava.okf.md#osv-severity-grading
 def osv_severity(advisory_ids: list[str], fetch: Fetch = _fetch_json) -> str:
-    """GitHub's reviewed severity for the first id OSV can grade, else `unknown`."""
     for advisory_id in advisory_ids:
         try:
             record = fetch(f"https://api.osv.dev/v1/vulns/{advisory_id}")
@@ -130,7 +109,37 @@ def python_vulnerabilities(audit_json: dict[str, Any], fetch: Fetch) -> list[Vul
     return found
 
 
-def npm_vulnerabilities(audit_json: dict[str, Any]) -> list[Vulnerability]:
+def _dev_only(nodes: list[str], packages: dict[str, Any]) -> bool:
+    if not nodes:
+        return False
+    for node in nodes:
+        entry = packages.get(node)
+        if not isinstance(entry, dict) or entry.get("dev") is not True:
+            return False
+    return True
+
+
+def _no_forward_fix(fix: Any, packages: dict[str, Any]) -> bool:
+    if fix is False:
+        return True
+    if not isinstance(fix, dict):
+        return False
+    name = fix.get("name")
+    suggested = fix.get("version")
+    installed = packages.get(f"node_modules/{name}")
+    if not isinstance(suggested, str) or not isinstance(installed, dict):
+        return False
+    version = installed.get("version")
+    if not isinstance(version, str):
+        return False
+    return _version_key(suggested) <= _version_key(version)
+
+
+# ava:ref scripts/ci/docs/dependency-audit.ava.okf.md#dev-only-exemption
+def npm_vulnerabilities(
+    audit_json: dict[str, Any], packages: dict[str, Any] | None = None
+) -> list[Vulnerability]:
+    lock = packages if packages is not None else {}
     found: list[Vulnerability] = []
     for name, entry in audit_json["vulnerabilities"].items():
         titles: list[str] = [via["title"] for via in entry["via"] if isinstance(via, dict)]
@@ -141,6 +150,7 @@ def npm_vulnerabilities(audit_json: dict[str, Any]) -> list[Vulnerability]:
             )
         else:
             fix_text = "available" if fix else "none"
+        exempt = _dev_only(entry.get("nodes") or [], lock) and _no_forward_fix(fix, lock)
         found.append(
             Vulnerability(
                 ecosystem="npm",
@@ -150,16 +160,15 @@ def npm_vulnerabilities(audit_json: dict[str, Any]) -> list[Vulnerability]:
                 severity=entry["severity"],
                 fix=fix_text,
                 summary="; ".join(titles) or "via " + ", ".join(map(str, entry["via"])),
+                dev_only_no_fix=exempt,
             )
         )
     return found
 
 
+# ava:ref scripts/ci/docs/dependency-audit.ava.okf.md#incomplete-audit-guard
 def run_json(argv: list[str], cwd: Path) -> dict[str, Any]:
-    """Accept findings (exit 1), but reject tool/registry errors as incomplete audits."""
-    result = subprocess.run(  # noqa: S603 — fixed audit tool argv
-        argv, capture_output=True, text=True, cwd=cwd, timeout=600, check=False
-    )
+    result = subprocess.run(argv, capture_output=True, text=True, cwd=cwd, timeout=600, check=False)
     try:
         parsed: Any = json.loads(result.stdout)
     except json.JSONDecodeError as exc:
@@ -173,10 +182,7 @@ def run_json(argv: list[str], cwd: Path) -> dict[str, Any]:
     return cast("dict[str, Any]", parsed)
 
 
-# ── pinned binaries ──────────────────────────────────────────────────────────
-
-# (display name, file, regex with one group for the pinned version). A constant that is
-# renamed or moved makes `pinned_version` raise, so a stale entry cannot silently drop a row.
+# ava:ref scripts/ci/docs/dependency-audit.ava.okf.md#pinned-binary-constants
 PINS: tuple[tuple[str, str, str], ...] = (
     ("zonky Postgres", "base/cluster/dataplane/runtime_binaries.py", r'^PG_VERSION = "([^"]+)"'),
     ("pgvector", "base/cluster/dataplane/runtime_binaries.py", r'^PGVECTOR_VERSION = "([^"]+)"'),
@@ -198,9 +204,8 @@ def pinned_version(path: str, pattern: str, root: Path = _REPO_ROOT) -> str:
     return matches[0]
 
 
+# ava:ref scripts/ci/docs/dependency-audit.ava.okf.md#zonky-major-comparison
 def zonky_latest(pinned: str, metadata_xml: str) -> str:
-    """Newest zonky release on the pinned Postgres major: a major bump is an expand step, never an
-    in-place swap, so it is not what this row compares."""
     major = pinned.split(".", 1)[0]
     versions = re.findall(r"<version>([^<]+)</version>", metadata_xml)
     same_major = [v for v in versions if v.split(".", 1)[0] == major and re.fullmatch(r"[\d.]+", v)]
@@ -216,7 +221,6 @@ def latest_binaries(
         data = gh_api(f"repos/{repo}/releases/latest")
         return str(data["tag_name"])
 
-    # pgvector publishes tags, not GitHub releases.
     tags = gh_api("repos/pgvector/pgvector/tags?per_page=100")
     pgvector_tags = [t["name"] for t in tags if re.fullmatch(r"v\d+\.\d+\.\d+", t["name"])]
     maven = "https://repo1.maven.org/maven2/io/zonky/test/postgres/embedded-postgres-binaries-linux-amd64"
@@ -245,13 +249,11 @@ def latest_binaries(
     ]
 
 
-# ── report + issue ───────────────────────────────────────────────────────────
-
-
+# ava:ref scripts/ci/docs/dependency-audit.ava.okf.md#run-actionability
 def is_actionable(vulnerabilities: list[Vulnerability], binaries: list[Binary]) -> bool:
-    return any(v.severity in _ACTIONABLE_SEVERITIES for v in vulnerabilities) or any(
-        b.behind for b in binaries
-    )
+    return any(
+        v.severity in _ACTIONABLE_SEVERITIES and not v.dev_only_no_fix for v in vulnerabilities
+    ) or any(b.behind for b in binaries)
 
 
 def render(vulnerabilities: list[Vulnerability], binaries: list[Binary]) -> str:
@@ -265,23 +267,7 @@ def render(vulnerabilities: list[Vulnerability], binaries: list[Binary]) -> str:
         ("python", "Python (uv audit + OSV severity)"),
         ("npm", "Frontend (npm audit)"),
     ):
-        rows = sorted(
-            (v for v in vulnerabilities if v.ecosystem == ecosystem),
-            key=lambda v: -_SEVERITY_RANK[v.severity],
-        )
-        counts = {s: sum(1 for v in rows if v.severity == s) for s in _SEVERITY_RANK}
-        summary = ", ".join(f"{n} {s}" for s, n in counts.items() if n) or "none"
-        lines += [f"## {heading}", "", f"Findings: {summary}.", ""]
-        if rows:
-            lines += [
-                "| Severity | Package | Version | Advisory | Fix | Summary |",
-                "|---|---|---|---|---|---|",
-            ]
-            lines += [
-                f"| {v.severity} | {v.package} | {v.version} | {v.advisory} | {v.fix} | {_cell(v.summary)} |"
-                for v in rows
-            ]
-            lines.append("")
+        lines += _ecosystem_section(ecosystem, heading, vulnerabilities)
     lines += [
         "## Pinned binaries",
         "",
@@ -296,12 +282,41 @@ def render(vulnerabilities: list[Vulnerability], binaries: list[Binary]) -> str:
     return "\n".join(lines)
 
 
+def _ecosystem_section(
+    ecosystem: str, heading: str, vulnerabilities: list[Vulnerability]
+) -> list[str]:
+    rows = sorted(
+        (v for v in vulnerabilities if v.ecosystem == ecosystem),
+        key=lambda v: -_SEVERITY_RANK[v.severity],
+    )
+    counts = {s: sum(1 for v in rows if v.severity == s) for s in _SEVERITY_RANK}
+    summary = ", ".join(f"{n} {s}" for s, n in counts.items() if n) or "none"
+    lines = [f"## {heading}", "", f"Findings: {summary}.", ""]
+    if rows:
+        lines += [
+            "| Severity | Package | Version | Advisory | Fix | Summary |",
+            "|---|---|---|---|---|---|",
+        ]
+        lines += [
+            f"| {v.severity} | {v.package} | {v.version} | {v.advisory} | {v.fix} | {_cell(v.summary)} |"
+            for v in rows
+        ]
+        lines.append("")
+    exempt = sum(1 for v in rows if v.dev_only_no_fix)
+    if exempt:
+        lines += [
+            f"{exempt} finding(s) are dev-only with no forward fix and are not actionable.",
+            "",
+        ]
+    return lines
+
+
 def _cell(text: str) -> str:
     return text.replace("|", "\\|").replace("\n", " ")[:200]
 
 
 def _gh(argv: list[str]) -> str:
-    return subprocess.run(  # noqa: S603 — fixed gh invocation
+    return subprocess.run(
         ["gh", *argv],
         capture_output=True,
         text=True,
@@ -310,10 +325,10 @@ def _gh(argv: list[str]) -> str:
     ).stdout
 
 
+# ava:ref scripts/ci/docs/dependency-audit.ava.okf.md#weekly-issue-lifecycle
 def sync_issue(
     repo: str, body: str, *, actionable: bool, gh: Callable[[list[str]], str] = _gh
 ) -> str:
-    """Keep the single tracked issue: update or open it when actionable, close it when clean."""
     marked = f'select((.body // "") | contains("{MARKER}"))'
     listing = gh(
         [
@@ -354,7 +369,7 @@ def sync_issue(
                 "POST",
                 f"repos/{repo}/issues/{number}/comments",
                 "-f",
-                "body=The weekly audit came back clean.",
+                "body=The weekly audit came back clean: no actionable findings.",
             ]
         )
         gh(
@@ -372,8 +387,9 @@ def sync_issue(
     return f"closed {len(open_issues)} issue(s)"
 
 
+# ava:ref scripts/ci/docs/dependency-audit.ava.okf.md#weekly-report-run
 def main(argv: list[str]) -> int:
-    parser = argparse.ArgumentParser(description=__doc__)
+    parser = argparse.ArgumentParser(description="Weekly dependency audit report")
     parser.add_argument("--out", type=Path, required=True)
     parser.add_argument(
         "--sync-issue", metavar="OWNER/REPO", help="update the tracked issue in this repo"
@@ -397,9 +413,14 @@ def main(argv: list[str]) -> int:
         ["npm", "audit", "--json", "--registry=https://registry.npmjs.org"],
         _REPO_ROOT / "ui/web",
     )
+    lockfile = cast(
+        "dict[str, Any]",
+        json.loads((_REPO_ROOT / "ui/web" / "package-lock.json").read_text(encoding="utf-8")),
+    )
+    packages = cast("dict[str, Any]", lockfile.get("packages") or {})
     vulnerabilities = [
         *python_vulnerabilities(uv_json, _fetch_json),
-        *npm_vulnerabilities(npm_json),
+        *npm_vulnerabilities(npm_json, packages),
     ]
     binaries = latest_binaries(_gh_api, _fetch_text)
 
