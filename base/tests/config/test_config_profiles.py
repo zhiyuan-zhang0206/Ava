@@ -247,10 +247,11 @@ def test_memory_backend_switch_fields_require_gateway_restart() -> None:
 def test_gateway_consumed_fields_declare_gateway_restart() -> None:
     from base.config.domains.channels.feishu import FeishuSettings
     from base.config.domains.channels.telegram import TelegramSettings
+    from base.config.domains.lm import LmSettings
     from base.config.domains.services.settings import ServiceSettings
     from base.config.profiles import PROCESS_PROFILES
 
-    for domain in ("services", "telegram", "feishu"):
+    for domain in ("services", "telegram", "feishu", "lm"):
         assert domain in PROCESS_PROFILES["gateway"]
 
     by_model = {
@@ -272,6 +273,13 @@ def test_gateway_consumed_fields_declare_gateway_restart() -> None:
             "feishu_app_id",
             "feishu_app_secret",
             "feishu_rest_timeout_seconds",
+        ),
+        LmSettings: (
+            "reply_suggestion_enabled",
+            "reply_suggestion_model",
+            "reply_suggestion_gate_model",
+            "reply_suggestion_gate_threshold",
+            "reply_suggestion_max_input_tokens",
         ),
     }
     for model, names in by_model.items():

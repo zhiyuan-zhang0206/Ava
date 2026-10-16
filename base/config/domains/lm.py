@@ -80,7 +80,7 @@ class LmSettings(EnvSettings):
             "calling any model."
         ),
         json_schema_extra={
-            "restart_required": "",
+            "restart_required": "gateway",
             "writable": True,
             "sensitive": False,
             "capability": "gateway",
@@ -97,7 +97,7 @@ class LmSettings(EnvSettings):
             "registered chat model; an unknown id fails the gateway at boot."
         ),
         json_schema_extra={
-            "restart_required": "",
+            "restart_required": "gateway",
             "writable": True,
             "sensitive": False,
             "capability": "gateway",
@@ -114,7 +114,7 @@ class LmSettings(EnvSettings):
             "model (not a chat model); an unknown id fails the gateway at boot."
         ),
         json_schema_extra={
-            "restart_required": "",
+            "restart_required": "gateway",
             "writable": True,
             "sensitive": False,
             "capability": "gateway",
@@ -132,7 +132,7 @@ class LmSettings(EnvSettings):
             "would help the user' for replies to be drafted. Raise it to draft less often."
         ),
         json_schema_extra={
-            "restart_required": "",
+            "restart_required": "gateway",
             "writable": True,
             "sensitive": False,
             "capability": "gateway",
@@ -150,7 +150,7 @@ class LmSettings(EnvSettings):
             "is cut from the end backwards, so the newest text survives."
         ),
         json_schema_extra={
-            "restart_required": "",
+            "restart_required": "gateway",
             "writable": True,
             "sensitive": False,
             "capability": "gateway",
