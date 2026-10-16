@@ -1,13 +1,3 @@
-// Composer integration tests — locks button (mode, draft) dispatch +
-// Enter / IME guard + input-preserved-on-send-failure. Key invariants:
-// busy + empty = stop, busy + non-empty = send (new message goes
-// through the inbound queue; agent picks it up after the current turn);
-// Enter always sends; stop is only triggered by clicking with empty
-// input.
-//
-// happy-dom + RTL — vitest globals=false; explicit cleanup, mirrors
-// connection-notice.test.
-
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { cleanup, fireEvent, render as rtlRender, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -17,11 +7,6 @@ import { clearMessageSent, markMessageSent } from "@/lib/format/interaction-timi
 
 import { Composer } from "./composer";
 
-// The Composer fetches the command list on mount. Default to an empty list so
-// the existing button/Enter tests don't hit the network; the command-integration
-// block overrides commandList per-test.
-// getContextBreakdown backs the context-breakdown-panel block (mounted only
-// when that panel is expanded).
 let commandList: { name: string; description: string; instruction_hint: string }[] = [];
 vi.mock("@/lib/transport/api", () => ({
   MessageDeliveryUnknownError: class MessageDeliveryUnknownError extends Error {
@@ -90,8 +75,6 @@ function storageWith(
   };
 }
 
-// Every Composer now reads its command catalog through Query. Keep a fresh
-// cache per render so tests cannot share catalogs across cases.
 function render(ui: React.ReactElement) {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   return rtlRender(ui, { wrapper: ({ children }) =>
@@ -100,11 +83,9 @@ function render(ui: React.ReactElement) {
 
 const renderComposer = render;
 
-/** Render a Composer with the given agentId and return the textarea element. */
 function renderComposerAgent(agentId: number) {
   render(<Composer {...baseProps} mode="idle" agentId={agentId} />);
-  // eslint-disable-next-line @typescript-eslint/no-unnecessary-type-assertion -- RTL getByTestId returns HTMLElement; narrowing to access .value
-  return screen.getByTestId("composer-input") as HTMLTextAreaElement;
+  return screen.getByTestId<HTMLTextAreaElement>("composer-input");
 }
 
 describe("Composer placeholder", () => {
@@ -125,8 +106,7 @@ describe("Composer reply suggestion", () => {
   const SUGGESTION = "Yes, go ahead and deploy.";
 
   function input(): HTMLTextAreaElement {
-    // eslint-disable-next-line @typescript-eslint/no-unnecessary-type-assertion -- RTL getByTestId returns HTMLElement; narrowing to access .value
-    return screen.getByTestId("composer-input") as HTMLTextAreaElement;
+    return screen.getByTestId<HTMLTextAreaElement>("composer-input");
   }
 
   it("browses numbered candidates in the placeholder and sends only the accepted text", async () => {
@@ -143,8 +123,10 @@ describe("Composer reply suggestion", () => {
     fireEvent.keyDown(input(), { key: "ArrowDown" });
     expect(input().placeholder).toBe("[4/4] Use D.");
     fireEvent.keyDown(input(), { key: "ArrowDown" });
-    expect(input().placeholder).toBe("[1/4] Use A.");
+    expect(input().placeholder).toBe("[4/4] Use D.");
     fireEvent.keyDown(input(), { key: "ArrowUp" });
+    expect(input().placeholder).toBe("[3/4] Use C.");
+    fireEvent.keyDown(input(), { key: "ArrowDown" });
     expect(input().placeholder).toBe("[4/4] Use D.");
     expect(input().value).toBe("");
 
@@ -159,6 +141,32 @@ describe("Composer reply suggestion", () => {
     expect(input().placeholder).toBe("Send a message");
     expect(fireEvent.keyDown(input(), { key: "ArrowRight" })).toBe(true);
     expect(input().value).toBe("");
+  });
+
+  it("stops at the first and last candidate instead of wrapping around", () => {
+    render(<Composer {...baseProps} mode="idle" suggestions={["Use A.", "Use B.", "Use C."]} />);
+
+    expect(input().placeholder).toBe("[1/3] Use A.");
+    fireEvent.keyDown(input(), { key: "ArrowUp" });
+    expect(input().placeholder).toBe("[1/3] Use A.");
+    fireEvent.keyDown(input(), { key: "ArrowUp" });
+    expect(input().placeholder).toBe("[1/3] Use A.");
+
+    fireEvent.keyDown(input(), { key: "ArrowDown" });
+    expect(input().placeholder).toBe("[2/3] Use B.");
+    fireEvent.keyDown(input(), { key: "ArrowDown" });
+    expect(input().placeholder).toBe("[3/3] Use C.");
+    fireEvent.keyDown(input(), { key: "ArrowDown" });
+    expect(input().placeholder).toBe("[3/3] Use C.");
+    fireEvent.keyDown(input(), { key: "ArrowDown" });
+    expect(input().placeholder).toBe("[3/3] Use C.");
+
+    fireEvent.keyDown(input(), { key: "ArrowUp" });
+    expect(input().placeholder).toBe("[2/3] Use B.");
+    fireEvent.keyDown(input(), { key: "ArrowUp" });
+    expect(input().placeholder).toBe("[1/3] Use A.");
+    fireEvent.keyDown(input(), { key: "ArrowUp" });
+    expect(input().placeholder).toBe("[1/3] Use A.");
   });
 
   it("restores the selected candidate when an accepted or edited draft is cleared", async () => {
@@ -338,14 +346,6 @@ describe("Composer reply suggestion", () => {
 });
 
 describe("Composer button mode dispatch", () => {
-  // Layout regression (task #714 + #715): the composer is width-capped and
-  // centered inside the timeline column. The cap comes from the
-  // display.timeline_width_ratio setting via the maxWidthCss prop (inline
-  // maxWidth: min(<ratio>vw, 1280px)); #723-⑧ dropped the #715 48px offset
-  // so the composer aligns with the timeline column width. The home page
-  // passes the ratio-derived cap explicitly on desktop (audit C2 removed the
-  // hidden default so absent = full-width everywhere). jsdom can't measure
-  // layout, so assert the class + inline-style contract on the composer root.
   it("root is width-capped, centered, aligned with the timeline width", () => {
     render(<Composer {...baseProps} mode="idle" maxWidthCss="min(40vw, 1280px)" />);
     const root = screen.getByTestId("composer");
@@ -370,10 +370,6 @@ describe("Composer button mode dispatch", () => {
     expect(root.style.maxWidth).toBe("min(60vw, 1280px)");
   });
 
-  // Task #805: narrow viewports (mobile) pass undefined — no inline maxWidth
-  // is rendered and the composer is full-width (w-full + mx-auto). One falsy
-  // convention (audit C2): undefined, never "" — a consumer doing a `!= null`
-  // check must not silently cap the mobile composer.
   it("undefined maxWidthCss (mobile) → no inline maxWidth, full-width", () => {
     render(<Composer {...baseProps} mode="idle" maxWidthCss={undefined} />);
     const root = screen.getByTestId("composer");
@@ -387,12 +383,10 @@ describe("Composer button mode dispatch", () => {
     const onStop = vi.fn();
     render(<Composer {...baseProps} mode="idle" onSend={onSend} onStop={onStop} />);
 
-    // eslint-disable-next-line @typescript-eslint/no-unnecessary-type-assertion -- RTL getByRole returns HTMLElement; narrowing to access .value / .disabled
-    const ta = screen.getByTestId("composer-input") as HTMLTextAreaElement;
+    const ta = screen.getByTestId<HTMLTextAreaElement>("composer-input");
     fireEvent.change(ta, { target: { value: "hello" } });
 
     fireEvent.click(screen.getByRole("button", { name: "Send message" }));
-    // await microtask for async onSend
     await Promise.resolve();
     await Promise.resolve();
     expect(onSend).toHaveBeenCalledWith("hello", [], expect.any(String));
@@ -417,8 +411,7 @@ describe("Composer button mode dispatch", () => {
     const onStop = vi.fn();
     render(<Composer {...baseProps} mode="busy" onSend={onSend} onStop={onStop} />);
 
-    // eslint-disable-next-line @typescript-eslint/no-unnecessary-type-assertion -- RTL getByRole returns HTMLElement; narrowing to access .value / .disabled
-    const ta = screen.getByTestId("composer-input") as HTMLTextAreaElement;
+    const ta = screen.getByTestId<HTMLTextAreaElement>("composer-input");
     fireEvent.change(ta, { target: { value: "draft" } });
 
     fireEvent.click(screen.getByRole("button", { name: "Send message" }));
@@ -439,20 +432,17 @@ describe("Composer button mode dispatch", () => {
     render(<Composer {...baseProps} mode="busy" />);
     expect(screen.getByRole("button").getAttribute("aria-label")).toBe("Stop current turn");
 
-    // eslint-disable-next-line @typescript-eslint/no-unnecessary-type-assertion -- RTL getByRole returns HTMLElement; narrowing to access .value / .disabled
-    const ta = screen.getByTestId("composer-input") as HTMLTextAreaElement;
+    const ta = screen.getByTestId<HTMLTextAreaElement>("composer-input");
     fireEvent.change(ta, { target: { value: "x" } });
     expect(screen.getByRole("button").getAttribute("aria-label")).toBe("Send message");
 
-    // Clear input → button flips back to stop (must be bidirectional)
     fireEvent.change(ta, { target: { value: "" } });
     expect(screen.getByRole("button").getAttribute("aria-label")).toBe("Stop current turn");
   });
 
   it("mode='busy' + whitespace-only → button still stop (empty after trim; guards against .trim() being silently dropped, flipping to send)", () => {
     render(<Composer {...baseProps} mode="busy" />);
-    // eslint-disable-next-line @typescript-eslint/no-unnecessary-type-assertion -- RTL getByRole returns HTMLElement; narrowing to access .value / .disabled
-    const ta = screen.getByTestId("composer-input") as HTMLTextAreaElement;
+    const ta = screen.getByTestId<HTMLTextAreaElement>("composer-input");
     fireEvent.change(ta, { target: { value: "   \n  " } });
     expect(screen.getByRole("button").getAttribute("aria-label")).toBe("Stop current turn");
   });
@@ -462,8 +452,8 @@ describe("Composer button mode dispatch", () => {
     const onStop = vi.fn();
     render(<Composer {...baseProps} mode="disabled" onSend={onSend} onStop={onStop} />);
 
-    const btn = screen.getByRole("button");
-    expect((btn as HTMLButtonElement).disabled).toBe(true);
+    const btn = screen.getByRole<HTMLButtonElement>("button");
+    expect(btn.disabled).toBe(true);
     fireEvent.click(btn);
     expect(onSend).not.toHaveBeenCalled();
     expect(onStop).not.toHaveBeenCalled();
@@ -471,8 +461,8 @@ describe("Composer button mode dispatch", () => {
 
   it("mode='idle' + empty input → button disabled (empty send is meaningless)", () => {
     render(<Composer {...baseProps} mode="idle" />);
-    const btn = screen.getByRole("button", { name: "Send message" });
-    expect((btn as HTMLButtonElement).disabled).toBe(true);
+    const btn = screen.getByRole<HTMLButtonElement>("button", { name: "Send message" });
+    expect(btn.disabled).toBe(true);
   });
 
   it("aria-label follows mode ('Send message' ↔ 'Stop current turn')", () => {
@@ -488,8 +478,7 @@ describe("Composer Enter / IME / Shift+Enter", () => {
   it("plain Enter → triggers action (onSend when idle)", async () => {
     const onSend = vi.fn(() => Promise.resolve(true));
     render(<Composer {...baseProps} mode="idle" onSend={onSend} />);
-    // eslint-disable-next-line @typescript-eslint/no-unnecessary-type-assertion -- RTL getByRole returns HTMLElement; narrowing to access .value / .disabled
-    const ta = screen.getByTestId("composer-input") as HTMLTextAreaElement;
+    const ta = screen.getByTestId<HTMLTextAreaElement>("composer-input");
     fireEvent.change(ta, { target: { value: "msg" } });
     fireEvent.keyDown(ta, { key: "Enter" });
     await Promise.resolve();
@@ -501,8 +490,7 @@ describe("Composer Enter / IME / Shift+Enter", () => {
     const onSend = vi.fn(() => Promise.resolve(true));
     const onStop = vi.fn();
     render(<Composer {...baseProps} mode="busy" onSend={onSend} onStop={onStop} />);
-    // eslint-disable-next-line @typescript-eslint/no-unnecessary-type-assertion -- RTL getByRole returns HTMLElement; narrowing to access .value / .disabled
-    const ta = screen.getByTestId("composer-input") as HTMLTextAreaElement;
+    const ta = screen.getByTestId<HTMLTextAreaElement>("composer-input");
     fireEvent.change(ta, { target: { value: "draft" } });
     fireEvent.keyDown(ta, { key: "Enter" });
     await Promise.resolve();
@@ -515,8 +503,7 @@ describe("Composer Enter / IME / Shift+Enter", () => {
     const onSend = vi.fn(() => Promise.resolve(true));
     const onStop = vi.fn();
     render(<Composer {...baseProps} mode="busy" onSend={onSend} onStop={onStop} />);
-    // eslint-disable-next-line @typescript-eslint/no-unnecessary-type-assertion -- RTL getByRole returns HTMLElement; narrowing to access .value / .disabled
-    const ta = screen.getByTestId("composer-input") as HTMLTextAreaElement;
+    const ta = screen.getByTestId<HTMLTextAreaElement>("composer-input");
     fireEvent.keyDown(ta, { key: "Enter" });
     await Promise.resolve();
     expect(onSend).not.toHaveBeenCalled();
@@ -526,10 +513,8 @@ describe("Composer Enter / IME / Shift+Enter", () => {
   it("IME composing (isComposing=true) → Enter does not trigger (CJK pinyin must be protected)", async () => {
     const onSend = vi.fn(() => Promise.resolve(true));
     render(<Composer {...baseProps} mode="idle" onSend={onSend} />);
-    // eslint-disable-next-line @typescript-eslint/no-unnecessary-type-assertion -- RTL getByRole returns HTMLElement; narrowing to access .value / .disabled
-    const ta = screen.getByTestId("composer-input") as HTMLTextAreaElement;
+    const ta = screen.getByTestId<HTMLTextAreaElement>("composer-input");
     fireEvent.change(ta, { target: { value: "\u4f60\u597d" } });
-    // RTL fireEvent.keyDown forwards nativeEvent props
     fireEvent.keyDown(ta, { key: "Enter", isComposing: true });
     await Promise.resolve();
     expect(onSend).not.toHaveBeenCalled();
@@ -538,8 +523,7 @@ describe("Composer Enter / IME / Shift+Enter", () => {
   it("IME Process key fallback → Enter does not trigger (even with isComposing=false)", async () => {
     const onSend = vi.fn(() => Promise.resolve(true));
     render(<Composer {...baseProps} mode="idle" onSend={onSend} />);
-    // eslint-disable-next-line @typescript-eslint/no-unnecessary-type-assertion -- RTL getByRole returns HTMLElement; narrowing to access .value / .disabled
-    const ta = screen.getByTestId("composer-input") as HTMLTextAreaElement;
+    const ta = screen.getByTestId<HTMLTextAreaElement>("composer-input");
     fireEvent.change(ta, { target: { value: "\u4f60\u597d" } });
     fireEvent.keyDown(ta, { key: "Process", isComposing: false });
     await Promise.resolve();
@@ -549,8 +533,7 @@ describe("Composer Enter / IME / Shift+Enter", () => {
   it("Shift+Enter → does not trigger send (default newline behavior, let textarea handle it)", async () => {
     const onSend = vi.fn(() => Promise.resolve(true));
     render(<Composer {...baseProps} mode="idle" onSend={onSend} />);
-    // eslint-disable-next-line @typescript-eslint/no-unnecessary-type-assertion -- RTL getByRole returns HTMLElement; narrowing to access .value / .disabled
-    const ta = screen.getByTestId("composer-input") as HTMLTextAreaElement;
+    const ta = screen.getByTestId<HTMLTextAreaElement>("composer-input");
     fireEvent.change(ta, { target: { value: "line1" } });
     fireEvent.keyDown(ta, { key: "Enter", shiftKey: true });
     await Promise.resolve();
@@ -562,8 +545,7 @@ describe("Composer input lifecycle", () => {
   it("send succeeds (returns true) → input cleared", async () => {
     const onSend = vi.fn<(content: string) => Promise<boolean>>(() => Promise.resolve(true));
     render(<Composer {...baseProps} mode="idle" onSend={onSend} />);
-    // eslint-disable-next-line @typescript-eslint/no-unnecessary-type-assertion -- RTL getByRole returns HTMLElement; narrowing to access .value / .disabled
-    const ta = screen.getByTestId("composer-input") as HTMLTextAreaElement;
+    const ta = screen.getByTestId<HTMLTextAreaElement>("composer-input");
     fireEvent.change(ta, { target: { value: "hello" } });
     fireEvent.click(screen.getByRole("button", { name: "Send message" }));
     await waitFor(() => expect(ta.value).toBe(""));
@@ -572,11 +554,9 @@ describe("Composer input lifecycle", () => {
   it("send fails (returns false) → input preserved, no lost user text (H2 fix)", async () => {
     const onSend = vi.fn<(content: string) => Promise<boolean>>(() => Promise.resolve(false));
     render(<Composer {...baseProps} mode="idle" onSend={onSend} />);
-    // eslint-disable-next-line @typescript-eslint/no-unnecessary-type-assertion -- RTL getByRole returns HTMLElement; narrowing to access .value / .disabled
-    const ta = screen.getByTestId("composer-input") as HTMLTextAreaElement;
+    const ta = screen.getByTestId<HTMLTextAreaElement>("composer-input");
     fireEvent.change(ta, { target: { value: "important draft" } });
     fireEvent.click(screen.getByRole("button", { name: "Send message" }));
-    // Wait for onSend microtask to complete — on failure no setValue, input must persist
     await waitFor(() => expect(onSend).toHaveBeenCalled());
     expect(ta.value).toBe("important draft");
   });
@@ -584,8 +564,7 @@ describe("Composer input lifecycle", () => {
   it("mode='busy' send fails (returns false) → input preserved (busy goes through the same submit path; failure branch must be covered)", async () => {
     const onSend = vi.fn<(content: string) => Promise<boolean>>(() => Promise.resolve(false));
     render(<Composer {...baseProps} mode="busy" onSend={onSend} />);
-    // eslint-disable-next-line @typescript-eslint/no-unnecessary-type-assertion -- RTL getByRole returns HTMLElement; narrowing to access .value / .disabled
-    const ta = screen.getByTestId("composer-input") as HTMLTextAreaElement;
+    const ta = screen.getByTestId<HTMLTextAreaElement>("composer-input");
     fireEvent.change(ta, { target: { value: "queued draft" } });
     fireEvent.click(screen.getByRole("button", { name: "Send message" }));
     await waitFor(() => expect(onSend).toHaveBeenCalled());
@@ -600,24 +579,20 @@ describe("Composer input lifecycle", () => {
       () => new Promise<boolean>((resolve) => { deferred.resolve = resolve; }),
     );
     render(<Composer {...baseProps} mode="idle" onSend={onSend} />);
-    // eslint-disable-next-line @typescript-eslint/no-unnecessary-type-assertion
-    const ta = screen.getByTestId("composer-input") as HTMLTextAreaElement;
+    const ta = screen.getByTestId<HTMLTextAreaElement>("composer-input");
     fireEvent.change(ta, { target: { value: "first" } });
 
-    // First click enters sending state (Promise unresolved, button disabled)
     fireEvent.click(screen.getByRole("button", { name: "Send message" }));
     await waitFor(() => {
-      const btn = screen.getByRole("button", { name: "Sending" });
-      expect((btn as HTMLButtonElement).disabled).toBe(true);
+      const btn = screen.getByRole<HTMLButtonElement>("button", { name: "Sending" });
+      expect(btn.disabled).toBe(true);
     });
 
-    // Second / third click blocked while sending
     const sendingBtn = screen.getByRole("button", { name: "Sending" });
     fireEvent.click(sendingBtn);
     fireEvent.click(sendingBtn);
     expect(onSend).toHaveBeenCalledTimes(1);
 
-    // Resolve the promise → button returns to send state
     deferred.resolve(true);
     await waitFor(() => expect(ta.value).toBe(""));
   });
@@ -628,8 +603,7 @@ describe("Composer input lifecycle", () => {
       .mockResolvedValueOnce(false)
       .mockResolvedValueOnce(true);
     render(<Composer {...baseProps} mode="idle" onSend={onSend} />);
-    // eslint-disable-next-line @typescript-eslint/no-unnecessary-type-assertion
-    const ta = screen.getByTestId("composer-input") as HTMLTextAreaElement;
+    const ta = screen.getByTestId<HTMLTextAreaElement>("composer-input");
     fireEvent.change(ta, { target: { value: "uncertain delivery" } });
 
     fireEvent.click(screen.getByRole("button", { name: "Send message" }));
@@ -854,8 +828,7 @@ describe("Composer input lifecycle", () => {
       .fn<(content: string, imageUrls: string[], clientMessageId: string) => Promise<boolean>>()
       .mockResolvedValue(false);
     render(<Composer {...baseProps} mode="idle" onSend={onSend} />);
-    // eslint-disable-next-line @typescript-eslint/no-unnecessary-type-assertion
-    const ta = screen.getByTestId("composer-input") as HTMLTextAreaElement;
+    const ta = screen.getByTestId<HTMLTextAreaElement>("composer-input");
     fireEvent.change(ta, { target: { value: "first draft" } });
     fireEvent.click(screen.getByRole("button", { name: "Send message" }));
     await waitFor(() => expect(onSend).toHaveBeenCalledTimes(1));
@@ -870,11 +843,9 @@ describe("Composer input lifecycle", () => {
   it("whitespace-only input → does not trigger onSend (button also disabled)", async () => {
     const onSend = vi.fn(() => Promise.resolve(true));
     render(<Composer {...baseProps} mode="idle" onSend={onSend} />);
-    // eslint-disable-next-line @typescript-eslint/no-unnecessary-type-assertion -- RTL getByRole returns HTMLElement; narrowing to access .value / .disabled
-    const ta = screen.getByTestId("composer-input") as HTMLTextAreaElement;
+    const ta = screen.getByTestId<HTMLTextAreaElement>("composer-input");
     fireEvent.change(ta, { target: { value: "   \n  " } });
-    // eslint-disable-next-line @typescript-eslint/no-unnecessary-type-assertion -- RTL getByRole returns HTMLElement; narrowing needed for .disabled
-    expect((screen.getByRole("button") as HTMLButtonElement).disabled).toBe(true);
+    expect((screen.getByRole<HTMLButtonElement>("button")).disabled).toBe(true);
     fireEvent.keyDown(ta, { key: "Enter" });
     await Promise.resolve();
     expect(onSend).not.toHaveBeenCalled();
@@ -884,15 +855,12 @@ describe("Composer input lifecycle", () => {
 describe("Composer token display", () => {
   it("contextTokens=0 shows invisible spacer (no layout jump)", () => {
     render(<Composer {...baseProps} mode="idle" contextTokens={0} />);
-    // The spacer text " " is rendered when contextTokens=0
     const span = screen.getByTestId("composer-meta");
     expect(span.textContent).toBe(" ");
   });
 
   it("shows the loading ghost while the token snapshot is pending (cold switch)", () => {
     renderComposer(<Composer {...baseProps} mode="idle" contextTokens={0} contextPending />);
-    // Same slot as the meter: the ghost stands in for the gauge while the
-    // first snapshot is in flight; no button (nothing to expand yet).
     expect(screen.getByTestId("context-meter-ghost")).toBeTruthy();
     expect(screen.queryByTestId("context-meter-button")).toBeNull();
     expect(screen.getByTestId("composer-meta").textContent).toBe("");
@@ -936,19 +904,13 @@ describe("Composer context breakdown panel", () => {
     );
     fireEvent.click(screen.getByTestId("context-meter-button"));
     const panel = await screen.findByTestId("context-breakdown-panel");
-    // Anchored expansion, not a modal: absolutely positioned, growing upward
-    // from the meta row (bottom-full) — the space below (the input) is never
-    // covered, and no dialog role locks the page.
     expect(panel.className).toContain("absolute");
     expect(panel.className).toContain("bottom-full");
     expect(screen.queryByRole("dialog")).toBeNull();
-    // The composer input stays in the DOM, enabled, and editable while open.
-    // eslint-disable-next-line @typescript-eslint/no-unnecessary-type-assertion -- RTL getByTestId returns HTMLElement; narrowing to access .value / .disabled
-    const ta = screen.getByTestId("composer-input") as HTMLTextAreaElement;
+    const ta = screen.getByTestId<HTMLTextAreaElement>("composer-input");
     expect(ta.disabled).toBe(false);
     fireEvent.change(ta, { target: { value: "still typing" } });
     expect(ta.value).toBe("still typing");
-    // Collapse via the panel's close button — panel unmounts, input untouched.
     fireEvent.click(screen.getByTestId("context-breakdown-close"));
     expect(screen.queryByTestId("context-breakdown-panel")).toBeNull();
     expect(ta.value).toBe("still typing");
@@ -967,15 +929,12 @@ describe("Composer context breakdown panel", () => {
         agentId={7}
       />,
     );
-    // Open the panel, then start typing a slash command: the dropdown opening
-    // must close the panel (both are absolute z-50 layers over the same spot).
     fireEvent.click(screen.getByTestId("context-meter-button"));
     await screen.findByTestId("context-breakdown-panel");
     const ta = screen.getByTestId("composer-input");
     fireEvent.change(ta, { target: { value: "/rec" } });
     await screen.findByTestId("slash-autocomplete");
     expect(screen.queryByTestId("context-breakdown-panel")).toBeNull();
-    // And the reverse: expanding the panel dismisses the open dropdown.
     fireEvent.click(screen.getByTestId("context-meter-button"));
     await screen.findByTestId("context-breakdown-panel");
     expect(screen.queryByTestId("slash-autocomplete")).toBeNull();
@@ -1091,23 +1050,17 @@ describe("Composer slash commands", () => {
   const recap = { name: "recap", description: "recap it", instruction_hint: "a focus" };
 
   const input = () =>
-    // eslint-disable-next-line @typescript-eslint/no-unnecessary-type-assertion -- RTL getByTestId returns HTMLElement; narrowing to drive .value / selection
-    screen.getByTestId("composer-input") as HTMLTextAreaElement;
+    screen.getByTestId<HTMLTextAreaElement>("composer-input");
 
-  /** Move the caret without touching the text, the way an arrow key does. */
   function moveCaret(ta: HTMLTextAreaElement, pos: number) {
     ta.setSelectionRange(pos, pos);
     fireEvent.keyUp(ta, { key: "ArrowLeft" });
   }
 
-  /** Put `marked` in the composer with the caret where "|" is (default: the
-   *  end, which is where the browser leaves it after a change). The dropdown
-   *  and the hint are caret-scoped, so the caret has to be driven as
-   *  deliberately as the text. */
   function typeInto(ta: HTMLTextAreaElement, marked: string) {
     const caret = marked.indexOf("|");
     const value = marked.replace("|", "");
-    fireEvent.change(ta, { target: { value } }); // leaves the caret at the end
+    fireEvent.change(ta, { target: { value } });
     if (caret >= 0 && caret !== value.length) moveCaret(ta, caret);
   }
 
@@ -1226,10 +1179,8 @@ describe("Composer slash commands", () => {
     expect(sel()).toBe("beta");
     fireEvent.keyDown(ta, { key: "ArrowUp" });
     expect(sel()).toBe("alpha");
-    // Up from the first wraps to the last.
     fireEvent.keyDown(ta, { key: "ArrowUp" });
     expect(sel()).toBe("gamma");
-    // Down from the last wraps back to the first.
     fireEvent.keyDown(ta, { key: "ArrowDown" });
     expect(sel()).toBe("alpha");
   });
@@ -1238,45 +1189,36 @@ describe("Composer slash commands", () => {
     commandList = abc;
     const onSend = vi.fn(() => Promise.resolve(true));
     render(<Composer {...baseProps} mode="idle" onSend={onSend} />);
-    // eslint-disable-next-line @typescript-eslint/no-unnecessary-type-assertion -- narrowing to read .value
-    const ta = screen.getByTestId("composer-input") as HTMLTextAreaElement;
+    const ta = screen.getByTestId<HTMLTextAreaElement>("composer-input");
     fireEvent.change(ta, { target: { value: "/" } });
     await screen.findByTestId("slash-option-alpha");
-    fireEvent.keyDown(ta, { key: "ArrowDown" }); // highlight beta
+    fireEvent.keyDown(ta, { key: "ArrowDown" });
     fireEvent.keyDown(ta, { key: "Tab" });
     expect(ta.value).toBe("/beta ");
     expect(onSend).not.toHaveBeenCalled();
-    // Caret lands at the end so the user types the instruction right after the
-    // space (the whole point of the caretToEnd effect).
     expect(ta.selectionStart).toBe(ta.value.length);
     expect(ta.selectionEnd).toBe(ta.value.length);
   });
 
   it("once the name is committed, the command's instruction_hint shows in the meta row", async () => {
-    commandList = [recap]; // instruction_hint: "a focus"
+    commandList = [recap];
     render(<Composer {...baseProps} mode="idle" />);
     const ta = screen.getByTestId("composer-input");
     const meta = () => screen.getByTestId("composer-meta").textContent;
-    // Not in instruction mode yet (no whitespace) — meta row shows the spacer,
-    // not the hint (the dropdown renders its own copy, hence the testid scope).
     fireEvent.change(ta, { target: { value: "/recap" } });
     await screen.findByTestId("slash-option-recap");
     expect(meta()).toBe(" ");
-    // Whitespace commits the name → hint appears in the meta row (hand-typed too).
     fireEvent.change(ta, { target: { value: "/recap " } });
     await waitFor(() => expect(meta()).toBe("a focus"));
   });
 
   it("no hint row for an unknown command or a command with an empty hint — falls back to context", async () => {
-    commandList = abc; // alpha/beta/gamma all have instruction_hint: ""
+    commandList = abc;
     const meta = () => screen.getByTestId("composer-meta").textContent;
-    // contextTokens > 0 so the fallback is distinguishable from the spacer.
     renderComposer(<Composer {...baseProps} mode="idle" contextTokens={500} />);
     const ta = screen.getByTestId("composer-input");
-    // Known command, but empty instruction_hint → no hint, show the context readout.
     fireEvent.change(ta, { target: { value: "/alpha " } });
     await waitFor(() => expect(meta()).toBe("Context: 500 tokens"));
-    // Unknown command → same fallback, no stray hint.
     fireEvent.change(ta, { target: { value: "/zzz " } });
     expect(meta()).toBe("Context: 500 tokens");
   });
@@ -1285,15 +1227,12 @@ describe("Composer slash commands", () => {
     commandList = [recap];
     const onSend = vi.fn(() => Promise.resolve(true));
     render(<Composer {...baseProps} mode="idle" onSend={onSend} />);
-    // eslint-disable-next-line @typescript-eslint/no-unnecessary-type-assertion -- narrowing to read .value
-    const ta = screen.getByTestId("composer-input") as HTMLTextAreaElement;
+    const ta = screen.getByTestId<HTMLTextAreaElement>("composer-input");
     fireEvent.change(ta, { target: { value: "/rec" } });
     await screen.findByTestId("slash-option-recap");
     fireEvent.keyDown(ta, { key: "Enter" });
     expect(ta.value).toBe("/recap ");
     expect(onSend).not.toHaveBeenCalled();
-    // Dropdown closes once whitespace follows the command name — the user
-    // is now typing the instruction. The meta row shows the command's hint.
     expect(screen.queryByTestId("slash-option-recap")).toBeNull();
   });
 
@@ -1301,13 +1240,11 @@ describe("Composer slash commands", () => {
     commandList = [recap];
     const onSend = vi.fn(() => Promise.resolve(true));
     render(<Composer {...baseProps} mode="idle" onSend={onSend} />);
-    // eslint-disable-next-line @typescript-eslint/no-unnecessary-type-assertion -- narrowing to read .value
-    const ta = screen.getByTestId("composer-input") as HTMLTextAreaElement;
+    const ta = screen.getByTestId<HTMLTextAreaElement>("composer-input");
     fireEvent.change(ta, { target: { value: "/rec" } });
     await screen.findByTestId("slash-option-recap");
     fireEvent.keyDown(ta, { key: "Enter" });
     expect(ta.value).toBe("/recap ");
-    // User types the natural-language instruction after the name, then sends.
     fireEvent.change(ta, { target: { value: "/recap just the PRs" } });
     fireEvent.keyDown(ta, { key: "Enter" });
     await waitFor(() =>
@@ -1321,10 +1258,7 @@ describe("Composer slash commands", () => {
     render(<Composer {...baseProps} mode="idle" onSend={onSend} />);
     const ta = screen.getByTestId("composer-input");
     fireEvent.change(ta, { target: { value: "/recap just the PRs" } });
-    // Dropdown is closed because whitespace follows the command name —
-    // the user is typing the instruction, not the command name.
     expect(screen.queryByTestId("slash-option-recap")).toBeNull();
-    // Enter sends the raw text, not re-selects a command.
     fireEvent.keyDown(ta, { key: "Enter" });
     await waitFor(() =>
       expect(onSend).toHaveBeenCalledWith("/recap just the PRs", [], expect.any(String)),
@@ -1335,8 +1269,7 @@ describe("Composer slash commands", () => {
     commandList = [recap];
     const onSend = vi.fn(() => Promise.resolve(true));
     render(<Composer {...baseProps} mode="idle" onSend={onSend} />);
-    // eslint-disable-next-line @typescript-eslint/no-unnecessary-type-assertion -- narrowing to read .value
-    const ta = screen.getByTestId("composer-input") as HTMLTextAreaElement;
+    const ta = screen.getByTestId<HTMLTextAreaElement>("composer-input");
     fireEvent.change(ta, { target: { value: "/" } });
     const option = await screen.findByTestId("slash-option-recap");
     fireEvent.mouseDown(option);
@@ -1373,11 +1306,6 @@ describe("Composer slash commands", () => {
     );
   });
 
-  // ── Multi-command messages (#836) ──
-  // Only the message's FIRST token can be a command: the autocomplete never
-  // triggers on a later slash, so a multi-command text passes through to
-  // onSend unchanged as plain text.
-
   const compact = { name: "compact", description: "compact context", instruction_hint: "an instruction hint" };
 
   it("sends raw multi-command text through to onSend", async () => {
@@ -1386,10 +1314,8 @@ describe("Composer slash commands", () => {
     render(<Composer {...baseProps} mode="idle" onSend={onSend} />);
     const ta = input();
     typeInto(ta, "/compact /update");
-    // No dropdown: the caret's token is "/update", which matches no command.
     await Promise.resolve();
     expect(screen.queryByTestId("slash-option-compact")).toBeNull();
-    // Enter sends the raw text as-is
     fireEvent.keyDown(ta, { key: "Enter" });
     await waitFor(() =>
       expect(onSend).toHaveBeenCalledWith("/compact /update", [], expect.any(String)),
@@ -1402,8 +1328,6 @@ describe("Composer slash commands", () => {
     render(<Composer {...baseProps} mode="idle" onSend={onSend} />);
     const ta = input();
     typeInto(ta, "hello /compact");
-    // The trailing slash is NOT the first token — no dropdown, even though
-    // "/compact" is a known command.
     await Promise.resolve();
     expect(screen.queryByTestId("slash-option-compact")).toBeNull();
     fireEvent.keyDown(ta, { key: "Enter" });
@@ -1417,15 +1341,10 @@ describe("Composer slash commands", () => {
     render(<Composer {...baseProps} mode="idle" />);
     const ta = input();
     const meta = () => screen.getByTestId("composer-meta").textContent;
-    // Caret in /compact's instruction → compact's hint.
     typeInto(ta, "/compact ping /recap the PRs");
     await waitFor(() => expect(meta()).toBe("an instruction hint"));
-    // Caret further in the text (past a later slash) → still compact's hint:
-    // the hint only ever follows the leading command now (#836).
     moveCaret(ta, "/compact ping /recap the".length);
     await waitFor(() => expect(meta()).toBe("an instruction hint"));
-    // Caret inside the leading name: the dropdown is up and renders the hint
-    // itself, so the meta row stays out of the way.
     moveCaret(ta, "/compact".length);
     await waitFor(() => expect(meta()).toBe(" "));
   });
@@ -1437,11 +1356,6 @@ describe("Composer slash commands", () => {
     typeInto(input(), "heads up /compact ping");
     await waitFor(() => expect(meta()).toBe(" "));
   });
-
-  // ── Caret-scoped dropdown (#1172) ──
-  // Every token is served alike: a later command on the line, a command typed
-  // into the middle of a message, one wedged in front of existing text. The old
-  // state machine anchored on the start of the value and refused all three.
 
   it("a later command in the message gets no dropdown (#836)", async () => {
     commandList = [recap, compact];
@@ -1462,8 +1376,6 @@ describe("Composer slash commands", () => {
   it("a command typed in front of existing text gets a dropdown", async () => {
     commandList = [recap];
     render(<Composer {...baseProps} mode="idle" />);
-    // Caret sent home, a space typed, then the name: the value neither starts
-    // with "/" nor is whitespace-free — the two conditions that used to kill it.
     typeInto(input(), " /rec| the PRs are piling up");
     expect(await screen.findByTestId("slash-option-recap")).toBeTruthy();
   });
@@ -1490,7 +1402,6 @@ describe("Composer slash commands", () => {
     await screen.findByTestId("slash-option-recap");
     fireEvent.keyDown(ta, { key: "Enter" });
     expect(ta.value).toBe(" /recap the PRs");
-    // Caret past that single (not doubled) space — where the instruction goes.
     expect(ta.selectionStart).toBe(" /recap ".length);
   });
 
@@ -1498,12 +1409,9 @@ describe("Composer slash commands", () => {
     commandList = [recap];
     render(<Composer {...baseProps} mode="idle" />);
     const ta = input();
-    // Trailing space already typed, caret sent back into the name.
     typeInto(ta, "/recap| ");
     await screen.findByTestId("slash-option-recap");
     fireEvent.keyDown(ta, { key: "Enter" });
-    // The text can't change, so only the caret commit closes the dropdown —
-    // and it has to reach the DOM, not just the component's state.
     expect(ta.value).toBe("/recap ");
     expect(ta.selectionStart).toBe("/recap ".length);
     await waitFor(() => expect(screen.queryByTestId("slash-option-recap")).toBeNull());
@@ -1525,8 +1433,6 @@ describe("Composer slash commands", () => {
 });
 
 describe("Composer image attachments", () => {
-  // happy-dom lacks object-url plumbing; stub it for the preview lifecycle
-  // (defineProperty avoids the unbound-method lint of a bare method read).
   beforeEach(() => {
     Object.defineProperty(URL, "createObjectURL", {
       configurable: true,
@@ -1609,8 +1515,7 @@ describe("Composer image attachments", () => {
     fireEvent.change(ta, { target: { value: "hi" } });
     fireEvent.paste(ta, { clipboardData: { files: [imageFile()], types: ["Files"] } });
     await waitFor(() => expect(onAttachImage).toHaveBeenCalled());
-    // eslint-disable-next-line @typescript-eslint/no-unnecessary-type-assertion -- narrow to read .disabled
-    const btn = screen.getByRole("button", { name: "Send message" }) as HTMLButtonElement;
+    const btn = screen.getByRole<HTMLButtonElement>("button", { name: "Send message" });
     expect(btn.disabled).toBe(true);
     resolve("/api/agents/7/uploads/shot.png");
     await waitFor(() => expect(btn.disabled).toBe(false));
@@ -1634,10 +1539,6 @@ describe("Composer image attachments", () => {
   });
 });
 
-// ── sessionStorage draft persistence ──
-// When switching between agents via the sidebar, the Composer should preserve
-// the draft text per agent so the user doesn't lose what they typed.
-
 describe("Composer sessionStorage draft persistence", () => {
   beforeEach(() => {
     sessionStorage.clear();
@@ -1647,14 +1548,12 @@ describe("Composer sessionStorage draft persistence", () => {
 
   it("restores the draft from sessionStorage on mount", () => {
     sessionStorage.setItem(draftKey(7), "hello agent 7");
-    // eslint-disable-next-line @typescript-eslint/no-unnecessary-type-assertion
-    const ta = renderComposerAgent(7) as HTMLTextAreaElement;
+    const ta = renderComposerAgent(7);
     expect(ta.value).toBe("hello agent 7");
   });
 
   it("starts empty when no draft exists in sessionStorage", () => {
-    // eslint-disable-next-line @typescript-eslint/no-unnecessary-type-assertion
-    const ta = renderComposerAgent(7) as HTMLTextAreaElement;
+    const ta = renderComposerAgent(7);
     expect(ta.value).toBe("");
   });
 
@@ -1694,12 +1593,10 @@ describe("Composer sessionStorage draft persistence", () => {
     fireEvent.keyDown(ta, { key: "Enter" });
     await waitFor(() => expect(onSend).toHaveBeenCalled());
     await waitFor(() => expect(clearMessageSent).toHaveBeenCalledWith(7));
-    // Draft survives a failed send.
     expect(sessionStorage.getItem(draftKey(7))).toBe("failed send");
   });
 
   it("switches draft when agentId prop changes", () => {
-    // Start with agent 7, type some text.
     const { rerender } = render(
       <Composer {...baseProps} mode="idle" agentId={7} />,
     );
@@ -1707,15 +1604,11 @@ describe("Composer sessionStorage draft persistence", () => {
     fireEvent.change(ta, { target: { value: "for agent 7" } });
     expect(sessionStorage.getItem(draftKey(7))).toBe("for agent 7");
 
-    // Pre-seed a draft for agent 9.
     sessionStorage.setItem(draftKey(9), "for agent 9");
 
-    // Switch to agent 9.
     rerender(<Composer {...baseProps} mode="idle" agentId={9} />);
-    // The old agent's draft stays saved.
     expect(sessionStorage.getItem(draftKey(7))).toBe("for agent 7");
-    // eslint-disable-next-line @typescript-eslint/no-unnecessary-type-assertion
-    expect((screen.getByTestId("composer-input") as HTMLTextAreaElement).value).toBe(
+    expect((screen.getByTestId<HTMLTextAreaElement>("composer-input")).value).toBe(
       "for agent 9",
     );
   });
@@ -1723,10 +1616,7 @@ describe("Composer sessionStorage draft persistence", () => {
   it("does not write to sessionStorage when agentId is null", () => {
     render(<Composer {...baseProps} mode="disabled" agentId={null} />);
     const ta = screen.getByTestId("composer-input");
-    // Composer is disabled with no agent, but the textarea still receives
-    // change events in tests — verify no draft is written.
     fireEvent.change(ta, { target: { value: "no agent" } });
-    // There should be no draft key for any agent.
     for (let i = 0; i < 100; i++) {
       expect(sessionStorage.getItem(draftKey(i))).toBeNull();
     }
@@ -1740,13 +1630,10 @@ describe("Composer sessionStorage draft persistence", () => {
     fireEvent.change(ta, { target: { value: "text for 7" } });
     expect(sessionStorage.getItem(draftKey(7))).toBe("text for 7");
 
-    // Switch to agent 9 with no pre-existing draft.
     sessionStorage.removeItem(draftKey(9));
     rerender(<Composer {...baseProps} mode="idle" agentId={9} />);
-    // eslint-disable-next-line @typescript-eslint/no-unnecessary-type-assertion
-    expect((screen.getByTestId("composer-input") as HTMLTextAreaElement).value).toBe("");
+    expect((screen.getByTestId<HTMLTextAreaElement>("composer-input")).value).toBe("");
 
-    // The old draft for agent 7 is still there.
     expect(sessionStorage.getItem(draftKey(7))).toBe("text for 7");
   });
 });
@@ -1757,7 +1644,6 @@ describe("Composer top-right details slot", () => {
       <Composer {...baseProps} mode="idle" details={<button type="button">DETAILS</button>} />,
     );
     expect(screen.getByRole("button", { name: "DETAILS" })).toBeTruthy();
-    // The selector sits in the meta row, right-aligned (ml-auto cluster).
     const metaRow = screen.getByTestId("composer-meta").closest("div");
     const cluster = screen.getByRole("button", { name: "DETAILS" }).parentElement!;
     expect(cluster.className).toContain("ml-auto");
