@@ -58,17 +58,23 @@ spelling (the same rule as the `# Capabilities` index); `*` stays `*`.
 2026-09-18 field order, Task #3952 / #3904). Cells in display order: agent birth
 — `spawned_at` (the true birth, written once at spawn), rendered as
 "relative, absolute" on a single line (user ruling 2026-08-24) and deliberately
-not `started_at`, which refreshes on every restart; next heartbeat — a pause
-renders its clock time, a queued check-in renders "pending" (the daemon will not
-send another while an inbound is pending), a running or terminated agent an em
-dash, and a projected time already in the past renders "due" (a past "*next*"
-time must never read "Xm ago"); last pause (relative time · duration, or "never
-paused"); then machine and lifecycle status. The status cell reuses the fleet's
-active-lease projection so an impersonated agent reads "Impersonated" while its
-native lifecycle stays idling; a terminated panel keeps "Terminated" even if a
-stale roster card is cached. The gateway's derived liveness state colors the
-heart icon when offline. The "every N" interval badge, the old "Last judged"
-cell and all observation details stay omitted.
+not `started_at`, which refreshes on every restart; next heartbeat — both
+projected instants (the end of an active pause and the check-in time) render
+through `formatUpcoming`, so the day boundary is part of the value: clock time
+later today, `Tomorrow 3:21 PM` across local midnight, a weekday name two to six
+days out, a date countdown from seven days, and a plain date from a month on. A
+bare clock time is never shown for a future day — `3:21 PM` read at 4:26 PM
+looks like a time that already passed (user report 2026-10-17). A queued
+check-in renders "pending" (the daemon will not send another while an inbound is
+pending), a running or terminated agent an em dash, and a projected time already
+in the past renders "due" (a past "*next*" time must never read "Xm ago"); last
+pause (relative time · duration, or "never paused"); then machine and lifecycle
+status. The status cell reuses the fleet's active-lease projection so an
+impersonated agent reads "Impersonated" while its native lifecycle stays idling;
+a terminated panel keeps "Terminated" even if a stale roster card is cached. The
+gateway's derived liveness state colors the heart icon when offline. The "every
+N" interval badge, the old "Last judged" cell and all observation details stay
+omitted.
 
 **Notice** renders the agent's single open notice at the bottom as the
 interactive reply surface (a `require_response` notice gets a reply box +
@@ -91,7 +97,9 @@ the background log and alert episodes instead of the UI (user ruling 2026-09-17,
 task #3869); unavailable metrics never become zero cost, zero throughput or a
 verdict, and the fleet Alerts block is not part of the inspector (user ruling
 2026-08-29). Formatting helpers are shared (`formatTokens`, `formatRelative` /
-`formatAbsolute` / `formatShort` / `formatUptime`), so tests assert against the
-shared helper's own output rather than re-deriving it.
+`formatAbsolute` / `formatShort` / `formatUpcoming` / `formatUptime`), so tests
+assert against the shared helper's own output rather than re-deriving it. The
+day-context table this section quotes is owned by
+[[ui/web/src/lib/format/docs/time.meiva.okf.md|Timestamp display]].
 
 Parent: [[ui/web/src/docs/frontend-components/inspector/inspector.meiva.okf.md]].
