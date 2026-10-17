@@ -12,6 +12,7 @@ from typing import Any
 from base.host.net.resilience import retry
 from base.lm.call import answer_text
 from base.lm.effort import ReasoningEffort
+from meiva.web import deepseek
 from meiva.web.deps import FetchDeps
 from meiva.web.errors import FetchError
 from meiva.web.policy import WEB_READ_POLICY
@@ -186,6 +187,13 @@ def _answer(
     )
 
 
+def read_page(url: str, max_chars: int, deps: FetchDeps) -> tuple[str, str, str, bool]:
+    # meiva:ref meiva/web/docs/providers.meiva.okf.md#web-provider-selection
+    if deps.reader == "jina":
+        return _read_page(url, max_chars, deps)
+    return deepseek.read_page(url, max_chars, deps)
+
+
 def fetch_one(
     url: str, prompt: str, max_chars: int, effort: str | ReasoningEffort | None, deps: FetchDeps
 ) -> str:
@@ -196,7 +204,7 @@ def fetch_one(
     judges the page text itself, which the scan of the summary never sees; it
     needs only the page, so it runs beside `_answer`.
     """
-    title, page_url, content, truncated = _read_page(url, max_chars, deps)
+    title, page_url, content, truncated = read_page(url, max_chars, deps)
     finish_check = deps.begin_check(url, title, content)
     try:
         answer = _answer(
