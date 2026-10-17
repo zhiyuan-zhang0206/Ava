@@ -6,7 +6,7 @@ from collections.abc import Callable
 
 from base.telemetry.delivery.pipeline import EventPipeline
 from base.telemetry.delivery.receipts import DrainResult, DrainStatus, Event
-from base.telemetry.otlp.telemetry_otlp import OtlpBackend
+from base.telemetry.otlp.telemetry_otlp import OtlpBackend, remaining_time
 
 __all__ = ["ExportingEventPipeline"]
 
@@ -34,10 +34,10 @@ class ExportingEventPipeline(EventPipeline):
         if not math.isfinite(timeout) or timeout < 0:
             raise ValueError("event drain timeout must be finite and non-negative")
         deadline = time.monotonic() + timeout
-        result = super().stop(max(0.0, deadline - time.monotonic()))
+        result = super().stop(remaining_time(deadline, time.monotonic()))
         if result.status is DrainStatus.UNFINISHED:
             return result
-        result = self._exporter.shutdown(timeout=max(0.0, deadline - time.monotonic()))
+        result = self._exporter.shutdown(timeout=remaining_time(deadline, time.monotonic()))
         self._exports_finished = result.status is DrainStatus.COMPLETED
         return result
 
