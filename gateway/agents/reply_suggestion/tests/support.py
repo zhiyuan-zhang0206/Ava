@@ -52,6 +52,7 @@ class Settings:
         self.gate_model = "jev-1.13.0"
         self.threshold = 0.5
         self.max_input_tokens = 1500
+        self.max_candidates = 3
 
     def policy(self) -> ReplySuggestionPolicy:
         return ReplySuggestionPolicy(
@@ -60,6 +61,7 @@ class Settings:
             gate_model=lambda: self.gate_model,
             gate_threshold=lambda: self.threshold,
             max_input_tokens=lambda: self.max_input_tokens,
+            max_candidates=lambda: self.max_candidates,
         )
 
 
