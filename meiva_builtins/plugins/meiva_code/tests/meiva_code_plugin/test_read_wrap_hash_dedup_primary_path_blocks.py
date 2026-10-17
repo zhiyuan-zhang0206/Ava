@@ -291,6 +291,62 @@ async def test_after_init_rehomes_when_inherited_cwd_is_inside_another_agents_wo
     assert result == {"meiva_code__cwd": str(unit_home / "workspaces" / "6720")}
 
 
+async def test_after_init_keeps_the_workspaces_root_itself(unit_home: Path):
+    from meiva_builtins.plugins.meiva_code.agent_runtime import ValidateCwdAfterInitHook
+
+    root = unit_home / "workspaces"
+    root.mkdir(parents=True)
+
+    result = await ValidateCwdAfterInitHook()(
+        make_state_with_cwd(str(root)), _cwd_runtime(6720), None
+    )
+
+    assert result is None
+
+
+async def test_after_init_keeps_a_non_numeric_directory_under_workspaces(unit_home: Path):
+    from meiva_builtins.plugins.meiva_code.agent_runtime import ValidateCwdAfterInitHook
+
+    shared = unit_home / "workspaces" / "shared"
+    shared.mkdir(parents=True)
+
+    result = await ValidateCwdAfterInitHook()(
+        make_state_with_cwd(str(shared)), _cwd_runtime(6720), None
+    )
+
+    assert result is None
+
+
+async def test_after_init_keeps_a_digit_lookalike_directory(unit_home: Path):
+    from meiva_builtins.plugins.meiva_code.agent_runtime import ValidateCwdAfterInitHook
+
+    lookalike = unit_home / "workspaces" / "2697abc"
+    lookalike.mkdir(parents=True)
+
+    result = await ValidateCwdAfterInitHook()(
+        make_state_with_cwd(str(lookalike)), _cwd_runtime(6720), None
+    )
+
+    assert result is None
+
+
+async def test_after_init_rehomes_through_a_symlink_into_another_agents_workspace(
+    unit_home: Path, tmp_path: Path
+):
+    from meiva_builtins.plugins.meiva_code.agent_runtime import ValidateCwdAfterInitHook
+
+    source_workspace = unit_home / "workspaces" / "2697"
+    source_workspace.mkdir(parents=True)
+    link = tmp_path / "shortcut"
+    link.symlink_to(source_workspace, target_is_directory=True)
+
+    result = await ValidateCwdAfterInitHook()(
+        make_state_with_cwd(str(link)), _cwd_runtime(6720), None
+    )
+
+    assert result == {"meiva_code__cwd": str(unit_home / "workspaces" / "6720")}
+
+
 async def test_after_init_keeps_an_inherited_project_cwd(tmp_path: Path):
     from meiva_builtins.plugins.meiva_code.agent_runtime import ValidateCwdAfterInitHook
 

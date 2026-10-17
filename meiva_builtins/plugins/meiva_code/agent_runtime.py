@@ -12,7 +12,7 @@ from agent.state import AgentState, PluginStateHandle
 from base.agents.context import MeivaContext
 from base.log import logger
 from base.packages.plugins.extensions import PluginContributions
-from base.paths import workspace_dir, workspace_dir_readonly
+from base.paths import workspace_dir, workspaces_root
 
 from ._prompt_sections import coding_tools_section, engineering_workflow_section
 from ._state import MeivaCodeState
@@ -78,7 +78,7 @@ def _logical_cwd_error(cwd: Path) -> OSError | None:
 
 
 def _foreign_workspace(cwd: Path, agent_id: int) -> str | None:
-    root = workspace_dir_readonly(agent_id).parent
+    root = workspaces_root()
     try:
         relative = cwd.resolve().relative_to(root.resolve())
     except ValueError:
