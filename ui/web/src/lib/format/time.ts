@@ -169,10 +169,13 @@ function dayOrdinal({ year, month, day }: LocalDateFields): number {
   return Math.round(Date.UTC(year, month - 1, day) / MS_PER_DAY);
 }
 
+export function normalizeDayPeriodSpace(value: string): string {
+  return value.replace(/[\u202f\u00a0]/g, " ");
+}
+
 function clockLabel(d: Date, timeZone?: string): string {
-  return intlPart(d, timeZone, { hour: "numeric", minute: "2-digit", hour12: true }).replace(
-    /[\u202f\u00a0]/g,
-    " ",
+  return normalizeDayPeriodSpace(
+    intlPart(d, timeZone, { hour: "numeric", minute: "2-digit", hour12: true }),
   );
 }
 

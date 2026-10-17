@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { formatUpcoming } from "./time";
+import { formatUpcoming, normalizeDayPeriodSpace } from "./time";
 
 const SHANGHAI = "Asia/Shanghai";
 const NEW_YORK = "America/New_York";
@@ -94,14 +94,18 @@ describe("formatUpcoming input handling", () => {
     expect(formatUpcoming(target, now, { timeZone: SHANGHAI })).toBe("8:15 AM");
   });
 
-  it("renders the day period with a plain space, never ICU's narrow no-break space", () => {
-    const rendered = [
-      upcoming("2026-10-17T17:30:00+08:00"),
-      upcoming("2026-10-18T15:21:00+08:00"),
-      upcoming("2026-10-20T09:05:00+08:00"),
-    ];
-    expect(rendered.some((value) => value.includes("\u202f") || value.includes("\u00a0"))).toBe(
-      false,
-    );
+});
+
+describe("normalizeDayPeriodSpace", () => {
+  it("turns ICU's narrow no-break space into a plain space", () => {
+    expect(normalizeDayPeriodSpace("3:21\u202fPM")).toBe("3:21 PM");
+  });
+
+  it("turns a no-break space into a plain space", () => {
+    expect(normalizeDayPeriodSpace("3:21\u00a0PM")).toBe("3:21 PM");
+  });
+
+  it("leaves an already-plain clock unchanged", () => {
+    expect(normalizeDayPeriodSpace("3:21 PM")).toBe("3:21 PM");
   });
 });
