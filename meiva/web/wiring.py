@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from functools import partial
+from typing import cast
 
 from base.config.service_read import ConfigAuthority
 from base.host.env.agent_slices import ModelOverrides
@@ -13,7 +14,18 @@ from base.lm.catalog import ModelCatalog
 from meiva.sdk_surface import settings as sdk_settings
 from meiva.sdk_surface.injection_check import begin_check
 from meiva.security import finding_delivery_active, record_model_finding, scan_content
-from meiva.web.deps import BraveConfig, FetchDeps, FetchModel, JinaConfig, SearchDeps
+from meiva.web.deepseek import RateLimiter
+from meiva.web.deps import (
+    BraveConfig,
+    DeepSeekFetchConfig,
+    DeepSeekSearchConfig,
+    FetchDeps,
+    FetchModel,
+    JinaConfig,
+    ReaderProvider,
+    SearchDeps,
+    SearchProvider,
+)
 from meiva.web.errors import FetchError
 
 __all__ = ["fetch_deps", "fetch_deps_for", "search_deps", "search_deps_for"]
@@ -24,12 +36,21 @@ def search_deps() -> SearchDeps:
 
 
 def search_deps_for(authority: ConfigAuthority) -> SearchDeps:
+    timeout_s = authority.service_field_value("web_search_timeout_seconds")
     return SearchDeps(
+        provider=cast(SearchProvider, authority.service_field_value("web_search_provider")),
         brave=BraveConfig(
             api_key=authority.service_field_value("brave_api_key"),
             endpoint=authority.service_field_value("web_brave_search_endpoint"),
-            timeout_s=authority.service_field_value("web_search_timeout_seconds"),
+            timeout_s=timeout_s,
             max_count=authority.service_field_value("web_max_search_results"),
+        ),
+        deepseek=DeepSeekSearchConfig(
+            api_key=authority.service_field_value("deepseek_api_key"),
+            endpoint=authority.service_field_value("web_deepseek_search_endpoint"),
+            timeout_s=timeout_s,
+            max_count=authority.service_field_value("web_deepseek_max_results"),
+            pacer=RateLimiter(authority.service_field_value("web_deepseek_qps")),
         ),
         open_url=SYSTEM_URL_OPENER,
         scan=_scan,
@@ -55,11 +76,19 @@ def fetch_deps_for(
     catalog: ModelCatalog,
     overrides: ModelOverrides,
 ) -> FetchDeps:
+    fetch_timeout_s = authority.service_field_value("web_fetch_timeout_seconds")
     return FetchDeps(
+        reader=cast(ReaderProvider, authority.service_field_value("web_fetch_reader")),
         jina=JinaConfig(
             api_key=authority.service_field_value("jina_api_key"),
             reader_base=authority.service_field_value("web_jina_reader_base"),
-            timeout_s=authority.service_field_value("web_fetch_timeout_seconds"),
+            timeout_s=fetch_timeout_s,
+        ),
+        deepseek=DeepSeekFetchConfig(
+            api_key=authority.service_field_value("deepseek_api_key"),
+            endpoint=authority.service_field_value("web_deepseek_fetch_endpoint"),
+            timeout_s=fetch_timeout_s,
+            pacer=RateLimiter(authority.service_field_value("web_deepseek_qps")),
         ),
         fetch_model=FetchModel(
             model=authority.service_field_value("web_fetch_model"),
