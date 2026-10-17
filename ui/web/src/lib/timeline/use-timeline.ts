@@ -44,6 +44,19 @@ function startsTurn(event: SystemEvent): boolean {
   );
 }
 
+function hasUnsettledClock(items: readonly BackendTimelineItem[]): boolean {
+  for (const it of items) {
+    if (
+      (it.reasoningStartedAt != null && it.reasoning_ms == null) ||
+      it.codeStartedAt != null ||
+      (it.execStartedAt != null && it.exec_ms == null)
+    ) {
+      return true;
+    }
+  }
+  return false;
+}
+
 /** SSE connection state — UI uses it to show banners ("disconnected /
  *  reconnecting"). Parse failures are signals,
  *  not health-state changes. */
@@ -96,6 +109,7 @@ export interface UseTimelineResult {
 export function useTimeline(
   agentId: number | null,
   showError: (msg: string) => void,
+  agentStatus?: string,
 ): UseTimelineResult {
   const queryClient = useQueryClient();
 
@@ -218,6 +232,11 @@ export function useTimeline(
       if (agentId === null || ev.agent_id !== agentId) return;
       if (ev.role === "impersonation_changed" || ev.role === "inbound_arrived") {
         void queryClient.invalidateQueries({ queryKey: ["timeline", ev.agent_id] });
+      } else if (ev.role === "agent_updated") {
+        const st = useTimelineStore.getState();
+        if (st.turnActive || hasUnsettledClock(st.items)) {
+          void queryClient.invalidateQueries({ queryKey: ["timeline", ev.agent_id] });
+        }
       } else if (ev.role === "compact_done") {
         compactPending.current = true;
         olderRequest.current?.abort();
@@ -443,6 +462,25 @@ export function useTimeline(
     compactEpoch,
     compactTailReady: compactBuffer?.tailReady ?? false,
   });
+
+  const prevAgentRef = useRef<{ id: number | null; status: string | undefined }>({
+    id: agentId,
+    status: agentStatus,
+  });
+  useEffect(function settleOnAgentIdle() {
+    const prev = prevAgentRef.current;
+    prevAgentRef.current = { id: agentId, status: agentStatus };
+    if (agentId === null || agentStatus === undefined || agentStatus === "running") return;
+    if (prev.id === agentId && prev.status === "running") {
+      useTimelineStore.getState().settleTurn();
+      void queryClient.invalidateQueries({ queryKey: ["timeline", agentId] });
+      return;
+    }
+    const st = useTimelineStore.getState();
+    if (!st.turnActive && hasUnsettledClock(st.items)) {
+      st.settleTurn();
+    }
+  }, [agentId, agentStatus, queryClient]);
 
   const selected = activeThreadId === agentId;
   const retained = selected || agentId === null ? undefined : queryClient.getQueryData<ReadingWindow>(["timeline-reading-window", agentId]);

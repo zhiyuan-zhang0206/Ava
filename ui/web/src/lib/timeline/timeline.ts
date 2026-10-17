@@ -9,6 +9,7 @@ import type { BackendTimelineItem } from "../contracts/types";
 export {
   applySystemEvent,
   clearCodeClocks,
+  freezeExecClocks,
   freezeReasoningClocks,
   mergeSnapshotWithStreaming,
   parseItemId,

@@ -292,6 +292,16 @@ export function clearCodeClocks(items: BackendTimelineItem[]): BackendTimelineIt
   });
 }
 
+export function freezeExecClocks(items: BackendTimelineItem[]): BackendTimelineItem[] {
+  return items.map((it) => {
+    if (it.kind === "code_output" && it.execStartedAt != null && it.exec_ms == null) {
+      const { execStartedAt, ...rest } = it;
+      return { ...rest, execElapsedMs: Math.max(Date.now() - execStartedAt, 0) };
+    }
+    return it;
+  });
+}
+
 /** Fold one SystemEvent into the BackendTimelineItem list. Returns a new list (does not mutate the input). */
 export function applySystemEvent(
   items: BackendTimelineItem[],
@@ -305,8 +315,10 @@ export function applySystemEvent(
       // "writing code for Xs" clock from earlier blocks, so their chips show
       // the frozen duration rather than clocks that keep ticking through
       // later phases.
-      return freezeReasoningClocks(
-        clearCodeClocks(createStartItem(items, ev.item_id, "agent_chat")),
+      return freezeExecClocks(
+        freezeReasoningClocks(
+          clearCodeClocks(createStartItem(items, ev.item_id, "agent_chat")),
+        ),
       );
     case "chat_delta":
       return appendDeltaById(items, ev.item_id, "agent_chat", ev.content);
@@ -319,7 +331,7 @@ export function applySystemEvent(
       // and stamp codeElapsedMs=0 (the bug that kept "Writing code for Xs"
       // from ever appearing during streaming).
       return createStartItem(
-        freezeReasoningClocks(clearCodeClocks(items)),
+        freezeExecClocks(freezeReasoningClocks(clearCodeClocks(items))),
         ev.item_id,
         "agent_code",
       );
@@ -332,7 +344,7 @@ export function applySystemEvent(
       // live clock is started by createStartItem (added after the freeze, so
       // it keeps its fresh anchor).
       return createStartItem(
-        freezeReasoningClocks(clearCodeClocks(items)),
+        freezeExecClocks(freezeReasoningClocks(clearCodeClocks(items))),
         ev.item_id,
         "agent_reasoning",
       );
@@ -344,8 +356,9 @@ export function applySystemEvent(
       // before any chunk arrives. The item_id matches subsequent
       // ExecOutputChunk / ExecOutput events. Clear any codeStartedAt
       // clocks (code writing → execution).
-      return clearCodeClocks(
-        upsertItemById(items, {
+      return upsertItemById(
+        freezeExecClocks(freezeReasoningClocks(clearCodeClocks(items))),
+        {
           item_id: ev.item_id,
           kind: "code_output",
           source: null,
@@ -354,7 +367,7 @@ export function applySystemEvent(
           inbound_id: null,
           show_timestamp: true,
           execStartedAt: Date.now(),
-        }),
+        },
       );
     case "exec_output_chunk":
       // A keepalive lets a mid-stream join that missed exec_start create the
@@ -370,13 +383,6 @@ export function applySystemEvent(
       // commit version that carries an envelope header.
       return appendDeltaById(items, ev.item_id, "code_output", ev.content);
     case "exec_output":
-      // exec done → upsert exec_output (stable item_id `{exec_msg_idx}.0`).
-      // On reload it
-      // collides with the gateway snapshot via same id and dedupes;
-      // chunks already streamed-appended are replaced by the full
-      // envelope version. Preserve execStartedAt from the chunk-created
-      // item (if any) so the output chip continues showing the live
-      // duration until the snapshot commits exec_ms.
       return (() => {
         const existing = items.find((it) => it.item_id === ev.item_id);
         return upsertItemById(items, {
@@ -387,7 +393,11 @@ export function applySystemEvent(
           created_at: now,
           inbound_id: null,
           show_timestamp: true,
-          ...(existing?.execStartedAt != null ? { execStartedAt: existing.execStartedAt } : {}),
+          ...(existing?.execStartedAt != null
+            ? { execElapsedMs: Math.max(Date.now() - existing.execStartedAt, 0) }
+            : existing?.execElapsedMs != null
+              ? { execElapsedMs: existing.execElapsedMs }
+              : {}),
         });
       })();
     case "compact_request":
@@ -536,7 +546,12 @@ export function mergeSnapshotWithStreaming(
   const snapshotIds = new Set(snapshot.map((it) => it.item_id));
   const clientExtras = prev.filter((it) => {
     if (snapshotIds.has(it.item_id)) return false;
-    if (!it.partial) return true;
+    const isUncommittedStreamItem =
+      Boolean(it.partial) ||
+      (it.reasoningStartedAt != null && it.reasoning_ms == null) ||
+      (it.codeStartedAt != null && it.code_elapsed_ms == null) ||
+      (it.kind === "code_output" && it.execStartedAt != null && it.exec_ms == null);
+    if (!isUncommittedStreamItem) return true;
     // Rule 3: stale partial cleanup — keep only the in-flight ones.
     if (streamingIds.has(it.item_id)) return true;
     const parsed = parseItemId(it.item_id);
@@ -645,7 +660,7 @@ export function foldEvent(t: ThreadTimelineState, ev: SystemEvent): ThreadTimeli
     ev.role === "reasoning_start" ||
     ev.role === "exec_start";
   // cancelled is handled above (it flips both flags off); intentionally absent here.
-  const turnEnd = ev.role === "llm_done" || ev.role === "error";
+  const turnEnd = ev.role === "llm_done" || ev.role === "exec_output" || ev.role === "error";
 
   // streaming flag
   const codeStart = ev.role === "code_start";
@@ -683,24 +698,9 @@ export function foldEvent(t: ThreadTimelineState, ev: SystemEvent): ThreadTimeli
         it.codeStartedAt != null ||
         (it.execStartedAt != null && it.exec_ms == null),
     );
-  const items = (() => {
-    if (!hasLiveClock) return applied;
-    const frozen = clearCodeClocks(freezeReasoningClocks(applied));
-    // Also clear execStartedAt from code_output placeholders — if the turn
-    // ends while a code_output placeholder still has its live clock (e.g.
-    // llm_done after exec_start but before exec_output commits), the
-    // leftover clock keeps isLiveExecution true → liveIndex peels the item
-    // out of grouping → the item never folds into its turn. The clock served
-    // its purpose (showed "executing…" while live); clear it so the completed
-    // turn groups correctly.
-    return frozen.map((it) => {
-      if (it.kind === "code_output" && it.execStartedAt != null && it.exec_ms == null) {
-        const { execStartedAt: _, ...rest } = it;
-        return rest;
-      }
-      return it;
-    });
-  })();
+  const items = hasLiveClock
+    ? freezeExecClocks(clearCodeClocks(freezeReasoningClocks(applied)))
+    : applied;
 
   return {
     ...t,

@@ -292,6 +292,7 @@ export type BackendTimelineItem = Omit<
   // on commit the snapshot replaces the item with the backend version
   // carrying the authoritative exec_ms, so this is only read pre-commit.
   readonly execStartedAt?: number;
+  readonly execElapsedMs?: number;
 };
 
 

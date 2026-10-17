@@ -16,6 +16,9 @@ import {
   type CompactTransitionBuffer,
 } from "../layout/compact-transition";
 import {
+  clearCodeClocks,
+  freezeExecClocks,
+  freezeReasoningClocks,
   mergeSnapshotWithStreaming,
   sortByItemId,
 } from "../fold/timeline";
@@ -155,6 +158,8 @@ export interface TimelineState {
 
   /** Mark an older-window fetch as started (scroll-up trigger). */
   beginLoadOlder: () => void;
+
+  settleTurn: () => void;
 
   /** Prepend an older window fetched via scroll-up. Dedupes by item_id (an
    * SSE snapshot may already hold some), re-sorts, and sets hasMoreOlder
@@ -448,5 +453,32 @@ export const useTimelineStore = create<TimelineState>()((set, get) => ({
         ? s.items.map((it) => (it.partial ? { ...it, partial: false } : it))
         : s.items,
     }));
+  },
+
+  settleTurn: () => {
+    set((s) => {
+      const hasLiveClock = s.items.some(
+        (it) =>
+          (it.reasoningStartedAt != null && it.reasoning_ms == null) ||
+          it.codeStartedAt != null ||
+          (it.execStartedAt != null && it.exec_ms == null) ||
+          (it.kind === "code_output" && it.payload === "" && it.exec_ms == null),
+      );
+      if (!s.turnActive && !s.streamingCode && s.streamingIds.size === 0 && !hasLiveClock) {
+        return {};
+      }
+      const cleaned = s.items.filter(
+        (it) => !(it.kind === "code_output" && it.payload === "" && it.exec_ms == null),
+      );
+      const items = hasLiveClock
+        ? freezeExecClocks(clearCodeClocks(freezeReasoningClocks(cleaned)))
+        : cleaned;
+      return {
+        turnActive: false,
+        streamingCode: false,
+        streamingIds: new Set(),
+        items,
+      };
+    });
   },
 }));
