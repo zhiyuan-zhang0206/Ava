@@ -104,7 +104,7 @@ verification, the installer hand-off, and both entry points — has its own node
 
 ## Build and release
 
-`Cargo.toml` is version `0.4.2`; release tags (`app-v*`, `android-v*`) must match
+`Cargo.toml` is version `1.0.0`; release tags (`app-v*`, `android-v*`) must match
 it exactly — the release workflows fail on mismatch — so a release starts by
 bumping `Cargo.toml`. `.github/workflows/ci-app.yml` path-filters
 Rust format/clippy, Android-target checking, and overlay/manifest tests.
