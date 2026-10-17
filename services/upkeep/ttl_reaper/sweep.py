@@ -67,15 +67,14 @@ _log = logging.getLogger(__name__)
 FIRE_LOG_PASS_BATCH = 50_000
 
 
-def _reap_expired_notices_blocking(
+def reap_expired_notices_blocking(
     pool: ConnectionPool, db: Database, bus: EventBus
-) -> list[tuple[int, int]]:
-    """Auto-resolve notices whose expire_at deadline has elapsed; return (agent_id, notice_id)."""
+) -> list[tuple[int, int, lifecycle.NoticeResolutionFacts]]:
     with write_transaction(pool) as conn:
         with conn.cursor() as cur:
             cur.execute(
-                "SELECT id, agent_id, title, require_response FROM agent_notices "
-                "WHERE expire_at <= now() AND resolved_at IS NULL "
+                "SELECT id, agent_id, title, require_response, created_at, reply, answer "
+                "FROM agent_notices WHERE expire_at <= now() AND resolved_at IS NULL "
                 "ORDER BY expire_at, id LIMIT %s "
                 "FOR UPDATE SKIP LOCKED",
                 (PASS_BATCH,),
@@ -83,9 +82,9 @@ def _reap_expired_notices_blocking(
             rows = cur.fetchall()
         if not rows:
             return []
-        reaped: list[tuple[int, int]] = []
+        reaped: list[tuple[int, int, lifecycle.NoticeResolutionFacts]] = []
         updated_agents: set[int] = set()
-        for nid, agent_id, title, require_response in rows:
+        for nid, agent_id, title, require_response, created_at, reply, answer in rows:
             with conn.cursor() as cur:
                 cur.execute(
                     "UPDATE agent_notices SET resolved_at = now(), resolution = 'expired' "
@@ -104,7 +103,18 @@ def _reap_expired_notices_blocking(
                 f'Re: "{title}"\n\n[This notice has expired.]',
                 source="system:notice-expire",
             )
-            reaped.append((agent_id, nid))
+            reaped.append(
+                (
+                    agent_id,
+                    nid,
+                    lifecycle.notice_resolution_facts(
+                        "expired",
+                        require_response=bool(require_response),
+                        created_at=created_at,
+                        replied=reply is not None or answer is not None,
+                    ),
+                )
+            )
     for aid in updated_agents:
         publish_agent_updated_sync(bus, aid)
     return reaped
@@ -248,9 +258,9 @@ async def sweep_round(
     progress.beat()
     sessions = await asyncio.to_thread(reap_expired_web_sessions_blocking, pool)
     progress.beat()
-    notices = await asyncio.to_thread(_reap_expired_notices_blocking, pool, db, bus)
-    for agent_id, nid in notices:
-        await lifecycle.publish_notice_resolved(bus, agent_id, nid)
+    notices = await asyncio.to_thread(reap_expired_notices_blocking, pool, db, bus)
+    for agent_id, nid, details in notices:
+        await lifecycle.publish_notice_resolved(bus, agent_id, nid, facts=details)
     progress.beat()
     pruned_fire_log, stuck_pointers = await _slow_phases(pool)
     if (
