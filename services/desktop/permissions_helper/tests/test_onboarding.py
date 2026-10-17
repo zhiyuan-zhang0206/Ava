@@ -19,15 +19,33 @@ NOW = datetime(2026, 10, 17, 8, 0, tzinfo=UTC)
 
 
 class FakeHelper(PermissionsHelperClient):
-    def __init__(self, codes: dict[str, int], *, screen: bool = True, ax: bool = True) -> None:
+    def __init__(
+        self,
+        codes: dict[str, int],
+        *,
+        screen: bool = True,
+        ax: bool = True,
+        request_capable: bool = True,
+    ) -> None:
         super().__init__("/unused.sock")
-        self._codes = codes
-        self._screen = screen
-        self._ax = ax
+        self.codes = codes
+        self.screen = screen
+        self.ax = ax
+        self.request_capable = request_capable
         self.spawns: list[list[str]] = []
+        self.requests = 0
 
     def ping(self) -> Any:
-        return {"preflight_screen": self._screen, "ax_trusted": self._ax}
+        return {
+            "pong": True,
+            "preflight_screen": self.screen,
+            "ax_trusted": self.ax,
+            "request_grants_v1": self.request_capable,
+        }
+
+    def request_grants(self) -> Any:
+        self.requests += 1
+        return {"screen_recording": self.screen, "accessibility": self.ax}
 
     def spawn_process(
         self,
@@ -41,7 +59,7 @@ class FakeHelper(PermissionsHelperClient):
         self.spawns.append(list(argv))
         services = json.loads(argv[2])
         Path(argv[3]).write_text(
-            json.dumps({service: {"code": self._codes[service]} for service in services})
+            json.dumps({service: {"code": self.codes[service]} for service in services})
         )
         return {"pid": 1, "reused": False}
 
@@ -104,56 +122,94 @@ def test_a_non_darwin_host_has_nothing_to_check(tmp_path: Path) -> None:
     assert not report.restricted
 
 
-def test_a_non_interactive_pass_never_raises_a_dialog(tmp_path: Path) -> None:
+def test_the_first_pass_sees_both_desktop_grants_and_each_folder(tmp_path: Path) -> None:
+    seat = host(tmp_path, client=FakeHelper(_codes(2), screen=False, ax=False))
+    report = onboarding.check(host=seat, now=NOW)
+    assert [item.id for item in report.prompt_now()] == [
+        "screen-recording",
+        "accessibility",
+        "desktop-folder",
+        "documents-folder",
+        "downloads-folder",
+    ]
+
+
+def test_the_first_pass_asks_both_desktop_grants_and_each_folder(tmp_path: Path) -> None:
+    helper = FakeHelper(_codes(2), screen=False, ax=False)
+    seat = host(tmp_path, client=helper)
     asked: list[str] = []
-    seat = host(tmp_path, client=FakeHelper(_codes(2)))
-
-    def request_item(*args: object, **kwargs: object) -> str:
-        asked.append("called")
-        return "granted"
-
-    report = onboarding.onboard(host=seat, interactive=False, now=NOW, request_item=request_item)
-    assert asked == []
-    assert isinstance(seat.client, FakeHelper)
-    assert len(seat.client.spawns) == 1
-    assert report.state is gate.GateState.ACTION_REQUIRED
-
-
-def test_an_interactive_pass_requests_only_what_a_dialog_can_still_resolve(tmp_path: Path) -> None:
-    asked: list[str] = []
-    seat = host(tmp_path, client=FakeHelper(_codes(2)))
 
     def request_item(_client: HelperChannel, item: PermissionItem, **_options: object) -> str:
         asked.append(item.id)
         return "granted"
 
-    report = onboarding.onboard(
-        host=seat, interactive=True, now=NOW, sleep=lambda _: None, request_item=request_item
-    )
-    assert asked == [item.id for item in report.prompt_now()]
+    onboarding.onboard(host=seat, now=NOW, sleep=lambda _: None, request_item=request_item)
+    assert helper.requests == 1
     assert "desktop-folder" in asked
     assert "screen-recording" not in asked
     assert "automation-finder" not in asked
+    assert len(helper.spawns) == 2
 
 
 def test_the_request_outcome_is_not_its_own_evidence(tmp_path: Path) -> None:
-    seat = host(tmp_path, client=FakeHelper(_codes(1)))
+    seat = host(tmp_path, client=FakeHelper(_codes(2), screen=False, ax=False))
     report = onboarding.onboard(
         host=seat,
-        interactive=True,
         now=NOW,
         sleep=lambda _: None,
         request_item=_granted,
     )
     assert report.state is gate.GateState.ACTION_REQUIRED
-    assert report.grant_for("desktop-folder") is Grant.DENIED
+    assert report.grant_for("desktop-folder") is Grant.NOT_DETERMINED
+    assert report.grant_for("screen-recording") is Grant.NOT_DETERMINED
+
+
+def test_a_denied_grant_is_not_asked_again_until_a_person_asks(tmp_path: Path) -> None:
+    codes = _codes(2)
+    helper = FakeHelper(codes, screen=False, ax=False)
+    seat = host(tmp_path, client=helper)
+    first = onboarding.onboard(host=seat, now=NOW, sleep=lambda _: None, request_item=_granted)
+    assert helper.requests == 1
+    assert first.grant_for("screen-recording") is Grant.NOT_DETERMINED
+
+    codes.update(_codes(1))
+    second = onboarding.onboard(host=seat, now=NOW, sleep=lambda _: None, request_item=_granted)
+    assert helper.requests == 1
+    assert second.grant_for("screen-recording") is Grant.DENIED
+    assert [item.id for item in second.manual()] == [
+        "screen-recording",
+        "accessibility",
+        "desktop-folder",
+        "documents-folder",
+        "downloads-folder",
+    ]
+
+    onboarding.onboard(
+        host=seat, now=NOW, automatic=False, sleep=lambda _: None, request_item=_granted
+    )
+    assert helper.requests == 2
+
+
+def test_a_grant_the_record_holds_and_the_helper_has_not_read_is_stale(tmp_path: Path) -> None:
+    seat = host(tmp_path, client=FakeHelper(_codes(0), screen=False, ax=False))
+    report = onboarding.check(host=seat, now=NOW)
+    assert report.state is gate.GateState.ACTION_REQUIRED
+    assert report.grant_for("screen-recording") is Grant.STALE
+    assert report.prompt_now() == ()
+
+
+def test_a_helper_without_the_request_method_keeps_the_manual_path(tmp_path: Path) -> None:
+    helper = FakeHelper(_codes(2), screen=False, ax=False, request_capable=False)
+    seat = host(tmp_path, client=helper)
+    report = onboarding.onboard(host=seat, now=NOW, sleep=lambda _: None, request_item=_granted)
+    assert helper.requests == 0
+    assert "request_grants_v1" in report.diagnostic
+    assert report.grant_for("screen-recording") is Grant.NOT_DETERMINED
 
 
 def test_the_summary_names_what_is_missing(tmp_path: Path) -> None:
-    report = onboarding.check(
-        host=host(tmp_path, client=FakeHelper(_codes(1), screen=False, ax=False)), now=NOW
-    )
+    report = onboarding.check(host=host(tmp_path, client=FakeHelper(_codes(1))), now=NOW)
     summary = onboarding.missing_summary(report)
-    assert summary.startswith("5 permission(s) still missing")
-    assert "Screen Recording" in summary
-    assert onboarding.observations(report)["accessibility"] == "denied"
+    assert summary.startswith("3 permission(s) still missing")
+    assert "Screen Recording" not in summary
+    assert onboarding.observations(report)["desktop-folder"] == "denied"

@@ -426,9 +426,7 @@ export const api = {
     f(`/api/host/permissions/recheck`, POST).then(ok<HostPermissionsPayload>),
 
   requestHostPermissions: (): Promise<HostPermissionsPayload> =>
-    f(`/api/host/permissions/request`, POST_JSON({ confirm_user_present: true })).then(
-      ok<HostPermissionsPayload>,
-    ),
+    f(`/api/host/permissions/request`, POST).then(ok<HostPermissionsPayload>),
 
   deferHostPermissions: (): Promise<HostPermissionsPayload> =>
     f(`/api/host/permissions/defer`, POST).then(ok<HostPermissionsPayload>),

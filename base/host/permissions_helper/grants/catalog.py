@@ -20,6 +20,7 @@ class Grant(StrEnum):
     GRANTED = "granted"
     DENIED = "denied"
     NOT_DETERMINED = "not_determined"
+    STALE = "stale"
     UNKNOWN = "unknown"
 
 
@@ -35,7 +36,7 @@ class PermissionItem:
     services: tuple[str, ...] = ()
     required: bool = True
     helper_restart: bool = False
-
+    ping_key: str = ""
     home_subpath: str = ""
 
 
@@ -109,11 +110,12 @@ SCREEN_ITEM = PermissionItem(
     group="desktop",
     title="Screen Recording",
     why="Take screenshots and window captures -- every look at your screen goes through it.",
-    mode=RequestMode.SYSTEM_SETTINGS,
+    mode=RequestMode.PROMPT,
     pane="Privacy_ScreenCapture",
     verify="Meiva is listed and ticked in Screen & System Audio Recording.",
     services=("kTCCServiceScreenCapture",),
     helper_restart=True,
+    ping_key="preflight_screen",
 )
 
 ACCESSIBILITY_ITEM = PermissionItem(
@@ -121,10 +123,12 @@ ACCESSIBILITY_ITEM = PermissionItem(
     group="desktop",
     title="Accessibility",
     why="Click, type, scroll and read the window contents on your behalf.",
-    mode=RequestMode.SYSTEM_SETTINGS,
+    mode=RequestMode.PROMPT,
     pane="Privacy_Accessibility",
     verify="Meiva is listed and ticked in Accessibility.",
     services=("kTCCServiceAccessibility",),
+    helper_restart=True,
+    ping_key="ax_trusted",
 )
 
 DESKTOP_ITEMS: tuple[PermissionItem, ...] = (SCREEN_ITEM, ACCESSIBILITY_ITEM)
@@ -198,6 +202,10 @@ REQUIRED_ITEMS: tuple[PermissionItem, ...] = tuple(item for item in CATALOG if i
 
 PREFLIGHT_SERVICES: tuple[str, ...] = tuple(
     dict.fromkeys(service for item in CATALOG for service in item.services)
+)
+
+PING_KEYS: tuple[str, ...] = tuple(
+    dict.fromkeys(item.ping_key for item in CATALOG if item.ping_key)
 )
 
 ITEMS_BY_ID: dict[str, PermissionItem] = {item.id: item for item in CATALOG}

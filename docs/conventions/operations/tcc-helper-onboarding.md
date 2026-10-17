@@ -45,15 +45,24 @@ Rules the implementation keeps:
 - **A state always comes from a fresh probe.** The record under
   `$MEIVA_HOME/permissions_onboarding.json` is the last observation plus the
   user's "later" flag; it is written from a probe and never read as evidence.
-- **No dialog without a human.** `onboard` refuses to request unless its caller
-  says a person is at the machine (`--confirm-user-present` on the tool, the
-  button click on the API, a TTY on the CLI/converge). A pending dialog blocks
-  synthesized input machine-wide until it is answered.
+- **Every start asks, once.** The converge step probes, then requests every row
+  the system reports `not_determined`: Screen Recording and Accessibility through
+  the helper's own `request_grants` wire method, folders and Automation targets
+  through their children. The helper identity gets one dialog per grant; macOS
+  answers later requests for the same grant silently, so a repeat costs nothing.
+  There is no TTY or "confirm a person is present" gate -- a dialog nobody
+  answers stays pending, and that is the accepted cost of never discovering a
+  missing grant mid-task.
+- **Denied is asked once, then manual; stale is never asked.** The grant state is
+  the TCC record (`TCCAccessPreflight`): denied stays denied and is only requested
+  again by `meiva permissions onboard` or the console's Ask button. A record that
+  holds the grant while the running helper still reports `preflight_screen` /
+  `ax_trusted` false reads `stale`: the fix is a helper restart
+  (`meiva permissions restart-helper`, coordinated on a shared machine), never a
+  trip to System Settings.
 - **A request is not its own evidence.** After requesting, the gate re-probes;
-  a child that reports "granted" while the system still denies stays denied.
-- **First converge asks, later converges remind.** The converge step requests
-  only when no record exists yet (the install-time case) and prints the checklist
-  then; afterwards it re-reads and points at `meiva permissions status`.
+  a child that reports "granted" while the system still denies stays denied, and
+  a request that raised no dialog changes nothing.
 
 ## Why before the flip
 
@@ -94,9 +103,10 @@ venv and the user present:
 - AppleEvents rows are keyed per target app and are granted only by a live
   dialog, so they are triggered one by one with the user watching; `--check`
   can not read them (there is no silent query for that row shape).
-- Screen Recording and Accessibility can not be requested programmatically;
-  the tool verifies them from the helper ping and points at System Settings
-  when either is missing.
+- The tool does not request Screen Recording or Accessibility: it reads both from
+  the helper ping and points at System Settings. The product path does request
+  them, through the helper's `request_grants` wire method -- the operator tool is
+  the attended fallback for a host whose helper build predates it (T5009).
 - Extended groups (`appdata`, `media`, `icloud`, `fda`, `devtools`) have
   their grant state read by the same preflight probe; `--fill-pending
   --confirm-user-present` adds best-effort triggers for `appdata` / `media` /
@@ -116,8 +126,8 @@ included: its prompt writes no `PROMPTING` line, so verify it by screenshot
 
 | Authorization | TCC service / row | Holder | First request today | Programmatic request | Manual only | Helper restart |
 |---|---|---|---|---|---|---|
-| Screen Recording (incl. ScreenCaptureKit) | `kTCCServiceScreenCapture` | helper | helper start (`registerPermissions`) + first capture | one-time prompt at helper start (`CGRequestScreenCaptureAccess`) | **yes** once denied -- System Settings > Screen Recording | **yes** |
-| Accessibility | `kTCCServiceAccessibility` | helper | helper start + first click/keystroke | one-time prompt at helper start (`AXIsProcessTrustedWithOptions`) | **yes** once denied | no (read live per call) |
+| Screen Recording (incl. ScreenCaptureKit) | `kTCCServiceScreenCapture` | helper | the gate's `request_grants` on every start, or first capture | yes -- helper-owned `CGRequestScreenCaptureAccess` (`ping.request_grants_v1`) | **yes** once denied -- System Settings > Screen Recording | **yes** |
+| Accessibility | `kTCCServiceAccessibility` | helper | the gate's `request_grants` on every start, or the first AX-gated operation | yes -- helper-owned `AXIsProcessTrustedWithOptions` (`axTrustedOrPrompt`) | **yes** once denied | no (read live per call) |
 | Desktop / Documents / Downloads folders | `kTCCServiceSystemPolicy{Desktop,Documents,Downloads}Folder` | helper | first folder operation by whichever workflow needed it | yes -- helper-spawned child lists the folder | after a denial | no |
 | Automation (Finder, Terminal, System Events, Safari, Chrome) | `kTCCServiceAppleEvents` per target | helper | first AppleEvent to that app | yes -- one benign `get version` event per app | after a denial | no |
 | App data | `kTCCServiceSystemPolicyAppData` | helper | -- (no shipped feature uses it) | experimental (`--fill-pending`) | -- | no |

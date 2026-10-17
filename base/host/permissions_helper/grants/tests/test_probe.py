@@ -12,19 +12,39 @@ from base.host.permissions_helper.client import (
     SpawnResult,
 )
 from base.host.permissions_helper.grants import probe
-from base.host.permissions_helper.grants.catalog import AUTOMATION_ITEMS, SCREEN_ITEM, Grant
+from base.host.permissions_helper.grants.catalog import (
+    ACCESSIBILITY_ITEM,
+    AUTOMATION_ITEMS,
+    SCREEN_ITEM,
+    Grant,
+)
 
 
 class FakeHelper(PermissionsHelperClient):
-    def __init__(self, *, codes: dict[str, int], screen: bool = True, ax: bool = True) -> None:
+    def __init__(
+        self,
+        *,
+        codes: dict[str, int],
+        screen: bool = True,
+        ax: bool = True,
+        request_capable: bool = True,
+    ) -> None:
         super().__init__("/unused.sock")
         self._codes = codes
         self._screen = screen
         self._ax = ax
+        self._request_capable = request_capable
         self.spawned: list[list[str]] = []
 
     def ping(self) -> Any:
-        return {"preflight_screen": self._screen, "ax_trusted": self._ax}
+        return {
+            "preflight_screen": self._screen,
+            "ax_trusted": self._ax,
+            "request_grants_v1": self._request_capable,
+        }
+
+    def request_grants(self) -> Any:
+        return {"screen_recording": self._screen, "accessibility": self._ax}
 
     def spawn_process(
         self,
@@ -70,11 +90,33 @@ def test_preflight_words_map_onto_the_grant_vocabulary(tmp_path: Path) -> None:
     assert all(grant is Grant.NOT_DETERMINED for grant in result.grants.values())
 
 
-def test_screen_and_accessibility_come_from_the_helper_ping(tmp_path: Path) -> None:
-    helper = FakeHelper(codes=_codes(0), screen=False, ax=False)
+def test_a_grant_the_record_holds_and_the_helper_has_not_read_is_stale(tmp_path: Path) -> None:
+    helper = FakeHelper(codes=_codes(0), screen=False, ax=True)
     result = probe.probe(helper, workdir=tmp_path, run_id="r3", env={}, sleep=lambda _: None)
-    assert result.grant_for(SCREEN_ITEM) is Grant.DENIED
+    assert result.grant_for(SCREEN_ITEM) is Grant.STALE
+    assert result.grant_for(ACCESSIBILITY_ITEM) is Grant.GRANTED
     assert result.grant_for(AUTOMATION_ITEMS[0]) is Grant.UNKNOWN
+
+
+def test_a_record_without_a_decision_stays_not_determined(tmp_path: Path) -> None:
+    helper = FakeHelper(codes=_codes(2), screen=False, ax=False)
+    result = probe.probe(helper, workdir=tmp_path, run_id="r8", env={}, sleep=lambda _: None)
+    assert result.grant_for(SCREEN_ITEM) is Grant.NOT_DETERMINED
+    assert result.grant_for(ACCESSIBILITY_ITEM) is Grant.NOT_DETERMINED
+
+
+def test_a_helper_without_the_request_method_says_so(tmp_path: Path) -> None:
+    helper = FakeHelper(codes=_codes(0), request_capable=False)
+    result = probe.probe(helper, workdir=tmp_path, run_id="r7", env={}, sleep=lambda _: None)
+    assert not result.supports_request
+
+
+def test_the_request_reports_what_the_helper_holds_afterwards() -> None:
+    helper = FakeHelper(codes=_codes(0), screen=False, ax=False)
+    assert probe.request_process_grants(helper) == {
+        "screen_recording": False,
+        "accessibility": False,
+    }
 
 
 def test_a_helper_that_does_not_answer_is_unavailable_not_denied(tmp_path: Path) -> None:

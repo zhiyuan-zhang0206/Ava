@@ -9,23 +9,15 @@ from base.host.permissions_helper.grants.gate import GateReport, GateState
 from services.desktop.permissions_helper.onboarding import GateService
 
 
-def run(
-    args: argparse.Namespace,
-    service: GateService | None = None,
-    *,
-    interactive: bool | None = None,
-) -> int:
+def run(args: argparse.Namespace, service: GateService | None = None) -> int:
     gate = service or GateService()
-    human_present = (
-        interactive if interactive is not None else sys.stdin.isatty() and sys.stdout.isatty()
-    )
     verb = args.permissions_cmd
     if verb == "status":
         return _report(gate.check(), as_json=args.json)
     if verb == "onboard":
         return _report(
             gate.onboard(
-                interactive=human_present,
+                automatic=False,
                 timeout_s=args.timeout,
                 echo=lambda line: print(line, file=sys.stderr),
             ),

@@ -20,7 +20,7 @@ from base.paths import meiva_home
 RECORD_NAME = "permissions_onboarding.json"
 RECORD_VERSION = 1
 
-BLOCKING_GRANTS = frozenset({Grant.DENIED, Grant.NOT_DETERMINED})
+BLOCKING_GRANTS = frozenset({Grant.DENIED, Grant.NOT_DETERMINED, Grant.STALE})
 
 
 class GateState(StrEnum):
@@ -49,6 +49,7 @@ class GateReport:
     items: tuple[ItemStatus, ...]
     diagnostic: str = ""
     helper_reachable: bool = True
+    supports_request: bool = True
 
     def status_for(self, item_id: str) -> ItemStatus | None:
         for status in self.items:
@@ -79,6 +80,14 @@ class GateReport:
             if status.item.mode is RequestMode.PROMPT and status.grant is Grant.NOT_DETERMINED
         )
 
+    def requestable(self) -> tuple[PermissionItem, ...]:
+        return tuple(
+            status.item
+            for status in self.items
+            if status.item.mode is RequestMode.PROMPT
+            and status.grant in (Grant.NOT_DETERMINED, Grant.DENIED)
+        )
+
     def manual(self) -> tuple[PermissionItem, ...]:
         rows: list[PermissionItem] = []
         for status in self.items:
@@ -89,6 +98,16 @@ class GateReport:
             ):
                 rows.append(status.item)
         return tuple(rows)
+
+
+# meiva:ref base/host/permissions_helper/grants/docs/grants.meiva.okf.md#record-and-runtime-planes
+def _detail(result: ProbeResult, item: PermissionItem) -> str:
+    if result.grant_for(item) is Grant.STALE:
+        return (
+            "macOS already records this grant; the running helper has not read it yet, so it"
+            " cannot use it until it restarts."
+        )
+    return ""
 
 
 # meiva:ref base/host/permissions_helper/grants/docs/grants.meiva.okf.md#live-probe-only
@@ -104,17 +123,17 @@ def evaluate(
             items=items,
             diagnostic=result.diagnostic,
             helper_reachable=False,
+            supports_request=False,
         )
     items = tuple(
-        ItemStatus(
-            item,
-            result.grant_for(item),
-            "only a live attempt decides" if result.grant_for(item) is Grant.UNKNOWN else "",
-        )
-        for item in CATALOG
+        ItemStatus(item, result.grant_for(item), _detail(result, item)) for item in CATALOG
     )
     report = GateReport(
-        state=GateState.COMPLETE, checked_at=checked_at, items=items, diagnostic=result.diagnostic
+        state=GateState.COMPLETE,
+        checked_at=checked_at,
+        items=items,
+        diagnostic=result.diagnostic,
+        supports_request=result.supports_request,
     )
     if report.missing:
         return GateReport(
@@ -122,6 +141,7 @@ def evaluate(
             checked_at=checked_at,
             items=items,
             diagnostic=result.diagnostic,
+            supports_request=result.supports_request,
         )
     return report
 
@@ -132,6 +152,7 @@ def not_applicable(now: datetime | None = None) -> GateReport:
         checked_at=now or datetime.now(UTC),
         items=(),
         diagnostic="There are no macOS authorizations to check on this host.",
+        supports_request=False,
     )
 
 

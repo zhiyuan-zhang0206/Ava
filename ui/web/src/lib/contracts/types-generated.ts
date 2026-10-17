@@ -2945,9 +2945,6 @@ export interface components {
             required_missing: number;
             items: components["schemas"]["PermissionItemRow"][];
         };
-        HostPermissionsRequest: {
-            confirm_user_present: boolean;
-        };
         ImageUrlContentBlock: {
             type: "image_url";
             image_url: components["schemas"]["ImageUrlRef"];
@@ -5819,11 +5816,7 @@ export interface operations {
             path?: never;
             cookie?: never;
         };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["HostPermissionsRequest"];
-            };
-        };
+        requestBody?: never;
         responses: {
             200: {
                 headers: {
@@ -5831,14 +5824,6 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["HostPermissionsPayload"];
-                };
-            };
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };

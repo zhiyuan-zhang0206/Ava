@@ -14,7 +14,8 @@ from base.host.permissions_helper.grants.gate import GateReport, GateState
 _STATE_LABELS: dict[Grant, str] = {
     Grant.GRANTED: "granted",
     Grant.DENIED: "denied -- turn it on in System Settings",
-    Grant.NOT_DETERMINED: "not requested yet",
+    Grant.NOT_DETERMINED: "not granted yet",
+    Grant.STALE: "granted in macOS; the helper has not read it yet",
     Grant.UNKNOWN: "not readable here",
 }
 
@@ -101,8 +102,9 @@ def _restart_note(item: PermissionItem) -> str:
     if not item.helper_restart:
         return ""
     return (
-        "Restart the permissions helper after granting it "
-        "(`meiva permissions restart-helper`): macOS only re-reads this grant at process start."
+        "Restart the permissions helper (`meiva permissions restart-helper`): macOS only"
+        " re-reads this grant at process start. On a machine that runs other agents,"
+        " coordinate it first -- the restart ends their desktop sessions."
     )
 
 
@@ -140,6 +142,9 @@ def _row_lines(row: ChecklistRow) -> list[str]:
     label = "" if row.required else " (optional)"
     lines = ["", f"[{mark}] {row.title}{label} -- {row.state_label}", f"    why:    {row.why}"]
     lines.append(f"    how:    {row.mode}")
+    if row.state is Grant.STALE:
+        lines.append(f"    fix:    {row.restart}")
+        return lines
     if not row.blocking:
         return lines
     lines.append(f"    open:   {row.jump}")

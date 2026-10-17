@@ -17,8 +17,6 @@ def _report(**overrides: Grant) -> gate.GateReport:
     return gate.evaluate(
         ProbeResult(
             grants=grants,
-            screen_recording=overrides.get("screen-recording") is not Grant.DENIED,
-            ax_trusted=overrides.get("accessibility") is not Grant.DENIED,
         ),
         now=NOW,
     )
@@ -36,7 +34,7 @@ def test_every_catalog_row_appears_with_why_jump_and_verification() -> None:
 def test_a_missing_row_carries_the_restart_note_where_macos_needs_one() -> None:
     rows = {row.id: row for row in checklist.rows(_report(**{"screen-recording": Grant.DENIED}))}
     assert "macOS only re-reads this grant at process start" in rows["screen-recording"].restart
-    assert rows["accessibility"].restart == ""
+    assert "coordinate it first" in rows["accessibility"].restart
 
 
 def test_the_text_checklist_names_the_missing_item_and_the_recheck_verb() -> None:
