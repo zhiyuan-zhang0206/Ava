@@ -152,6 +152,7 @@ above (or when its name is unregistered); otherwise it stays in the JSONL mirror
 | `auth401_rejected` | gateway auth-401 rejections in the 60s window (aggregate count) | noise | count | — | events | — |
 | `agent_registry` | agent registry max id — the agents-table high-water mark (absolute state, 60s sample) | noise | max_id | — | events | — |
 | `memory_search_stats` | memory search store rows + last save duration (absolute state, 60s sample) | noise | rows, last_save_seconds | — | events | — |
+| `memory_index_patrol` | memory indexer patrol pass — paths still behind, consecutive failures, over-limit flag | noise | pending_paths, consecutive_failures, over_limit, last_success_at | — | events | — |
 | `upload_delivery_held` | a delivered upload batch was held after a permanent copy failure or its last copy attempt; nothing retries it and the person has to upload again | anomaly | agent_id, batch_id, reason | — | events | — |
 | `gate_auth_probe_failed` | gate auth probe failed — carries the classification (auth/timeout/network/application) and exception shape | anomaly | category, exception_type, exception_value, status, latency_ms | — | events | — |
 | `chrome_page_ttl_renewed` | Chrome page TTL deadline renewed via the renew_page tool; attributes carry page_id, ttl_s, new_expires_at | observation | — | — | events | — |

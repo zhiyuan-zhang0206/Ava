@@ -15,7 +15,6 @@ not the same semantic space).
 
 from __future__ import annotations
 
-import queue
 import time
 from collections.abc import Callable, Sequence
 from pathlib import Path
@@ -100,8 +99,24 @@ def test_scan_disk_finds_md_only(tmp_path: Path) -> None:
     sub.mkdir()
     (sub / "c.md").write_text("c")
 
-    result = daemon.scan_disk(tmp_path)
-    assert set(result.keys()) == {(tmp_path / "a.md").resolve(), (sub / "c.md").resolve()}
+    result = daemon.scan_disk(tmp_path, config=MemoryIndexerConfig())
+    assert result == {
+        (tmp_path / "a.md").resolve(): content_hash("a"),
+        (sub / "c.md").resolve(): content_hash("c"),
+    }
+
+
+def test_scan_disk_skips_navigation_files(tmp_path: Path) -> None:
+    (tmp_path / "MEMORY.md").write_text("- [a](a.md) — a")
+    (tmp_path / "a.md").write_text("a")
+    (tmp_path / "index.md").write_text("- [a](a.md) — a")
+    (tmp_path / "index-of-rulings.md").write_text("a real note")
+
+    result = daemon.scan_disk(tmp_path, config=MemoryIndexerConfig())
+    assert set(result) == {
+        (tmp_path / "a.md").resolve(),
+        (tmp_path / "index-of-rulings.md").resolve(),
+    }
 
 
 def test_scan_disk_skips_symlinks(tmp_path: Path) -> None:
@@ -110,12 +125,12 @@ def test_scan_disk_skips_symlinks(tmp_path: Path) -> None:
     link = tmp_path / "link.md"
     link.symlink_to(real)
 
-    result = daemon.scan_disk(tmp_path)
+    result = daemon.scan_disk(tmp_path, config=MemoryIndexerConfig())
     assert link.resolve() not in result or set(result.keys()) == {real.resolve()}
 
 
 def test_scan_disk_missing_root_returns_empty(tmp_path: Path) -> None:
-    result = daemon.scan_disk(tmp_path / "nonexistent")
+    result = daemon.scan_disk(tmp_path / "nonexistent", config=MemoryIndexerConfig())
     assert result == {}
 
 
@@ -238,42 +253,6 @@ def test_process_paths_deletes_missing_files(
     assert store_backend.all_meta() == {}
 
 
-def test_event_handler_pushes_md_paths_only() -> None:
-    dirty: queue.Queue[Path] = queue.Queue()
-    handler = daemon.MarkdownEventHandler(dirty)
-
-    class E:
-        def __init__(self, src: str, *, is_dir: bool = False) -> None:
-            self.src_path = src
-            self.is_directory = is_dir
-
-    handler.on_created(E("/a.md"))  # type: ignore[arg-type]
-    handler.on_modified(E("/b.txt"))  # type: ignore[arg-type]
-    handler.on_deleted(E("/c.md"))  # type: ignore[arg-type]
-    handler.on_created(E("/dir", is_dir=True))  # type: ignore[arg-type]
-
-    pushed = []
-    while not dirty.empty():
-        pushed.append(dirty.get_nowait())  # pyright: ignore[reportUnknownMemberType]
-    assert pushed == [Path("/a.md"), Path("/c.md")]
-
-
-def test_event_handler_on_moved_pushes_both_ends() -> None:
-    dirty: queue.Queue[Path] = queue.Queue()
-    handler = daemon.MarkdownEventHandler(dirty)
-
-    class MoveEvent:
-        src_path = "/old.md"
-        dest_path = "/new.md"
-        is_directory = False
-
-    handler.on_moved(MoveEvent())  # type: ignore[arg-type]
-    pushed = []
-    while not dirty.empty():
-        pushed.append(dirty.get_nowait())  # pyright: ignore[reportUnknownMemberType]
-    assert pushed == [Path("/old.md"), Path("/new.md")]
-
-
 def test_process_paths_deletes_foreign_paths_even_when_file_exists(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -310,20 +289,18 @@ def test_process_paths_deletes_foreign_paths_even_when_file_exists(
     assert store_backend.all_meta() == {}
 
 
-def test_cold_start_reconcile_prunes_foreign_rows(
+def test_reconcile_prunes_foreign_rows(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     store_backend: StoreBackend,
     *,
     machine_identity: MachineIdentity,
 ) -> None:
-    """Cold-start reconcile deletes rows whose path is outside the watched
-    root — the durable fix for the 11 stale authoring-checkout entries."""
     root = tmp_path / "watched"
     root.mkdir()
     watched = root / "a.md"
     watched.write_text("watched content")
-    foreign = tmp_path / "foreign.md"  # exists on disk, outside root
+    foreign = tmp_path / "foreign.md"
     foreign.write_text("foreign content")
 
     def memory_root_for_roles(*, roles: MachineRoles) -> Path:
@@ -331,8 +308,6 @@ def test_cold_start_reconcile_prunes_foreign_rows(
         return root
 
     monkeypatch.setattr(daemon, "memory_root", memory_root_for_roles)
-    # Both rows pre-exist in the index (e.g. from an era before the
-    # gateway-checkout split).
     backend = store_backend
     backend.upsert(str(watched.resolve()), 1.0, "h", _vec(0), kind="body", chunk_idx=0)
     backend.upsert(str(foreign.resolve()), 1.0, "h", _vec(0), kind="body", chunk_idx=0)
@@ -343,22 +318,21 @@ def test_cold_start_reconcile_prunes_foreign_rows(
         Liveness(liveness_timeout()),
         machine=machine_identity,
         config=MemoryIndexerConfig(),
+        status=daemon.PatrolStatus(retry_limit=3),
+        root=root,
     )
     meta = store_backend.all_meta()
     assert str(foreign.resolve()) not in meta
     assert str(watched.resolve()) in meta
 
 
-def test_cold_start_reconcile_reembeds_on_provider_switch(
+def test_reconcile_reembeds_on_provider_switch(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     store_backend: StoreBackend,
     *,
     machine_identity: MachineIdentity,
 ) -> None:
-    """CTO ①: the provider fingerprint is part of the reconcile key — a row
-    built by another provider is dirty at cold start even at the same mtime
-    and hash, so the switch wipes the index by re-embedding everything."""
     root = tmp_path / "watched"
     root.mkdir()
     watched = root / "a.md"
@@ -372,7 +346,6 @@ def test_cold_start_reconcile_reembeds_on_provider_switch(
     backend = store_backend
     watched_mtime = watched.stat().st_mtime
     backend.upsert(str(watched.resolve()), watched_mtime, "h", _vec(0), kind="body", chunk_idx=0)
-    # mtime matches disk, hash matches — but the fingerprint is the old provider's.
     assert backend.all_meta() == {str(watched.resolve()): (watched_mtime, "h", FINGERPRINT)}
 
     switched = FakeProvider(fingerprint="other:provider")
@@ -383,8 +356,9 @@ def test_cold_start_reconcile_reembeds_on_provider_switch(
         Liveness(liveness_timeout()),
         machine=machine_identity,
         config=MemoryIndexerConfig(),
+        status=daemon.PatrolStatus(retry_limit=3),
+        root=root,
     )
-    # The row was re-embedded with the new fingerprint.
     meta = switched_backend.all_meta()
     assert str(watched.resolve()) in meta
     assert meta[str(watched.resolve())][2] == "other:provider"
@@ -658,7 +632,13 @@ def test_cold_start_reconcile_beats_liveness_across_chunks(
     started = time.monotonic()
     assert (
         daemon.reconcile(
-            store_backend, FakeProvider(), liveness, machine=machine_identity, config=indexer_config
+            store_backend,
+            FakeProvider(),
+            liveness,
+            machine=machine_identity,
+            config=indexer_config,
+            status=daemon.PatrolStatus(retry_limit=indexer_config.retry_limit),
+            root=tmp_path,
         )
         is True
     )

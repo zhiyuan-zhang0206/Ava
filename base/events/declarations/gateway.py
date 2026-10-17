@@ -117,6 +117,13 @@ class MemorySearchStats(TypedDict):
     last_save_seconds: float
 
 
+class MemoryIndexPatrol(TypedDict):
+    pending_paths: int
+    consecutive_failures: int
+    over_limit: bool
+    last_success_at: float
+
+
 class InspectMetricsCoverageGap(TypedDict):
     """`inspect_metrics_coverage_gap` payload — gateway/inspect/_metrics_health.py.
 
@@ -248,6 +255,13 @@ EVENTS: dict[str, EventSpec] = {
         payload=MemorySearchStats,
         tier="noise",
         site=("services/derived/memory_search/app.py:emit_memory_search_stats (positional emit)"),
+    ),
+    "memory_index_patrol": telemetry_event(
+        "memory_index_patrol",
+        "memory indexer patrol pass — paths still behind, consecutive failures, over-limit flag",
+        payload=MemoryIndexPatrol,
+        tier="noise",
+        site="services/derived/memory_indexer/patrol_status.py:emit_patrol_event (attributes= emit)",
     ),
     "upload_delivery_held": telemetry_event(
         "upload_delivery_held",
