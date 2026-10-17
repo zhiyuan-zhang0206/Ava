@@ -72,24 +72,12 @@ validation, and hosts keep explicit caller contexts.
 
 ### Self & User
 - [[meiva/self/docs/self.meiva.okf.md|self]] — Agent self (**core** meiva.self): AGENT_ID / MACHINE_SPEC / attach / pause_heartbeat / compact / restart / terminate; `set_label` is separately injected by meiva_fleet plugin
-- [[ui.meiva.okf.md]] — User interface: serve / notify / show / close
+- [[meiva/docs/ui.meiva.okf.md]] — User interface: serve / notify / show / close
 - [[meiva_builtins/plugins/meiva_memory/docs/memory-api.meiva.okf.md]] — Long-term memory pool: semantic search
 - [[meiva/skills/docs/skills.meiva.okf.md]] — Skill registry: meiva.help(meiva.skills.<name>)
 
-An SDK installation retains its root-supplied Clock factory without evaluating
-it at binding. Timestamped operations obtain a fresh clock from a bound context,
-or from the installed process factory when unbound; a partial context missing a
-clock fails explicitly rather than borrowing the installation.
-`meiva.sdk_surface.process_context.loaded_code_image()` returns the immutable
-first-load code fact and does not reread a moved checkout on reload or late
-attachment.
-
-SDK recorders capture the installation's lazy event producer, or the admitted
-caller's ClientSet producer with identity, tally and durable capture. Changing
-context mid-call cannot redirect that event. Sampling precedes producer
-construction; durable capture precedes enqueue. An unbound Python caller uses
-the installation's retained producer as a system caller without creating an
-MeivaContext, and reload preserves that producer.
+Installation lifetime — the retained clock factory, event producer and the
+atexit owner that `uninstall()` removes — is in [[install-lifetime.meiva.okf.md]].
 
 The Fleet launched-boot probe uses a fresh interpreter with environment and
 cluster configuration pinned before its first `import meiva`. It checks one boot
