@@ -54,7 +54,9 @@ rows, and only the claim rewrite broke the property.
 it with the rest of `channel_values`. When the source's logical cwd was its own
 workspace — the default — the fork spent its whole life writing into the
 source's private scratch directory: #6720 ran with
-`meiva_code__cwd = /Users/zyonzhang/.ava/workspaces/2697` in every checkpoint.
+`meiva_code__cwd = /Users/zyonzhang/.ava/workspaces/2697` in every checkpoint
+(`.ava` is the pre-rename home — the same path is `~/.meiva/workspaces/2697`
+today; the rename landed 2026-10-17 and does not change the mechanism).
 The after-init validation let it through because the path exists and is a
 directory; only a *missing* cwd was repaired.
 

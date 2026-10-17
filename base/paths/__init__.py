@@ -173,6 +173,10 @@ def mcps_dir(home: Path) -> Path:
     return home / "mcps"
 
 
+def workspaces_root() -> Path:
+    return meiva_home() / "workspaces"
+
+
 def workspace_dir(agent_id: int) -> Path:
     """Per-agent workspace ($MEIVA_HOME/workspaces/<agent_id>); create if missing.
 
@@ -188,7 +192,7 @@ def workspace_dir(agent_id: int) -> Path:
             "workspace); callers that need a pre-bootstrap fallback use Path.home() "
             "explicitly instead of calling workspace_dir()."
         )
-    target = meiva_home() / "workspaces" / str(agent_id)
+    target = workspaces_root() / str(agent_id)
     target.mkdir(parents=True, exist_ok=True)
     return target
 
