@@ -77,5 +77,15 @@ async def dismiss_current(
     if not acceptance.replayed:
         if record.require_response:
             await asyncio.to_thread(publish_response_required_hint, request.app.state.bus, agent_id)
-        await lifecycle.publish_notice_resolved(request.app.state.bus, agent_id, record.id)
+        await lifecycle.publish_notice_resolved(
+            request.app.state.bus,
+            agent_id,
+            record.id,
+            facts=lifecycle.notice_resolution_facts(
+                "withdrawn",
+                require_response=record.require_response,
+                created_at=record.created_at,
+                replied=record.reply is not None,
+            ),
+        )
     return record
