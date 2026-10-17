@@ -24,14 +24,12 @@ pub struct AppConfig {
     pub auto_login: bool,
     pub notifications: bool,
     pub background_service: bool,
-    /// GitHub Releases API listing used by the Android update check; `None`
-    /// on desktop, where `tauri-plugin-updater` owns updates instead.
-    pub releases_api: Option<String>,
 }
 
-/// Releases listing for the app's own tags. Desktop uses the updater plugin,
-/// so only Android consults this.
-const RELEASES_API: &str = "https://api.github.com/repos/zhiyuan-zhang0206/Ava/releases";
+/// Where the user is sent when the in-app update path cannot run. The release
+/// workflow keeps this page pointing at the newest rolling build.
+const UPDATE_DOWNLOAD_PAGE: &str =
+    "https://github.com/zhiyuan-zhang0206/Ava/releases/tag/android-latest";
 
 impl AppConfig {
     pub fn build<R: Runtime>(app: &AppHandle<R>, state: &AppState) -> Self {
@@ -58,7 +56,6 @@ impl AppConfig {
             },
             notifications: cfg!(target_os = "android") && settings.notifications,
             background_service: cfg!(target_os = "android") && settings.background_service,
-            releases_api: cfg!(target_os = "android").then(|| RELEASES_API.to_string()),
         }
     }
 }
@@ -276,6 +273,141 @@ pub async fn app_take_pending_click(app: AppHandle) -> bool {
         let _ = app;
         log::debug!("notification-click capture suppressed off Android");
         false
+    }
+}
+
+/// What the About surface shows about the running build.
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UpdateInfo {
+    pub version_name: String,
+    /// Android build number; the desktop bundle has no equivalent.
+    pub version_code: Option<u64>,
+}
+
+/// The result of one update check. `status` is the closed set both surfaces
+/// render; `reason` carries a stable code, never a technical string.
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UpdateCheck {
+    pub status: &'static str,
+    pub reason: Option<&'static str>,
+    pub current_version_code: Option<u64>,
+    pub latest_version_name: Option<String>,
+    pub latest_version_code: Option<u64>,
+    pub download_page: &'static str,
+}
+
+/// What `app_install_update` did, or why it stopped.
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct InstallOutcome {
+    pub status: &'static str,
+    pub reason: Option<&'static str>,
+    pub download_page: &'static str,
+}
+
+impl UpdateCheck {
+    fn new(status: &'static str) -> Self {
+        Self {
+            status,
+            reason: None,
+            current_version_code: None,
+            latest_version_name: None,
+            latest_version_code: None,
+            download_page: UPDATE_DOWNLOAD_PAGE,
+        }
+    }
+
+    #[cfg(target_os = "android")]
+    fn with_reason(mut self, reason: &'static str) -> Self {
+        self.reason = Some(reason);
+        self
+    }
+}
+
+fn install_outcome(status: &'static str, reason: Option<&'static str>) -> InstallOutcome {
+    InstallOutcome {
+        status,
+        reason,
+        download_page: UPDATE_DOWNLOAD_PAGE,
+    }
+}
+
+#[cfg(target_os = "android")]
+async fn check_update(app: &AppHandle) -> UpdateCheck {
+    let installed = match crate::update_android::version_code(app).await {
+        Ok(code) => code,
+        Err(failure) => return UpdateCheck::new("failed").with_reason(failure.code()),
+    };
+    let mut check = UpdateCheck::new("current");
+    check.current_version_code = Some(installed);
+    match crate::update_android::check(installed).await {
+        Ok(Some(manifest)) => {
+            check.status = "available";
+            check.latest_version_name = Some(manifest.version_name);
+            check.latest_version_code = Some(manifest.version_code);
+        }
+        Ok(None) => {}
+        Err(failure) => {
+            check.status = "failed";
+            check.reason = Some(failure.code());
+        }
+    }
+    check
+}
+
+#[cfg(target_os = "android")]
+async fn install_update(app: &AppHandle) -> InstallOutcome {
+    use crate::update_android::InstallState;
+
+    match crate::update_android::install(app).await {
+        Ok(InstallState::InstallerOpened) => install_outcome("installer-opened", None),
+        Ok(InstallState::PermissionRequired) => install_outcome("permission-required", None),
+        Ok(InstallState::Current) => install_outcome("current", None),
+        Err(failure) => install_outcome("failed", Some(failure.code())),
+    }
+}
+
+/// Installed version name and build number, read without touching the network.
+#[tauri::command]
+pub async fn app_update_info(app: AppHandle) -> UpdateInfo {
+    let version_name = app.package_info().version.to_string();
+    #[cfg(target_os = "android")]
+    let version_code = crate::update_android::version_code(&app).await.ok();
+    #[cfg(not(target_os = "android"))]
+    let version_code = None;
+    UpdateInfo {
+        version_name,
+        version_code,
+    }
+}
+
+/// Read the published build manifest once and compare it with this install.
+#[tauri::command]
+pub async fn app_check_update(app: AppHandle) -> UpdateCheck {
+    #[cfg(target_os = "android")]
+    {
+        check_update(&app).await
+    }
+    #[cfg(not(target_os = "android"))]
+    {
+        let _ = &app;
+        UpdateCheck::new("unsupported")
+    }
+}
+
+/// Download the published build, verify it, and open the system installer.
+#[tauri::command]
+pub async fn app_install_update(app: AppHandle) -> InstallOutcome {
+    #[cfg(target_os = "android")]
+    {
+        install_update(&app).await
+    }
+    #[cfg(not(target_os = "android"))]
+    {
+        let _ = &app;
+        install_outcome("failed", Some("unsupported"))
     }
 }
 

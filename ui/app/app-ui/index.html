@@ -70,6 +70,15 @@
       details { margin-top: 18px; border-top: 1px solid var(--line); }
       summary { padding-top: 14px; cursor: pointer; color: var(--muted); }
       details > div { padding-top: 14px; }
+      .about {
+        display: grid;
+        grid-template-columns: auto 1fr;
+        gap: 4px 12px;
+        margin: 0 0 14px;
+        font-size: 0.85rem;
+      }
+      .about dt { color: var(--muted); }
+      .about dd { margin: 0; text-align: right; font-variant-numeric: tabular-nums; }
       .toggle {
         display: flex;
         align-items: center;
@@ -156,6 +165,23 @@
           <button type="submit" id="setup-submit" data-i18n="connectButton">Connect</button>
           <button type="button" class="secondary" id="setup-cancel" hidden data-i18n="cancelButton">Cancel</button>
         </form>
+        <details id="about">
+          <summary data-i18n="aboutTitle">About</summary>
+          <div>
+            <dl class="about">
+              <dt data-i18n="aboutVersion">Version</dt>
+              <dd id="about-version">—</dd>
+              <dt data-i18n="aboutBuild" id="about-build-label">Build</dt>
+              <dd id="about-build">—</dd>
+            </dl>
+            <div id="update-panel" hidden>
+              <p class="hint" id="update-status" aria-live="polite"></p>
+              <button type="button" id="update-check" data-i18n="checkUpdates">Check for updates</button>
+              <button type="button" id="update-install" hidden data-i18n="installUpdate">Install update</button>
+              <button type="button" class="secondary" id="update-download" hidden data-i18n="openDownloadPage">Open download page</button>
+            </div>
+          </div>
+        </details>
       </section>
 
       <section id="connecting" hidden style="text-align: center">
@@ -281,6 +307,7 @@
         document.getElementById("notifications").checked = config.notifications;
         document.getElementById("secret-field").hidden = desktop;
         document.getElementById("setup-cancel").hidden = !target;
+        renderAbout(config);
 
         const screen = screenFromHash();
         if (screen === "connecting") {
@@ -394,6 +421,105 @@
       document.getElementById("change-server").addEventListener("click", () => {
         window.location.hash = "setup";
         show("setup");
+      });
+
+      const aboutVersion = document.getElementById("about-version");
+      const aboutBuild = document.getElementById("about-build");
+      const updatePanel = document.getElementById("update-panel");
+      const updateStatus = document.getElementById("update-status");
+      const updateCheckButton = document.getElementById("update-check");
+      const updateInstallButton = document.getElementById("update-install");
+      const updateDownloadButton = document.getElementById("update-download");
+      let updateDownloadPage = null;
+
+      function setUpdateStatus(text) {
+        updateStatus.textContent = text;
+      }
+
+      /** Version and build number are local facts; the update panel is Android-only. */
+      async function renderAbout(config) {
+        aboutVersion.textContent = config.version || "—";
+        try {
+          const info = await invoke("app_update_info");
+          if (info.versionName) aboutVersion.textContent = info.versionName;
+          if (info.versionCode === null || info.versionCode === undefined) {
+            document.getElementById("about-build-label").hidden = true;
+            aboutBuild.hidden = true;
+          } else {
+            aboutBuild.textContent = String(info.versionCode);
+          }
+        } catch (error) {
+          console.error("[ava-app] could not read the installed build", error);
+        }
+        if (config.platform === "android") updatePanel.hidden = false;
+      }
+
+      /** The manual entry runs the same check the startup prompt uses. */
+      updateCheckButton.addEventListener("click", async () => {
+        updateCheckButton.disabled = true;
+        updateInstallButton.hidden = true;
+        updateDownloadButton.hidden = true;
+        setUpdateStatus(t("checkingUpdates"));
+        try {
+          const check = await invoke("app_check_update");
+          if (check.status === "available") {
+            setUpdateStatus(
+              t("updateAvailable")
+                .replace("{version}", check.latestVersionName)
+                .replace("{build}", String(check.latestVersionCode)),
+            );
+            updateDownloadPage = check.downloadPage || null;
+            updateInstallButton.hidden = false;
+          } else if (check.status === "current") {
+            setUpdateStatus(t("updateCurrent"));
+          } else if (check.status === "unsupported") {
+            updatePanel.hidden = true;
+          } else {
+            updateDownloadPage = check.downloadPage || null;
+            updateDownloadButton.hidden = !updateDownloadPage;
+            setUpdateStatus(t("updateCheckFailed"));
+          }
+        } catch (error) {
+          console.error("[ava-app] update check failed", error);
+          setUpdateStatus(t("updateCheckFailed"));
+        } finally {
+          updateCheckButton.disabled = false;
+        }
+      });
+
+      updateInstallButton.addEventListener("click", async () => {
+        updateInstallButton.disabled = true;
+        updateDownloadButton.hidden = true;
+        setUpdateStatus(t("updateDownloading"));
+        try {
+          const outcome = await invoke("app_install_update");
+          if (outcome.status === "installer-opened") {
+            updateInstallButton.hidden = true;
+            setUpdateStatus(t("updateInstallerOpened"));
+          } else if (outcome.status === "permission-required") {
+            updateInstallButton.disabled = false;
+            setUpdateStatus(t("updatePermissionRequired"));
+          } else if (outcome.status === "current") {
+            updateInstallButton.hidden = true;
+            setUpdateStatus(t("updateCurrent"));
+          } else {
+            updateInstallButton.disabled = false;
+            updateDownloadPage = outcome.downloadPage || updateDownloadPage;
+            updateDownloadButton.hidden = !updateDownloadPage;
+            setUpdateStatus(t("updateInstallFailed"));
+          }
+        } catch (error) {
+          console.error("[ava-app] update install failed", error);
+          updateInstallButton.disabled = false;
+          setUpdateStatus(t("updateInstallFailed"));
+        }
+      });
+
+      updateDownloadButton.addEventListener("click", () => {
+        if (!updateDownloadPage) return;
+        invoke("app_open_external", { url: updateDownloadPage }).catch((error) => {
+          console.error("[ava-app] could not open the download page", error);
+        });
       });
 
       window.addEventListener("hashchange", () => {
