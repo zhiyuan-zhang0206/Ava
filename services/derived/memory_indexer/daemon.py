@@ -292,11 +292,22 @@ def reconcile(
     machine: MachineIdentity,
     config: MemoryIndexerConfig,
     status: PatrolStatus,
+    root: Path,
 ) -> bool:
     started = time.monotonic()
-    disk = scan_disk(memory_root(roles=machine.role()), config=config)
+    disk = scan_disk(root, config=config)
     scanned_at = time.monotonic()
-    dirty = dirty_paths(disk, backend.all_meta(), provider)
+    indexed = backend.all_meta()
+    if not disk and indexed:
+        status.begin(len(indexed))
+        _log.error(
+            "[indexer] patrol scanned no file under %s while the index holds %d path(s); "
+            "refusing to prune and retrying — a vanished root must not empty the index",
+            root,
+            len(indexed),
+        )
+        return False
+    dirty = dirty_paths(disk, indexed, provider)
     compared_at = time.monotonic()
     status.begin(len(dirty))
 
@@ -350,10 +361,18 @@ async def _patrol_once(
     machine: MachineIdentity,
     config: MemoryIndexerConfig,
     status: PatrolStatus,
+    root: Path,
 ) -> bool:
     try:
         return await asyncio.to_thread(
-            reconcile, backend, provider, liveness, machine=machine, config=config, status=status
+            reconcile,
+            backend,
+            provider,
+            liveness,
+            machine=machine,
+            config=config,
+            status=status,
+            root=root,
         )
     except Exception:
         _log.exception("[indexer] patrol pass failed")
@@ -370,6 +389,7 @@ async def patrol_loop(
     status: PatrolStatus,
     clock: Callable[[], float],
     wait: Callable[[float], Awaitable[None]],
+    root: Path,
 ) -> None:
     _log.info(
         "[indexer] patrol every %ss (retry %ss doubling, limit %s)",
@@ -386,7 +406,13 @@ async def patrol_loop(
         if clock() < next_patrol:
             continue
         complete = await _patrol_once(
-            backend, provider, liveness, machine=machine, config=config, status=status
+            backend,
+            provider,
+            liveness,
+            machine=machine,
+            config=config,
+            status=status,
+            root=root,
         )
         liveness.beat()
         if complete:
@@ -559,6 +585,7 @@ async def run(
             status=status,
             clock=time.monotonic,
             wait=asyncio.sleep,
+            root=root,
         )
     finally:
         _close_backend(backend)

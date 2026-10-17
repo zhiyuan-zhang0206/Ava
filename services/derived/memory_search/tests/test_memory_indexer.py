@@ -319,6 +319,7 @@ def test_reconcile_prunes_foreign_rows(
         machine=machine_identity,
         config=MemoryIndexerConfig(),
         status=daemon.PatrolStatus(retry_limit=3),
+        root=root,
     )
     meta = store_backend.all_meta()
     assert str(foreign.resolve()) not in meta
@@ -356,6 +357,7 @@ def test_reconcile_reembeds_on_provider_switch(
         machine=machine_identity,
         config=MemoryIndexerConfig(),
         status=daemon.PatrolStatus(retry_limit=3),
+        root=root,
     )
     meta = switched_backend.all_meta()
     assert str(watched.resolve()) in meta
@@ -636,6 +638,7 @@ def test_cold_start_reconcile_beats_liveness_across_chunks(
             machine=machine_identity,
             config=indexer_config,
             status=daemon.PatrolStatus(retry_limit=indexer_config.retry_limit),
+            root=tmp_path,
         )
         is True
     )

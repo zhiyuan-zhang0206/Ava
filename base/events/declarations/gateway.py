@@ -261,7 +261,7 @@ EVENTS: dict[str, EventSpec] = {
         "memory indexer patrol pass — paths still behind, consecutive failures, over-limit flag",
         payload=MemoryIndexPatrol,
         tier="noise",
-        site="services/derived/memory_indexer/daemon.py:emit_patrol_event (attributes= emit)",
+        site="services/derived/memory_indexer/patrol_status.py:emit_patrol_event (attributes= emit)",
     ),
     "upload_delivery_held": telemetry_event(
         "upload_delivery_held",
