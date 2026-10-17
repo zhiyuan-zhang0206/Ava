@@ -36,6 +36,9 @@ in â€” a FastAPI `TestClient` for an in-process gateway, or any `httpx.Client` â
 context for the block and restoring the previous binding afterwards. A caller on another thread
 keeps the client its own set answers. `use_client` never closes the derived sibling, so the client
 it hands in stays the caller's; closing a sibling would close whatever its builder returned.
+Because the sibling builds its gateway client from the shared endpoint, a parent set without a
+resolvable gateway endpoint cannot derive one; the block's builder still receives that endpoint and
+ignores it.
 
 ```meiva-contract
 id = "client-set-single-owner"
