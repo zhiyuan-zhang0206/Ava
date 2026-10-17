@@ -615,6 +615,9 @@ export type AgentMachineRow = Schemas["AgentMachineRow"];
 // + atomic `applied`). Re-exported from the generated layer so the inventory
 // page imports from the stable `@/lib/types` path.
 export type InventoryAggregate = Schemas["InventoryAggregate"];
+
+export type HostPermissionsPayload = Schemas["HostPermissionsPayload"];
+export type PermissionItemRow = Schemas["PermissionItemRow"];
 export type InventoryItemAggregate = Schemas["InventoryItemAggregate"];
 export type InventoryItemHostState = Schemas["InventoryItemHostState"];
 export type InventoryWriteResult = Schemas["InventoryWriteResult"];

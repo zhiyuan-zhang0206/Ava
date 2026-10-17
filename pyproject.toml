@@ -275,6 +275,16 @@ check-typed-exception = true
 "meiva_builtins/plugins/*/skills/**/reference/*.py" = ["ERA001", "T20", "B904", "F841", "RUF059", "PLW1510", "S110", "S112", "S603", "C401", "PLR0915", "N806"]
 "meiva_builtins/plugins/*/skills/**/scripts/*.py" = ["ERA001", "T20", "S603", "S108", "FBT", "PLW1510", "PTH", "ANN"]
 "scripts/**" = ["ANN", "T20"]
+# This operator tool inserts the repository root on sys.path before importing
+# first-party modules, so it can run from any working directory with the
+# checkout venv. The bootstrap is a code statement ahead of those imports by
+# design; E402 records that ordering, not a stray import.
+"scripts/host_ops/tcc/onboard-helper-grants.py" = ["E402"]
+# These are the helper-spawned child programs: each one performs a single fixed
+# OS action (list a folder, send one AppleEvent, query tccd) and reports the
+# outcome verbatim. S603 records the fixed argv built here; BLE001 is the point
+# of the file -- any failure must reach the parent as a verdict, not a crash.
+"base/host/permissions_helper/grants/children/*.py" = ["S603", "BLE001"]
 # The weekly dependency audit calls fixed https upstream URLs and fixed audit-tool
 # argv (uvx / npm / gh) — every site is a literal with static arguments, so the
 # bandit heuristics would only restate those two lines.
@@ -770,6 +780,11 @@ reportUnknownArgumentType = "error"
 
 [[tool.pyright.executionEnvironments]]
 root = "base/host/net/tests"
+reportUnknownMemberType = "error"
+reportUnknownArgumentType = "error"
+
+[[tool.pyright.executionEnvironments]]
+root = "base/host/permissions_helper/grants/tests"
 reportUnknownMemberType = "error"
 reportUnknownArgumentType = "error"
 

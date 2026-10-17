@@ -1,6 +1,7 @@
-exports = ["launchd_job.py", "lifecycle.py"]
+exports = ["launchd_job.py", "lifecycle.py", "onboarding.py"]
 
 [uses]
 "__init__.py" = ["lifecycle.py"]
 "lifecycle.py" = ["build_state.py", "hardened_runtime.py", "launchd_job.py"]
-"tests" = ["__init__.py", "launchd_job.py", "lifecycle.py"]
+"onboarding.py" = ["launchd_job.py"]
+"tests" = ["__init__.py", "launchd_job.py", "lifecycle.py", "onboarding.py"]
