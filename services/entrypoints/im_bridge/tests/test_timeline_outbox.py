@@ -1,5 +1,5 @@
 import asyncio
-from collections.abc import Iterator
+from collections.abc import Awaitable, Callable, Iterator
 from concurrent.futures import ThreadPoolExecutor
 from threading import Event
 from typing import Any
@@ -47,6 +47,7 @@ class RecordingAdapter(IMAdapter):
         self.account = account
         self.sent: list[str] = []
         self.error: Exception | None = None
+        self.error_queue: list[Exception | None] = []
         self.started: asyncio.Event | None = None
         self.release: asyncio.Event | None = None
 
@@ -78,8 +79,9 @@ class RecordingAdapter(IMAdapter):
         if self.release is not None:
             await self.release.wait()
         self.sent.extend(chunk.text for chunk in prepared.chunks)
-        if self.error is not None:
-            raise self.error
+        error = self.error_queue.pop(0) if self.error_queue else self.error
+        if error is not None:
+            raise error
 
 
 def candidate(
@@ -257,6 +259,55 @@ async def test_worker_records_whole_send_outcome_without_secret(
     assert row[0] == expected and row[1] is not None
     assert "SECRET" not in str(row)
     await IMOutboxWorker(store, {"telegram": adapter}).run_once()
+    assert adapter.sent == ["original"]
+
+
+class RecordingRetry:
+    def __init__(self) -> None:
+        self.calls = 0
+
+    async def __call__(self, attempt: Callable[[], Awaitable[None]]) -> None:
+        self.calls += 1
+        await attempt()
+
+
+async def test_worker_retries_a_proved_no_effect_send_once(pool: ConnectionPool) -> None:
+    store = IMOutboxStore(pool)
+    store.accept("telegram", "bot", "chat", 7, [candidate()])
+    adapter = RecordingAdapter()
+    adapter.error_queue = [SendNotStartedError("no effect"), None]
+    retry = RecordingRetry()
+    await IMOutboxWorker(store, {"telegram": adapter}, retry=retry).run_once()
+    row = statuses(pool)[0]
+    assert row[0] == "sent" and retry.calls == 1
+    assert adapter.sent == ["original", "original"]
+
+
+async def test_worker_records_failed_when_the_retry_also_proves_no_effect(
+    pool: ConnectionPool,
+) -> None:
+    store = IMOutboxStore(pool)
+    store.accept("telegram", "bot", "chat", 7, [candidate()])
+    adapter = RecordingAdapter()
+    adapter.error = SendNotStartedError("no effect")
+    retry = RecordingRetry()
+    await IMOutboxWorker(store, {"telegram": adapter}, retry=retry).run_once()
+    row = statuses(pool)[0]
+    assert row[0] == "failed" and retry.calls == 1
+    assert adapter.sent == ["original", "original"]
+    await IMOutboxWorker(store, {"telegram": adapter}, retry=retry).run_once()
+    assert adapter.sent == ["original", "original"]
+
+
+async def test_worker_never_retries_an_ambiguous_outcome(pool: ConnectionPool) -> None:
+    store = IMOutboxStore(pool)
+    store.accept("telegram", "bot", "chat", 7, [candidate()])
+    adapter = RecordingAdapter()
+    adapter.error = httpx.ReadError("https://provider/botSECRET?context_token=SECRET")
+    retry = RecordingRetry()
+    await IMOutboxWorker(store, {"telegram": adapter}, retry=retry).run_once()
+    row = statuses(pool)[0]
+    assert row[0] == "uncertain" and retry.calls == 0
     assert adapter.sent == ["original"]
 
 
