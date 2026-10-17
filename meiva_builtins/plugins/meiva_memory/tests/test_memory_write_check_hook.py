@@ -119,13 +119,17 @@ def _state(
 @pytest.fixture
 def runtime(search: _MemoryGateway, model_catalog: Any) -> Iterator[Runtime[MeivaContext]]:
     clients = ClientSet(
+        gateway_url="http://gateway.test",
+        gateway=lambda url: httpx.Client(
+            base_url=url, transport=httpx.MockTransport(search.respond)
+        ),
         factories={
             GatewayTransportInputs: lambda: GatewayTransportInputs(
                 max_retries_reader=lambda: 1,
                 retry_delay_reader=lambda: 0.0,
                 memory_deadline_reader=lambda: 15.0,
             )
-        }
+        },
     )
     context = MeivaContext(
         identity=AgentIdentity(agent_id=17, owns_loop=True),
@@ -134,17 +138,9 @@ def runtime(search: _MemoryGateway, model_catalog: Any) -> Iterator[Runtime[Meiv
         clients=clients,
     )
     try:
-        with (
-            httpx.Client(
-                base_url="http://gateway.test", transport=httpx.MockTransport(search.respond)
-            ) as client,
-            clients.using_gateway(client),
-        ):
-            try:
-                yield Runtime(context=context)
-            finally:
-                assert search.finished.wait(timeout=2), "memory HTTP handler did not finish"
+        yield Runtime(context=context)
     finally:
+        assert search.finished.wait(timeout=2), "memory HTTP handler did not finish"
         clients.close()
 
 
