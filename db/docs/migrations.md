@@ -50,6 +50,13 @@ the drift gate refuses unmirrored dependency changes before DB mutation.
    would fail on `already exists` (lint check 7 enforces the mechanically detectable cases)
 4. PR review focus: running `db/schema.sql` on a fresh DB and running the baseline + all
    post-baseline migrations on a dev DB must converge to the same schema
+5. An object the migration touches may belong to an upstream dependency rather than to
+   `db/schema.sql` — the LangGraph checkpoint tables the saver creates are the current
+   example. The table is present when a real cluster migrates (a birth runs
+   `PostgresSaver.setup()` before this step), but not in a schema-only database, so such
+   a migration guards on `to_regclass` and says so with `RAISE NOTICE` when it skips.
+   Keep the guard narrow: it covers the fixture, never a cluster that should have the
+   table
 
 ## Pre-commit lint
 

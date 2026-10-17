@@ -1,6 +1,7 @@
 exports = ["migration_support.py", "schema_gate.py"]
 
 [uses]
+"test_checkpoints_compact_boundary_index.py" = ["migration_support.py"]
 "test_migration_layout.py" = ["migration_support.py"]
 "test_migration_reset.py" = ["migration_support.py"]
 "test_timeline_projection_upgrade.py" = ["migration_support.py"]
