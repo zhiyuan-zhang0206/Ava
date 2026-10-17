@@ -132,6 +132,49 @@ def patch_manifest(manifest_xml: str) -> str:
     return ET.tostring(root, encoding="unicode", xml_declaration=True)
 
 
+_MAIN_ACTIVITY_MARKER = "// Meiva system-bar insets overlay."
+
+# meiva:ref ui/app/docs/app.meiva.okf.md#android-system-bar-insets
+_MAIN_ACTIVITY_INSETS = """
+    {marker}
+    val meivaContent = findViewById<View>(android.R.id.content)
+    ViewCompat.setOnApplyWindowInsetsListener(meivaContent) { view, insets ->
+      val bars = insets.getInsets(
+        WindowInsetsCompat.Type.systemBars() or WindowInsetsCompat.Type.displayCutout()
+      )
+      view.setPadding(bars.left, bars.top, bars.right, bars.bottom)
+      insets
+    }
+    ViewCompat.requestApplyInsets(meivaContent)
+"""
+
+_MAIN_ACTIVITY_IMPORTS = (
+    "import android.view.View\n"
+    "import androidx.core.view.ViewCompat\n"
+    "import androidx.core.view.WindowInsetsCompat\n"
+)
+
+
+def patch_main_activity(source: str) -> str:
+    if _MAIN_ACTIVITY_MARKER in source:
+        return source
+    anchor = "super.onCreate(savedInstanceState)"
+    if anchor not in source:
+        raise ValueError(f"unrecognised Tauri MainActivity template; missing {anchor!r}")
+    if "import android.os.Bundle" not in source:
+        raise ValueError("unrecognised Tauri MainActivity template; no Bundle import")
+    patched = source.replace(
+        "import android.os.Bundle\n",
+        "import android.os.Bundle\n" + _MAIN_ACTIVITY_IMPORTS,
+        1,
+    )
+    return patched.replace(
+        anchor + "\n",
+        anchor + "\n" + _MAIN_ACTIVITY_INSETS.replace("{marker}", _MAIN_ACTIVITY_MARKER),
+        1,
+    )
+
+
 def patch_gradle(build_gradle: str) -> str:
     """Wire Tauri's generated Android app to an optional CI keystore.
 
@@ -207,6 +250,13 @@ def apply(overlay_dir: Path, gen_dir: Path) -> None:
 
     gradle = app_dir / "build.gradle.kts"
     gradle.write_text(patch_gradle(gradle.read_text(encoding="utf-8")), encoding="utf-8")
+
+    main_activity = package_dir / "MainActivity.kt"
+    if not main_activity.is_file():
+        raise SystemExit(f"{main_activity} does not exist — the Tauri template changed")
+    main_activity.write_text(
+        patch_main_activity(main_activity.read_text(encoding="utf-8")), encoding="utf-8"
+    )
 
 
 def main(argv: list[str] | None = None) -> int:
