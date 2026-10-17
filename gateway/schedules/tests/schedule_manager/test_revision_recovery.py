@@ -31,6 +31,9 @@ class Backend:
     def session_generation(self, name: str) -> str | None:
         return None
 
+    def host_generation(self) -> str | None:
+        return "host-a"
+
     def kill_session(self, name: str) -> tuple[bool, str]:
         self.killed.append(name)
         if self.fail_reap:

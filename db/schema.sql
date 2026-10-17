@@ -1254,8 +1254,11 @@ CREATE TABLE schedules (
     not_live_since   TIMESTAMPTZ,             -- first sessionless observation of the current outage
     stall_alerted_at TIMESTAMPTZ,             -- the two-hour no-session alert fired for this outage
     desired_revision BIGINT NOT NULL DEFAULT 0,
-    applied_revision BIGINT NOT NULL DEFAULT 0
+    applied_revision BIGINT NOT NULL DEFAULT 0,
+    launch_generation     TEXT                     -- session-host generation the current attempt was launched into (NULL = unknown)
 );
+COMMENT ON COLUMN schedules.launch_generation IS
+    'Session-host generation (the pty-sessions service epoch) the current execution attempt was launched into; NULL when the attempt predates this column or the host could not name itself. A live epoch that differs from this value means the host was replaced and the attempt died with it, which authorizes one automatic relaunch (services/wake/schedule_manager/docs/host-replacement.meiva.okf.md#host-replacement-restart).';
 CREATE INDEX ON schedules (enabled);
 
 CREATE TABLE resource_creation_receipts (

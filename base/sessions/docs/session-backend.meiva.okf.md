@@ -153,3 +153,9 @@ tests = ["base/sessions/tests/test_pty_backend.py::test_started_ats_answers_ever
 One listing avoids a separate round trip per session in a status snapshot. The
 bound test checks the returned epochs and absent/empty cases; it does not count
 network calls.
+
+### Session host generation
+
+A backend names its hosting process's generation, or None when it cannot tell;
+a replacement generation is one new chance for a supervised resident process.
+See [[base/sessions/docs/host-generation.meiva.okf.md|session host generation]].

@@ -27,6 +27,7 @@ import re
 import signal
 import threading
 import time
+import uuid
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
@@ -136,6 +137,7 @@ class PtyService:
         self._sessions: dict[str, session.PtySession] = {}
         self._lock = threading.Lock()
         self._closing = False
+        self._host_generation = uuid.uuid4().hex
         # Set once `serve` runs: the loop and its task group, and the stop request.
         self._loop: asyncio.AbstractEventLoop | None = None
         self._tasks: asyncio.TaskGroup | None = None
@@ -190,7 +192,7 @@ class PtyService:
 
     def _ping(self, req: dict[str, Any]) -> dict[str, Any]:
         del req
-        return {"pid": os.getpid()}
+        return {"pid": os.getpid(), "host_generation": self._host_generation}
 
     def _has(self, req: dict[str, Any]) -> dict[str, Any]:
         return {"alive": self._live(_text(req, "name")) is not None}

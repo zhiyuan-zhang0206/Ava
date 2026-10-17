@@ -37,7 +37,7 @@ from base.paths import meiva_home
 from base.sessions.backend import get_shell_backend
 from base.sessions.env_forwarding import forward_env_dict
 from base.sessions.protocol import SessionBackend
-from services.wake.schedule_manager import revisions
+from services.wake.schedule_manager import host_restart, revisions
 from services.wake.schedule_manager.recovery_gate import RecoveryGate
 
 _log = logging.getLogger(__name__)
@@ -55,6 +55,21 @@ STALL_ALERT_AFTER_S = SCHEDULE_STALL_ALERT_AFTER_S
 # paused service sits between them) are not one streak.
 BLOCKED_GIVE_UP_AFTER_S = 600.0
 BLOCKED_STREAK_GAP_S = 60.0
+
+# meiva:ref services/wake/schedule_manager/docs/host-replacement.meiva.okf.md#host-replacement-restart
+INTERRUPTED_HOST_REPLACED = "interrupted (session host replaced)"
+HOST_GENERATION_UNKNOWN_LOG_INTERVAL_S = 300.0
+
+
+# meiva:ref services/wake/schedule_manager/docs/host-replacement.meiva.okf.md#host-replacement-restart
+def auto_restart_max_per_window() -> int:
+    return settings.gateway.schedule_auto_restart_max_per_window
+
+
+# meiva:ref services/wake/schedule_manager/docs/host-replacement.meiva.okf.md#host-replacement-restart
+def auto_restart_window_seconds() -> float:
+    return settings.gateway.schedule_auto_restart_window_seconds
+
 
 # Repo root (services/wake/schedule_manager/../../.. == <repo>/) — the cwd the runner launches from, so its
 # relative `.venv/bin/python` resolves into this checkout's venv.
@@ -96,6 +111,9 @@ class ScheduleManager:
             emit_held=self._emit_gate_held,
             emit_refusal=self._emit_launch_refused,
         )
+        self._host_generation: str | None = None
+        self._host_restarts = host_restart.AutoRestartLedger()
+        self._host_generation_unknown_logged = 0.0
 
     # ── control (the sync-request consumer calls this) ──────────────────────
 
@@ -112,6 +130,7 @@ class ScheduleManager:
         if admission.held():
             return False
         with self._lock:
+            self._host_generation = self._read_host_generation()
             converged = self._sync_revision(schedule_id)
             if converged:
                 self._blocked.pop(schedule_id, None)
@@ -146,7 +165,7 @@ class ScheduleManager:
                     )
                 return legacy
             if observed == wanted.revision:
-                self._mark_running(schedule_id, wanted.revision)
+                self._mark_running(schedule_id, wanted.revision, self._host_generation)
                 return True
             if not self._reap(schedule_id, owned=True):
                 self._reap_retries.add(schedule_id)
@@ -156,9 +175,11 @@ class ScheduleManager:
             "completed",
             "error",
         ):
-            if wanted.status == "running":
+            if wanted.status != "running":
+                return True
+            if not self._reclaim_after_host_replacement(schedule_id, wanted):
                 self._mark_lost(schedule_id, wanted.revision)
-            return True
+                return True
         return self._launch_revision(schedule_id)
 
     def _launch_revision(self, schedule_id: int) -> bool:
@@ -210,6 +231,10 @@ class ScheduleManager:
 
         if admission.held():
             return
+        self._host_generation = self._read_host_generation()
+        if self._host_generation is None:
+            self._note_host_generation_unknown()
+            return
         # A given-up schedule is not retried: only a new revision lifts that.
         self._reap_retries.difference_update(self._abandoned)
         retrying = self._reap_retries.copy()
@@ -255,6 +280,7 @@ class ScheduleManager:
         }
         self._blocked = {sid: span for sid, span in self._blocked.items() if sid in known}
         self._abandoned = {sid: rev for sid, rev in self._abandoned.items() if sid in known}
+        self._host_restarts.prune(known)
 
     def _launch_missing(self, enabled_rows: dict[int, str], missing: list[int]) -> None:
         """Apply explicit revisions; an admitted missing execution is never relaunched."""
@@ -277,6 +303,60 @@ class ScheduleManager:
             ).rowcount
         if changed:
             _log.warning("schedule %s process lost; automatic relaunch disabled", schedule_id)
+
+    # meiva:ref services/wake/schedule_manager/docs/host-replacement.meiva.okf.md#host-replacement-restart
+    def _read_host_generation(self) -> str | None:
+        return get_shell_backend().host_generation()
+
+    # meiva:ref services/wake/schedule_manager/docs/host-replacement.meiva.okf.md#session-host-absent
+    def _note_host_generation_unknown(self) -> None:
+        now = time.monotonic()
+        if now - self._host_generation_unknown_logged < HOST_GENERATION_UNKNOWN_LOG_INTERVAL_S:
+            return
+        self._host_generation_unknown_logged = now
+        _log.warning(
+            "schedule reconcile skipped: the session host did not name its generation "
+            "(an absent host means unknown, never an empty one)"
+        )
+
+    # meiva:ref services/wake/schedule_manager/docs/host-replacement.meiva.okf.md#host-replacement-restart
+    def _reclaim_after_host_replacement(self, schedule_id: int, wanted: revisions.Desired) -> bool:
+        generation = self._host_generation
+        if (
+            generation is None
+            or wanted.launch_generation is None
+            or wanted.launch_generation == generation
+        ):
+            return False
+        intent = (wanted.launch_generation, generation)
+        window = auto_restart_window_seconds()
+        replay = self._host_restarts.in_flight(schedule_id) == intent
+        attempts = self._host_restarts.recent(schedule_id, window)
+        if not replay and len(attempts) >= auto_restart_max_per_window():
+            host_restart.emit_auto_restart_suppressed(
+                schedule_id, wanted.launch_generation, generation, len(attempts), window
+            )
+            return False
+        with write_transaction(self._pool) as conn:
+            authorized = conn.execute(
+                "UPDATE schedules SET launch_count = 0 WHERE id = %s AND enabled "
+                "AND status = 'running' AND desired_revision = %s AND applied_revision = %s "
+                "AND launch_generation = %s",
+                (schedule_id, wanted.revision, wanted.applied, wanted.launch_generation),
+            ).rowcount
+        if not authorized:
+            return False
+        self._close_null_runs(schedule_id, note=INTERRUPTED_HOST_REPLACED)
+        if replay:
+            return True
+        self._host_restarts.record(schedule_id, intent, window)
+        _log.warning(
+            "schedule %s: session host %s was replaced by %s; relaunching once in the new generation",
+            schedule_id,
+            wanted.launch_generation,
+            generation,
+        )
+        return True
 
     def _report_stalled_schedules(self, status_by_id: dict[int, str], live_ids: set[int]) -> None:
         """Alert once when an active schedule has been sessionless for 2h.
@@ -378,7 +458,7 @@ class ScheduleManager:
                     live.add(schedule_id)
         return live
 
-    def _close_null_runs(self, schedule_id: int) -> None:
+    def _close_null_runs(self, schedule_id: int, *, note: str = "interrupted") -> None:
         """Close a schedule's in-progress run-history rows (ok IS NULL) as
         'interrupted' — the runner that opened them is gone. Best-effort (run
         history is severable observability) and idempotent (WHERE ok IS NULL):
@@ -388,9 +468,9 @@ class ScheduleManager:
         then."""
         with write_transaction(self._pool) as conn, conn.cursor() as cur:
             cur.execute(
-                "UPDATE schedule_runs SET ok = false, note = 'interrupted' "
+                "UPDATE schedule_runs SET ok = false, note = %s "
                 "WHERE schedule_id = %s AND ok IS NULL",
-                (schedule_id,),
+                (note, schedule_id),
             )
 
     def _launch(self, schedule_id: int) -> None:
@@ -414,7 +494,7 @@ class ScheduleManager:
         # same-name survivor is by definition stale.
         if not self._prepare_launch(schedule_id, name, backend, wanted):
             return
-        if not self._claim_launch(schedule_id, wanted.revision):
+        if not self._claim_launch(schedule_id, wanted.revision, self._host_generation):
             return
         # _launch is only reached for a schedule with no live session, so any
         # in-progress run row at this point belongs to a dead process (the
@@ -474,16 +554,25 @@ class ScheduleManager:
             return
         self._reap_retries.discard(schedule_id)
         _log.info("schedule %s launched (session %s)", schedule_id, name)
-        self._mark_running(schedule_id, wanted.revision)
+        intent = self._host_restarts.clear(schedule_id)
+        self._mark_running(schedule_id, wanted.revision, self._host_generation)
+        if intent is not None:
+            host_restart.emit_auto_restart(
+                schedule_id,
+                intent[0],
+                intent[1],
+                len(self._host_restarts.recent(schedule_id, auto_restart_window_seconds())),
+            )
 
-    def _mark_running(self, schedule_id: int, revision: int) -> None:
+    def _mark_running(self, schedule_id: int, revision: int, epoch: str | None) -> None:
         """Confirm a matching live process without overwriting completion or newer intent."""
         with write_transaction(self._pool) as conn:
             conn.execute(
-                "UPDATE schedules SET applied_revision = %s, status = CASE "
+                "UPDATE schedules SET applied_revision = %s, "
+                "launch_generation = COALESCE(%s, launch_generation), status = CASE "
                 "WHEN applied_revision = %s AND status = 'completed' THEN status ELSE 'running' END, "
                 "last_error = NULL WHERE id = %s AND desired_revision = %s AND enabled",
-                (revision, revision, schedule_id, revision),
+                (revision, epoch, revision, schedule_id, revision),
             )
 
     def _prepare_launch(
@@ -496,7 +585,7 @@ class ScheduleManager:
         if backend.session_generation(name) == current_generation():
             observed = revisions.launched_revision(schedule_id)
             if observed == wanted.revision:
-                self._mark_running(schedule_id, wanted.revision)
+                self._mark_running(schedule_id, wanted.revision, self._host_generation)
                 return False
             if observed is None:
                 if wanted.revision > 0:
@@ -656,7 +745,7 @@ class ScheduleManager:
             rows = conn.execute("SELECT id, status FROM schedules WHERE enabled").fetchall()
         return {row[0]: row[1] for row in rows}
 
-    def _claim_launch(self, schedule_id: int, revision: int) -> bool:
+    def _claim_launch(self, schedule_id: int, revision: int, epoch: str | None) -> bool:
         """Admit one process attempt before effects; ambiguity consumes the attempt.
 
         Existing launch_count is a one-attempt latch, reset only by a new
@@ -666,10 +755,11 @@ class ScheduleManager:
             return (
                 conn.execute(
                     "UPDATE schedules SET launch_count = 1, applied_revision = %s, "
-                    "status = 'error', last_error = %s WHERE id = %s AND enabled "
-                    "AND desired_revision = %s AND launch_count = 0",
+                    "launch_generation = %s, status = 'error', last_error = %s WHERE id = %s "
+                    "AND enabled AND desired_revision = %s AND launch_count = 0",
                     (
                         revision,
+                        epoch,
                         "Launch outcome unknown; inspect before explicitly restarting",
                         schedule_id,
                         revision,

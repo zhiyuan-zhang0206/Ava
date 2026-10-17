@@ -1,8 +1,8 @@
-exports = ["daemon.py", "engine.py", "manager.py", "recovery_gate.py", "requests.py", "revisions.py", "runner.py"]
+exports = ["daemon.py", "engine.py", "host_restart.py", "manager.py", "recovery_gate.py", "requests.py", "revisions.py", "runner.py"]
 
 [uses]
 "daemon.py" = ["manager.py", "requests.py"]
-"manager.py" = ["recovery_gate.py", "revisions.py"]
+"manager.py" = ["host_restart.py", "recovery_gate.py", "revisions.py"]
 "requests.py" = ["manager.py"]
 "runner.py" = ["engine.py"]
 "tests" = ["manager.py", "recovery_gate.py"]

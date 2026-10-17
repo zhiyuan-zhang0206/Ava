@@ -198,6 +198,31 @@ class GatewaySettings(EnvSettings):
         json_schema_extra=_SCHEDULE_RESTART_METADATA,
     )
 
+    schedule_auto_restart_max_per_window: int = Field(
+        default=5,
+        alias="MEIVA_SCHEDULE_AUTO_RESTART_MAX_PER_WINDOW",
+        description=(
+            "How many automatic relaunches one schedule may receive inside one rolling window "
+            "after its session host was replaced (host reboot, deploy stop/start, a pty-sessions "
+            "crash-restart). One host generation authorizes exactly one relaunch by construction; "
+            "this cap only stops a host that keeps restarting from turning one incident into a "
+            "restart storm. Reaching it records the schedule as an error and emits "
+            "schedule_auto_restart_suppressed."
+        ),
+        json_schema_extra=_SCHEDULE_RESTART_METADATA,
+    )
+
+    schedule_auto_restart_window_seconds: float = Field(
+        default=1800.0,
+        alias="MEIVA_SCHEDULE_AUTO_RESTART_WINDOW_SECONDS",
+        description=(
+            "The rolling window the automatic-relaunch cap counts in. One wave restarts the "
+            "session host once (stop, then start); half an hour lets a wave be re-run without "
+            "letting a crash-looping host relaunch schedules indefinitely."
+        ),
+        json_schema_extra=_SCHEDULE_RESTART_METADATA,
+    )
+
     gateway_reload: bool = Field(
         default=False,
         alias="MEIVA_GATEWAY_RELOAD",

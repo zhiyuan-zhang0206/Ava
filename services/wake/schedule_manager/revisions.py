@@ -19,6 +19,7 @@ class Desired(NamedTuple):
     status: str
     revision: int
     applied: int
+    launch_generation: str | None
 
 
 @contextmanager
@@ -41,7 +42,8 @@ def claim_convergence(pool: ConnectionPool[Any], schedule_id: int) -> Generator[
 def desired(pool: ConnectionPool[Any], schedule_id: int) -> Desired | None:
     with pool.connection() as conn:
         row = conn.execute(
-            "SELECT enabled, status, desired_revision, applied_revision FROM schedules WHERE id = %s",
+            "SELECT enabled, status, desired_revision, applied_revision, launch_generation "
+            "FROM schedules WHERE id = %s",
             (schedule_id,),
         ).fetchone()
     return None if row is None else Desired(*row)

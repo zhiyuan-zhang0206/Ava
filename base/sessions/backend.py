@@ -179,6 +179,10 @@ class PtySessionBackend(SessionBackend):
                 return info.generation
         return None
 
+    # meiva:ref base/sessions/docs/host-generation.meiva.okf.md#host-generation
+    def host_generation(self) -> str | None:
+        return client.host_generation()
+
     def session_log_path(self, name: str) -> Path | None:
         return logs_dir() / f"{name}.out.log"
 
