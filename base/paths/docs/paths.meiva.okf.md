@@ -72,6 +72,12 @@ only itself.
 ## Notes
 
 - **`.env` / `installed.json` lock discipline** (sibling file locks at every door, leaves stay leaves, atomic save vs lost update): [[base/paths/docs/lock-discipline.meiva.okf.md]].
+- `workspaces_root()` owns the `workspaces` path segment; `workspace_dir`,
+  `workspace_dir_readonly`, `meiva_code`'s fork cwd re-homing and the
+  agent-runner's to_user watcher all derive from it in both directions (build a
+  workspace path, or classify one as belonging to some agent's workspace). Do
+  not re-derive the root as `workspace_dir(...).parent` or by composing
+  `meiva_home() / "workspaces"`.
 - The home is `MEIVA_HOME` when set, else `~/.meiva`
   (`base/host/env/dotenv_boot.py:resolve_meiva_home`), never from cwd and never from a
   flag: no pointer file, no checkout claim, no in-process override. A home that

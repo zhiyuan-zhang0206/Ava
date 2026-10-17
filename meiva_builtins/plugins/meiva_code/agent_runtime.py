@@ -12,7 +12,7 @@ from agent.state import AgentState, PluginStateHandle
 from base.agents.context import MeivaContext
 from base.log import logger
 from base.packages.plugins.extensions import PluginContributions
-from base.paths import workspace_dir
+from base.paths import workspace_dir, workspaces_root
 
 from ._prompt_sections import coding_tools_section, engineering_workflow_section
 from ._state import MeivaCodeState
@@ -77,6 +77,18 @@ def _logical_cwd_error(cwd: Path) -> OSError | None:
     return None
 
 
+def _foreign_workspace(cwd: Path, agent_id: int) -> str | None:
+    root = workspaces_root()
+    try:
+        relative = cwd.resolve().relative_to(root.resolve())
+    except ValueError:
+        return None
+    if not relative.parts:
+        return None
+    owner = relative.parts[0]
+    return owner if owner.isdigit() and owner != str(agent_id) else None
+
+
 # meiva:ref meiva_builtins/plugins/meiva_code/docs/runtime-notes.meiva.okf.md#logical-cwd
 class ValidateCwdAfterInitHook(Hook):
     async def __call__(
@@ -88,12 +100,17 @@ class ValidateCwdAfterInitHook(Hook):
     ) -> dict[str, str] | None:
         initialized = "meiva_code__cwd" in state.model_fields_set
         cwd = Path(state_handle().view(state).cwd)
-        exc = _logical_cwd_error(cwd) if initialized else None
-        if initialized and exc is None:
-            return None
-
         identity = runtime.context.identity
         aid = None if identity is None else identity.agent_id
+        exc = _logical_cwd_error(cwd) if initialized else None
+        owner = (
+            _foreign_workspace(cwd, aid)
+            if initialized and exc is None and aid is not None
+            else None
+        )
+        if initialized and exc is None and owner is None:
+            return None
+
         fallback = str(Path.home() if aid is None else workspace_dir(aid))
         if exc is not None:
             logger.warning(
@@ -102,7 +119,15 @@ class ValidateCwdAfterInitHook(Hook):
                 "future restarts use the new cwd",
                 cwd=str(cwd),
                 exc=exc,
-                fallback=str(fallback),
+                fallback=fallback,
+            )
+        elif owner is not None:
+            logger.warning(
+                "[meiva_code] after_init: inherited cwd {cwd!r} belongs to agent "
+                "{owner}'s workspace, re-homing to {fallback!r}",
+                cwd=str(cwd),
+                owner=owner,
+                fallback=fallback,
             )
         return {"meiva_code__cwd": fallback}
 

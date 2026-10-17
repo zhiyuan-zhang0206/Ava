@@ -30,7 +30,7 @@ writes through its delta. Context-file injection runs separately in the exec pat
 ```meiva-contract
 id = "logical-cwd"
 kind = "invariant"
-statement = "After initialization, a valid persisted logical cwd is preserved. An absent or unusable cwd is replaced by the invoking agent's workspace, or home when no agent identity exists. This does not change the Python process cwd."
+statement = "After initialization, a valid persisted logical cwd is preserved, except a cwd inside another agent's workspace (a fork inherits the source's cwd channel): that one is replaced by the invoking agent's workspace, because a workspace is agent identity rather than project context. An absent or unusable cwd is likewise replaced by the invoking agent's workspace, or home when no agent identity exists. The workspaces root comes from `base.paths.workspaces_root()`, its single owner. This does not change the Python process cwd."
 code = ["meiva_builtins/plugins/meiva_code/agent_runtime.py:ValidateCwdAfterInitHook"]
 tests = [
   "meiva_builtins/plugins/meiva_code/tests/meiva_code_plugin/test_read_wrap_hash_dedup_primary_path_blocks.py::test_after_init_initializes_each_host_workspace_without_sdk_slot",
@@ -38,6 +38,14 @@ tests = [
   "meiva_builtins/plugins/meiva_code/tests/meiva_code_plugin/test_read_wrap_hash_dedup_primary_path_blocks.py::test_after_init_hook_falls_back_when_cwd_missing",
   "meiva_builtins/plugins/meiva_code/tests/meiva_code_plugin/test_read_wrap_hash_dedup_primary_path_blocks.py::test_after_init_hook_noop_when_cwd_valid",
   "meiva_builtins/plugins/meiva_code/tests/meiva_code_plugin/test_read_wrap_hash_dedup_primary_path_blocks.py::test_after_init_hook_falls_back_when_cwd_is_file",
+  "meiva_builtins/plugins/meiva_code/tests/meiva_code_plugin/test_read_wrap_hash_dedup_primary_path_blocks.py::test_after_init_rehomes_when_inherited_cwd_is_another_agents_workspace",
+  "meiva_builtins/plugins/meiva_code/tests/meiva_code_plugin/test_read_wrap_hash_dedup_primary_path_blocks.py::test_after_init_rehomes_when_inherited_cwd_is_inside_another_agents_workspace",
+  "meiva_builtins/plugins/meiva_code/tests/meiva_code_plugin/test_read_wrap_hash_dedup_primary_path_blocks.py::test_after_init_keeps_an_inherited_project_cwd",
+  "meiva_builtins/plugins/meiva_code/tests/meiva_code_plugin/test_read_wrap_hash_dedup_primary_path_blocks.py::test_after_init_keeps_own_workspace_and_its_subdirectories",
+  "meiva_builtins/plugins/meiva_code/tests/meiva_code_plugin/test_read_wrap_hash_dedup_primary_path_blocks.py::test_after_init_keeps_the_workspaces_root_itself",
+  "meiva_builtins/plugins/meiva_code/tests/meiva_code_plugin/test_read_wrap_hash_dedup_primary_path_blocks.py::test_after_init_keeps_a_non_numeric_directory_under_workspaces",
+  "meiva_builtins/plugins/meiva_code/tests/meiva_code_plugin/test_read_wrap_hash_dedup_primary_path_blocks.py::test_after_init_keeps_a_digit_lookalike_directory",
+  "meiva_builtins/plugins/meiva_code/tests/meiva_code_plugin/test_read_wrap_hash_dedup_primary_path_blocks.py::test_after_init_rehomes_through_a_symlink_into_another_agents_workspace",
 ]
 ```
 
@@ -45,3 +53,8 @@ SDK file, shell, understanding and UI wrappers resolve their paths against the
 logical cwd. Bare Python file operations and subprocess calls retain the
 process's startup cwd. Initialization uses the invocation's explicit runtime
 identity and distinguishes an absent field from a deliberately persisted value.
+
+Fork copies the source agent's whole graph state, so the inherited cwd channel
+is the source's. Re-homing is limited to the workspaces tree: a fork that
+inherits a repo or checkout the source was working in keeps it, because that
+path is the work's context, not the source agent's identity.
