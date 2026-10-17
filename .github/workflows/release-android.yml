@@ -1,4 +1,20 @@
-# Build and publish the Ava App Android APK for an `android-v*` tag.
+# Build and publish the Ava App Android APK.
+#
+# Every build injects versionCode = 1_000_000 + github.run_number through the
+# Tauri `--config` overlay (scripts/codegen/build_android_release.py owns the
+# rule and the manifest). The run number is unique and increasing per workflow,
+# so the code strictly increases across builds even when versionName does not;
+# it also stays above 4002, the highest code Tauri's old semver derivation
+# produced (0.4.2). Tauri's `autoIncrementVersionCode` stays off: it reads a
+# file the generated tree never keeps between CI builds.
+#
+# An `android-v*` tag publishes one immutable release. Every other run replaces
+# the APK and `android-latest.json` in the mutable `android-latest` prerelease;
+# the manifest's fields (versionCode, versionName, apkUrl, sha256, commit,
+# builtAt) are the client update contract. Only a push or a dispatch with
+# dry_run=false publishes, and a publish refuses to move the channel backwards:
+# the upload guard compares the new versionCode with the manifest already
+# advertised, so a late re-run of an older run cannot roll phones back.
 #
 # This workflow is deliberately independent of release-app.yml: Android signing
 # is sufficient for an APK release and must not depend on desktop credentials.
@@ -23,6 +39,13 @@ on:
       - 'ui/app/android/**'
       - '.github/workflows/release-android.yml'
   workflow_dispatch:
+    inputs:
+      dry_run:
+        # Default true: a manual dispatch is a build, not a release. Pass
+        # dry_run=false to replace the android-latest channel deliberately.
+        description: 'Build only; set to false to publish to the android-latest channel'
+        type: boolean
+        default: true
 
 permissions:
   contents: read
@@ -46,6 +69,7 @@ jobs:
     timeout-minutes: 5
     outputs:
       version: ${{ steps.version.outputs.version }}
+      build_number: ${{ steps.build.outputs.build_number }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
@@ -80,6 +104,16 @@ jobs:
               output.write(f"version={version}\n")
           PY
 
+      - name: Compute the build number
+        id: build
+        env:
+          RUN_NUMBER: ${{ github.run_number }}
+        run: |
+          build_number="$(python3 scripts/codegen/build_android_release.py version-code \
+            --run-number "$RUN_NUMBER")"
+          echo "versionCode = 1_000_000 + run $RUN_NUMBER = $build_number"
+          echo "build_number=$build_number" >> "$GITHUB_OUTPUT"
+
   android:
     name: Android (APK)
     needs: prepare
@@ -91,7 +125,9 @@ jobs:
       ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
       EVENT_NAME: ${{ github.event_name }}
       NDK_VERSION: 27.2.12479018
+      BUILD_TOOLS_VERSION: '36.0.0'
       APP_VERSION: ${{ needs.prepare.outputs.version }}
+      BUILD_NUMBER: ${{ needs.prepare.outputs.build_number }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
@@ -112,7 +148,7 @@ jobs:
 
       - name: Install the Android NDK
         run: |
-          sdkmanager --install "ndk;$NDK_VERSION" "platforms;android-36" "build-tools;36.0.0"
+          sdkmanager --install "ndk;$NDK_VERSION" "platforms;android-36" "build-tools;$BUILD_TOOLS_VERSION"
           echo "NDK_HOME=$ANDROID_HOME/ndk/$NDK_VERSION" >> "$GITHUB_ENV"
 
       - name: Install Rust
@@ -172,7 +208,32 @@ jobs:
 
       - name: Build the APK
         working-directory: ui/app
-        run: cargo tauri android build --apk --config "{\"version\":\"$APP_VERSION\"}"
+        run: |
+          # The overlay pins both identity fields: versionName is the milestone
+          # version, versionCode the injected build number.
+          config="$(python3 "$GITHUB_WORKSPACE/scripts/codegen/build_android_release.py" tauri-config \
+            --version-name "$APP_VERSION" --version-code "$BUILD_NUMBER")"
+          echo "Tauri config overlay: $config"
+          cargo tauri android build --apk --config "$config"
+
+      # The whole update chain compares versionCode, so a config overlay that
+      # Tauri silently ignored would ship an APK the phone never installs over
+      # an older build. Read the number back out of the built APK instead of
+      # trusting the build log.
+      - name: Verify the injected build number
+        run: |
+          mapfile -t apks < <(find ui/app/src-tauri/gen/android -name '*.apk')
+          if [ "${#apks[@]}" -ne 1 ]; then
+            echo "expected exactly one APK, found ${#apks[@]}" >&2
+            exit 1
+          fi
+          aapt2="$ANDROID_HOME/build-tools/$BUILD_TOOLS_VERSION/aapt2"
+          "$aapt2" dump badging "${apks[0]}" > "$RUNNER_TEMP/badging.txt"
+          head -n 1 "$RUNNER_TEMP/badging.txt"
+          if ! grep -Fq "versionCode='$BUILD_NUMBER'" "$RUNNER_TEMP/badging.txt"; then
+            echo "APK versionCode does not match the injected $BUILD_NUMBER" >&2
+            exit 1
+          fi
 
       - name: Collect artifacts
         run: |
@@ -193,6 +254,9 @@ jobs:
     timeout-minutes: 15
     permissions:
       contents: write # create the release and upload its assets
+    # A manual dispatch may build and inspect the APK without touching the
+    # channel phones update from; push and tag runs always publish.
+    if: github.event_name != 'workflow_dispatch' || inputs.dry_run != true
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
@@ -215,7 +279,40 @@ jobs:
           mkdir -p release-assets
           cp "${apks[0]}" "release-assets/ava-app-$APP_VERSION.apk"
 
-      - name: Create the release and upload the APK
+      - name: Build the update manifest
+        # Only the mutable channel carries the manifest; a tag release is an
+        # immutable milestone the app does not consult.
+        if: github.ref_type != 'tag'
+        env:
+          APP_VERSION: ${{ needs.prepare.outputs.version }}
+          BUILD_NUMBER: ${{ needs.prepare.outputs.build_number }}
+        run: |
+          python3 scripts/codegen/build_android_release.py manifest \
+            --version-code "$BUILD_NUMBER" \
+            --version-name "$APP_VERSION" \
+            --apk "release-assets/ava-app-$APP_VERSION.apk" \
+            --commit "$GITHUB_SHA" \
+            --repo "$GITHUB_REPOSITORY" \
+            --out release-assets/android-latest.json
+
+      - name: Refuse to move the channel backwards
+        if: github.ref_type != 'tag'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          BUILD_NUMBER: ${{ needs.prepare.outputs.build_number }}
+        run: |
+          previous="$RUNNER_TEMP/previous-android-latest"
+          mkdir -p "$previous"
+          if gh release download android-latest --pattern android-latest.json \
+              --dir "$previous" 2>/dev/null; then
+            python3 scripts/codegen/build_android_release.py assert-advances \
+              --current "$previous/android-latest.json" \
+              --version-code "$BUILD_NUMBER"
+          else
+            echo "android-latest carries no manifest yet; this run publishes the first one"
+          fi
+
+      - name: Create the release and upload its assets
         env:
           GH_TOKEN: ${{ github.token }}
           REF_TYPE: ${{ github.ref_type }}
@@ -238,4 +335,12 @@ jobs:
                 --notes "Latest APK built from main." --prerelease
             fi
           fi
-          gh release upload "$TAG" release-assets/*.apk --clobber
+          # Upload the APK before the manifest: while the APK is being
+          # replaced, the old manifest's sha256 no longer matches, so a client
+          # refuses the half-updated channel instead of installing it. A tag
+          # release has no manifest to upload.
+          assets=(release-assets/*.apk)
+          if [ -f release-assets/android-latest.json ]; then
+            assets+=(release-assets/android-latest.json)
+          fi
+          gh release upload "$TAG" "${assets[@]}" --clobber
