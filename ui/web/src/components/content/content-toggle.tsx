@@ -13,7 +13,9 @@ export const DETAILS_SETTINGS_HREF = "/control#display-timeline";
 // meiva:ref ui/web/src/docs/frontend-components/home-shell-chrome/home-shell-chrome.meiva.okf.md#details-mode-owner
 export function ContentToggle() {
   const t = useTranslations("contentToggle");
-  const { detailsMode } = useContentToggle();
+  const { detailsMode, isLoading } = useContentToggle();
+
+  if (isLoading) return null;
 
   return (
     <Link

@@ -130,6 +130,7 @@ vi.mock("../ui/scroll-area", () => ({
 const toggleState = {
   detailsMode: "all" as "all" | "last" | "none",
   isLoading: false,
+  resetPending: false,
   // TimelineView reads the toggle once per render — a render counter.
   reads: 0,
 };
@@ -140,7 +141,22 @@ function setToggleState(patch: Partial<typeof toggleState>) {
 function resetToggleState() {
   toggleState.detailsMode = "all";
   toggleState.isLoading = false;
+  toggleState.resetPending = false;
 }
+
+function setResetPending(): void {
+  toggleState.resetPending = true;
+}
+
+function clearResetPending(): void {
+  toggleState.resetPending = false;
+}
+
+const resetStore = {
+  get resetPending() { return toggleState.resetPending; },
+  bumpReset: vi.fn(setResetPending),
+  consumeReset: vi.fn(clearResetPending),
+};
 
 vi.mock("@/lib/layout/content-toggle-store", async () => {
   const { useSyncExternalStore } = await import("react");
@@ -154,12 +170,8 @@ vi.mock("@/lib/layout/content-toggle-store", async () => {
         isLoading: toggleState.isLoading,
       };
     },
-    // Same-mode re-pick reset token (user ruling 2026-08-06): static in tests —
-    // TimelineView only clears overrides when the token moves; it never does here.
-    useContentToggleReset: (selector?: (s: { resetToken: number; bumpReset: () => void }) => unknown) =>
-      selector
-        ? selector({ resetToken: 0, bumpReset: vi.fn() })
-        : { resetToken: 0, bumpReset: vi.fn() },
+    useContentToggleReset: (selector?: (s: typeof resetStore) => unknown) =>
+      selector ? selector(resetStore) : resetStore,
   };
 });
 
@@ -2873,6 +2885,32 @@ describe("Details mode 'none' — turn expansion keeps child blocks collapsed (#
     fireEvent.click(turnToggle()); // re-expand → the child pin survives
     expect(screen.getByText("hidden thought")).toBeTruthy();
     expect(screen.queryByTestId("python-code")).toBeNull();
+  });
+});
+
+describe("Details mode re-pick made while the timeline was unmounted", () => {
+  it("collapses the manual expansions on the next mount", () => {
+    setToggleState({ detailsMode: "none" });
+    const items = [
+      makeItem({ item_id: "1.0", kind: "agent_reasoning", payload: "hidden thought" }),
+      makeItem({ item_id: "1.1", kind: "agent_code", payload: "print('code')" }),
+    ];
+    const props = { items, threadKey: "reset-gap", scrollMemoryKey: "reset-gap-thread" };
+
+    const first = render(<TimelineView {...props} />);
+    fireEvent.click(screen.getByTestId("turn-toggle"));
+    fireEvent.click(screen.getAllByTestId("card-toggle")[0]);
+    expect(screen.getByText("hidden thought")).toBeTruthy();
+    first.unmount();
+
+    resetStore.bumpReset();
+    expect(resetStore.resetPending).toBe(true);
+
+    render(<TimelineView {...props} />);
+    expect(screen.getByTestId("turn-toggle").getAttribute("aria-expanded")).toBe("false");
+    expect(screen.queryByTestId("card-toggle")).toBeNull();
+    expect(resetStore.consumeReset).toHaveBeenCalled();
+    expect(resetStore.resetPending).toBe(false);
   });
 });
 

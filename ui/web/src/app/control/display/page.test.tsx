@@ -157,6 +157,16 @@ describe("DisplaySettingsPage", () => {
     expect(screen.getByRole<HTMLInputElement>("radio", { name: "Collapse all blocks" }).checked).toBe(true);
   });
 
+  it("renders no details selection while the settings row is still loading", async () => {
+    vi.mocked(api.getSettings).mockReturnValue(new Promise<never>(() => undefined));
+    renderPage();
+
+    await waitFor(() => {
+      expect(screen.queryByText("Timeline details")).toBeNull();
+    });
+    expect(screen.queryByRole("radio", { name: "Collapse all blocks" })).toBeNull();
+  });
+
   it("writes the details mode picked in settings", async () => {
     renderPage();
 

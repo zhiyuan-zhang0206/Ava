@@ -20,6 +20,7 @@ import { useCallback, useSyncExternalStore } from "react";
 import { USER_SETTING_DEFAULTS } from "@/lib/contracts/types";
 
 let store: Record<string, unknown> = { ...USER_SETTING_DEFAULTS };
+let loading = false;
 const listeners = new Set<() => void>();
 const setSettingSpy: { key: string; value: unknown }[] = [];
 
@@ -40,7 +41,13 @@ function snapshot(): Record<string, unknown> {
  *  recorded setSetting calls. Call in beforeEach. */
 export function resetMockSettings(initial: Record<string, unknown> = {}): void {
   store = { ...USER_SETTING_DEFAULTS, ...initial };
+  loading = false;
   setSettingSpy.length = 0;
+  emit();
+}
+
+export function setMockLoading(value: boolean): void {
+  loading = value;
   emit();
 }
 
@@ -63,7 +70,7 @@ export function useUserSettings(): {
 } {
   const settings = useSyncExternalStore(subscribe, snapshot, snapshot);
   const setSetting = useCallback((key: string, value: unknown) => setMockSetting(key, value), []);
-  return { settings, setSetting, isLoading: false };
+  return { settings, setSetting, isLoading: loading };
 }
 
 export function useDebouncedSetting<T>(

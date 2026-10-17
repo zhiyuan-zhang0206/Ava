@@ -10,7 +10,7 @@ vi.mock("@/lib/state/use-user-settings", () => import("@/test-support/user-setti
 
 import { mockSetSettingCalls, resetMockSettings, setMockSetting } from "@/test-support/user-settings-mock";
 
-import { useContentToggle } from "./content-toggle-store";
+import { useContentToggle, useContentToggleReset } from "./content-toggle-store";
 
 beforeEach(() => resetMockSettings());
 afterEach(cleanup);
@@ -47,5 +47,20 @@ describe("useContentToggle", () => {
       key: "display.expand_runs_mode",
       value: "last",
     });
+  });
+});
+
+describe("useContentToggleReset", () => {
+  it("a re-pick leaves a pending reset for the next mounted timeline", () => {
+    const { result } = renderHook(() => useContentToggleReset());
+    act(() => result.current.bumpReset());
+    expect(result.current.resetPending).toBe(true);
+  });
+
+  it("consuming the pending reset clears the flag", () => {
+    const { result } = renderHook(() => useContentToggleReset());
+    act(() => result.current.bumpReset());
+    act(() => result.current.consumeReset());
+    expect(result.current.resetPending).toBe(false);
   });
 });
