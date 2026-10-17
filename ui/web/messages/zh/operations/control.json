@@ -56,9 +56,14 @@
     "status-services": "服务",
     "status-gateway": "网关",
     "ops-metrics": "指标 (Grafana)",
-    "alerts": "告警"
+    "alerts": "告警",
+    "app": "应用"
   },
   "title": "控制台",
   "backToAgents": "返回对话",
-  "openOkfGraph": "打开 OKF 图谱"
+  "openOkfGraph": "打开 OKF 图谱",
+  "app": "应用",
+  "appDescription": "本机上 Meiva 应用的设置：服务器地址与更新。",
+  "appOpenSettings": "打开应用设置",
+  "appOpenSettingsFailed": "应用没有打开设置页。"
 }

@@ -114,3 +114,18 @@ describe("ControlPage shell", () => {
     }
   });
 });
+
+describe("Control shell — app settings section", () => {
+  it("appears only inside the Meiva app", async () => {
+    const first = wrap(<ControlPage />);
+    expect(screen.queryByRole("heading", { name: "App" })).toBeNull();
+    first.unmount();
+
+    (window as unknown as { __TAURI_INTERNALS__?: unknown }).__TAURI_INTERNALS__ = {
+      invoke: vi.fn().mockResolvedValue(undefined),
+    };
+    wrap(<ControlPage />);
+    expect(await screen.findByRole("heading", { name: "App" })).toBeTruthy();
+    delete (window as unknown as { __TAURI_INTERNALS__?: unknown }).__TAURI_INTERNALS__;
+  });
+});
