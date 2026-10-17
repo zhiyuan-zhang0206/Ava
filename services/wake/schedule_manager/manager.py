@@ -30,6 +30,7 @@ from psycopg_pool import ConnectionPool
 from base import telemetry
 from base.clock import Clock
 from base.cluster import session_name
+from base.config import settings
 from base.db.transaction import write_transaction
 from base.deploy.schedule_timing import SCHEDULE_STALL_ALERT_AFTER_S
 from base.paths import meiva_home
@@ -37,6 +38,7 @@ from base.sessions.backend import get_shell_backend
 from base.sessions.env_forwarding import forward_env_dict
 from base.sessions.protocol import SessionBackend
 from services.wake.schedule_manager import revisions
+from services.wake.schedule_manager.recovery_gate import RecoveryGate
 
 _log = logging.getLogger(__name__)
 
@@ -89,6 +91,11 @@ class ScheduleManager:
         # Serializes the reconcile tick against the sync requests, which run on
         # separate threads and both touch the backend and launch-admission columns.
         self._lock = threading.Lock()
+        self._recovery = RecoveryGate(
+            alert_after_s=settings.gateway.schedule_recovery_gate_alert_seconds,
+            emit_held=self._emit_gate_held,
+            emit_refusal=self._emit_launch_refused,
+        )
 
     # ── control (the sync-request consumer calls this) ──────────────────────
 
@@ -159,10 +166,38 @@ class ScheduleManager:
 
         with start_serving.recovery_permitted() as permitted:
             if not permitted:
+                self._recovery.refusal(
+                    schedule_id, "the serving receipt does not name this root; run meiva start"
+                )
                 return False
             self._launch(schedule_id)
         latest = revisions.desired(self._pool, schedule_id)
-        return latest is not None and latest.revision == latest.applied
+        if latest is None or latest.revision != latest.applied:
+            self._recovery.refusal(schedule_id, "the launch did not record the desired revision")
+            return False
+        return True
+
+    def _emit_gate_held(self, held_for_s: float) -> None:
+        _log.warning(
+            "recovery gate closed for %.0fs — schedule relaunches are refused until a start "
+            "publishes this root's serving receipt",
+            held_for_s,
+        )
+        telemetry.emit(
+            "telemetry",
+            event_name="schedule_recovery_gated",
+            level="warning",
+            attributes={"held_for_s": round(held_for_s, 1)},
+        )
+
+    def _emit_launch_refused(self, schedule_id: int, reason: str) -> None:
+        _log.warning("schedule %s: launch refused (%s)", schedule_id, reason)
+        telemetry.emit(
+            "telemetry",
+            event_name="schedule_launch_refused",
+            level="warning",
+            attributes={"schedule_id": schedule_id, "reason": reason},
+        )
 
     # ── reconcile (blocking: session backend + DB, run via asyncio.to_thread) ──
 
@@ -210,6 +245,7 @@ class ScheduleManager:
         live = self._live_ids()
         enabled_rows = self._load_enabled()
         self._launch_missing(enabled_rows, sorted(set(enabled_rows) - live))
+        self._recovery.observe()
 
     def _forget_unknown(self, known: set[int]) -> None:
         """Drop per-schedule retry state of schedules that are neither live nor enabled."""

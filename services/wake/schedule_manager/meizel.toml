@@ -1,11 +1,11 @@
-exports = ["daemon.py", "engine.py", "manager.py", "requests.py", "revisions.py", "runner.py"]
+exports = ["daemon.py", "engine.py", "manager.py", "recovery_gate.py", "requests.py", "revisions.py", "runner.py"]
 
 [uses]
 "daemon.py" = ["manager.py", "requests.py"]
-"manager.py" = ["revisions.py"]
+"manager.py" = ["recovery_gate.py", "revisions.py"]
 "requests.py" = ["manager.py"]
 "runner.py" = ["engine.py"]
-"tests" = ["manager.py"]
+"tests" = ["manager.py", "recovery_gate.py"]
 
 [external]
 "engine.py" = "runs schedule scripts (the one materialized from the database under $MEIVA_HOME/schedules, and the built-in templates in schedules/); run content, not a dependency"
