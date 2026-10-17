@@ -242,14 +242,18 @@ describe("MessageCard", () => {
     headerTs: false,
   };
 
-  it("renders children inside colored frame", () => {
+  it("marks the kind with a short accent at the header, not a full-height frame", () => {
     const { container } = render(
       <MessageCard config={cfg}>
         <div data-testid="child">hello</div>
       </MessageCard>,
     );
-    expect(container.firstElementChild?.className).toContain("border-l-2");
-    expect(container.firstElementChild?.className).toContain("border-red-500");
+    const frame = container.firstElementChild;
+    expect(frame?.className).not.toContain("border-l-2");
+    const accent = frame?.querySelector('[data-testid="card-accent"]');
+    expect(accent?.className).toContain("border-l-2");
+    expect(accent?.className).toContain("border-red-500");
+    expect(accent?.className).toContain("h-7");
   });
 
   it("no actions prop → mounts no overlay DOM at all (not just hidden)", () => {
