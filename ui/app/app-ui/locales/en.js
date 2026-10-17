@@ -33,5 +33,19 @@ window.AVA_APP_I18N['en'] =
   "failureHttp": "The server is up but the console is not - retry shortly",
   "failureAuth": "Wrong secret - re-enter it or clear it to fall through to the web login page",
   "failureUpdateWindow": "The server may be upgrading or rolling back; retry shortly.",
-  "timeoutMessage": "Connection timed out - please retry."
+  "timeoutMessage": "Connection timed out - please retry.",
+  "aboutTitle": "About",
+  "aboutVersion": "Version",
+  "aboutBuild": "Build",
+  "checkUpdates": "Check for updates",
+  "installUpdate": "Install update",
+  "openDownloadPage": "Open download page",
+  "checkingUpdates": "Checking for updates…",
+  "updateCurrent": "You are on the latest build.",
+  "updateAvailable": "Ava {version} (build {build}) is available.",
+  "updateCheckFailed": "Could not check for updates.",
+  "updateDownloading": "Downloading and verifying the update…",
+  "updateInstallerOpened": "The system installer is open.",
+  "updatePermissionRequired": "Allow Ava to install unknown apps in system settings, then try again.",
+  "updateInstallFailed": "The update could not be installed."
 };

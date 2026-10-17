@@ -16,6 +16,10 @@ mod desktop;
 mod external;
 mod settings;
 mod state;
+#[cfg(any(target_os = "android", test))]
+mod update;
+#[cfg(target_os = "android")]
+mod update_android;
 mod urls;
 mod window;
 
@@ -49,7 +53,8 @@ pub fn run() {
         .plugin(android::background_plugin())
         .plugin(android::secret_plugin())
         .plugin(android::cookie_plugin())
-        .plugin(android::click_plugin());
+        .plugin(android::click_plugin())
+        .plugin(update_android::plugin());
 
     builder
         .invoke_handler(tauri::generate_handler![
@@ -60,6 +65,9 @@ pub fn run() {
             commands::app_open_settings,
             commands::app_notify,
             commands::app_take_pending_click,
+            commands::app_update_info,
+            commands::app_check_update,
+            commands::app_install_update,
         ])
         .setup(|app| {
             let handle = app.handle();
