@@ -1,11 +1,14 @@
 from __future__ import annotations
 
+import hashlib
+import json
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
 import pytest
 
+from base.paths import meiva_home
 from cli.commands.observability import grafana_render
 from cli.database.tests.command_inputs import command_runtime as command_runtime
 from tests.path_scoped.cli_tests import operator_database as operator_database
@@ -92,3 +95,47 @@ def test_render_cmd_refuses_a_host_without_the_lgtm_tree(
     )
     err = capsys.readouterr().err
     assert "does not run the LGTM observability stack" in err
+
+
+def test_render_cmd_force_records_the_dashboard_hash(
+    target: Path, operator_database: Callable[[], Any]
+) -> None:
+    assert (
+        grafana_render.cmd_grafana_render(
+            force=True, repo_only=True, database_factory=operator_database
+        )
+        == 0
+    )
+
+    hashes_path = meiva_home() / "lgtm/native/config/provisioning-hashes.json"
+    hashes = json.loads(hashes_path.read_text(encoding="utf-8"))
+    assert (
+        hashes["dashboards/meiva-ops-main.json"] == hashlib.sha256(target.read_bytes()).hexdigest()
+    )
+    assert hashes["$dashboard-source"] == "render"
+
+
+def test_render_cmd_records_the_hash_when_the_file_is_already_in_sync(
+    target: Path, operator_database: Callable[[], Any]
+) -> None:
+    assert (
+        grafana_render.cmd_grafana_render(
+            force=True, repo_only=True, database_factory=operator_database
+        )
+        == 0
+    )
+    hashes_path = meiva_home() / "lgtm/native/config/provisioning-hashes.json"
+    hashes_path.unlink()
+
+    assert (
+        grafana_render.cmd_grafana_render(
+            force=False, repo_only=True, database_factory=operator_database
+        )
+        == 0
+    )
+
+    hashes = json.loads(hashes_path.read_text(encoding="utf-8"))
+    assert (
+        hashes["dashboards/meiva-ops-main.json"] == hashlib.sha256(target.read_bytes()).hexdigest()
+    )
+    assert hashes["$dashboard-source"] == "render"

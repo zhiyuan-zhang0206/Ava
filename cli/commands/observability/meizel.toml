@@ -2,7 +2,9 @@ exports = ["grafana_render.py", "lgtm.py", "lgtm_native.py", "logs.py", "otel_co
 
 [uses]
 "_lgtm_provisioning.py" = ["observatory_urls.py"]
+"grafana_render.py" = ["_lgtm_provisioning.py"]
+"lgtm.py" = ["_lgtm_provisioning.py"]
 "lgtm_native.py" = ["_lgtm_assets.py", "_lgtm_provisioning.py", "lgtm.py", "observatory_urls.py"]
 "otel_collector.py" = ["_otel_collector_exporters.py"]
-"tests" = ["grafana_render.py", "lgtm_native.py", "observatory_urls.py", "otel_collector.py", "trace.py"]
+"tests" = ["_lgtm_provisioning.py", "grafana_render.py", "lgtm_native.py", "observatory_urls.py", "otel_collector.py", "trace.py"]
 "trace.py" = ["otel_collector.py"]

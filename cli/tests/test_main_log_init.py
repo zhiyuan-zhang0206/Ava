@@ -401,7 +401,10 @@ def test_cold_reporter_delivers_through_main_owned_pipeline(
     )
     if name == "dashboard":
         destination = tmp_path / "lgtm/native/config/provisioning/dashboards/meiva-ops-main.json"
-        assert destination.read_text() == "previous dashboard"
+        reference = (
+            _REPO_ROOT / "deploy/lgtm/config/grafana/provisioning/dashboards/meiva-ops-main.json"
+        )
+        assert destination.read_text() == reference.read_text()
     assert factories == [args.database_factory]
     assert len(pipelines) == 1 and pipelines[0].stopped
     assert [record.event_name for record in events] == [event]
