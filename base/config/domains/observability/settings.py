@@ -517,3 +517,99 @@ class ObservabilitySettings(EnvSettings):
             "remote_writable": False,
         },
     )
+
+    otel_collector_download_budget_s: float = Field(
+        default=1800.0,
+        gt=0,
+        alias="MEIVA_OTELCOL_DOWNLOAD_BUDGET_S",
+        description=(
+            "Wall-clock budget for ONE otel-collector download operation at `meiva start`, "
+            "shared by every attempt and by the waits between them; there is no separate "
+            "per-attempt cap. A mirror that trickles or stalls must fail the converge step "
+            "within this time instead of holding bring-up for tens of minutes. 1800 s keeps "
+            "the old worst case (3 attempts x 600 s) so a before/after comparison is "
+            "like-for-like; lower it once the intended bound is measured (task #5274)."
+        ),
+        json_schema_extra={
+            "restart_required": "",
+            "writable": True,
+            "sensitive": False,
+            "scope": "host",
+            "remote_writable": False,
+        },
+    )
+
+    otel_collector_download_socket_timeout_s: float = Field(
+        default=30.0,
+        gt=0,
+        alias="MEIVA_OTELCOL_DOWNLOAD_SOCKET_TIMEOUT_S",
+        description=(
+            "Socket timeout of one otel-collector download request: the per-read guard that "
+            "catches a half-dead connection (no data, no close). A request opens with "
+            "min(this, budget remaining), so the download outlives its budget by at most one "
+            "in-flight read. 30 s is long enough for a slow mirror to deliver a chunk and "
+            "short enough that a wedged connection cannot hide for a whole budget."
+        ),
+        json_schema_extra={
+            "restart_required": "",
+            "writable": True,
+            "sensitive": False,
+            "scope": "host",
+            "remote_writable": False,
+        },
+    )
+
+    otel_collector_download_attempts: int = Field(
+        default=3,
+        ge=1,
+        alias="MEIVA_OTELCOL_DOWNLOAD_ATTEMPTS",
+        description=(
+            "Total otel-collector download executions (initial + retries) inside the one "
+            "budget. Rides out a transient blip; a mirror that fails every time still ends "
+            "by the budget, never by the attempt count alone."
+        ),
+        json_schema_extra={
+            "restart_required": "",
+            "writable": True,
+            "sensitive": False,
+            "scope": "host",
+            "remote_writable": False,
+        },
+    )
+
+    otel_collector_download_retry_backoff_s: float = Field(
+        default=5.0,
+        ge=0,
+        alias="MEIVA_OTELCOL_DOWNLOAD_RETRY_BACKOFF_S",
+        description=(
+            "Base retry wait of the otel-collector download: attempt N waits N x this value "
+            "(5 s, 10 s for three attempts), clamped to the budget that remains so a backoff "
+            "is never spent past the deadline. Spaced retries let a brief upstream hiccup "
+            "clear without paying a stalled mirror's time."
+        ),
+        json_schema_extra={
+            "restart_required": "",
+            "writable": True,
+            "sensitive": False,
+            "scope": "host",
+            "remote_writable": False,
+        },
+    )
+
+    otel_collector_download_progress_interval_s: float = Field(
+        default=15.0,
+        gt=0,
+        alias="MEIVA_OTELCOL_DOWNLOAD_PROGRESS_INTERVAL_S",
+        description=(
+            "Minimum delay between two progress heartbeats of an otel-collector download. "
+            "Byte counts on the converge log are what separates a slow mirror from a dead "
+            "one; frequent enough to see movement, rare enough not to flood the log."
+        ),
+        json_schema_extra={
+            "restart_required": "",
+            "writable": True,
+            "sensitive": False,
+            "scope": "host",
+            "remote_writable": False,
+        },
+    )

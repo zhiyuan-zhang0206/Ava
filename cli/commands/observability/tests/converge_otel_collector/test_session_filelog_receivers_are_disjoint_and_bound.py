@@ -20,6 +20,14 @@ from cli.database.runtime import CommandRuntime
 from cli.database.tests.command_inputs import command_runtime as command_runtime
 from tests.path_scoped.cli_tests import operator_database as operator_database
 
+DOWNLOAD_LIMITS = artifact.DownloadLimits(
+    total_budget_s=60.0,
+    socket_timeout_s=30.0,
+    attempts=3,
+    retry_backoff_s=5.0,
+    progress_interval_s=15.0,
+)
+
 
 def test_session_filelog_receivers_are_disjoint_and_bound_discovery(
     monkeypatch: pytest.MonkeyPatch,
@@ -575,7 +583,16 @@ def test_stream_download_writes_all_chunks(
     opener = FakeUrlOpener()
     opener.on(url, Answer(payload, headers={"Content-Length": str(len(payload))}))
     dest = tmp_path / "t.tar.gz"
-    artifact.stream_download(url, dest, timers=SYSTEM_TIMERS, open_url=opener)
+    limits = DOWNLOAD_LIMITS
+    artifact.stream_download(
+        url,
+        dest,
+        timers=SYSTEM_TIMERS,
+        open_url=opener,
+        limits=limits,
+        deadline=SYSTEM_TIMERS.monotonic() + limits.total_budget_s,
+        progress=artifact.DownloadProgress(),
+    )
     assert dest.read_bytes() == payload
     assert opener.urls == [url]
     out = capsys.readouterr().out
@@ -587,9 +604,18 @@ def test_stream_download_honors_socket_timeout(tmp_path: Path) -> None:
     url = "https://example.invalid/t.tar.gz"
     opener = FakeUrlOpener()
     opener.on(url, TimeoutError("timed out"))
+    limits = DOWNLOAD_LIMITS
     with pytest.raises(TimeoutError):
-        artifact.stream_download(url, tmp_path / "t.tar.gz", timers=SYSTEM_TIMERS, open_url=opener)
-    assert opener.calls[0].timeout == artifact.DOWNLOAD_SOCKET_TIMEOUT_S
+        artifact.stream_download(
+            url,
+            tmp_path / "t.tar.gz",
+            timers=SYSTEM_TIMERS,
+            open_url=opener,
+            limits=limits,
+            deadline=SYSTEM_TIMERS.monotonic() + limits.total_budget_s,
+            progress=artifact.DownloadProgress(),
+        )
+    assert opener.calls[0].timeout == limits.socket_timeout_s
 
 
 @pytest.mark.parametrize(

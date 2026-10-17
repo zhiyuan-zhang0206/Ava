@@ -245,11 +245,13 @@ def test_ensure_downloads_when_missing(
     )
 
     downloaded: list[str] = []
-    monkeypatch.setattr(
-        artifact,
-        "download_and_verify",
-        lambda tag, _d, **_ports: downloaded.append(tag),  # pyright: ignore[reportUnknownArgumentType]
-    )
+    ports: dict[str, object] = {}
+
+    def _record_download(tag: str, _dest: Path, **kwargs: object) -> None:
+        downloaded.append(tag)
+        ports.update(kwargs)
+
+    monkeypatch.setattr(artifact, "download_and_verify", _record_download)
 
     monkeypatch.setattr(
         base_config.settings.observability, "telemetry_tempo_endpoint", "http://127.0.0.1:14318"
@@ -269,8 +271,16 @@ def test_ensure_downloads_when_missing(
         database_factory=operator_database,
         machine=command_runtime.machine,
     )
-    assert len(downloaded) == 1
+    assert downloaded == [artifact.platform_tag()]
     assert (tmp_path / "otel-collector/config.yaml").exists()
+    observability = base_config.settings.observability
+    assert ports["limits"] == artifact.DownloadLimits(
+        total_budget_s=observability.otel_collector_download_budget_s,
+        socket_timeout_s=observability.otel_collector_download_socket_timeout_s,
+        attempts=observability.otel_collector_download_attempts,
+        retry_backoff_s=observability.otel_collector_download_retry_backoff_s,
+        progress_interval_s=observability.otel_collector_download_progress_interval_s,
+    )
 
 
 def test_unsupported_platform_skips(
