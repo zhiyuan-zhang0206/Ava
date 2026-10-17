@@ -10,22 +10,23 @@ from base.agents.context.gateway_client import launch_retry, memory_search, tran
 from base.agents.context.identity import AgentIdentity, ExternalLease
 
 
-def owner() -> MeivaContext:
+def owner(client: httpx.Client) -> MeivaContext:
     return MeivaContext(
         clients=ClientSet(
+            gateway_url="http://explicit",
+            gateway=lambda _url: client,
             factories={
                 transport.GatewayTransportInputs: lambda: transport.GatewayTransportInputs(
                     max_retries_reader=lambda: 1,
                     retry_delay_reader=lambda: 0.0,
                     memory_deadline_reader=lambda: 4.0,
                 )
-            }
+            },
         )
     )
 
 
 def test_two_contexts_keep_clients_timeouts_and_wire_parameters_separate() -> None:
-    first, second = owner(), owner()
     seen: list[tuple[str, str, str, dict[str, float | None]]] = []
 
     def answer(request: httpx.Request) -> httpx.Response:
@@ -39,17 +40,16 @@ def test_two_contexts_keep_clients_timeouts_and_wire_parameters_separate() -> No
         )
         return httpx.Response(200, json={"host": request.url.host})
 
-    try:
-        with (
-            httpx.Client(
-                base_url="http://first", timeout=3, transport=httpx.MockTransport(answer)
-            ) as a,
-            httpx.Client(
-                base_url="http://second", timeout=9, transport=httpx.MockTransport(answer)
-            ) as b,
-            first.clients.using_gateway(a),
-            second.clients.using_gateway(b),
-        ):
+    with (
+        httpx.Client(
+            base_url="http://first", timeout=3, transport=httpx.MockTransport(answer)
+        ) as a,
+        httpx.Client(
+            base_url="http://second", timeout=9, transport=httpx.MockTransport(answer)
+        ) as b,
+    ):
+        first, second = owner(a), owner(b)
+        try:
             assert transport.get("/api/read", params={"q": "first"}, context=first).json() == {
                 "host": "first"
             }
@@ -61,10 +61,10 @@ def test_two_contexts_keep_clients_timeouts_and_wire_parameters_separate() -> No
             }
             transport.get("/api/override", timeout=httpx.Timeout(12), context=second)
             assert not a.is_closed and not b.is_closed
+        finally:
+            first.clients.close()
+            second.clients.close()
         assert a.is_closed and b.is_closed
-    finally:
-        first.clients.close()
-        second.clients.close()
     assert [(method, url, body) for method, url, body, _timeout in seen] == [
         ("GET", "http://first/api/read?q=first", ""),
         ("POST", "http://second/api/write", '{"owner":"second"}'),
