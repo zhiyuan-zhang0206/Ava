@@ -1,1 +1,1 @@
-exports = ["check_git_hooks.py", "prepush_freshness.py", "prepush_frontend.py"]
+exports = ["check_git_hooks.py", "prepush_branch_diff.py", "prepush_freshness.py", "prepush_frontend.py"]
