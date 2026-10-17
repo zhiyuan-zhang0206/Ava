@@ -338,6 +338,23 @@ def test_serving_an_app_adds_no_environment_slot(config_authority: ConfigAuthori
     assert set(os.environ) == before
 
 
+def test_health_reports_the_serving_home_verbatim_for_the_probe(tmp_path: Path) -> None:
+    roots = tmp_path / "roots"
+    roots.mkdir()
+    alias = tmp_path / "roots-alias"
+    alias.symlink_to(roots, target_is_directory=True)
+    served = alias / "home"
+    served.mkdir(mode=0o700)
+
+    with gateway_test_client(_rooted_app(served)) as redirected:
+        verbatim = redirected.get("/api/health").json()["home"]
+    with gateway_test_client() as unit:
+        assert unit.get("/api/health").json()["home"] == str(paths.meiva_home())
+
+    assert verbatim == str(served)
+    assert verbatim != str(served.resolve())
+
+
 def _root_read_calls(node: ast.AST) -> list[ast.Call]:
     return [
         inner
