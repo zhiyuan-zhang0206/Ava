@@ -15,8 +15,9 @@ personal memory entry (`<workspace>/memory/<slug>.md`) with an
 `<!-- meiva:inheritable -->` … `<!-- /meiva:inheritable -->` pair. Every descendant
 within `memory_inherit_depth` hops up the immutable birth chain
 (`agents_meta.born_spawner`, nearest first) receives the blocks as a context note
-when its window is established — cold start, after a compaction, or on a fork's
-head rebuild (the fork strips the source's copy and grafts its own chain's).
+when its window is established — cold start, after a compaction, or on a fork
+(the fork keeps the inherited copy in the source's history and grafts its own
+chain's after the fork marker).
 The chain read is one light gateway round-trip (no tie graph), cached per
 process: `born_spawner` is append-only, so a row's chain never changes. Entry
 files are read off THIS machine's workspaces — an ancestor on another machine

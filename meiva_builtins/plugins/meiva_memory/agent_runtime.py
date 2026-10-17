@@ -53,15 +53,6 @@ def state_handle() -> PluginStateHandle[MemoryWriteState]:
 # index right after the exec-timeout note, the per-agent index right after the agent-id note.
 # Disabling this plugin means neither is ever declared, and a window is laid down with no memory
 # notes in it — matching an agent that has no memory stores.
-# The shared index is NOT `on_fork`: the pool is cluster-wide, so the copy
-# a fork inherits with the source's history is the same content the graft would
-# add — grafting it duplicates the index in the forked agent's window
-# (issue #1320). Same reasoning as the framework's timezone note. The per-agent
-# index IS `on_fork`: it names the source agent's store, which the inherited
-# history renders wrong for the new agent — `_handle_fork` strips the inherited
-# copy before grafting the new agent's own. The inherited-memory note is
-# `on_fork` for the same reason: the source's history carries the blocks read
-# from the SOURCE's chain, which is not the new agent's chain.
 
 
 # ── Memory discipline (system prompt section) ──────────────────────────

@@ -14,8 +14,7 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import Any, cast
 
-from langchain_core.messages import BaseMessage, RemoveMessage
-from langgraph.graph.message import REMOVE_ALL_MESSAGES
+from langchain_core.messages import BaseMessage
 
 from agent import state as _state
 from agent.db import ClaimedInbound
@@ -34,7 +33,7 @@ from base.agents.context import MeivaContext
 from base.agents.messages.envelope import EnvelopeReadInputs
 from base.agents.messages.inbound import InboundKind
 from base.agents.messages.injection_scan import scan_inbound_content
-from base.agents.messages.kwargs import MeivaMsgType, read_meiva_kwargs
+from base.agents.messages.kwargs import MeivaMsgType
 from base.agents.messages.security_finding import SecurityFindingEntry
 from base.events.live.projection import Cancelled, CompactionMode, CompactionStatus
 from base.host.env.agent_slices import AgentSlices
@@ -53,8 +52,6 @@ class BatchState:
     """
 
     new_msgs: list[BaseMessage] = field(default_factory=list)
-    """Messages appended this pass — HumanMessages from the handlers plus,
-    for a fork, the `RemoveMessage` strip entries (issue #1320)."""
     next_goto: ClaimGoto = BEFORE_LLM
     compact_payload: tuple[str, str, str | None] | None = None
     """(summary_text, compact_kind, compact_run_id) — the run id pairs the
@@ -485,81 +482,24 @@ async def _handle_resurrect(
     )
 
 
-# Notes the inherited history renders wrong for the new agent: each names the
-# SOURCE (its id, its personal memory store, the inheritable blocks read from
-# ITS chain, its preloaded-skill set). The fork drops the inherited copies in
-# its full-wipe head rebuild and grafts the new agent's own — exactly one of
-# each, owned by the agent reading it (issue #1320). The cluster memory index
-# is deliberately NOT here: it is cluster-wide, so the inherited copy is the
-# same content a graft would add (grafting it duplicated the index — the
-# timezone note's reasoning applies to it too).
-STRIP_ON_FORK_TAGS: frozenset[NoteTag] = frozenset(
-    {
-        NoteTag.AGENT_ID,
-        NoteTag.AGENT_MEMORY,
-        NoteTag.INHERITED_MEMORY,
-        NoteTag.PRELOADED_SKILLS,
-    }
-)
-
-
-def _is_source_identity_note(m: BaseMessage) -> bool:
-    """Whether `m` is a standing note the fork must drop from the rebuild — a
-    system note whose tag names the SOURCE agent."""
-    kw = read_meiva_kwargs(m)
-    return (
-        kw.get("meiva_msg_type") == MeivaMsgType.SYSTEM_NOTE.value
-        and kw.get("meiva_note_tag") in STRIP_ON_FORK_TAGS
-    )
-
-
-def fork_rebuild_prefix(state: _state.AgentState) -> list[BaseMessage]:
-    """The full-wipe rebuild the fork prepends to its claim update: the
-    inherited history re-listed UNCHANGED except that the source-identity
-    notes are dropped.
-
-    Mid-history `RemoveMessage(id=...)` deletion is forbidden by the
-    append-only ruling (task #1256, `agent/messages/guard.py`); the full wipe
-    is the one sanctioned deletion shape, and the guard's rebuild check only
-    demands that survivors keep content + relative order — dropping the
-    source notes and splicing the grafted own-copies afterwards satisfies it.
-    A fork is a brand-new agent whose model has seen nothing yet, so the head
-    rewrite breaks no "model-visible means logged" invariant.
-    """
-    return [
-        RemoveMessage(id=REMOVE_ALL_MESSAGES),
-        *[m for m in state.messages if not _is_source_identity_note(m)],
-    ]
-
-
+# meiva:ref agent/graph/docs/context-notes/context-notes.meiva.okf.md#fork-keeps-inherited-head
 async def _handle_fork(
     agent_id: int,
     item: ClaimedInbound,
     st: BatchState,
-    state: _state.AgentState,
     slices: AgentSlices,
     extensions: ExtensionRegistry,
     ctx: MeivaContext,
 ) -> None:
-    """FORK: rebuild the head (drop source-identity notes), append marker, graft own notes.
-
-    Fork copied the source agent's full history; without a marker the model
-    keeps the source's identity.  State the new identity explicitly. Notes the
-    inherited history renders wrong for the new agent are dropped from the
-    rebuild and re-grafted with the new agent's content via `fork_notes`.
-
-    The rebuild is prepended (not appended) to `st.new_msgs` so any chat /
-    marker the same batch dispatched stays a tail append AFTER the rebuild —
-    a wipe must never swallow a message another handler already appended.
-    """
-    st.new_msgs[0:0] = fork_rebuild_prefix(state)
     st.new_msgs.append(
         system_note_message(
             content=(
                 f"{_ts_prefix(ctx)}You have been forked from {item.source}. "
                 f"You are now a new, independent agent with id {agent_id} — the "
                 f"conversation above is inherited from {item.source}, not your own "
-                f"history. Continue as agent {agent_id}."
+                f"history. Identity, memory and skill notes in that history belong "
+                f"to {item.source}; the notes below this marker are yours. "
+                f"Continue as agent {agent_id}."
             ),
             tag=NoteTag.LIFECYCLE_FORK,
             created_at=datetime.now(UTC),
@@ -616,9 +556,7 @@ async def _dispatch_item(
         if item.id == latest_resurrect_id:
             await _handle_resurrect(ctx, item, st)
     elif kind == InboundKind.FORK:
-        await _handle_fork(
-            agent_id, item, st, state, ctx.require_agent(), ctx.plugin_registry(), ctx
-        )
+        await _handle_fork(agent_id, item, st, ctx.require_agent(), ctx.plugin_registry(), ctx)
     elif kind == InboundKind.REMINDER:
         # Lease-expiry reminders are dismissed in the lease's release/expiry
         # transaction, so one reaching the claim node means that invariant

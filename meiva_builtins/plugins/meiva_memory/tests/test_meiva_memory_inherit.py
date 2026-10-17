@@ -1,12 +1,3 @@
-"""Inherited memory — the `inheritable` block parser and the chain-read note.
-
-The chain is faked at the client seam (`meiva.gateway_client.get_born_chain`)
-and entry files are written into the test home's workspaces, so the note
-builder runs end to end minus the network and the DB. What the real claim node
-does with the note (strip on fork + regraft) is pinned in
-`agent/tests/history/test_fork_notes.py`.
-"""
-
 from __future__ import annotations
 
 from dataclasses import replace
@@ -366,9 +357,6 @@ def test_guardrails_can_be_disabled(
 def test_fork_notes_graft_the_new_agent_s_own_chain(
     chain: _FakeChain, memory_plugin: Any, *, machine_identity: MachineIdentity
 ) -> None:
-    """`fork_notes()` builds the on_fork notes in the NEW agent's process — the
-    inherited note therefore carries the new agent's chain, not the source's
-    (the claim node strips the source's copy; see test_fork_notes.py)."""
     _write_entry(600401, "rules", _wrap("fork chain block"))
     chain.rows = [_local_row(600401, label="Fork parent", machine_identity=machine_identity)]
     from agent.graph.prompt.context_notes import fork_notes

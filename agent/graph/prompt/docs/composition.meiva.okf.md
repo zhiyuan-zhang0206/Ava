@@ -10,7 +10,7 @@ tags: [agent]
 ```meiva-contract
 id = "context-order"
 kind = "invariant"
-statement = "Framework and plugin notes are stably sorted by cache rank, placing stable settings before changing memory indexes. Agent identity and concrete workspace paths live in re-graftable notes rather than the shared system prompt, so forks do not inherit source identity. The timezone IANA name remains authoritative when an offset becomes stale across DST. Fork skill additions append at the tail to preserve the inherited prefix."
+statement = "Framework and plugin notes are stably sorted by cache rank, placing stable settings before changing memory indexes. Agent identity and concrete workspace paths live in `on_fork` notes, not the shared system prompt; a fork keeps the inherited copy byte-identical (the prefix cache it rides) and appends its own after the marker, which says the notes above are the source's. The timezone IANA name remains authoritative when an offset becomes stale across DST. Fork skill additions append at the tail to preserve the inherited prefix."
 code = ["agent/graph/prompt/context_notes.py:<module>"]
 tests = ["agent/graph/tests/prompt/test_timezone_note.py::test_sits_in_the_stable_cache_band", "agent/graph/tests/prompt/test_agent_id_note.py::test_workspace_clause_carries_the_concrete_path", "agent/tests/history/test_fork_notes.py::test_fork_tail_grafts_delta_skills_from_inbound_payload"]
 ```
