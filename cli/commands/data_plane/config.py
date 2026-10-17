@@ -34,6 +34,7 @@ class DataPlaneConfig:
     redis_admin_password: str = field(repr=False)
     cluster_secret: str = field(repr=False)
     pgbouncer_enabled: bool
+    pooler_max_client_conn: int
     redis_bin_dir: str
     trusted_cidrs: str
     events_channel: str
@@ -65,6 +66,7 @@ def _from_view(view: Any) -> DataPlaneConfig:
         redis_admin_password=plane.redis_admin_password,
         cluster_secret=plane.cluster_secret,
         pgbouncer_enabled=plane.pgbouncer_enabled,
+        pooler_max_client_conn=plane.pooler_max_client_conn,
         redis_bin_dir=plane.redis_bin_dir,
         trusted_cidrs=plane.trusted_cidrs,
         events_channel=plane.events_channel,

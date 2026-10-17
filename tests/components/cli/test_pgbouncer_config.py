@@ -92,6 +92,7 @@ def test_render_ini_is_transaction_scram_and_socket_server(
         listen_port=6433,
         db_name="meiva_main",
         machine=machine_identity,
+        max_client_conn=2000,
     )
     _assert_transaction_pooling_with_scram_clients(ini)
     _assert_database_entry_forwards_over_owner_only_socket(ini)
@@ -107,7 +108,11 @@ def test_render_ini_authenticates_and_binds_loopback_on_a_single_box(
     reachable address (`MEIVA_MACHINE_HOST` unset) binds loopback alone."""
     machine_identity.set(host="localhost")
     ini = pgbouncer.render_ini(
-        pg_port=5433, listen_port=6433, db_name="meiva", machine=machine_identity
+        pg_port=5433,
+        listen_port=6433,
+        db_name="meiva",
+        machine=machine_identity,
+        max_client_conn=2000,
     )
     assert "auth_type = scram-sha-256" in ini.splitlines()
     assert "trust" not in ini
@@ -119,7 +124,11 @@ def test_render_ini_adds_only_the_declared_reachable_address(
 ) -> None:
     machine_identity.set(host="10.0.0.5")
     ini = pgbouncer.render_ini(
-        pg_port=5433, listen_port=6433, db_name="meiva", machine=machine_identity
+        pg_port=5433,
+        listen_port=6433,
+        db_name="meiva",
+        machine=machine_identity,
+        max_client_conn=2000,
     )
     assert "listen_addr = 127.0.0.1, 10.0.0.5" in ini.splitlines()
 
@@ -130,6 +139,7 @@ def test_render_ini_binds_loopback_never_all_interfaces(machine_identity: Machin
         listen_port=6433,
         db_name="meiva_main",
         machine=machine_identity,
+        max_client_conn=2000,
     )
     listen = next(ln for ln in ini.splitlines() if ln.startswith("listen_addr ="))
     assert "127.0.0.1" in listen

@@ -66,10 +66,10 @@ from cli.commands.data_plane.cluster_instance import (
 )
 from cli.commands.data_plane.config import DataPlaneConfig, data_plane_config_from_settings
 
-# Transaction-pooling defaults. max_client_conn
-# caps total in-flight psycopg connections through the pooler; default_pool_size is
-# the real Postgres backend pool per (db,user).
-_MAX_CLIENT_CONN = 500
+# meiva:note
+# `default_pool_size` is the real Postgres backend pool per (database, user) pair.
+# The client-side cap (`max_client_conn`) is configuration — MEIVA_POOLER_MAX_CLIENT_CONN —
+# because the client slot budget belongs to the whole fleet's pool maxima, not to this module.
 _DEFAULT_POOL_SIZE = 25
 
 # libpq/psycopg send these startup parameters; PgBouncer rejects unknown ones unless
@@ -85,7 +85,14 @@ def _logfile_path() -> Path:
     return pooler.pooler_dir() / "pgbouncer.log"
 
 
-def render_ini(*, pg_port: int, listen_port: int, db_name: str, machine: MachineIdentity) -> str:
+def render_ini(
+    *,
+    pg_port: int,
+    listen_port: int,
+    db_name: str,
+    machine: MachineIdentity,
+    max_client_conn: int,
+) -> str:
     """The pgbouncer.ini for this cluster's pooler. One [databases] entry mapping the
     cluster db to the local Postgres over its owner-only unix socket; [pgbouncer]
     sets transaction pooling, SCRAM client auth against the userlist (always), and
@@ -147,7 +154,7 @@ def render_ini(*, pg_port: int, listen_port: int, db_name: str, machine: Machine
             server_reset,
             # always=0 (SV_ACTIVE-window reset only; rationale in docstring).
             "server_reset_query_always = 0",
-            f"max_client_conn = {_MAX_CLIENT_CONN}",
+            f"max_client_conn = {max_client_conn}",
             f"default_pool_size = {_DEFAULT_POOL_SIZE}",
             f"ignore_startup_parameters = {_IGNORE_STARTUP_PARAMETERS}",
             # Admin/stats console (`SHOW POOLS` etc.) for the userlist-only
@@ -164,14 +171,24 @@ def render_ini(*, pg_port: int, listen_port: int, db_name: str, machine: Machine
 
 
 def write_config(
-    *, pg_port: int, listen_port: int, db_name: str, userlist: bytes, machine: MachineIdentity
+    *,
+    pg_port: int,
+    listen_port: int,
+    db_name: str,
+    userlist: bytes,
+    machine: MachineIdentity,
+    max_client_conn: int,
 ) -> bool:
     """Write pgbouncer.ini + userlist.txt (0600); True when either file's bytes
     changed, which requires a pooler restart (a reload never revokes a user)."""
     from base.host.private_storage import write_private_bytes
 
     ini = render_ini(
-        pg_port=pg_port, listen_port=listen_port, db_name=db_name, machine=machine
+        pg_port=pg_port,
+        listen_port=listen_port,
+        db_name=db_name,
+        machine=machine,
+        max_client_conn=max_client_conn,
     ).encode()
     changed = False
     for path, body in ((pooler.ini_path(), ini), (userlist_path(), userlist)):
@@ -283,6 +300,7 @@ def ensure_pgbouncer(
     userlist: bytes,
     admin_password: str,
     machine: MachineIdentity,
+    max_client_conn: int,
 ) -> int:
     """Bring up (or reload) this cluster's PgBouncer on `listen_port`, pooling in
     front of the local Postgres on `pg_port`. Idempotent. Returns 0 on success.
@@ -332,6 +350,7 @@ def ensure_pgbouncer(
         db_name=db_name,
         userlist=userlist,
         machine=machine,
+        max_client_conn=max_client_conn,
     )
     if custodian is not None:
         owner = custodian.identity

@@ -25,6 +25,7 @@ def test_the_mapping_reads_every_field_from_its_own_setting(
         "redis_admin_password": "mapped-admin-password",
         "cluster_secret": "mapped-cluster-secret-0123456789abcdef",
         "pgbouncer_enabled": False,
+        "pooler_max_client_conn": 1234,
         "redis_bin_dir": redis_bin,
         "trusted_cidrs": "10.1.0.0/16",
         "events_channel": "meiva:mapped:events",

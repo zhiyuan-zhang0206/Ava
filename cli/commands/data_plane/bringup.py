@@ -386,6 +386,7 @@ def ensure_pooler(
         userlist=render_userlist(home, generation),
         admin_password=read_pooler_admin(home).password,
         machine=machine,
+        max_client_conn=config.pooler_max_client_conn,
     )
     if rc:
         raise RuntimeError("pooler did not become ready")

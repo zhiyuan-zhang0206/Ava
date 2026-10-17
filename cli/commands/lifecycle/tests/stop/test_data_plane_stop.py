@@ -545,6 +545,7 @@ def _launch_incident_shape_pooler(
         db_name="meiva_maintenance_test",
         userlist=f'"{role}" "{secret}"\n'.encode(),
         machine=command_machine,
+        max_client_conn=2000,
     )
     subprocess.run(
         [binary, "-d", str(base_pooler.ini_path())], check=True, capture_output=True, timeout=5
@@ -641,6 +642,7 @@ def test_real_start_retains_pooler_with_held_client(
                     userlist=f'"{role}" "{secret}"\n'.encode(),
                     admin_password=secret,
                     machine=command_machine,
+                    max_client_conn=2000,
                 )
             assert old.live(), "normal start must retain a pooler still draining its client"
             assert pb.running_pid() == pid, "no replacement may be launched"
