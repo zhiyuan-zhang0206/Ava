@@ -21,4 +21,4 @@ code = ["meiva/conftest.py:<module>"]
 tests = ["meiva/sdk_surface/tests/test_package_identity.py::test_loaded_submodules_are_attributes_of_their_package"]
 ```
 
-Parent: [[meiva/docs/sdk-surface.meiva.okf.md]].
+Parent: [[meiva/docs/sdk-surface/sdk-surface.meiva.okf.md]].
