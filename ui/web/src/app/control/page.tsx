@@ -28,8 +28,11 @@ import { PluginNavList } from "@/components/plugins/plugin-nav";
 import { buttonVariants } from "@/components/ui/button";
 import { assetUrl } from "@/lib/transport/api";
 
+import { AppSettingsEntry, useAppBridge } from "@/components/app/app-settings";
+
 import { ControlNav } from "./_nav";
 import {
+  APP_SETTINGS_SECTION,
   CONTROL_SCROLL_ID,
   CONTROL_SECTIONS,
 } from "./_sections";
@@ -40,6 +43,8 @@ import { cn } from "@/lib/format/utils";
 export default function ControlPage() {
   const t = useTranslations("control");
   const ts = useTranslations("control.sections");
+  const appBridge = useAppBridge();
+  const sections = appBridge ? [...CONTROL_SECTIONS, APP_SETTINGS_SECTION] : CONTROL_SECTIONS;
   // Honor a #anchor on first load / direct link: resolve the target once,
   // from the URL hash at mount (later hash changes come from nav clicks,
   // which scroll themselves). The target scrolls into the container — no
@@ -73,7 +78,7 @@ export default function ControlPage() {
           scrollbar even if a child mis-sizes. */}
       <div className={cn("md:flex-row", FLEX, FLEX_COL, FLEX_1, MIN_H_0, OVERFLOW_HIDDEN)}>
         <ControlNav
-          sections={CONTROL_SECTIONS}
+          sections={sections}
           scrollId={CONTROL_SCROLL_ID}
           ariaLabel="Control sections"
         />
@@ -134,6 +139,16 @@ export default function ControlPage() {
             >
               <SchedulesPage />
             </ControlSection>
+
+            {appBridge ? (
+              <ControlSection
+                id={APP_SETTINGS_SECTION.id}
+                label={ts("app")}
+                description={t("appDescription")}
+              >
+                <AppSettingsEntry bridge={appBridge} />
+              </ControlSection>
+            ) : null}
 
             <ControlSection
               id="okf-graph"
