@@ -44,6 +44,14 @@ def _render_score_skills(data: dict[str, Any]) -> str:
 
     cards = []
     for s in skills:
+        if s.get("unavailable"):
+            cards.append(
+                f"""<div class="score-card">
+    <div class="score-skill-name">{s["skill"]}</div>
+    <div class="score-row"><span class="score-dim">n/a — no scorable runs ({s.get("n", 0)} replayed)</span></div>
+  </div>"""
+            )
+            continue
         dims_html = []
         for d in s.get("dimensions", []):
             dims_html.append(
@@ -279,12 +287,13 @@ def build_report_data(
     sample at `skills/meiva-self-evolution/references/sample_report.json`.
     """
     overall_delta = 0.0
-    for s in score_skills:
-        for d in s.get("dimensions", []):
+    scored = [s for s in score_skills if s.get("dimensions")]
+    for s in scored:
+        for d in s["dimensions"]:
             if d.get("label") == "overall":
                 overall_delta += d.get("delta", 0)
-    if score_skills:
-        overall_delta = round(overall_delta / len(score_skills), 3)
+    if scored:
+        overall_delta = round(overall_delta / len(scored), 3)
 
     tasks_replayed = eval_results.get("replayed", 0) if eval_results else 0
     improved = eval_results.get("improved", 0) if eval_results else 0

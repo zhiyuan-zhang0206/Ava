@@ -36,7 +36,7 @@ import json
 import sys
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 from uuid import uuid4
 
 import meiva
@@ -176,9 +176,17 @@ def poll(state: dict[str, Any], *, database: Database) -> dict[str, list[int]]:
     return {"done": done, "pending": pending}
 
 
-def _mean(score_dicts: list[dict[str, float]]) -> dict[str, float]:
+def _reason(leak_invalidated: bool, abstain: str | None, replay_reason: str) -> str:
+    if leak_invalidated:
+        return "leak"
+    if abstain is not None:
+        return f"abstain:{abstain}"
+    return replay_reason
+
+
+def _mean(score_dicts: list[dict[str, float]]) -> dict[str, float] | None:
     if not score_dicts:
-        return {"completion": 0.0, "efficiency": 0.0, "overall": 0.0}
+        return None
     keys = ("completion", "efficiency", "overall")
     return {k: round(sum(s[k] for s in score_dicts) / len(score_dicts), 3) for k in keys}
 
@@ -209,18 +217,22 @@ def gather(state: dict[str, Any], *, database: Database) -> dict[str, Any]:
             continue
         eval_agent_id = run["eval_agent_id"]
         rec = collect_one(eval_agent_id, database=database, leak_paths=_leak_paths(eval_agent_id))
+        if not (rec.get("task_prompt") or "").strip():
+            rec["task_prompt"] = task_prompt_of(rec)
         replay_ok, replay_reason = verify_replay(
             {"tools_called": run.get("original_tools_called", {})}, rec
         )
         leak_invalidated = rec["invalidated"]
-        valid = replay_ok and not leak_invalidated
-        reason = "leak" if leak_invalidated else replay_reason
+        scored = scores(rec)
+        abstain = cast(str | None, scored.get("abstain"))
+        valid = replay_ok and not leak_invalidated and abstain is None
+        reason = _reason(leak_invalidated, abstain, replay_reason)
         per_task.append(
             {
                 "eval_agent_id": eval_agent_id,
                 "source_agent_id": run["source_agent_id"],
                 "label": rec["label"],
-                "scores": scores(rec),
+                "scores": scored,
                 "leak_audit": rec["leak_audit"],
                 "invalidated": leak_invalidated,
                 "valid": valid,
@@ -233,7 +245,7 @@ def gather(state: dict[str, Any], *, database: Database) -> dict[str, Any]:
         "skill": state["skill"],
         "stamp": state["stamp"],
         "n": len(valid),
-        "mean": _mean([task["scores"] for task in valid]),
+        "mean": _mean([cast("dict[str, float]", task["scores"]) for task in valid]),
         "per_task": per_task,
         "invalid": invalid,
         "invalidated": sum(task["invalidated"] for task in per_task),

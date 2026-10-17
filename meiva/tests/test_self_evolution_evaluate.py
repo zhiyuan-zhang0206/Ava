@@ -132,6 +132,7 @@ def test_gather_excludes_invalid_replays_from_mean(
                 "source_agent_id": 2,
                 "original_tools_called": {"meiva.files.read": 1},
             },
+            {"eval_agent_id": 44, "source_agent_id": 3, "original_tools_called": {}},
         ],
         "skipped": [],
     }
@@ -152,19 +153,34 @@ def test_gather_excludes_invalid_replays_from_mean(
             "leak_audit": [],
             "invalidated": False,
         },
+        44: {
+            "label": "ok",
+            "turns": 1,
+            "final_output": "done",
+            "tools_called": {},
+            "leak_audit": [],
+            "invalidated": False,
+        },
     }
 
     def _poll(_state: dict[str, Any], **_kwargs: object) -> dict[str, list[int]]:
         assert _kwargs["database"] is database
-        return {"done": [41, 42], "pending": []}
+        return {"done": [41, 42, 44], "pending": []}
 
     def _collect_one(agent_id: int, **_kwargs: object) -> dict[str, Any]:
         assert _kwargs["database"] is database
         return records[agent_id]
 
-    def _scores(rec: dict[str, Any]) -> dict[str, float]:
+    def _scores(rec: dict[str, Any]) -> dict[str, Any]:
         if rec is records[41]:
             return {"completion": 1.0, "efficiency": 1.0, "overall": 1.0}
+        if rec is records[44]:
+            return {
+                "completion": None,
+                "efficiency": None,
+                "overall": None,
+                "abstain": "no_telemetry",
+            }
         return {"completion": 0.0, "efficiency": 0.0, "overall": 0.0}
 
     def _leak_paths(_agent_id: int) -> Any:
@@ -183,8 +199,14 @@ def test_gather_excludes_invalid_replays_from_mean(
 
     assert report["n"] == 1
     assert report["mean"] == {"completion": 1.0, "efficiency": 1.0, "overall": 1.0}
-    assert [entry["valid"] for entry in report["per_task"]] == [True, False]
-    assert report["invalid"][0]["eval_agent_id"] == 42
+    assert [entry["valid"] for entry in report["per_task"]] == [True, False, False]
+    assert [entry["eval_agent_id"] for entry in report["invalid"]] == [42, 44]
+    assert report["invalid"][1]["verification"]["reason"] == "abstain:no_telemetry"
+
+    empty = evaluate.gather({**state, "runs": [state["runs"][2]]}, database=database)
+    assert empty["n"] == 0
+    assert empty["mean"] is None
+    assert evaluate._mean([]) is None
 
 
 def test_gather_excludes_leaked_replays_from_mean(
