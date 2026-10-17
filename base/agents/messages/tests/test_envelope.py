@@ -23,6 +23,7 @@ import pytest
 from base.agents.messages.envelope import (
     EnvelopeReadInputs,
     inbound_head,
+    sender_class,
     validate_source,
     wrap_inbound,
 )
@@ -416,3 +417,48 @@ def test_inbound_head_is_exactly_what_precedes_the_content(source: str) -> None:
     at = datetime(2026, 10, 4, 3, 0, 0, tzinfo=UTC)
     head = inbound_head(source, created_at=at, inputs=_ENVELOPE_INPUTS)
     assert wrap_inbound("BODY", source, created_at=at, inputs=_ENVELOPE_INPUTS) == head + "BODY"
+
+
+@pytest.mark.parametrize(
+    ("source", "expected"),
+    [
+        ("user", "user"),
+        ("ui:page:dashboard", "user"),
+        ("agent:5", "agent"),
+        ("external_agent:codex", "agent"),
+        ("external_agent:codex:laptop-2", "agent"),
+        ("watcher:3", "automation"),
+        ("shell:9", "automation"),
+        ("schedule:4", "automation"),
+        ("system", "system"),
+        ("system:compact", "system"),
+        (None, "system"),
+        ("", "system"),
+        ("unknown", "system"),
+    ],
+)
+def test_sender_class_maps_every_source_tag(source: str | None, expected: str) -> None:
+    assert sender_class(source) == expected
+
+
+@pytest.mark.parametrize(
+    "source",
+    [
+        "user",
+        "ui:page:dash",
+        "agent:5",
+        "external_agent:codex:laptop-2",
+        "watcher:3",
+        "shell:9",
+        "schedule:4",
+        "system",
+        "system:compact",
+    ],
+)
+def test_every_writable_source_has_a_real_category(source: str) -> None:
+    validate_source(source)
+    if source.startswith("ui:page:") or source == "user":
+        assert sender_class(source) == "user"
+    else:
+        assert sender_class(source) in {"agent", "automation", "system"}
+        assert sender_class(source) != "user"
