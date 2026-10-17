@@ -8,6 +8,7 @@ settles) its rows."""
 from __future__ import annotations
 
 import itertools
+import json
 from collections.abc import Iterator
 from datetime import UTC, datetime, timedelta
 from typing import Any, cast
@@ -16,9 +17,10 @@ import psycopg
 import pytest
 from psycopg_pool import ConnectionPool
 
+from base.daemon.loop_health import LoopProgress
 from base.db import Database, create_agent
 from base.db.code_version_gate import ProcessDbGate
-from base.events.live.bus import EventBus
+from base.events.live.bus import EventBus, event_bus_config_from_settings
 from base.telemetry.tests.capture.event_capture import EmittedEvents
 from base.telemetry.tests.capture.event_capture import emitted_events as emitted_events
 from services.upkeep.ttl_reaper import lifecycle_fences, sweep
@@ -377,3 +379,48 @@ def test_a_fresh_or_unapplied_force_is_not_alerted(
 
     assert lifecycle_fences.scan_stuck_lifecycle_pointers_blocking(reaper_pool) == 0
     assert len(emitted_events) == 0
+
+
+class _RecordingBus(EventBus):
+    def __init__(self) -> None:
+        super().__init__(event_bus_config_from_settings())
+        self.payloads: list[dict[str, object]] = []
+
+    async def publish_best_effort(
+        self, payload: str, *, channel: str | None = None, context: str = ""
+    ) -> int | None:
+        self.payloads.append(json.loads(payload))
+        return 1
+
+
+async def test_expired_notice_publishes_observation_facts(
+    db_conn: psycopg.Connection,
+    reaper_pool: ConnectionPool,
+    database: Database,
+    event_bus: EventBus,
+) -> None:
+    aid = _running_agent(db_conn)
+    with db_conn.cursor() as cur:
+        cur.execute(
+            "INSERT INTO agent_notices "
+            "(agent_id, local_id, title, priority, require_response, expire_at) "
+            "VALUES (%s, 0, 'expired?', 'P2', true, now() - interval '1 minute') "
+            "RETURNING id",
+            (aid,),
+        )
+        row = cur.fetchone()
+        assert row is not None
+        nid = int(row[0])
+    db_conn.commit()
+
+    bus = _RecordingBus()
+    await sweep.sweep_round(reaper_pool, database, bus, LoopProgress("test", 60.0))
+
+    resolved = [event for event in bus.payloads if event.get("role") == "notice_resolved"]
+    assert len(resolved) == 1
+    facts = resolved[0]
+    assert facts["notice_id"] == nid
+    assert facts["resolution"] == "expired"
+    assert facts["require_response"] is True
+    assert facts["had_reply"] is False
+    assert isinstance(facts["age_seconds"], int) and facts["age_seconds"] >= 0
