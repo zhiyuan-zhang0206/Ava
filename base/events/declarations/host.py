@@ -98,6 +98,12 @@ EVENTS: dict[str, EventSpec] = {
         "without a task (crash / kill -9); carries n = rows settled",
         tier="noise",
     ),
+    "host_stale_running_settle_failed": telemetry_event(
+        "host_stale_running_settle_failed",
+        "the hosted beat could not settle stale running rows this round — logged with the "
+        "traceback and retried on the next beat; the rows stay running until a settle succeeds",
+        tier="anomaly",
+    ),
     "host_dispatcher_subscribed": telemetry_event(
         "host_dispatcher_subscribed",
         "hosted dispatcher subscribed to the inbound wake pattern",
