@@ -2,13 +2,14 @@
 from __future__ import annotations
 
 from datetime import datetime
+from pathlib import Path
 from typing import Annotated
 from urllib.parse import quote
 
 import httpx
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
 
-from base.paths import insights_socket, meiva_home
+from base.paths import insights_socket
 from gateway.agents.eval_guard import deny_isolated_result_read
 from services.derived.insights.run_timeline.schemas import (
     RunTimelineContext,
@@ -28,10 +29,10 @@ _FORWARDED_REQUEST_HEADERS = frozenset({"accept"})
 _FORWARDED_RESPONSE_HEADERS = frozenset({"content-type", "cache-control", "etag"})
 
 
-def build_client() -> httpx.AsyncClient:
+def build_client(home: Path) -> httpx.AsyncClient:
     return httpx.AsyncClient(
         transport=httpx.AsyncHTTPTransport(
-            uds=str(insights_socket(meiva_home())), limits=httpx.Limits(max_connections=32)
+            uds=str(insights_socket(home)), limits=httpx.Limits(max_connections=32)
         ),
         base_url="http://insights",
         timeout=_TIMEOUT,

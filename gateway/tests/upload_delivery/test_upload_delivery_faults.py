@@ -246,6 +246,7 @@ async def test_real_remote_receiver_after_fsync_response_loss_one_inbound(
         client.app.state.db,
         client.app.state.bus,
         machine=machine_identity,
+        home=client.app.state.gateway_process.home,
     )
     await recovery.copy(request)
     assert source.status(client.app.state.db_pool, agent, first["batch_id"]).state == "pending"
@@ -311,6 +312,7 @@ async def test_unknown_remote_kind_holds(
         client.app.state.db,
         client.app.state.bus,
         machine=machine_identity,
+        home=client.app.state.gateway_process.home,
     )
 
     async def dispatch(*_args: Any, **_kwargs: Any):
@@ -603,6 +605,7 @@ async def test_same_machine_other_home_requires_native_rpc_not_local_shortcut(
         client.app.state.db,
         client.app.state.bus,
         machine=machine_identity,
+        home=client.app.state.gateway_process.home,
     )
     await recovery.copy(request)
     assert len(calls) == 1 and calls[0][0] == unit.machine

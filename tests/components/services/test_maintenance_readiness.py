@@ -33,10 +33,12 @@ from tests.fixtures.gateway_config import gateway_test_client
 def held(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
+    unit_home: Path,
     database: Database,
     *,
     machine_identity: MachineIdentity,
 ) -> None:
+    del unit_home
     monkeypatch.setattr(start_serving, "state_path", lambda: tmp_path / "serving.json")
     pause_owner.begin_maintenance("update", WHEN)
     pause_owner.change_maintenance(
@@ -128,7 +130,10 @@ def _authenticated(monkeypatch: pytest.MonkeyPatch) -> str:
 
 @pytest.mark.usefixtures("held")
 def test_held_gateway_serves_bootstrap_only_to_an_authenticated_caller(
-    monkeypatch: pytest.MonkeyPatch, served_gateway_home: Any, gateway_data_plane: None
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    served_gateway_home: Any,
+    gateway_data_plane: None,
 ) -> None:
     _authenticated(monkeypatch)
     runner = bearer_header(served_gateway_home.api.runner)
@@ -144,7 +149,7 @@ def test_held_gateway_serves_bootstrap_only_to_an_authenticated_caller(
     payload = "".join(body.values())
     for role in (served_gateway_home.roles.runner, served_gateway_home.roles.gateway):
         assert role.name not in payload and role.password not in payload
-    assert admission.business_paused()
+    assert admission.business_paused(tmp_path)
 
 
 @pytest.mark.usefixtures("held")
@@ -194,4 +199,4 @@ def test_a_runners_first_join_reaches_a_held_gateway(
         )
     installed = unit.require_unit_capability(runner)
     assert installed.api is not None and not bundle.exists()
-    assert admission.business_paused()
+    assert admission.business_paused(tmp_path)

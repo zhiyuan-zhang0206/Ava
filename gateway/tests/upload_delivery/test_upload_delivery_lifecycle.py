@@ -140,6 +140,7 @@ async def test_shutdown_drains_native_future_after_cancelled_http_wait(
         client.app.state.db,
         client.app.state.bus,
         machine=machine_identity,
+        home=client.app.state.gateway_process.home,
     )
     entered, finish = threading.Event(), threading.Event()
 
@@ -191,6 +192,7 @@ async def test_accepted_upload_wakes_once_and_a_lost_wake_is_not_repeated(
         client.app.state.db,
         client.app.state.bus,
         machine=machine_identity,
+        home=client.app.state.gateway_process.home,
     )
     await recovery.round()
     await recovery.round()
@@ -223,6 +225,7 @@ async def test_failed_copies_hold_after_the_attempt_budget_and_alert_once(
         client.app.state.db,
         client.app.state.bus,
         machine=machine_identity,
+        home=client.app.state.gateway_process.home,
     )
     # Bound here, not as a fixture: the gateway of `uploaded_agent` binds its own pipeline first.
     with capturing_events() as emitted_events:
@@ -260,7 +263,11 @@ async def test_business_pause_skips_new_copy_and_db_round(
         post(client, agent).json()["batch_id"],
         local_machine=machine_identity.name(),
     )
-    monkeypatch.setattr(worker, "business_paused", lambda: True)
+
+    def paused(_home: Path) -> bool:
+        return True
+
+    monkeypatch.setattr(worker, "business_paused", paused)
 
     def forbidden(*_args: Any):
         raise AssertionError("paused source must not inspect/accept pending work")
@@ -271,6 +278,7 @@ async def test_business_pause_skips_new_copy_and_db_round(
         client.app.state.db,
         client.app.state.bus,
         machine=machine_identity,
+        home=client.app.state.gateway_process.home,
     )
     await recovery.copy(request)
     assert (
@@ -289,6 +297,7 @@ async def test_cancelled_shutdown_wait_still_drains_actual_native_writer(
         client.app.state.db,
         client.app.state.bus,
         machine=machine_identity,
+        home=client.app.state.gateway_process.home,
     )
     entered, finish = threading.Event(), threading.Event()
 

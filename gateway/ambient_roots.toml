@@ -2,6 +2,7 @@
 # from them.
 db = ["cluster/process_boot.py"]
 
-# The only module here that may build the `bus` handle from the live settings (the app lifespan);
-# every other gateway module reads `request.app.state.bus`.
+# The only module here that may build the `bus` handle — the app lifespan builds it from this
+# process's boot configuration, not the live settings; every other gateway module reads
+# `request.app.state.bus`.
 bus = ["app.py"]
