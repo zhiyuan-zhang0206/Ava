@@ -1,37 +1,22 @@
-// Android update check.
-//
-// `tauri-plugin-updater` is desktop-only — there is no in-place APK swap — so
-// Android checks the GitHub Releases API for a newer `android-v*` tag and, when
-// it finds one, offers the APK. Delivery is a browser download the user
-// confirms, not a silent install.
-//
-// It runs in the page (rather than in Rust) so the check costs the binary no
-// HTTP stack and no TLS root store on a target that cannot be built or tested
-// on this machine. The console's CSP already allows `connect-src https:`, and
-// the GitHub API answers cross-origin.
+// ava:ref ui/app/docs/android-updates.ava.okf.md#android-update-prompt
 (function () {
   var cfg = window.__AVA_APP__;
-  if (!cfg || !cfg.releasesApi || !cfg.version) return;
+  if (!cfg || cfg.platform !== "android" || !cfg.version) return;
   if (window.top !== window) return;
+  if (location.protocol === "tauri:" || location.hostname === "tauri.localhost") return;
   var MARKER = "ava-app-update-checked";
   if (!window.sessionStorage || window.sessionStorage.getItem(MARKER)) return;
   window.sessionStorage.setItem(MARKER, "1");
 
-  var TAG_PREFIX = "android-v";
-
-  /** Compare dotted numeric versions; >0 when `a` is newer than `b`. */
-  function compare(a, b) {
-    var left = String(a).split(".").map(Number);
-    var right = String(b).split(".").map(Number);
-    for (var i = 0; i < Math.max(left.length, right.length); i += 1) {
-      var l = left[i] || 0;
-      var r = right[i] || 0;
-      if (l !== r) return l - r;
-    }
-    return 0;
+  function invoke(command, args) {
+    return window.__TAURI_INTERNALS__.invoke(command, args);
   }
 
-  function banner(version, assetUrl) {
+  function label(check) {
+    return "Ava " + check.latestVersionName + " (build " + check.latestVersionCode + ") is available";
+  }
+
+  function banner(check) {
     var bar = document.createElement("div");
     bar.setAttribute("data-ava-app", "update-banner");
     bar.style.cssText = [
@@ -52,23 +37,42 @@
     ].join(";");
 
     var text = document.createElement("span");
-    text.textContent = "Ava " + version + " is available";
+    text.textContent = label(check);
 
     var actions = document.createElement("span");
     actions.style.cssText = "display:flex;gap:8px;flex:none";
 
-    var download = document.createElement("button");
-    download.type = "button";
-    download.textContent = "Download";
-    download.style.cssText =
+    var update = document.createElement("button");
+    update.type = "button";
+    update.textContent = "Update";
+    update.style.cssText =
       "border:0;border-radius:6px;padding:6px 12px;background:#4f46e5;color:#fff;font:inherit";
-    download.addEventListener("click", function () {
-      window.__TAURI_INTERNALS__
-        .invoke("app_open_external", { url: assetUrl })
+    update.addEventListener("click", function () {
+      update.disabled = true;
+      update.textContent = "Updating…";
+      invoke("app_install_update")
+        .then(function (outcome) {
+          if (outcome && outcome.status !== "failed") {
+            bar.remove();
+            return;
+          }
+          var page = outcome && outcome.downloadPage;
+          if (!page) {
+            bar.remove();
+            return;
+          }
+          update.disabled = false;
+          update.textContent = "Open download page";
+          update.addEventListener("click", function () {
+            invoke("app_open_external", { url: page }).catch(function (error) {
+              console.error("[ava-app] update download page failed", error);
+            });
+          });
+        })
         .catch(function (error) {
-          console.error("[ava-app] update download handoff failed", error);
+          console.error("[ava-app] update install failed", error);
+          bar.remove();
         });
-      bar.remove();
     });
 
     var dismiss = document.createElement("button");
@@ -80,62 +84,27 @@
       bar.remove();
     });
 
-    actions.appendChild(download);
+    actions.appendChild(update);
     actions.appendChild(dismiss);
     bar.appendChild(text);
     bar.appendChild(actions);
     document.body.appendChild(bar);
   }
 
-  (async function () {
-    var releases;
-    try {
-      var response = await fetch(cfg.releasesApi, {
-        headers: { Accept: "application/vnd.github+json" },
-      });
-      if (!response.ok) return;
-      releases = await response.json();
-    } catch (err) {
-      // Offline or rate-limited: the check is best-effort, never a nag.
-      return;
-    }
-    if (!Array.isArray(releases)) return;
-
-    // GitHub orders releases by creation time, which is not version order: a
-    // later backfill can appear before a newer app. Scan the whole response
-    // and choose the highest eligible semver that actually has an APK.
-    var candidate = null;
-    for (var i = 0; i < releases.length; i += 1) {
-      var release = releases[i];
-      if (!release || release.draft || release.prerelease) continue;
-      var tag = String(release.tag_name || "");
-      if (!/^android-v\d+\.\d+\.\d+$/.test(tag)) continue;
-      var version = tag.slice(TAG_PREFIX.length);
-      if (compare(version, cfg.version) <= 0) continue;
-      var assets = release.assets || [];
-      for (var j = 0; j < assets.length; j += 1) {
-        if (/\.apk$/i.test(assets[j].name || "")) {
-          if (!candidate || compare(version, candidate.version) > 0) {
-            candidate = {
-              version: version,
-              assetUrl: assets[j].browser_download_url,
-            };
-          }
-          break;
-        }
-      }
-    }
-    if (!candidate) return;
-    if (cfg.notifications) {
-      window.__TAURI_INTERNALS__
-        .invoke("app_notify", {
-          title: "Ava " + candidate.version + " is available",
-          body: "Tap the download bar in the app to install it.",
-        })
-        .catch(function (error) {
+  invoke("app_check_update")
+    .then(function (check) {
+      if (!check || check.status !== "available") return;
+      if (cfg.notifications) {
+        invoke("app_notify", {
+          title: label(check),
+          body: "Tap Update in the app to install it.",
+        }).catch(function (error) {
           console.error("[ava-app] update notification failed", error);
         });
-    }
-    if (document.body) banner(candidate.version, candidate.assetUrl);
-  })();
+      }
+      if (document.body) banner(check);
+    })
+    .catch(function (error) {
+      console.error("[ava-app] update check failed", error);
+    });
 })();
