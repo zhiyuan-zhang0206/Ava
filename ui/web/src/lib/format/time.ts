@@ -100,3 +100,89 @@ export function formatRelative(iso: string, now: Date = new Date()): string {
   else span = `${Math.floor(min / 60 / 24 / 365)}y`;
   return deltaSec > 0 ? `in ${span}` : `${span} ago`;
 }
+
+const MS_PER_DAY = 86_400_000;
+const TOMORROW_DAYS = 1;
+const WEEKDAY_DAYS_MAX = 6;
+const DATE_DAYS_MIN = 30;
+
+export interface FormatUpcomingOptions {
+  timeZone?: string;
+}
+
+// meiva:ref ui/web/src/lib/format/docs/time.meiva.okf.md#day-context
+export function formatUpcoming(
+  iso: string | Date,
+  now: Date = new Date(),
+  opts: FormatUpcomingOptions = {},
+): string {
+  const target = new Date(iso);
+  if (Number.isNaN(target.getTime())) return "—";
+  if (target.getTime() <= now.getTime()) return formatRelative(target.toISOString(), now);
+
+  const zone = opts.timeZone;
+  const targetDate = localDateFields(target, zone);
+  const nowDate = localDateFields(now, zone);
+  const days = dayOrdinal(targetDate) - dayOrdinal(nowDate);
+  const clock = clockLabel(target, zone);
+  const monthDay = monthDayLabel(target, zone, targetDate.year !== nowDate.year);
+
+  if (days <= 0) return clock;
+  if (days === TOMORROW_DAYS) return `Tomorrow ${clock}`;
+  if (days <= WEEKDAY_DAYS_MAX) return `${intlPart(target, zone, { weekday: "short" })} ${clock}`;
+  if (days < DATE_DAYS_MIN) return `In ${days} days (${monthDay})`;
+  return monthDay;
+}
+
+interface LocalDateFields {
+  year: number;
+  month: number;
+  day: number;
+}
+
+function intlFormatter(
+  timeZone: string | undefined,
+  options: Intl.DateTimeFormatOptions,
+): Intl.DateTimeFormat {
+  return new Intl.DateTimeFormat("en-US", { ...options, timeZone });
+}
+
+function intlPart(
+  d: Date,
+  timeZone: string | undefined,
+  options: Intl.DateTimeFormatOptions,
+): string {
+  return intlFormatter(timeZone, options).format(d);
+}
+
+function localDateFields(d: Date, timeZone?: string): LocalDateFields {
+  const parts = intlFormatter(timeZone, {
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).formatToParts(d);
+  const num = (type: string) => Number(parts.find((p) => p.type === type)?.value);
+  return { year: num("year"), month: num("month"), day: num("day") };
+}
+
+function dayOrdinal({ year, month, day }: LocalDateFields): number {
+  return Math.round(Date.UTC(year, month - 1, day) / MS_PER_DAY);
+}
+
+export function normalizeDayPeriodSpace(value: string): string {
+  return value.replace(/[\u202f\u00a0]/g, " ");
+}
+
+function clockLabel(d: Date, timeZone?: string): string {
+  return normalizeDayPeriodSpace(
+    intlPart(d, timeZone, { hour: "numeric", minute: "2-digit", hour12: true }),
+  );
+}
+
+function monthDayLabel(d: Date, timeZone: string | undefined, withYear: boolean): string {
+  return intlPart(d, timeZone, {
+    month: "short",
+    day: "numeric",
+    ...(withYear ? { year: "numeric" } : {}),
+  });
+}
