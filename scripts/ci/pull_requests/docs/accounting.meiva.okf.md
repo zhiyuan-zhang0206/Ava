@@ -25,7 +25,7 @@ every run reachable. All GitHub reads are best-effort: a failed or timed-out
 ```meiva-contract
 id = "attribution-fallback-chain"
 kind = "invariant"
-statement = """A run's identity resolves in order: the real PR of a synthetic `trunk-merge/pr-<n>/<uuid>` branch (or the run's PR payload) by PR title; then a push-to-main merge run's merged PR via its merge commit; then the head commit subject; then the `meiva-<id>-<slug>` head branch name. The parsed source is the legacy `[Meiva-<id>]` prefix, read from PR titles and commit subjects only when present (new PR titles carry none — user ruling 2026-10-16), plus `(task #<id>)`; a run matching none stays unattributed."""
+statement = """A run's PR and task identity resolves in order: the real PR of a synthetic `trunk-merge/pr-<n>/<uuid>` branch (or the run's PR payload) by PR title; then a push-to-main merge run's merged PR via its merge commit; then the head commit subject for `(task #<id>)`. Agent prefix/branch matching is not performed."""
 code = ["scripts/ci/pull_requests/accounting.py:_run_identity"]
 tests = ["scripts/ci/pull_requests/tests/test_ci_accounting.py::test_push_run_attributes_from_commit_subject", "scripts/ci/pull_requests/tests/test_ci_accounting.py::test_branch_name_attributes_nonprefix_subject", "scripts/ci/pull_requests/tests/test_ci_accounting.py::test_trunk_branch_without_pr_payload_attributes_by_branch"]
 ```

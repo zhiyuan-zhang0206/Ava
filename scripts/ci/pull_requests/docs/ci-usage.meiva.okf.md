@@ -40,15 +40,12 @@ tests = ["scripts/ci/pull_requests/tests/test_accounting_integrity.py::test_runs
 ```meiva-contract
 id = "attribution-sources"
 kind = "invariant"
-statement = "Ordinary PR associations read their real PR title; a trunk-merge/pr-N branch uses its real PR instead of its synthetic association. Main runs may resolve their merge commit's PR, then attribution retains the existing Meiva subject and meiva-N branch fallbacks. A failed title query is missing evidence, not a successfully unattributed run."
+statement = "Ordinary PR associations read their real PR title; a trunk-merge/pr-N branch uses its real PR instead of its synthetic association. Main runs may resolve their merge commit's PR, then attribution falls back to the commit subject for `(task #N)`. A failed title query is missing evidence, not a successfully unattributed run."
 code = ["scripts/ci/pull_requests/accounting.py:_identity_from_prs", "scripts/ci/pull_requests/accounting.py:_run_identity"]
 tests = ["scripts/ci/pull_requests/tests/test_accounting_integrity.py::test_actual_github_envelope_retains_pr_identity", "scripts/ci/pull_requests/tests/test_accounting_integrity.py::test_pr_title_failure_is_not_an_unattributed_success", "scripts/ci/pull_requests/tests/test_ci_accounting.py::test_trunk_synthetic_pr_resolves_to_real_pr", "scripts/ci/pull_requests/tests/test_ci_accounting.py::test_main_push_run_resolves_pr_via_merge_commit", "scripts/ci/pull_requests/tests/test_ci_accounting.py::test_branch_name_attributes_nonprefix_subject"]
 ```
 
-The shared GitHub account does not identify the Meiva agent that requested a run.
-The existing `[Meiva-N]` title/subject and `(task #N)` conventions supply that
-identity. A genuinely unattributed run remains in the report. Fallbacks resolve
-absent attribution; they do not disguise a failed authoritative lookup.
+Task references `(task #N)` in PR titles and commit subjects supply task attribution without distinguishing internal vs external agents. Fallbacks resolve absent attribution; they do not disguise a failed authoritative lookup.
 
 ```meiva-contract
 id = "completed-job-minutes"
