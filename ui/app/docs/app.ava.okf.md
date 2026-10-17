@@ -116,6 +116,10 @@ group is absent, while manual dispatch may still produce unsigned evidence.
 `scripts/codegen/build_app_update_manifest.py` emits signed updater entries only, and
 the mutable `app-latest` release carries the stable `latest.json` endpoint.
 
+`release-android.yml` injects `versionCode = 1_000_000 + github.run_number`
+through a Tauri `--config` overlay, reads it back from the APK with `aapt2`, and
+refuses a publish that would not advance the advertised code.
+
 ## Limits
 
 The Android foreground service keeps the process resident but notification SSE
