@@ -13,6 +13,9 @@
     "allow-app-save-settings",
     "allow-app-retry-entry",
     "allow-app-notify",
-    "allow-app-take-pending-click"
+    "allow-app-take-pending-click",
+    "allow-app-update-info",
+    "allow-app-check-update",
+    "allow-app-install-update"
   ]
 }

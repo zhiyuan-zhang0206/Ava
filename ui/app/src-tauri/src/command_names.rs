@@ -18,4 +18,7 @@ pub const COMMANDS: &[&str] = &[
     "app_open_settings",
     "app_notify",
     "app_take_pending_click",
+    "app_update_info",
+    "app_check_update",
+    "app_install_update",
 ];

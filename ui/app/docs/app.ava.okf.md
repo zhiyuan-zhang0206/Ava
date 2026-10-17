@@ -94,8 +94,13 @@ their JNI response; direct synchronous mobile-plugin calls would deadlock it.
 Android's network-security XML cannot express IP prefixes, so it permits
 cleartext transport while Rust refuses to persist an HTTP endpoint unless all
 resolved addresses are loopback, link-local, RFC1918, or `100.64.0.0/10`.
-HTTPS is unrestricted. APK updates are explicit GitHub Release downloads, not
-silent installs.
+HTTPS is unrestricted.
+
+## Android updates
+
+The manifest-driven update path — build-number ordering, digest and signer
+verification, the installer hand-off, and both entry points — has its own node:
+[[ui/app/docs/android-updates.ava.okf.md|Android updates]].
 
 ## Build and release
 
@@ -104,7 +109,8 @@ it exactly — the release workflows fail on mismatch — so a release starts by
 bumping `Cargo.toml`. `.github/workflows/ci-app.yml` path-filters
 Rust format/clippy, Android-target checking, and overlay/manifest tests.
 `release-app.yml` builds the universal macOS DMG; `release-android.yml` builds the Android APK (`android-v*` tags)
-artifacts for `app-v*` tags. Apple signing and updater signing activate only for
+artifacts for `app-v*` tags. The client updates from the `android-latest.json`
+manifest published beside the rolling `android-latest` APK, not from tags. Apple signing and updater signing activate only for
 complete secret groups; tag releases fail closed when any required signing
 group is absent, while manual dispatch may still produce unsigned evidence.
 `scripts/codegen/build_app_update_manifest.py` emits signed updater entries only, and
@@ -123,7 +129,8 @@ immutable release, and `workflow_dispatch` builds only unless `dry_run=false`.
 
 The Android foreground service keeps the process resident but notification SSE
 still lives in the webview; force-stop/closed-app delivery would require a push
-service and is out of scope. Android cleartext CIDR enforcement is an
+service and is out of scope. An update always ends at the system installer's
+confirmation: the app can only prepare and verify the file. Android cleartext CIDR enforcement is an
 application-time DNS check because the platform XML supports domain names, not
 network prefixes.
 

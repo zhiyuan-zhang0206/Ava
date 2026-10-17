@@ -48,6 +48,7 @@ PERMISSIONS = (
     "android.permission.POST_NOTIFICATIONS",
     "android.permission.FOREGROUND_SERVICE",
     "android.permission.FOREGROUND_SERVICE_SPECIAL_USE",
+    "android.permission.REQUEST_INSTALL_PACKAGES",
 )
 
 #: The foreground service, declared relative to the app package.

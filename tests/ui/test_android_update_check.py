@@ -1,12 +1,8 @@
-"""Execute the Android update selector against out-of-order release lists."""
-
 from __future__ import annotations
 
 import json
 import subprocess
 from pathlib import Path
-
-import pytest
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 _SCRIPT = _REPO_ROOT / "ui" / "app" / "src-tauri" / "scripts" / "update-check.js"
@@ -14,96 +10,197 @@ _SCRIPT = _REPO_ROOT / "ui" / "app" / "src-tauri" / "scripts" / "update-check.js
 _HARNESS = r"""
 const fs = require("fs");
 const vm = require("vm");
-const releases = JSON.parse(process.argv[1]);
+const scenario = JSON.parse(process.argv[1]);
+
 const appended = [];
+const invocations = [];
 
 function element() {
   return {
     children: [],
+    handlers: {},
     style: {},
     textContent: "",
+    disabled: false,
+    removed: false,
     setAttribute() {},
-    addEventListener() {},
-    appendChild(child) { this.children.push(child); },
-    remove() {},
+    addEventListener(type, handler) {
+      this.handlers[type] = handler;
+    },
+    appendChild(child) {
+      this.children.push(child);
+    },
+    remove() {
+      this.removed = true;
+    },
   };
 }
 
 const body = element();
-body.appendChild = function (child) { appended.push(child); };
+body.appendChild = function (child) {
+  appended.push(child);
+};
+
 const window = {
-  __AVA_APP__: {
-    releasesApi: "https://api.github.test/releases",
-    version: "0.4.0",
-    notifications: false,
+  __AVA_APP__: scenario.config,
+  __TAURI_INTERNALS__: {
+    invoke: async function (command, args) {
+      invocations.push({ command: command, args: args });
+      if (command === "app_check_update") return scenario.check;
+      if (command === "app_install_update") return scenario.install;
+      return {};
+    },
   },
-  __TAURI_INTERNALS__: { invoke: async () => {} },
   sessionStorage: {
-    getItem() { return null; },
+    getItem() {
+      return null;
+    },
     setItem() {},
   },
 };
 window.top = window;
-const context = {
-  window,
-  document: { body, createElement: element },
-  fetch: async () => ({ ok: true, json: async () => releases }),
-  console,
-};
-vm.runInNewContext(fs.readFileSync(process.argv[2], "utf8"), context);
-setTimeout(() => {
-  const banner = appended[0];
-  process.stdout.write(banner ? banner.children[0].textContent : "");
-}, 0);
+
+vm.runInNewContext(fs.readFileSync(process.argv[2], "utf8"), {
+  window: window,
+  document: { body: body, createElement: element },
+  location: { protocol: "https:", hostname: "console.test" },
+  console: { error() {}, log() {} },
+});
+
+const tick = () => new Promise((resolve) => setTimeout(resolve, 0));
+
+(async function () {
+  await tick();
+  const banner = appended[0] || null;
+  const result = {
+    banner: banner !== null,
+    text: banner ? banner.children[0].textContent : "",
+    actions: banner ? banner.children[1].children.map((child) => child.textContent) : [],
+    commands: invocations.map((call) => call.command),
+    notifications: invocations
+      .filter((call) => call.command === "app_notify")
+      .map((call) => call.args),
+  };
+  if (banner && scenario.interact) {
+    const update = banner.children[1].children[0];
+    update.handlers.click();
+    await tick();
+    result.afterInstall = update.textContent;
+    result.removed = banner.removed;
+    if (!banner.removed) {
+      update.handlers.click();
+      await tick();
+      result.downloadPage = invocations
+        .filter((call) => call.command === "app_open_external")
+        .map((call) => call.args.url)[0];
+    }
+  }
+  process.stdout.write(JSON.stringify(result));
+})();
 """
 
+_DOWNLOAD_PAGE = "https://github.com/zhiyuan-zhang0206/Ava/releases/tag/android-latest"
 
-def _release(
-    version: str,
-    *,
-    apk: bool = True,
-    draft: bool = False,
-    prerelease: bool = False,
-) -> dict[str, object]:
-    assets = []
-    if apk:
-        assets.append(
-            {
-                "name": f"Ava_{version}.apk",
-                "browser_download_url": f"https://downloads.test/Ava_{version}.apk",
-            }
-        )
+
+def _available(version_name: str = "1.0.0", version_code: int = 4003) -> dict[str, object]:
     return {
-        "tag_name": f"android-v{version}",
-        "draft": draft,
-        "prerelease": prerelease,
-        "assets": assets,
+        "status": "available",
+        "reason": None,
+        "currentVersionCode": 4002,
+        "latestVersionName": version_name,
+        "latestVersionCode": version_code,
+        "downloadPage": _DOWNLOAD_PAGE,
     }
 
 
-def _selected_banner(releases: list[dict[str, object]]) -> str:
-    result = subprocess.run(  # noqa: S603 -- fixed Node harness, no shell
-        ["node", "-e", _HARNESS, json.dumps(releases), str(_SCRIPT)],
+def _settled(status: str) -> dict[str, object]:
+    return {
+        "status": status,
+        "reason": None if status == "current" else "network",
+        "currentVersionCode": 4002,
+        "latestVersionName": None,
+        "latestVersionCode": None,
+        "downloadPage": _DOWNLOAD_PAGE,
+    }
+
+
+def _run(
+    *,
+    check: dict[str, object] | None = None,
+    install: dict[str, object] | None = None,
+    notifications: bool = False,
+    interact: bool = False,
+    platform: str = "android",
+) -> dict[str, object]:
+    # ava:ref tests/docs/tests.ava.okf.md#android-update-prompt-harness
+    scenario = {
+        "config": {
+            "platform": platform,
+            "version": "0.4.2",
+            "notifications": notifications,
+        },
+        "check": check,
+        "install": install,
+        "interact": interact,
+    }
+    result = subprocess.run(  # noqa: S603
+        ["node", "-e", _HARNESS, json.dumps(scenario), str(_SCRIPT)],
         check=True,
         capture_output=True,
         text=True,
     )
-    return result.stdout
+    return json.loads(result.stdout)
 
 
-@pytest.mark.parametrize(
-    ("releases", "expected"),
-    [
-        ([_release("0.3.0"), _release("0.5.0")], "Ava 0.5.0 is available"),
-        ([_release("0.6.0", apk=False), _release("0.5.0")], "Ava 0.5.0 is available"),
-        ([_release("0.5.0"), _release("0.7.0")], "Ava 0.7.0 is available"),
-        (
-            [_release("0.9.0", prerelease=True), _release("0.8.0", draft=True)],
-            "",
-        ),
-    ],
-)
-def test_selects_highest_published_semver_with_an_apk(
-    releases: list[dict[str, object]], expected: str
-) -> None:
-    assert _selected_banner(releases) == expected
+def test_offers_a_newer_build_with_an_install_action() -> None:
+    result = _run(check=_available())
+    assert result["banner"] is True
+    assert result["text"] == "Ava 1.0.0 (build 4003) is available"
+    assert result["actions"] == ["Update", "Later"]
+    assert result["commands"] == ["app_check_update"]
+
+
+def test_notifies_only_when_the_setting_is_on() -> None:
+    silent = _run(check=_available())
+    assert silent["notifications"] == []
+
+    announced = _run(check=_available(), notifications=True)
+    assert announced["notifications"] == [
+        {
+            "title": "Ava 1.0.0 (build 4003) is available",
+            "body": "Tap Update in the app to install it.",
+        }
+    ]
+
+
+def test_stays_silent_without_a_newer_build_or_a_usable_answer() -> None:
+    for check in (_settled("current"), _settled("failed"), _settled("unsupported")):
+        result = _run(check=check)
+        assert result["banner"] is False
+        assert result["notifications"] == []
+
+
+def test_desktop_never_runs_the_android_check() -> None:
+    result = _run(check=_available(), platform="macos")
+    assert result["commands"] == []
+    assert result["banner"] is False
+
+
+def test_a_failed_install_falls_back_to_the_download_page() -> None:
+    result = _run(
+        check=_available(),
+        install={"status": "failed", "reason": "network", "downloadPage": _DOWNLOAD_PAGE},
+        interact=True,
+    )
+    assert result["afterInstall"] == "Open download page"
+    assert result["removed"] is False
+    assert result["downloadPage"] == _DOWNLOAD_PAGE
+
+
+def test_an_opened_installer_removes_the_bar() -> None:
+    result = _run(
+        check=_available(),
+        install={"status": "installer-opened", "reason": None, "downloadPage": _DOWNLOAD_PAGE},
+        interact=True,
+    )
+    assert result["removed"] is True
