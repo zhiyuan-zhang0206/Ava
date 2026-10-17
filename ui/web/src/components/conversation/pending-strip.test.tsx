@@ -1,7 +1,7 @@
 import { cleanup, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it } from "vitest";
 
-import { PendingStrip } from "./pending-strip";
+import { PendingStrip, userPending } from "./pending-strip";
 import type { PendingInbound } from "@/lib/contracts/types";
 
 afterEach(cleanup);
@@ -9,6 +9,7 @@ afterEach(cleanup);
 function item(over: Partial<PendingInbound> & { id: number }): PendingInbound {
   return {
     source: "user",
+    sender: "user",
     content: "hello",
     images: null,
     created_at: "2026-05-28T00:00:00Z",
@@ -16,9 +17,57 @@ function item(over: Partial<PendingInbound> & { id: number }): PendingInbound {
   };
 }
 
+function mixedQueue(): PendingInbound[] {
+  return [
+    item({ id: 1, content: "check the logs" }),
+    item({ id: 2, source: "agent:3", sender: "agent", content: "peer asks for a status" }),
+    item({ id: 3, source: "system", sender: "system", content: "[system] compact now" }),
+  ];
+}
+
+describe("userPending", () => {
+  it("keeps the rows the user caused, including a page callback", () => {
+    const queued = userPending([
+      item({ id: 1 }),
+      item({ id: 2, source: "ui:page:compare", sender: "user" }),
+    ]);
+    expect(queued.map((p) => p.id)).toEqual([1, 2]);
+  });
+
+  it("drops agent, automation and system rows", () => {
+    const queued = userPending([
+      item({ id: 1, source: "agent:3", sender: "agent" }),
+      item({ id: 2, source: "schedule:7", sender: "automation" }),
+      item({ id: 3, source: "watcher:5", sender: "automation" }),
+      item({ id: 4, source: "system", sender: "system" }),
+    ]);
+    expect(queued).toEqual([]);
+  });
+});
+
 describe("PendingStrip", () => {
   it("renders nothing when empty", () => {
     const { container } = render(<PendingStrip items={[]} />);
+    expect(container.firstChild).toBeNull();
+  });
+
+  it("shows only the user-originated pending message of a mixed queue", () => {
+    render(<PendingStrip items={mixedQueue()} />);
+    expect(screen.getByText("1 pending")).toBeTruthy();
+    expect(screen.getByText("check the logs")).toBeTruthy();
+    expect(screen.queryByText("peer asks for a status")).toBeNull();
+    expect(screen.queryByText("[system] compact now")).toBeNull();
+  });
+
+  it("renders nothing when the queue holds no user message", () => {
+    const { container } = render(
+      <PendingStrip
+        items={[
+          item({ id: 1, source: "agent:3", sender: "agent", content: "peer asks for a status" }),
+          item({ id: 2, source: "schedule:7", sender: "automation", content: "wake" }),
+        ]}
+      />,
+    );
     expect(container.firstChild).toBeNull();
   });
 
@@ -34,31 +83,6 @@ describe("PendingStrip", () => {
     expect(screen.getByText("2 pending")).toBeTruthy();
     expect(screen.getByText("check the logs")).toBeTruthy();
     expect(screen.getByText("here is the result")).toBeTruthy();
-  });
-
-  it("maps source tags to short labels", () => {
-    render(
-      <PendingStrip
-        items={[
-          item({ id: 1, source: "user" }),
-          item({ id: 2, source: "agent:3" }),
-          item({ id: 3, source: "schedule:7" }),
-          item({ id: 4, source: "watcher:5" }),
-          item({ id: 5, source: null }),
-        ]}
-      />,
-    );
-    expect(screen.getByText("· User")).toBeTruthy();
-    expect(screen.getByText("· Agent #3")).toBeTruthy();
-    expect(screen.getByText("· scheduled")).toBeTruthy();
-    // unrecognized tags fall through to the raw value
-    expect(screen.getByText("· watcher:5")).toBeTruthy();
-    expect(screen.getByText("· system")).toBeTruthy();
-  });
-
-  it("labels a page callback (ui:page:<name>) as User", () => {
-    render(<PendingStrip items={[item({ id: 1, source: "ui:page:compare" })]} />);
-    expect(screen.getByText("· User")).toBeTruthy();
   });
 
   it("renders a thumbnail per image on a queued multimodal message", () => {
@@ -90,9 +114,7 @@ describe("PendingStrip", () => {
 
   it("suppresses the [image] placeholder when thumbnails render", () => {
     const { rerender } = render(
-      <PendingStrip
-        items={[item({ id: 1, content: "[image]", images: ["/api/agents/7/uploads/a.png"] })]}
-      />,
+      <PendingStrip items={[item({ id: 1, content: "[image]", images: ["/api/agents/7/uploads/a.png"] })]} />,
     );
     expect(screen.queryByText("[image]")).toBeNull();
     // Without an image the same literal is the message's real text — keep it.

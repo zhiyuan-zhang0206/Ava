@@ -3419,6 +3419,7 @@ export interface components {
         PendingInbound: {
             id: number;
             source: string | null;
+            sender: "user" | "agent" | "automation" | "system";
             content: string;
             images: string[] | null;
             created_at: string;

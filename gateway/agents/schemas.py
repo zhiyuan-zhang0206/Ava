@@ -18,7 +18,7 @@ from pydantic import (
     model_validator,
 )
 
-from base.agents.messages.envelope import validate_source
+from base.agents.messages.envelope import InboundSender, validate_source
 from base.agents.messages.kwargs import NoteTag
 from base.agents.observation.snapshot import AgentSnapshot
 from base.agents.tasks.priority import Priority
@@ -267,6 +267,7 @@ class PendingInbound(BaseModel):
 
     id: int
     source: str | None
+    sender: InboundSender
     content: str
     images: list[str] | None
     created_at: datetime

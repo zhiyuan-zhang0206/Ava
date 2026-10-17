@@ -11,7 +11,7 @@
   "stale": "Offline. Last document shown.",
   "unavailable": "Document unavailable. Try again later.",
   "loading": "Loading…",
-  "empty": "This agent hasn't written its shared document yet. Its current state, decisions and next steps will appear here.",
+  "empty": "No content",
   "noticesUnavailable": "Notifications unavailable.",
   "expandNotice": "Expand notification",
   "collapseNotice": "Collapse notification",

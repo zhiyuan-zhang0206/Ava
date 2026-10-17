@@ -23,6 +23,7 @@ from base.agents.history.context_response import (
 )
 from base.agents.inbox.chat_delivery import ClientMessageConflictError
 from base.agents.inbox.rows import list_pending_inbounds
+from base.agents.messages.envelope import sender_class
 from base.agents.messages.inbound import InboundKind
 from base.agents.messages.inbound_images import image_mime_for, inbound_image_urls, parse_upload_url
 from base.agents.model.model_overrides import agent_overrides
@@ -445,7 +446,7 @@ def get_last_message(
 @router.get(
     "/api/agents/{agent_id}/pending",
     dependencies=[Depends(deny_isolated_result_read)],
-    description="Chat inbounds still queued for the agent (status='pending'), oldest\nfirst. These have not been claimed yet, so they are absent from the\ntimeline snapshot; the web UI shows them as a compact strip above the\ncomposer. Once a message is claimed it enters the agent's messages and\nappears in the timeline, dropping out of this list. A chat the active takeover\nabsorbed (trail or relay read) is omitted too (#3683). A multimodal\nmessage carries its image reference urls (`images`) so the strip can\nrender thumbnails before the claim.\n\nReturns an empty list for a nonexistent agent (this is a plain\ninbound-table read with no agent-existence precondition; a missing agent\njust has no pending rows).",
+    description="Chat inbounds still queued for the agent (status='pending'), oldest\nfirst. These have not been claimed yet, so they are absent from the\ntimeline snapshot; the web UI shows them as a compact strip above the\ncomposer. Once a message is claimed it enters the agent's messages and\nappears in the timeline, dropping out of this list. A chat the active takeover\nabsorbed (trail or relay read) is omitted too (#3683). A multimodal\nmessage carries its image reference urls (`images`) so the strip can\nrender thumbnails before the claim. Each row also carries `sender`, the\nclosed category of its `source` tag (user / agent / automation / system),\nso a client selects human-originated rows without parsing the tag.\n\nReturns an empty list for a nonexistent agent (this is a plain\ninbound-table read with no agent-existence precondition; a missing agent\njust has no pending rows).",
 )
 def get_pending_messages(agent_id: int, request: Request) -> list[PendingInbound]:
 
@@ -455,6 +456,7 @@ def get_pending_messages(agent_id: int, request: Request) -> list[PendingInbound
         PendingInbound(
             id=r.id,
             source=r.source,
+            sender=sender_class(r.source),
             content=r.content,
             images=inbound_image_urls(agent_id, r.payload),
             created_at=r.created_at,

@@ -57,7 +57,43 @@ def test_pending_returns_only_pending_chat_oldest_first(
     items = resp.json()
     assert [it["content"] for it in items] == ["first", "second"]
     assert [it["source"] for it in items] == ["user", "agent:3"]
+    assert [it["sender"] for it in items] == ["user", "agent"]
     assert [it["id"] for it in items] == [first, second]
+
+
+def test_pending_carries_the_sender_category_of_each_queue_entry(
+    db_conn: psycopg.Connection, database: Database, event_bus: EventBus
+) -> None:
+    tid = _seed_agent(db_conn)
+    sources = [
+        "user",
+        "ui:page:compare",
+        "agent:3",
+        "external_agent:codex",
+        "schedule:7",
+        "watcher:5",
+        "shell:9",
+        "system",
+    ]
+    for index, source in enumerate(sources):
+        insert_inbound_message(
+            db_conn, tid, f"m{index}", source=source, bus=event_bus, database=database
+        )
+
+    with gateway_test_client() as client:
+        resp = client.get(f"/api/agents/{tid}/pending")
+
+    assert resp.status_code == 200
+    assert [it["sender"] for it in resp.json()] == [
+        "user",
+        "user",
+        "agent",
+        "agent",
+        "automation",
+        "automation",
+        "automation",
+        "system",
+    ]
 
 
 def test_pending_empty_when_nothing_queued(db_conn: psycopg.Connection) -> None:
