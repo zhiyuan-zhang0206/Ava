@@ -18,7 +18,11 @@ and an unreadable journal both read as invalid: they keep business closed and
 refuse new work, and no command clears them. They have one exit: after confirming no `meiva
 stop` is in flight for this home, an operator
 removes the file by hand (`rm $MEIVA_HOME/run/deploy-pause-owner.json`) and runs
-`meiva start`.
+`meiva start`. `read_for_home` reports an OS error as that `invalid` record
+instead of raising, and `admission.business_paused` keeps its own `except
+OSError` arm anyway: an intentional fail-closed fallback, unreachable while this
+classification holds and never removed as dead code, so a reader change cannot
+open the gate into a stopping unit.
 
 An explicit [maintenance hold](maintenance.meiva.okf.md) uses the same journal
 with a typed cohort/progress payload. The journal records no process identity:
