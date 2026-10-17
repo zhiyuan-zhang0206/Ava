@@ -8,6 +8,7 @@ import contextlib
 import os
 import shlex
 import sys
+import threading
 import time
 from collections.abc import Callable
 from pathlib import Path
@@ -230,13 +231,25 @@ def _poll_until(condition: Callable[[], bool], seconds: float) -> None:
         time.sleep(0.3)
 
 
-def _poll_log(path: Path, ready: Callable[[str], bool], seconds: float = 0.0) -> str:
+def _poll_log(path: Path, ready: Callable[[str], bool], seconds: float = 5.0) -> str:
     deadline = time.time() + seconds
     while True:
         text = path.read_text()
         if ready(text) or time.time() >= deadline:
             return text
         time.sleep(0.05)
+
+
+def test_poll_log_waits_for_content_that_arrives_late(tmp_path: Path) -> None:
+    log = tmp_path / "late.log"
+    log.write_text("")
+    writer = threading.Timer(0.2, lambda: log.write_text("late-bg\n"))
+    writer.start()
+    try:
+        text = _poll_log(log, lambda value: "late-bg" in value)
+    finally:
+        writer.cancel()
+    assert "late-bg" in text, text
 
 
 def _assert_completion_notice_argv(argv: list[str], handle: Any) -> None:
