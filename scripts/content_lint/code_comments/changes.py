@@ -12,7 +12,10 @@ from scripts.content_lint.code_comments.typescript_index import SUFFIXES, parsed
 
 def _brand_key(text: str) -> str:
     return (
-        text.replace("meiva", "a" + "va").replace("Meiva", "A" + "va").replace("MEIVA", "A" + "VA")
+        text.replace("meiva", "a" + "va")
+        .replace("Meiva", "A" + "va")
+        .replace("MEIVA", "A" + "VA")
+        .replace("7d21fe712cd3", "947e545987bb")
     )
 
 

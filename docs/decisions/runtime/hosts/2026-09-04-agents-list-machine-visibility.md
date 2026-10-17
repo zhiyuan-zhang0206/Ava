@@ -4,7 +4,7 @@ title: Agent list machine visibility
 
 # Agent list machine visibility
 
-`ava agents ls` now serves as an external-context bridge as well as a compact
+`meiva agents ls` now serves as an external-context bridge as well as a compact
 operator view. An agent id and lifecycle state do not identify where work is
 running in a multi-runner cluster; the machine is the minimum additional fact
 an external operator or coding agent needs to interpret the roster and choose
@@ -22,7 +22,7 @@ The measured 2026-09-01 sample was 381,791 compact bytes versus 2,460,642
 summary bytes for 5,218 rows: the summary response is about 6.4 times larger
 and transfers 2,078,851 additional bytes for that sample. It also performs the
 summary projection's roster lookups rather than the compact query's three-column
-join. We accept that cost because `ava agents ls` is an on-demand context read,
+join. We accept that cost because `meiva agents ls` is an on-demand context read,
 not a polling roster surface, and machine visibility is required for the result
 to be operationally complete. High-frequency consumers should continue using
 their purpose-built scoped projections rather than polling this all-history CLI

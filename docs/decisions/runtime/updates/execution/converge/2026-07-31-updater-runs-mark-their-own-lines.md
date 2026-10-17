@@ -13,7 +13,7 @@ That works on POSIX, where every spawn tees to a fresh `updater-<epoch>.log`, so
 one file holds exactly one run.
 
 Windows has no per-run file. The native supervisor owns the redirect and appends
-every run to one `ava-updater.out.log`, so the pause flag dates the FILE and not
+every run to one `meiva-updater.out.log`, so the pause flag dates the FILE and not
 the lines in it: a bounded tail can open in the middle of an earlier run, and the
 decline marker — the only verdict Windows writes at all, since the cmd.exe
 command line emits no `[session-exit] rc=` line — is matched anywhere in that
@@ -68,7 +68,7 @@ operators read.
   sketches). It removes the ambiguity at its source rather than annotating around
   it, and it would make the `{"log": ...}` handle `spawn_update` returns name a
   file that exists on that platform. Rejected because the redirect is not the
-  updater's to choose: `shared/winproc.py` opens `$AVA_HOME/logs/<session>.out.log`
+  updater's to choose: `shared/winproc.py` opens `$MEIVA_HOME/logs/<session>.out.log`
   for **every** session it supervises, so per-run naming is a change to the
   supervisor's contract with agents, daemons and shells alike — a far larger blast
   radius than the reader that asked, and one that moves where an operator looks

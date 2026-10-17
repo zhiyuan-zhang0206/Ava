@@ -3,7 +3,7 @@
 ## Context
 
 An audit of untyped `dict` access across the internal runtime code
-(`shared/ gateway/ agent/ ops/ cli/ plugins/ services/`, tests and the `ava/`
+(`shared/ gateway/ agent/ ops/ cli/ plugins/ services/`, tests and the `meiva/`
 SDK surface excluded) went looking for type-safety debt and landed on two
 structural facts about `[tool.pyright]` in `pyproject.toml` rather than a pile
 of scattered findings:
@@ -23,14 +23,14 @@ of scattered findings:
    `services/agent_ops/daemon.py`), lives entirely inside this unchecked
    region, spanning both ends of the wire.
 
-The highest-risk concrete finding: `ava_msg_type`, the discriminator for
-~24 `ava_*` keys agents write into LangChain's untyped `additional_kwargs`,
+The highest-risk concrete finding: `meiva_msg_type`, the discriminator for
+~24 `meiva_*` keys agents write into LangChain's untyped `additional_kwargs`,
 is compared as a bare string literal in five call sites across three modules
 (`agent/messages.py`, `agent/graph/_claim.py`, `shared/timeline.py`,
 `gateway/context_breakdown.py`, `agent/graph/_memory_recall.py`) with no
 enum and no exhaustiveness check — a typo or value drift between writer and
 reader fails silently (wrong timeline render, wrong context bucket), not
-loudly. The same file already had a working answer next to it: `ava_note_tag`
+loudly. The same file already had a working answer next to it: `meiva_note_tag`
 is a `StrEnum`. And `shared/events.py` already modeled its own SSE wire as a
 one-`BaseModel`-per-role discriminated union (`role: Literal[...]` +
 `EVENT_ADAPTER = TypeAdapter(Event)`) — proof the pattern works here, just not
@@ -55,7 +55,7 @@ Eight PRs (#658–#665) landed this program:
 - **#659** brings `services/ops/plugins` into pyright's `include`, closing
   the unchecked region (prerequisite — the RPC wire's `services/` side was
   invisible before this).
-- **#660** types `ava_*` message metadata: a `StrEnum` discriminator plus a
+- **#660** types `meiva_*` message metadata: a `StrEnum` discriminator plus a
   `TypedDict` for the kwargs bag, with reads routed through one collapsing
   function instead of five independent `.get()` call sites.
 - **#665** models the ops cluster-RPC envelope and per-`OpKind` payloads,
@@ -64,7 +64,7 @@ Eight PRs (#658–#665) landed this program:
   langchain's own `ToolCall`) their real shape instead of a widened
   `dict[str, Any]`.
 - **#662, #664, #661, #658** cover CLI wire shapes, fleet notice rows /
-  `ava_code` findings / tiered `event_log` payloads, fail-fast
+  `meiva_code` findings / tiered `event_log` payloads, fail-fast
   `usage_metadata` handling, and the evals container boundary
   (`CaseResult`, typed `swe_bench` instance) respectively.
 
@@ -74,7 +74,7 @@ Eight PRs (#658–#665) landed this program:
   obvious reading of "the rule is off, turn it on." Rejected: even setting
   aside cost, an Unknown-type error only forces *some* annotation at that
   call site — it does not force the *correct* one, so it would not have
-  caught the `ava_msg_type` bare-string drift that was the audit's top
+  caught the `meiva_msg_type` bare-string drift that was the audit's top
   finding (both sides are already valid `str`). A later same-night empirical
   probe (§ below) also priced this option and found it independently
   unaffordable as a first move: 11,319 errors, 85% of them in test
@@ -114,7 +114,7 @@ goes to `warning` repo-wide first (free: CI and pre-commit only gate on
 `error`, so this adds IDE/log visibility with zero risk of a new gate), then
 to `error` directory by directory starting from the highest-signal core
 (`shared/ops/services`, 234 findings) and expanding outward by directory
-(`gateway` 139 → `agent` 252 → `ava` 362 → …). `tests/` stays at `warning`
+(`gateway` 139 → `agent` 252 → `meiva` 362 → …). `tests/` stays at `warning`
 permanently — its 9,644 findings are idiomatic test-double style, not a queue
 to clear.
 

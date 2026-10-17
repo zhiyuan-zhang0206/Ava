@@ -18,8 +18,8 @@ Every outage episode is a transition measured from its true start. The shared
 `transition_severity` policy returns no alert before the warning threshold,
 WARNING until the error threshold, and ERROR afterward. Defaults are 180 and
 600 seconds, configured cluster-wide through
-`AVA_ALERTS_TRANSITION_WARNING_SECONDS` and
-`AVA_ALERTS_TRANSITION_ERROR_SECONDS`.
+`MEIVA_ALERTS_TRANSITION_WARNING_SECONDS` and
+`MEIVA_ALERTS_TRANSITION_ERROR_SECONDS`.
 
 A live cluster deploy lease or a machine's live updater lease explains an
 outage for the lease's bounded lifetime. Explanation pauses grading; it does
@@ -32,7 +32,7 @@ Episode state lives with each producer's durable authority:
 - `machine_probe.transition_since` is set by the gateway on the first failed
   machine probe and cleared by the first successful probe. Postgres preserves
   the episode across gateway restarts.
-- `$AVA_HOME/health_probe_alert` stores message, start time, and last-fired
+- `$MEIVA_HOME/health_probe_alert` stores message, start time, and last-fired
   severity. The health probe can therefore track an episode while the gateway
   or database is itself unavailable. Recovery deletes every marker, but only a
   marker with a fired severity resolves an alert instance.

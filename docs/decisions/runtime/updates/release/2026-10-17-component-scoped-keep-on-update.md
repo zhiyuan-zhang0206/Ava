@@ -4,10 +4,10 @@
 
 The networked cluster updates by full stop and start
 ([2026-09-30-networked-cluster-stays-on-source-updates](2026-09-30-networked-cluster-stays-on-source-updates.md)):
-every unit runs `ava stop -y`, switches its checkout, starts again. Its recorded
+every unit runs `meiva stop -y`, switches its checkout, starts again. Its recorded
 consequence stands — every agent drains, schedules close, the data plane restarts —
 and two of the stopped resources hold state that costs more than a bounce: the
-pty-sessions service holds every live agent shell, and `ava stop` (unlike `restart`)
+pty-sessions service holds every live agent shell, and `meiva stop` (unlike `restart`)
 also takes the shared headed Chrome and its MCP upstream down.
 
 Most windows touch a small slice of runtime code, and the stateful components sit on
@@ -16,9 +16,9 @@ pty-sessions surface is 31 files; the browser surface is 152 (it reaches
 `base/config` 36, `base/telemetry` 24, `base/host` 24) — broad, but still far from the
 7 200-file checkout. A window that changes neither should not clear either.
 
-`ava stop` already carries its own keep set: repeatable `--keep-service NAME`
-(`ava pause` was deleted for exactly this shape,
-[2026-10-03-delete-ava-pause](../../../agents/graph/2026-10-03-delete-ava-pause.md)).
+`meiva stop` already carries its own keep set: repeatable `--keep-service NAME`
+(`meiva pause` was deleted for exactly this shape,
+[2026-10-03-delete-meiva-pause](../../../agents/graph/2026-10-03-delete-meiva-pause.md)).
 The three names this decision needs — `pty-sessions`, `browser`, `browser-mcp` — are
 `requires_db=False`, so no `--keep-infra` coupling, and every host's roster carries
 their specs unconditionally, so the flag names are valid on browserless hosts too.
@@ -43,8 +43,8 @@ its sessions with the owners' busy notice and no grace period.
    - **pty-sessions** — dirs `services/agent_runner/pty_sessions`, `base/sessions/pty`;
      watch `services/supervision/healthchecks/protocol_probe.py`; keeps
      `pty-sessions`.
-   - **browser** — dirs `services/desktop/browser`, `ava_builtins/mcps/chrome`; watch
-     `ava/mcps/_browser.py`, `services/supervision/healthchecks/browser.py`,
+   - **browser** — dirs `services/desktop/browser`, `meiva_builtins/mcps/chrome`; watch
+     `meiva/mcps/_browser.py`, `services/supervision/healthchecks/browser.py`,
      `services/supervision/healthchecks/browser_mcp.py`; keeps `browser` and
      `browser-mcp` together (the browser phase watches `browser` in the keep set, and
      `browser-mcp` is a service of its own).
@@ -82,7 +82,7 @@ its sessions with the owners' busy notice and no grace period.
   `base/sessions/pty` would keep old pty-sessions code against new callers on the same
   host — the conservative half of the ruling exists for this. Manual per-update flags
   would make every attended window a judgment call.
-- **Deciding inside `ava stop` on each host.** At decision time hosts run OLD code and
+- **Deciding inside `meiva stop` on each host.** At decision time hosts run OLD code and
   cannot judge a window whose NEW code they do not have yet. The operator's checkout
   holds both revisions and the checker.
 - **Routing the analysis through a new `meizel/__init__.py` door.** A plain re-export
@@ -104,7 +104,7 @@ its sessions with the owners' busy notice and no grace period.
   keep-everything without any analysis.
 - The behavior activates at the next `down` run from a checkout that contains this
   code. Hosts need no update first: `--keep-service` and these names exist in the
-  current hosts' `ava stop`.
+  current hosts' `meiva stop`.
 - Docs follow the behavior: the runbook's update section (with the stale "restart
   keeps persistent PTYs" line corrected), `graceful-maintenance.md` (the writer-barrier
   caveat for a kept pty-sessions), `services/desktop/browser/docs/operations.md`

@@ -20,7 +20,7 @@ hand-written check, and nothing made the next loop remember it.
    gated without a line of its own. A skipped round beats progress as a sleeping loop does and
    never marks success.
 2. A hand-written loop checks `admission.quiesced()` in its own function, after its wait: a
-   held unit skips the pass, keeps beating liveness, and resumes when `ava start` releases the
+   held unit skips the pass, keeps beating liveness, and resumes when `meiva start` releases the
    hold.
 3. `scripts/content_lint/lint_quiesced_loops.py` makes the stance mandatory. A resident
    loop in `services/`, `gateway/` or `ops/` (`while True` or `while not <event>.is_set()`
@@ -60,7 +60,7 @@ hand-written check, and nothing made the next loop remember it.
 - Event-driven writers (audit-event writers such as `record_audit_standalone`, the IM cursor stores) still touch the
   pool when an event arrives inside the window; they are not loops and are not covered.
 
-Forward link (2026-10-03): `ava pause` was deleted; a stop with a different keep set replaces it. See [delete ava pause](../../../../agents/graph/2026-10-03-delete-ava-pause.md).
+Forward link (2026-10-03): `meiva pause` was deleted; a stop with a different keep set replaces it. See [delete meiva pause](../../../../agents/graph/2026-10-03-delete-meiva-pause.md).
 
 Forward: [decisions/2026-10-11-remove-starting-and-ready-maintenance-phases.md](../../../processes/shutdown/2026-10-11-remove-starting-and-ready-maintenance-phases.md)
 removes `in_stop_leg()`; the host dispatcher's turn scan now gates on `quiesced()`.

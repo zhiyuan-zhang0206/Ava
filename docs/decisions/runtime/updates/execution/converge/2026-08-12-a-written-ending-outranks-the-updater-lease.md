@@ -31,7 +31,7 @@ act on it: Phase B abandons the host as `POLL_STALLED`, and
 `ops.cluster_deploy._updater_hung` reports the session it just spawned as hung for
 the controller to force-kill.
 
-`win`'s own `ava-updater.out.log` has the whole chain in it, one run after the other:
+`win`'s own `meiva-updater.out.log` has the whole chain in it, one run after the other:
 
 ```
   ✗ converge failed: watchdog-probe registration failed on Windows for agent-runner
@@ -42,12 +42,12 @@ The 2026-08-12 11:40 run took the abort branch and `exit /b`'d — the next run'
 marker is glued onto the end of its last line with no newline between them, and no
 `_updater_lease clear` ever ran, so the lease stayed armed with an 11:55 expiry. The
 20:34:55 run inherited it, was declared STALLED within seconds of its pause, and then
-went on to finish normally: same log, `ava start` through to "cluster pin: c5f0539 —
+went on to finish normally: same log, `meiva start` through to "cluster pin: c5f0539 —
 this host HEAD c5f0539 [aligned]", last written 20:36:01 — while the rollout that had
 given up on it was still printing, finishing at 20:36:22.
 
 That abort branch is also mis-blaming itself. Nothing was wrong with the checkout,
-sync or tree: `ava restart` failed inside converge, its recovering `ava start` failed
+sync or tree: `meiva restart` failed inside converge, its recovering `meiva start` failed
 the same way, and the ladder's non-zero group fell through the `||` into a message
 about a mixed tree.
 
@@ -147,7 +147,7 @@ convergence already cancels.
   reaching any branch of its own chain — and is rendered as that. For exactly one
   rollout, the one that ships this, a Windows host still spawns the OLD chain from
   before its checkout moves, so its silence is read as a death it may not be.
-- The rc a Windows recovery branch reports is the branch's meaning, not the `ava
+- The rc a Windows recovery branch reports is the branch's meaning, not the `meiva
   start` behind it: a restart that failed and was then rescued reports rc=1. The
   posture row is what says whether the host came back, and Phase B reads it first.
 - Windows-only behaviour this repo's CI cannot execute. The ladder is pinned as a

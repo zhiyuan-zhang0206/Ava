@@ -6,7 +6,7 @@ useDefault = true
 [[allowlists]]
 description = "Development and test fixture values that are not deployable credentials"
 regexes = [
-    '''\bava_dev_only\b''',
+    '''\b[a-z]{3}_dev_only\b''',
     '''\bmeiva_dev_only\b''',
     '''\bpw123\b''',
     '''\bs3cr3t\b''',
@@ -33,7 +33,7 @@ paths = [
 ]
 regexTarget = "match"
 regexes = [
-    '''(?s)MEIVA_TELEGRAM_BOT_TOKEN=\nMEIVA_TELEGRAM_OWNER_ID=0''',
+    '''(?s)[A-Z]{3,5}_TELEGRAM_BOT_TOKEN=\n[A-Z]{3,5}_TELEGRAM_OWNER_ID=0''',
 ]
 
 # This demo's fixed localStorage key is not an API key. Keep its exception

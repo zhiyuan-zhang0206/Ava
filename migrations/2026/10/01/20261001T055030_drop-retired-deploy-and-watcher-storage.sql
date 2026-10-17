@@ -56,7 +56,7 @@ ALTER TABLE host_deploy_state
     ADD CONSTRAINT host_deploy_state_posture_check CHECK (posture IN ('idle', 'paused'));
 
 COMMENT ON TABLE host_deploy_state IS
-    'Host-level deploy posture (idle/paused), one row per machine: written by ava stop, pause, maintenance and start; read by the gateway 503 middleware, ava status and the deploy window.';
+    'Host-level deploy posture (idle/paused), one row per machine: written by meiva stop, pause, maintenance and start; read by the gateway 503 middleware, meiva status and the deploy window.';
 
 DROP TABLE IF EXISTS cluster_pin;
 DROP TABLE IF EXISTS cluster_last_update;

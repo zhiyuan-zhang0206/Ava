@@ -7,7 +7,7 @@ or cancelled operation keeps its control files, staged artifact and partial
 work as evidence, and the next operation refuses to start while any earlier
 `.operation-*` control directory exists. There is no command to retire it.
 
-The common trigger is routine: `ava stop` or a release drain during the nightly
+The common trigger is routine: `meiva stop` or a release drain during the nightly
 dump. Backup coverage then stops silently until someone intervenes. An
 interrupted off-site upload also strands a complete dump inside the controls,
 and a failed in-process snapshot leaves a plaintext `.dump.partial` that nothing

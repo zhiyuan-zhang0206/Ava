@@ -95,20 +95,20 @@ the schema-mutation lock) is the one-way conversion:
   stone**.
 - A read path (a daemon's boot check) that meets an unconverted legacy table
   raises `CutoverRequired` rather than silently converting — a read must never
-  mutate; it waits for the gateway's `ava update` to run the conversion.
+  mutate; it waits for the gateway's `meiva update` to run the conversion.
 
-## Deployment consequence (this PR is not `ava update`-deployable)
+## Deployment consequence (this PR is not `meiva update`-deployable)
 
 The running **old** code's rollout pre-flight (`_vet_rollout_target` →
 `validate_migrations_at_ref`) validates the *target* commit's `migrations/` under
 the *old* rules: it rejects an empty dir ("no migration files found") and rejects
 timestamp names ("does not match `NNNN_`"). The cutover commit's `migrations/` is
-exactly that — empty of integer files. So a normal `ava update` onto this commit
+exactly that — empty of integer files. So a normal `meiva update` onto this commit
 is refused by the code already in production, before anything is paused.
 
 Therefore this cutover deploys **manually**, bypassing the old vet: on the gateway
-(and each runner), `git fetch && git checkout <cutover-sha> && uv sync && ava
-start`. The new code's `ava start` runs `apply_pending_migrations`, which converts
+(and each runner), `git fetch && git checkout <cutover-sha> && uv sync && meiva
+start`. The new code's `meiva start` runs `apply_pending_migrations`, which converts
 the DB via `_ensure_cutover` and then applies zero post-baseline deltas. Prod is a
 single cluster (a macOS gateway + WSL runner on the shared DB), so the DB converts
 once (whichever runs `apply` first) and the other sees the new format. This is a

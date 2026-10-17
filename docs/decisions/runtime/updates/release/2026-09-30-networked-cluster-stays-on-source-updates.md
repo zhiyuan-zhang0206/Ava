@@ -4,10 +4,10 @@
 
 The production cluster is networked: one Linux gateway unit under systemd and
 several macOS agent-runner units (`launchd -> signed permissions helper ->
-ava-root`), every unit with the cluster secret set and every unit running from
-its `$HOME/.ava/source` checkout on a detached HEAD (source mode).
+meiva-root`), every unit with the cluster secret set and every unit running from
+its `$HOME/.meiva/source` checkout on a detached HEAD (source mode).
 
-The release path (`ava cluster release request` -> `ava cluster update
+The release path (`meiva cluster release request` -> `meiva cluster update
 --prepared`) admits a fleet of one: `require_topology` and
 `require_fleet_of_one` in `cli/release_fleet/inventory.py` refuse any request
 that names another unit. Letting the networked cluster use it was investigated
@@ -67,12 +67,12 @@ deployment state.
   `--frozen` rewrote `uv.lock`, and a start over SSH cannot sign the helper.
   A script enforces the order and checks each step's outcome.
 - **A resumable state machine with per-step resume points.** Each half is
-  already idempotent (`ava stop` and `ava start` on a unit already in that
+  already idempotent (`meiva stop` and `meiva start` on a unit already in that
   state succeed), so rerunning a half after a fix covers every interruption
   the attended operator meets; journaled resume would add state for no failure
   that rerunning does not handle
   ([postmortem 0009](../../../../postmortems/0009-complexity-must-name-the-failure-it-prevents.md)).
-- **A source-mode branch inside `ava cluster update`.** That verb is the
+- **A source-mode branch inside `meiva cluster update`.** That verb is the
   release path's entry; a second update authority inside it would run from one
   unit's CLI and depend on that unit's configuration. A standalone operator
   script needs nothing from the operator's own cluster.
@@ -98,7 +98,7 @@ deployment state.
 The release/image path is to be deleted, and stale processes are to be kept
 out by a version gate instead; see the follow-up decision.
 
-Forward link (2026-10-03): `ava pause` was deleted; a stop with a different keep set replaces it. See [delete ava pause](../../../agents/graph/2026-10-03-delete-ava-pause.md).
+Forward link (2026-10-03): `meiva pause` was deleted; a stop with a different keep set replaces it. See [delete meiva pause](../../../agents/graph/2026-10-03-delete-meiva-pause.md).
 
 Forward link (2026-10-17): persistent terminals close only when the window's changes reach the
 pty-sessions code; the update keeps the components its window does not touch. See

@@ -5,9 +5,9 @@
 The message pipeline was string end-to-end: `inbound_messages.content` is `TEXT`,
 the claim node envelope-wraps that string into a `HumanMessage(content=str)`, and
 the frontend composer sent `{content: string}`. Images could only reach an agent
-indirectly — the upload endpoint saved a file to `~/Downloads/AvaAgent-{id}/` and
+indirectly — the upload endpoint saved a file to `~/Downloads/MeivaAgent-{id}/` and
 delivered a text notification ("File uploaded: /path"), leaving the agent to call
-`ava.understand(path=...)` (which routes media to Gemini) to actually see it. We
+`meiva.understand(path=...)` (which routes media to Gemini) to actually see it. We
 wanted a user to paste/drag an image into chat and have the agent's own model see
 the pixels natively.
 
@@ -26,13 +26,13 @@ reference-based, not inline: the image is uploaded to disk (reusing the existing
 upload dir) and only its reference url travels on the wire and in the
 inbound row's JSONB `payload`. The claim node reads the file at delivery time and
 inlines it as a native base64 image block in the `HumanMessage`; the reference
-url rides on `additional_kwargs.ava_image_urls` so the timeline renders a
+url rides on `additional_kwargs.meiva_image_urls` so the timeline renders a
 thumbnail without ever surfacing the base64.
 
 ## Alternatives rejected
 
 - **Understand-mediated (model-agnostic).** Keep content as a string; on image
-  send, attach the file path and let the agent call `ava.understand`. Works with
+  send, attach the file path and let the agent call `meiva.understand`. Works with
   every model including DeepSeek, tiny change — but the model never sees pixels,
   only a description it must actively fetch. Rejected: it is not "native", and it
   is essentially the flow that already existed.

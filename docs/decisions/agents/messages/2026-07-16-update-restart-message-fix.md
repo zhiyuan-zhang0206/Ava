@@ -1,25 +1,25 @@
 # update/restart Audit and Fix for Restart Message Loss
 
-> **Status 2026-08** — written for the removed `ava.self.update()` initiator
+> **Status 2026-08** — written for the removed `meiva.self.update()` initiator
 > path (`self:update` restart rows). The restart-completed source-priority SQL
 > it produced (`system:update` > `self:update`) still lives in
 > `ops/agent_wake.py` and still matters for historical rows; no new
 > `self:update` rows are written.
 
 ## Problem
-After `ava.self.update()`, the agent process is restarted, but the restart completion message does not reach the agent, causing the agent to not know that it has been restarted.
+After `meiva.self.update()`, the agent process is restarted, but the restart completion message does not reach the agent, causing the agent to not know that it has been restarted.
 
 ## Root Cause Analysis
 
 ### Trace
 
-The complete call chain of `ava.self.update()`:
+The complete call chain of `meiva.self.update()`:
 
 ```
-SDK: ava/self.py:update()
+SDK: meiva/self.py:update()
   → POST /api/cluster/rollout (gateway)
   → spawns the rollout session
-  → runs ava update --local:
+  → runs meiva update --local:
     1. Phase A: Pause restarters
     2. Quiesce: Insert system:update restart inbound for all live agents
     3. SDK poll detects system:update → inserts self:update restart + raises AgentRestart
@@ -64,7 +64,7 @@ At this point, the claim node processes `restart_completed`:
 - returns goto=CLAIM (back to waiting), agent never sees the restart marker
 - **Agent is restarted but never informed**
 
-This scenario is not easily triggered in the normal path of `ava.self.update()` (clean exit), but may occur in the following situations:
+This scenario is not easily triggered in the normal path of `meiva.self.update()` (clean exit), but may occur in the following situations:
 - Process is SIGTERMed during checkpoint write
 - DB connection drops during write
 - Any exception preventing graph.ainvoke from returning normally

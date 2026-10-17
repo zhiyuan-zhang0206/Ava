@@ -2,7 +2,7 @@
 
 ## Context
 
-Schedule reconciliation on `ava-preview` repeatedly replaced `ava-schedule-*`
+Schedule reconciliation on `meiva-preview` repeatedly replaced `meiva-schedule-*`
 sessions while older PTY hosts and runners remained alive. The host process is
 intentionally detached and ignores `SIGHUP` and `SIGTERM`, so a registry entry
 is its normal management route. Logs showed a later host with the same name

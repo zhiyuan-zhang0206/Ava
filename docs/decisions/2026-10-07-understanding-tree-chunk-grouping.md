@@ -45,7 +45,7 @@ Rejected, and why:
 - *Slots, a limiter and a thread pool sized to them*: one more thing to size; the provider already
   answers load with a 429, and a job holds a thread only while it runs.
 - *Backfilling history, a daily budget, per-agent rollout allowlists*: not needed to answer the
-  question; the switch (`AVA_UNDERSTANDING_ENABLED`) ships off and is turned on for a few agents first.
+  question; the switch (`MEIVA_UNDERSTANDING_ENABLED`) ships off and is turned on for a few agents first.
 
 Measured on a real agent (agent 9, 11 compaction segments, 610 level-1 nodes): about 8% of the
 agent's own spend at the chosen ratio, within the 10% ceiling; the top level lags the history end

@@ -16,7 +16,7 @@ numbers are planning inputs, not a billing guarantee.
 ## Decision
 
 PostgreSQL `archive_command` will call a source-independent shim under
-`$AVA_HOME/runtime/pg-archive/`. The shim durably and atomically publishes each
+`$MEIVA_HOME/runtime/pg-archive/`. The shim durably and atomically publishes each
 completed WAL/history file to a private local spool. A separately supervised
 uploader will encrypt with a physical-backup key unrelated to the cluster
 secret, publish to GCS, verify the remote object, and only then record an ACK.

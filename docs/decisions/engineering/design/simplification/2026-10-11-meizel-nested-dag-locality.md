@@ -5,7 +5,7 @@ Status: Accepted
 
 ## Context
 
-Ava's locality goal is that a contributor, human or agent, can understand and
+Meiva's locality goal is that a contributor, human or agent, can understand and
 change a component by reading that component and the public interfaces of the
 components it uses. The boundary has to be programmatic: a rule that a checker
 enforces, not a convention someone remembers.
@@ -115,7 +115,7 @@ containing the loading file lists the directories that file may load from:
 
 ```toml
 [loads]
-"loader.py" = ["ava_builtins"]   # repository-relative directories
+"loader.py" = ["meiva_builtins"]   # repository-relative directories
 ```
 
 Meizel turns each declaration into a fact edge from the loading file to the
@@ -185,7 +185,7 @@ Once meizel is the gate, the following are deleted:
   - the private-patch placement inference in `scripts/lint/patch_targets.py`;
   - the cross-package private-access rule in `scripts/lint/code_structure.py`;
 - public contracts: `scripts/lint/public_contracts.py` and
-  `[tool.ava.public_contracts]`;
+  `[tool.meiva.public_contracts]`;
 - import-linter contracts. The root and package manifests express the same
   layering.
 - the evaluation machinery in `scripts/structure/imports/`: literal tables,
@@ -232,7 +232,7 @@ a separate decision.
   - projecting today's code yields 4,505 local edges, 3,444 after transitive
     reduction;
   - 47 directories have cycles, all at depths 1 to 3. The largest are `base`
-    (16 of 18 children in one strongly connected component), `ava`, `agent`,
+    (16 of 18 children in one strongly connected component), `meiva`, `agent`,
     `gateway` and the repository root.
 - The gate turns on for the whole repository at once, after those cycles are
   removed. There is no per-directory waiver.

@@ -6,7 +6,7 @@
 ## Summary
 
 A failed rollout entered automatic rollback and restored code and schema, but
-stopped during `ava start`. Health-probe registration unconditionally unloaded
+stopped during `meiva start`. Health-probe registration unconditionally unloaded
 the same launchd job whose descendant was performing the rollback, so launchd
 terminated recovery before its cleanup could resume the host and release the
 update lease. Registration now defers its own replacement, and a regression test
@@ -19,21 +19,21 @@ pins that ownership boundary.
 - Repeated gateway liveness failures triggered the health probe's automatic
   rollback to the last-known-good commit.
 - Rollback reversed the new migration, reset the checkout, synchronized the
-  environment, and entered `ava start` to restore services.
+  environment, and entered `meiva start` to restore services.
 - Converge reached health-probe registration and issued `launchctl bootout` for
   the currently executing LaunchAgent. The rollback process tree disappeared
   before its `finally` block ran, leaving a paused host and a lease owned by a
   dead process.
 - Recovery aligned the host with the existing cluster pin, reapplied the
   migration, restored services, and cleared the stranded lease with
-  `ava cluster recover`.
+  `meiva cluster recover`.
 
 ## Root cause
 
 `shared.os_cron._register_macos` treated every registration as an external
 replacement: write the plist, boot out the label, then bootstrap it. A health
 probe launched by launchd inherits its label as `XPC_SERVICE_NAME`; the rollback
-and `ava start` descendants inherit it too. Booting out that label terminates the
+and `meiva start` descendants inherit it too. Booting out that label terminates the
 owned process tree, including the code attempting recovery.
 
 The rollback cleanup was correctly placed in `finally`, but an external
@@ -56,7 +56,7 @@ hid that every call performed a destructive reload.
 - `test_register_macos_never_relabels_its_own_legacy_launchd_job` protects the
   path-only label cutover from cleaning up the currently executing legacy job.
 - `test_register_macos_still_reloads_from_another_launchd_job` proves the guard
-  does not suppress convergence when `ava start` belongs to boot autostart.
+  does not suppress convergence when `meiva start` belongs to boot autostart.
 
 The tests model launchd at the subprocess boundary; CI does not run a real macOS
 LaunchAgent lifecycle. The exact scheduler-identity contract therefore remains

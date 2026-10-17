@@ -2,8 +2,8 @@
 
 ## Context
 
-`ava skill install` takes an Agent Skills standard package from a git URL and
-copies it, unmodified, into `$AVA_HOME/skills/`, where every agent's skill scan
+`meiva skill install` takes an Agent Skills standard package from a git URL and
+copies it, unmodified, into `$MEIVA_HOME/skills/`, where every agent's skill scan
 mounts it. That is the intended behaviour — compatibility with the ecosystem's
 published layouts is the whole point — and it is also an unguarded ingestion
 path into the most powerful actor in the system. Going open-source, and
@@ -25,7 +25,7 @@ assumption: there was **no** verified "disable your safety checks" instruction
 in the campaign — the coercion was social ("install this prerequisite"), aimed
 at the human, not at the model's guardrails.
 
-Two properties of Ava make the usual answers unavailable:
+Two properties of Meiva make the usual answers unavailable:
 
 - **No sandbox.** `execute_code` runs on the host as the user who started the
   agent, deliberately
@@ -37,7 +37,7 @@ Two properties of Ava make the usual answers unavailable:
   code-signing or dependency audit would flag. The file the agent obeys is the
   attack surface.
 
-There was also a structural hole: `ava/security.py` scans content an agent
+There was also a structural hole: `meiva/security.py` scans content an agent
 ingests *mid-turn*, but a skill's text does not arrive that way. It is mounted
 as a namespace and read as instructions, so the runtime scanner never sees it.
 And the sibling skill-recall work makes this sharply worse — recall pulls skill
@@ -59,8 +59,8 @@ report names file, line and matched text. `--accept-risk` is the only way past,
 and it records the waived rule ids on the registry row. **Notice** findings
 (`sudo`, `rm -rf`, a credential path on its own, an outbound POST, a bundled
 binary) never block; they are the evidence a human reads before promoting a
-package. Every ingestion path is gated — `ava skill install`, `ava plugins
-install` (both the bare-skill and the plugin-bundle branch), and `ava skill
+package. Every ingestion path is gated — `meiva skill install`, `meiva plugins
+install` (both the bare-skill and the plugin-bundle branch), and `meiva skill
 register`, which would otherwise make `cp -r` the documented way around the gate.
 
 Blobs are **decoded before matching**, recursively (base64, `\x` hex, percent-
@@ -74,8 +74,8 @@ where content enters:
 
 | tier | means | who writes it |
 |---|---|---|
-| `builtin` | came out of this Ava checkout (`ava_builtins/`) | converge |
-| `reviewed` | a human here read this content and vouches for it | `ava skill trust <name>` |
+| `builtin` | came out of this Meiva checkout (`meiva_builtins/`) | converge |
+| `reviewed` | a human here read this content and vouches for it | `meiva skill trust <name>` |
 | `unreviewed` | ingested from outside; treat as attacker-controlled | every install path |
 
 **A clean scan does not promote.** An install that passes every rule still lands
@@ -100,10 +100,10 @@ not — that is a stranger's prose entering the context with no human in the loo
   about not papering over a mistake with a fallback, and installing content the
   scanner just flagged is exactly the paper.
 - **Refuse with no override at all.** Rejected because a heuristic scanner's
-  false positives are a certainty, not a risk (three fired against Ava's own
+  false positives are a certainty, not a risk (three fired against Meiva's own
   first-party skills on the first run, and tuning them out is what shaped the
   final rule table). With no escape hatch, a user blocked on a legitimate
-  package does `cp -r ~/.ava/skills/ && ava skill register` and lands in a worse
+  package does `cp -r ~/.meiva/skills/ && meiva skill register` and lands in a worse
   place: installed, unscanned, unrecorded. A loud, recorded override keeps the
   decision inside the system.
 - **A single severity — block on everything matched.** Rejected on the same
@@ -114,17 +114,17 @@ not — that is a stranger's prose entering the context with no human in the loo
   would make the tier a restatement of the scan, and the scan's honest output is
   "no rule matched" — not "safe". A tier that means "a pattern matcher had no
   opinion" is worthless to recall, which is the consumer the tier exists for.
-- **Reuse `ava/security.py`'s pattern table.** Rejected: it answers a different
+- **Reuse `meiva/security.py`'s pattern table.** Rejected: it answers a different
   question (does this mid-turn content carry an injection, reported over a side
   channel) and its output shape has no file/line anchoring. The layer rule
-  (`shared` < `ava`) forbids sharing one table anyway, since the scanner must be
+  (`shared` < `meiva`) forbids sharing one table anyway, since the scanner must be
   reachable from `shared` for the registry and recall to consult it.
 - **Hermes' stance — a `dangerous` verdict that `--force` cannot bypass at all**
   (NousResearch/hermes-agent: install-time quarantine, regex analysis, verdicts
   safe/caution/dangerous, `--force` overriding caution only). Genuinely stricter
   than what shipped here, and tempting. Rejected on the escape-hatch argument
   above: Hermes can afford an unbypassable tier because its scanner is one of
-  several gates and its trust tiers hard-allowlist four publisher orgs. Ava has
+  several gates and its trust tiers hard-allowlist four publisher orgs. Meiva has
   no allowlist and no sandbox, so an unbypassable refusal on a *heuristic* would
   route legitimate installs to `cp -r` — outside the system entirely, where
   nothing is recorded. The recorded waiver is the weaker guarantee that stays
@@ -133,7 +133,7 @@ not — that is a stranger's prose entering the context with no human in the loo
   curated `official` tier). Rejected: MolTrust's critique of exactly this
   design is that an allowlist without a publisher-identity or reputation
   mechanism is a static list of names, and a compromised or transferred repo
-  under a trusted org inherits the trust. Ava's `reviewed` tier is per-cluster
+  under a trusted org inherits the trust. Meiva's `reviewed` tier is per-cluster
   and per-package for that reason — it records that *this operator* read *this
   content*, which is a claim that cannot go stale silently the way an org-level
   allowlist can.
@@ -149,28 +149,28 @@ not — that is a stranger's prose entering the context with no human in the loo
 - Installing a third-party skill can now fail on content, and the failure is
   loud. Users hitting a false positive have `--accept-risk`; the rule table is
   tuned against the whole first-party skill library as a standing regression
-  test (`test_ava_own_skills_carry_no_critical_findings`), so a rule that fires
+  test (`test_meiva_own_skills_carry_no_critical_findings`), so a rule that fires
   there is wrong by construction.
 - **This is a mitigation layer, not a boundary** — the same claim `SECURITY.md`
-  and `ava/security.py` make. It matches known shapes of known attacks in text
+  and `meiva/security.py` make. It matches known shapes of known attacks in text
   it can read. Anyone who knows the rules can write a package that walks past
   them, and nothing here constrains what a skill does once an agent follows it.
   A clean report must never be quoted as "this package is safe".
 - Registry rows written before this field read as `unreviewed` until the next
   converge re-stamps them. That degrades in the safe direction (a builtin skill
-  briefly treated as third-party) and self-heals on the next `ava start`.
-- The tier is only as good as its consumers. Today `ava skill trust` writes it
+  briefly treated as third-party) and self-heals on the next `meiva start`.
+- The tier is only as good as its consumers. Today `meiva skill trust` writes it
   and nothing enforces it at runtime; the enforcement that makes it matter is
   the recall-side rule above, landing with that work.
-- `--accept-risk` is a flag an *agent* can pass — `ava_package_installer` drives
+- `--accept-risk` is a flag an *agent* can pass — `meiva_package_installer` drives
   most installs, and a malicious package's README can tell it to. The waiver
-  being recorded and re-surfaced by `ava skill scan` is the answer available
+  being recorded and re-surfaced by `meiva skill scan` is the answer available
   without a human-presence channel the CLI does not have; a real one is tracked
   as remaining work.
 - **Regex alone cannot reach instruction-level attacks in free-form prose**, and
   every scanner surveyed converges on the same layering: static rules for
   scripts and code, semantic review for markdown. This ships the static half.
-  The semantic half is architecturally native here — `ava.understand(targets)`
+  The semantic half is architecturally native here — `meiva.understand(targets)`
   is a batch API already in the SDK — and is scoped as the next slice rather
   than pretended away.
 
@@ -182,7 +182,7 @@ not — that is a stranger's prose entering the context with no human in the loo
 - **Claude Code marketplaces** — three tiers (official curated / community
   automated-screening-only / third-party unscreened with an explicit
   disclaimer). PromptArmor demonstrated a marketplace-plugin injection hijack
-  against that model, which is why Ava's `safety-subversion` rules exist despite
+  against that model, which is why Meiva's `safety-subversion` rules exist despite
   ClawHavoc itself carrying no such instruction.
 - **SkillsGuard** (Teycir/SkillsGuard) — 151 rules / 15 categories, and the
   source of the recursive pre-decode design adopted here; also weighted 0–100

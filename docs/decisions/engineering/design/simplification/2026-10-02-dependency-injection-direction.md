@@ -7,8 +7,8 @@ configuration by importing it, so what the function depends on is written in its
 body, not its signature: about 950 read sites over about 500 fields. It is a
 service locator, and it is not the only one. The same shape recurs in
 module-level caches, registries, handles, clocks and identity holders. A one-off
-AST survey of module-level bindings in the framework packages (`agent/`, `ava/`,
-`ava_builtins/`, `base/`, `cli/`, `gateway/`, `ops/`, `services/`, `schedules/`;
+AST survey of module-level bindings in the framework packages (`agent/`, `meiva/`,
+`meiva_builtins/`, `base/`, `cli/`, `gateway/`, `ops/`, `services/`, `schedules/`;
 tests excluded) classified 684 of them:
 
 | Class | Bindings | What they are |
@@ -23,7 +23,7 @@ tests excluded) classified 684 of them:
 sites. The root fixture must set 22 environment variables before any project
 module is imported, and an assertion guards that import order, because module
 level code reads them at import. 44 configuration values are computed at import
-and frozen there, so a later override cannot reach them. One leaked `AVA_HOME`
+and frozen there, so a later override cannot reach them. One leaked `MEIVA_HOME`
 failed about 150 tests at once. None of this is a testing problem; the tests are
 the place where the hidden dependencies have to be made visible by hand.
 
@@ -31,7 +31,7 @@ the place where the hidden dependencies have to be made visible by hand.
 scope. That held when each agent ran in its own process: one agent's identity,
 config, buffers and counters were the process's. The agent host replaced that
 model. One host process serves many agents' turns as concurrent asyncio tasks
-([agent runtime](../../../../../agent/docs/agent-runtime/agent-runtime.ava.okf.md)), so every global that
+([agent runtime](../../../../../agent/docs/agent-runtime/agent-runtime.meiva.okf.md)), so every global that
 is agent-level in meaning and process-level in storage is a possible cross-agent
 leak. The repository has patched this one global at a time: the per-turn config
 view and the plugin-config view bind overlays in ContextVars around each turn
@@ -40,10 +40,10 @@ ContextVars carry the turn identity, and a lint forces turn-scoped code to read
 through the overlay. Each patch makes a global look scoped while every reader
 still has to know which of two paths is the right one. The survey found about 25
 more entries of this kind. The clearest is the security findings buffer in
-`ava/security.py`, a module-level list whose comment still justifies it with
+`meiva/security.py`, a module-level list whose comment still justifies it with
 "one agent per process".
 
-Two earlier stances stand in the way and are reversed here. The `AvaContext`
+Two earlier stances stand in the way and are reversed here. The `MeivaContext`
 module docstring records that threading the context through read sites was
 judged not worth the blast radius. The
 [config ownership decomposition](../../../runtime/config/2026-07-19-config-ownership-decomposition.md)
@@ -75,7 +75,7 @@ stops being a silent import and becomes a visible edit of the guard file.
 Rulings that fix the boundary of the rule:
 
 1. **A ContextVar is a violation, not a sanctioned carrier.** LangGraph already
-   provides a per-run context: graph nodes receive `Runtime[AvaContext]`, which
+   provides a per-run context: graph nodes receive `Runtime[MeivaContext]`, which
    the host builds once per turn. Decision inputs of a turn (the agent's pinned
    config, the turn identity) travel there, not in ContextVars. ContextVars in
    code that does not run inside the graph (the gateway MCP client identity, the
@@ -91,7 +91,7 @@ Rulings that fix the boundary of the rule:
 4. **Background duties are services with sequential loops, and request paths
    start no tasks.**
    - Every periodic or event-driven background duty is its own service: an
-     independent process supervised by `ava-root`, with its own health check,
+     independent process supervised by `meiva-root`, with its own health check,
      readiness proof and lifecycle. It does not stay inside the service that
      happens to need it.
    - A duty's body is a sequential loop: scan, act, sleep. A round that has not
@@ -109,7 +109,7 @@ Rulings that fix the boundary of the rule:
      recovery) are decided as ruling A': one service with three resident sequential
      loops, so single-flight holds by construction. One `TaskGroup` in the service's
      main function owns the loops; a crash in any loop exits the process and
-     `ava-root` restarts it. Cool-down and failure counts live in the database.
+     `meiva-root` restarts it. Cool-down and failure counts live in the database.
      Rejected: one phased loop (the slowest RPC delays all three duties) and three
      services (three more processes of private memory, health checks and
      onboarding boilerplate). Every other
@@ -197,7 +197,7 @@ Rulings that fix the boundary of the rule:
   import-order assertion and most of the environment pinning disappear as slices
   land.
 - The 2026-07-19 decision's rejection of colocating config classes with their
-  owners is reversed (a forward link is added to that entry), and the `AvaContext`
+  owners is reversed (a forward link is added to that entry), and the `MeivaContext`
   docstring changes with the migration.
 - A plugin that imports `settings` directly breaks when its field moves. The
   repository carries no compatibility shim; plugins installed outside it are
@@ -213,6 +213,6 @@ Rulings that fix the boundary of the rule:
   plan.
 - The throttle and dedupe entries (14) stay frozen as deliberate residue.
 
-- Forward: `decisions/2026-10-04-ava-state-and-context.md` makes one ContextVar a sanctioned exception to ruling 1: the exec child has no LangGraph runtime to carry the per-run context, so the process's `AvaContext` is read through a single ContextVar (`ava.sdk_surface.process_context`), the way `get_runtime()` does it.
+- Forward: `decisions/2026-10-04-meiva-state-and-context.md` makes one ContextVar a sanctioned exception to ruling 1: the exec child has no LangGraph runtime to carry the per-run context, so the process's `MeivaContext` is read through a single ContextVar (`meiva.sdk_surface.process_context`), the way `get_runtime()` does it.
 
 - Forward: [explicit runtime ownership boundaries](2026-10-09-explicit-runtime-ownership-boundaries.md) selects process/system attribution for ordinary unannotated logs, counts each public SDK entry, exposes postcommit realtime notification errors in the request, and preserves heartbeat error exposure at owner join while retiring ambient sites.

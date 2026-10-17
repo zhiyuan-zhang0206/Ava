@@ -2,13 +2,13 @@
 
 ## Context
 
-`ava stop` asks Postgres for a fast shutdown (SIGINT) and waits for the whole process
+`meiva stop` asks Postgres for a fast shutdown (SIGINT) and waits for the whole process
 tree to exit. A fast shutdown does not finish while the archiver is running an archive
 command, and a WAL-G that never returns (a blackholed network) makes that wait unbounded.
 The earlier rule ([stop window contract](../../runtime/processes/shutdown/2026-09-12-stop-window-contract.md)) was "no
 force": the wait ran to the stop's deadline and failed with "native shutdown did not
 complete; custody retained". The failure left the unit half stopped (services and pooler
-down, Postgres still shutting down, hold retained), and the compensating `ava start`
+down, Postgres still shutting down, hold retained), and the compensating `meiva start`
 could not succeed against a postmaster that is shutting down.
 
 Measured with real wal-g (WAL-G smoke, 2026-10-02): a network blackhole makes each archive
@@ -38,7 +38,7 @@ wal-g is killed.
 - **Loud.** An error log, the `postgres_stop_escalated` event (level error), a line on
   stderr at the moment of escalation, and an `escalations` entry in the stop journal and
   the stop report. The stop itself completes: an escalated shutdown is not a failed stop,
-  so the compensating `ava start` does not run.
+  so the compensating `meiva start` does not run.
 - **Scope.** Only Postgres. The pooler stop and the services stop keep their
   no-escalation contract. A process that outlives its SIGKILL still fails the stop with
   custody retained.
@@ -60,8 +60,8 @@ The loud surfaces are the same on every leg that can end a Postgres shutdown: th
 owner's error log, a stderr line at the moment of escalation, and the
 `postgres_stop_escalated` event (level error). Which stop a leg belongs to decides
 only the journal: an `escalations` entry needs a stop that owns a lifecycle journal
-(`ava stop` through `_temporary_stop`, the maintenance stop). The two cluster-instance
-legs — `ava stop --force` and `ava cluster instance stop`, both through
+(`meiva stop` through `_temporary_stop`, the maintenance stop). The two cluster-instance
+legs — `meiva stop --force` and `meiva cluster instance stop`, both through
 `stop_cluster_instance` — own no journal, so none is fabricated; they report through
 the same helper (`cli/commands/lifecycle/service_stop.report_postgres_stop_escalation`)
 and get stderr, the event and the owner's error log too. No leg is silent.

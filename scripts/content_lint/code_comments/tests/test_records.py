@@ -46,7 +46,7 @@ def test_examples_inside_an_outer_fence_are_not_live_records() -> None:
 
 
 @pytest.mark.parametrize(
-    "path", ["pkg/README.md", "future/docs/core.meiva.okf.md", "docs/decisions/core.ava.okf.md"]
+    "path", ["pkg/README.md", "future/docs/core.meiva.okf.md", "docs/decisions/core.meiva.okf.md"]
 )
 def test_current_contracts_cannot_hide_in_ungoverned_or_historical_prose(path: str) -> None:
     parsed, findings = parse_document(path, record())

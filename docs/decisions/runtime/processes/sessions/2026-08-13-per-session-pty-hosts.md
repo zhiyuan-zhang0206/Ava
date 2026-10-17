@@ -3,7 +3,7 @@
 **Date**: 2026-08-13
 **Status**: decided
 **Context**: the 2026-08-12 prod incident — a cluster update's service stop
-force-killed `ava-pty-supervisor`, taking every agent shell down with it
+force-killed `meiva-pty-supervisor`, taking every agent shell down with it
 (including the shell the rollout itself ran in, which killed the rollout
 mid-stop and stranded prod paused with all services down).
 
@@ -13,7 +13,7 @@ The repo promised, in six places, that agent persistent shell sessions
 "persist across terminate/restart/update" — while the update path stopped the
 pty-supervisor daemon like any roster service, and every shell was a child of
 that daemon holding its pty master. The promise held against agent restarts
-and gateway restarts, and was false against cluster updates, `ava stop`, and
+and gateway restarts, and was false against cluster updates, `meiva stop`, and
 the supervisor healthcheck's kill-then-relaunch respawn. The cost had been
 paid repeatedly (#1014 ×4 — watchers reaped by every rollout; #973 — all page
 servers dead after a rollout), and each remediation built a *rebuild*
@@ -26,7 +26,7 @@ Delete the supervisor daemon entirely. Each session runs in its **own
 detached host process** (`shared/pty_sessions/host.py`): spawned via
 `shared._reparent` so it reparents to init at birth, owning its one pty
 master, screen model, transcript, record, and a per-session unix socket
-(`$AVA_HOME/run/pty/<name>.sock`). `new` spawns a host; session ops dial the
+(`$MEIVA_HOME/run/pty/<name>.sock`). `new` spawns a host; session ops dial the
 session's socket; enumeration is a record scan. There is no roster entry, no
 healthcheck, no respawn channel, and no `_FORCE_KILL_SESSIONS` carve-out —
 the mass-kill channels are not guarded against, they no longer have a target.
@@ -37,7 +37,7 @@ crashing (blast radius: one session), or a machine reboot.
 
 - **Exempt the supervisor from the stop scope** (`preserve_sessions` +
   watchdog special-casing — the browser's mechanism). Rejected: it protects
-  one channel at a time (update stop, `ava stop` reap, healthcheck respawn,
+  one channel at a time (update stop, `meiva stop` reap, healthcheck respawn,
   watchdog code-controller restart — each needing its own carve-out that new
   channels silently miss), leaves the supervisor running old code across
   updates, and keeps the machine-wide blast radius: any supervisor death
@@ -60,7 +60,7 @@ crashing (blast radius: one session), or a machine reboot.
   (2026-05-09-stateless-gateway.md, "accepted as equivalent to closing a
   terminal window") now applies per session instead of per machine.
 - One transition cost: the update that ships this reaps the old
-  `ava-pty-supervisor` service session (converge `_RENAMED_AWAY_SERVICES`),
+  `meiva-pty-supervisor` service session (converge `_RENAMED_AWAY_SERVICES`),
   killing the final pre-host-era shells — the last time an update kills any
   shell.
 - Session creation pays a python interpreter start (~0.4s measured) instead
@@ -72,6 +72,6 @@ crashing (blast radius: one session), or a machine reboot.
 
 Forward link (2026-10-03): superseded by
 [agent shells live in one pty-sessions roster service per machine](2026-10-03-pty-sessions-service.md).
-Sessions survive an agent, agent-host or gateway restart and `ava restart`; they no longer try to
-survive a service stop or an update, which `ava stop` had already ended on 2026-09-28. The host
+Sessions survive an agent, agent-host or gateway restart and `meiva restart`; they no longer try to
+survive a service stop or an update, which `meiva stop` had already ended on 2026-09-28. The host
 processes, records, orphan reaper and CLI transport described here are gone.

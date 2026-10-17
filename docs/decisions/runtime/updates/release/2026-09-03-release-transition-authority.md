@@ -6,7 +6,7 @@ Production currently executes an editable source checkout. A prepared wheel
 generation removes that dependency, but packaging alone does not authorize it to
 migrate a database, stop writers, or become the serving image. In particular,
 the migration runner trusts Git's tracked-file set and a checkout-owned home;
-an absolute `AVA_HOME` supplied to a wheel is not equivalent evidence.
+an absolute `MEIVA_HOME` supplied to a wheel is not equivalent evidence.
 
 ## Decision
 

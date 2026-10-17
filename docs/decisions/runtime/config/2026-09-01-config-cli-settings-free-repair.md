@@ -2,7 +2,7 @@
 
 ## Decision
 
-`ava config` treats field metadata and current `.env` bytes as a separate
+`meiva config` treats field metadata and current `.env` bytes as a separate
 bootstrap surface from the runtime `Settings` singleton. The gateway thin
 client resolves its URL and bearer credential directly from process
 environment or unit files. `--local` reads the unit `.env` directly, gates the
@@ -11,7 +11,7 @@ then writes only after validation succeeds.
 
 The `settings` public object remains the normal runtime interface and retains
 its normal import-time fail-fast behavior. The existing settings-lite
-`AVA_CONFIG_FETCH=skip` mode now defers construction until first attribute
+`MEIVA_CONFIG_FETCH=skip` mode now defers construction until first attribute
 access, permitting the config registry and candidate validator to load declared
 Settings models without loading a broken `.env` into the process or constructing
 the invalid singleton.
@@ -34,7 +34,7 @@ the single cross-field validation definition.
 
 ## Consequences
 
-- `ava config get/set/unset --local` can inspect and repair a unit `.env` while
+- `meiva config get/set/unset --local` can inspect and repair a unit `.env` while
   runtime Settings construction would fail.
 - Sensitive local values stay masked; invalid candidates leave `.env` bytes
   unchanged.

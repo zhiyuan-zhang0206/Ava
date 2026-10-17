@@ -1,6 +1,6 @@
 # Termination keeps daemon-managed pages
 
-Agent termination closes only `ava.ui.show()` rows. `ava.ui.serve()` and
+Agent termination closes only `meiva.ui.show()` rows. `meiva.ui.serve()` and
 `serve_markdown()` rows carry `serve_dir`, are owned by the page-server daemon,
 and stay open with their persistent page sessions after the agent process exits.
 

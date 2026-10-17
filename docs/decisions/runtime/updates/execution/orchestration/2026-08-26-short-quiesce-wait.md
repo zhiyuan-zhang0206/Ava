@@ -17,7 +17,7 @@ cluster unblock is worth more.** Two changes:
 
 1. **The mechanism allows arbitrarily short waits — no minimum.** The smooth
    window is no longer derived from `exec_timeout_seconds`; it is the
-   configured `AVA_UPDATE_QUIESCE_TIMEOUT_SECONDS` (default **10s**, user's
+   configured `MEIVA_UPDATE_QUIESCE_TIMEOUT_SECONDS` (default **10s**, user's
    5/10/15s range, taken at 10). Any non-negative value is legal; 0 means
    signal-then-immediately-reap. There is no lower-bound validation.
 2. **The default is 10s.** Agents idle or between turns still exit at their
@@ -27,8 +27,8 @@ cluster unblock is worth more.** Two changes:
 
 `force` mode is unchanged (~10s wait, always force-reap); the two modes now
 differ only in the always-reap axis, not in the wait. The same window applies
-to `ava cluster rollback` and the standalone per-host self-heal
-(`ava restart --quiesce`), which share `_quiesce_timeout_s("smooth")`.
+to `meiva cluster rollback` and the standalone per-host self-heal
+(`meiva restart --quiesce`), which share `_quiesce_timeout_s("smooth")`.
 
 ## Alternatives rejected
 
@@ -49,5 +49,5 @@ to `ava cluster rollback` and the standalone per-host self-heal
   the guarantee "the rollout is bounded and every agent lands on the new
   code" is unchanged.
 - Operators who want the old grace can set
-  `AVA_UPDATE_QUIESCE_TIMEOUT_SECONDS` higher; the field is cluster-pinned
+  `MEIVA_UPDATE_QUIESCE_TIMEOUT_SECONDS` higher; the field is cluster-pinned
   and writable through the config surface.

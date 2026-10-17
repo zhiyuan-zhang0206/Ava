@@ -17,7 +17,7 @@ remediation; it was a 60s heartbeat of guaranteed failure.
 
 `run_keepalive` now schedules failed respawns with exponential backoff
 (`base * 2^n`, base = watchdog round interval, cap = 30min via
-`AVA_WATCHDOG_RESPAWN_BACKOFF_CAP_SECONDS`) and opens a circuit breaker after
+`MEIVA_WATCHDOG_RESPAWN_BACKOFF_CAP_SECONDS`) and opens a circuit breaker after
 `watchdog_respawn_breaker_rounds` (default 5) consecutive rounds without a
 probe-alive verdict: respawns hold, each round WARNINGs the hold age, and
 exactly one `respawn_breaker_open` event fires through the unified events

@@ -34,7 +34,7 @@ Every other model keeps the flat 30/40 rule of
 The ceiling knob stays unused roster-wide.
 
 Prod already runs these values through the env layer
-(`AVA_AUTO_COMPACT_FRACTION=0.512` / `AVA_COMPACT_REMINDER_FRACTION=0.374`,
+(`MEIVA_AUTO_COMPACT_FRACTION=0.512` / `MEIVA_COMPACT_REMINDER_FRACTION=0.374`,
 cluster-default); this decision aligns the code-layer registry default with
 that state, so a machine that drops the env vars falls back to 374k/512k
 instead of the 2026-08-27 600k/700k pin.

@@ -20,7 +20,7 @@ an `agent_id`. There was no working channel at all.
 
 ## Decision
 
-A single core primitive, `ava.ui.ask_question(...)`, paired with `ava.ui.show` — asking
+A single core primitive, `meiva.ui.ask_question(...)`, paired with `meiva.ui.show` — asking
 the user is about the *user*, not the agent. It is **fire-then-idle**: it posts a
 question and returns; the agent ends its turn and idles; the answer arrives later
 as a chat inbound that wakes a fresh turn. It cannot block like `input()` — a turn
@@ -46,7 +46,7 @@ Two channels, split by who can settle the question:
 
 - **Delegable** → `send_message` up the spawn tree; the chain absorbs what it can
   resolve, the user never sees it.
-- **Non-delegable** → `ava.ui.ask_question`, flat, from any depth.
+- **Non-delegable** → `meiva.ui.ask_question`, flat, from any depth.
 
 "Ask your manager first" survives as **subsidiarity** (resolve at the lowest
 competent level), not a mandatory full-chain walk. Its real job is
@@ -78,14 +78,14 @@ parsed.
   reopens the whole single-vs-multi-select / "other" / no-selection mess. The
   A/B/C-in-content convention buys the brevity without the machinery.
 
-- **Forcing all asks through `ava.ui.show` (rich HTML pages).** `ava.ui` can
+- **Forcing all asks through `meiva.ui.show` (rich HTML pages).** `meiva.ui` can
   render any panel, but it optimizes *producer expressiveness* while the binding
   constraint is *consumer triage bandwidth*. Fifty bespoke pages have no shared
   schema, no priority, no dedup — un-triageable, and an HTTP server per question is
   heavy. The primitive earns its keep on the consumer side: a canonical,
   low-entropy, priority-tagged shape so the single queue is sortable. Maximum
   expressiveness and low-entropy-canonical are opposites; the attention bottleneck
-  wants the latter. `ask` joins `ava.ui` as a lightweight sibling of `show`.
+  wants the latter. `ask` joins `meiva.ui` as a lightweight sibling of `show`.
 
 - **Modeling the user as a code-executing agent (`agent_id=0`).** Breaks the
   conceptual model — the user is not an agent — and pollutes every agent-list
@@ -133,9 +133,9 @@ parsed.
 
 ---
 
-**Update (2026-06-17):** `ask` is no longer a *core* `ava.ui` member. It moved
-into the `ava_fleet` plugin (still exposed at `ava.ui.ask_question`), so it strips together
-with the rest of the human-supervision surface (`ava.self.log` / `ava.ui.submit_report`).
+**Update (2026-06-17):** `ask` is no longer a *core* `meiva.ui` member. It moved
+into the `meiva_fleet` plugin (still exposed at `meiva.ui.ask_question`), so it strips together
+with the rest of the human-supervision surface (`meiva.self.log` / `meiva.ui.submit_report`).
 The reclassification — the removability circle's center is "is a human
 supervising," not `ask` itself; with no human, `ask` has no one to answer it — is
 argued in `future/supervision-queue.md` §2 (since removed).

@@ -31,7 +31,7 @@ artifact — a stamp is read in its own terms, not converted (PR #789).
   that names a conversion without providing it is noise.
 - **Move the hint into docs only** — rejected: the instruction had exactly one
   consumer, the prompt itself; the shared memory-pool note that mirrored it
-  (`ava/bugs/exec-timestamp-pdt-label-20260822.md`, "How to apply") was
+  (`meiva/bugs/exec-timestamp-pdt-label-20260822.md`, "How to apply") was
   updated in place instead.
 
 ## Consequences

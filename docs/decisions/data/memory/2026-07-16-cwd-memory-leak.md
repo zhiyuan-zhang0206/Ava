@@ -22,7 +22,7 @@ if cwd_mem.is_file() and cwd_mem.resolve() != path.resolve():
 Problem chain:
 
 1. An agent left its personal memory in the shared checkout's `MEMORY.md`
-   (cwd-relative writes from the `ava_code` plugin path resolution).
+   (cwd-relative writes from the `meiva_code` plugin path resolution).
 2. Every agent process's OS-level cwd is the checkout directory (inherited
    when the gateway starts agents).
 3. When each new agent runs for the first time, `per_agent_memory_note()`

@@ -61,7 +61,7 @@ exactly the population the hold was taken over. This adds a second consumer of t
 same fact rather than a second source of truth for it — which is the whole reason
 there is no separate "deploy in progress" flag.
 
-Nothing else changes. The hold is not released, shortened, or renewed; a second `ava
+Nothing else changes. The hold is not released, shortened, or renewed; a second `meiva
 update` is refused exactly as before; auto-rollback stays suppressed; and no host but
 the named one is permitted anything. The heal keeps every other guard it had —
 agent-runner only, prod-source only, no local orchestration session, the persistent
@@ -117,12 +117,12 @@ poll and the host-local stall reaper, and cutting it re-opens the clock disagree
   asymmetry is deliberate rather than an omission. Pin and code *converge* a host;
   unpausing merely stops holding its services down, which is not what the hold is
   waiting for, and a settle hold is exactly the window in which a paused host's
-  services should stay down. `ava stop`'s unpause discriminator is the same
+  services should stay down. `meiva stop`'s unpause discriminator is the same
   reasoning at a different call site.
 - **#1074 landed first, and the two compose as predicted — but only because the
   exception is scoped to one guard.** Pin and code now consult *two* signals: the
   lease, where `awaits` narrows *which leases* defer, and `current_orchestration()`,
-  which #1074 added because a watchdog-spawned `ava-updater` takes no lease at all and
+  which #1074 added because a watchdog-spawned `meiva-updater` takes no lease at all and
   is therefore invisible to the lease read. A settle hold naming this host says nothing
   about whether an updater is mid-checkout here, so the permission stops at the lease
   guard: letting it carry past the second one would force a checkout back underneath a
@@ -141,7 +141,7 @@ poll and the host-local stall reaper, and cutting it re-opens the clock disagree
   this decision exists to remove.
 - **The adjacent false-green is not addressed here.** `on_pin` is computed from HEAD
   vs pin, so every pin-based surface reported the Air aligned while it executed a
-  different commit. `ava cluster status`' `code` column does show `⚠` for it, but
+  different commit. `meiva cluster status`' `code` column does show `⚠` for it, but
   nothing treats `running_sha != head_sha` as an alarm. That is the #1012 family and
   wants its own change.
 

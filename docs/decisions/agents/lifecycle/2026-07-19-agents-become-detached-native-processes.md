@@ -4,8 +4,8 @@
 now spawned as a detached, native OS process by a native process supervisor
 (`shared/posixproc.py` on POSIX, the pre-existing `shared/winproc.py` on Windows),
 tracked by `agents_meta.pid` + a JSON session record under
-`$AVA_HOME/run/sessions/`. Daemons and the agents' own persistent shells
-(`ava.shell`) stay on the session server.
+`$MEIVA_HOME/run/sessions/`. Daemons and the agents' own persistent shells
+(`meiva.shell`) stay on the session server.
 
 ## Why
 
@@ -57,7 +57,7 @@ Everything that used to reach the agent through the session server now goes thro
 supervisor or the DB pid:
 - **spawn / kill-stale** (`ops/agent_launch.py`) → `native_proc()` (winproc /
   posixproc), both platforms.
-- **`ava stop` reap** (`cli/commands/stop.py`) → SIGTERM every agent process under
+- **`meiva stop` reap** (`cli/commands/stop.py`) → SIGTERM every agent process under
   one shared deadline, force-kill stragglers; the agents' **shells** are still
   reaped via the shell backend. Self-contained (no DB — it is being torn down), enumerating
   agents from the on-disk session records.
@@ -73,6 +73,6 @@ The `_warn_if_pty_ceiling_low` startup warning (which tied `ptmx_max` to
 `max_agents` on the one-PTY-per-agent assumption) was removed: that coupling no
 longer exists.
 
-The record layer duplicates the DB pid only for the *no-DB* path (`ava stop`
+The record layer duplicates the DB pid only for the *no-DB* path (`meiva stop`
 after the gateway + DB are down); the DB pid stays authoritative everywhere a
 process can reach it.

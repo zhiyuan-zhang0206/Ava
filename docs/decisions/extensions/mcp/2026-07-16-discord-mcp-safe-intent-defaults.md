@@ -1,12 +1,12 @@
 # Discord MCP fix — safe defaults for privileged intents
 
 > **Note (2026-08-12):** The Discord MCP was deleted entirely per the user
-> ruling — Ava no longer maintains it. This document is retained as history
+> ruling — Meiva no longer maintains it. This document is retained as history
 > only.
 
 ## Context
 
-After Ava update (2026-07-15), Discord MCP was broken: every tool call returned
+After Meiva update (2026-07-15), Discord MCP was broken: every tool call returned
 "Discord client not ready". The bot process was running with TCP connected to
 Discord gateway, but `on_ready` never fired.
 
@@ -34,7 +34,7 @@ ENABLED by default → gateway 4014.
 
 ### 3. Machine config override of built-in config (secondary)
 
-`~/.ava/mcp.json` had `uv run mcp-discord` (upstream package, no `on_ready` fix)
+`~/.meiva/mcp.json` had `uv run mcp-discord` (upstream package, no `on_ready` fix)
 instead of `uv run python -m mcps.discord` (custom fixed module). The built-in
 `.mcp.json` had the correct command, but the machine config overrode it.
 
@@ -44,7 +44,7 @@ instead of `uv run python -m mcps.discord` (custom fixed module). The built-in
    `DISCORD_DISABLE_MESSAGE_CONTENT` and `DISCORD_DISABLE_MEMBERS`
 2. **.mcp.json**: Remove unresolvable `${DISCORD_TOKEN}` placeholder; set
    safe defaults (`"1"`)
-3. **Ops fix**: Update `~/.ava/mcp.json` to use correct command and disable
+3. **Ops fix**: Update `~/.meiva/mcp.json` to use correct command and disable
    privileged intents
 
 ## Update resilience

@@ -4,7 +4,7 @@
 
 Core content (builtin skills, plugin-carried skills, builtin plugins) is authored in this
 repository and ships inside the code train. Today it moves only when the code moves: an
-`ava cluster update` rollout, an explicit `ava skill update`, or nothing. Two pressures made
+`meiva cluster update` rollout, an explicit `meiva skill update`, or nothing. Two pressures made
 that insufficient:
 
 - A skill edit merged to `main` could stay invisible in a running fleet for days (the
@@ -35,17 +35,17 @@ update:
    `check_interval_seconds`. Default for every channel-backed package: `auto` @ 24h; manual
    refresh is always available; the core channel tracks `main` (merge = publish). Overridable
    per package at install and later.
-3. **Executor.** One verb — `ava packages refresh` — run manually, by a converge-registered
+3. **Executor.** One verb — `meiva packages refresh` — run manually, by a converge-registered
    per-machine OS job (15-minute base tick; intervals are data), and later by a host pass.
    Check (`ls-remote`) ≠ fetch: content is fetched only when the ref moved, extracted into a
    staging dir, gated (scan / manifest-version / local-edit guard), then stage-swapped
-   atomically; the previous tree backs `ava packages rollback`.
+   atomically; the previous tree backs `meiva packages rollback`.
 4. **Activation at natural boundaries only** (user ruling 2026-09-13). Skills are hot on the
    next scan; plugins activate at the next process start. The refresh pass never restarts
    anything, never touches code/schema/services, and never writes the checkout.
 5. **Version axis = commit-date-derived host version + a `requires_commit` ancestry layer**
    (user ruling 2026-09-13). No `pyproject` bump discipline; the dormant dated-release
-   pipeline is not a dependency. `engines.ava` ranges remain for third-party content.
+   pipeline is not a dependency. `engines.meiva` ranges remain for third-party content.
 6. **Phasing** (user ruling 2026-09-13): P0 schema/status surface → P1 skills fast lane (the
    POC) → P2 core-plugin materialization → P3 cluster-row alignment with extension ownership
    (issue #39); P2 is scheduled after P1.
@@ -75,14 +75,14 @@ Buildable detail: [`future/infra/lifecycle/core-package-update-channel.md`](../.
 - **In-process plugin hot reload / service restarts to activate content** — activation stays
   at process boundaries; the refresh pass is explicitly non-disruptive.
 - **SKILL.md frontmatter as the manifest carrier** — a second parsing path with YAML quoting
-  hazards; a sidecar manifest reuses the existing `ava-plugin.json` validator and range
+  hazards; a sidecar manifest reuses the existing `meiva-plugin.json` validator and range
   algebra.
 
 ## Consequences
 
-- Core content gains a second delivery path; `ava cluster update` stays the only code channel.
+- Core content gains a second delivery path; `meiva cluster update` stays the only code channel.
   The rollout's builtin-skill refresh legs must skip channel-managed packages.
-- Install registry schema v2 (`UpdateState` / `ChannelState`) plus `ava packages status`
+- Install registry schema v2 (`UpdateState` / `ChannelState`) plus `meiva packages status`
   become the source of truth for "which rev is on disk, what is blocked, what is due".
 - The refresh pass runs on pet machines: bounded budgets, per-home flock, skip while an update
   is in flight, one previous tree per package, no mirrors in P1.

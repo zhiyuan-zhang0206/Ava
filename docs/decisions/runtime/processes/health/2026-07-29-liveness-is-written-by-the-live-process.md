@@ -2,25 +2,25 @@
 
 ## Context
 
-The fleet roster's liveness fields had one writer: `ava start`, at the tail of a
+The fleet roster's liveness fields had one writer: `meiva start`, at the tail of a
 supervised bring-up, via `shared.machines.register_self()`. That call does two
 things to the unit's `machine_units` row — clears `stopped_at` and stamps
 `last_seen_at` — and both are claims about a *running process*, made by a command
 that then exits.
 
-A host reaches "serving" by several paths that are not a completed `ava start`:
+A host reaches "serving" by several paths that are not a completed `meiva start`:
 
-| path | ran `ava start`? |
+| path | ran `meiva start`? |
 |---|---|
-| operator runs `ava start` | yes |
+| operator runs `meiva start` | yes |
 | OS-scheduled autostart job | brings sessions up; may not complete the full start |
 | `agent-runner-watchdog` respawns the `ops` session | no |
 | the restart leg of a rollout | not as a completed start |
 
-On every path but the first the `stopped_at` latch set by the previous `ava stop`
+On every path but the first the `stopped_at` latch set by the previous `meiva stop`
 survived, and nothing cleared it while the ops daemon answered every op. So
-`ava cluster status` reported a runner **stopped** while its cron autostart
-had in fact brought it up, and the `ava update` fan-out — which filters on that
+`meiva cluster status` reported a runner **stopped** while its cron autostart
+had in fact brought it up, and the `meiva update` fan-out — which filters on that
 same latch — dropped a live host from a migration-carrying rollout (the
 2026-07-28 rollout: 3 targeted, 4 known).
 
@@ -32,7 +32,7 @@ process, sourced from something that is not that process.
 
 **The ops daemon calls `register_self()` at its own boot**, once its health server
 is serving (`services/agent_ops/daemon.py:_register_boot`). The daemon is the only
-long-running Ava process on an agent-runner and the one the gateway probes, so it
+long-running Meiva process on an agent-runner and the one the gateway probes, so it
 is the process the row is about.
 
 Two consequences fall out of the choice, both deliberate:
@@ -60,7 +60,7 @@ heartbeats `machine_units` or `machines`. There is exactly one fact —
 — and the defect was that its only writer was not the process it spoke for. Adding
 the daemon does not add a meaning; it makes the existing one true on the paths
 where it was false, and true *more often* (a daemon boots more frequently than a
-full `ava start` happens).
+full `meiva start` happens).
 
 Liveness proper is `MachineStatus.online`, a live `status_probe`, which never reads
 this column. No decision path reads it either — not the fan-out
@@ -102,13 +102,13 @@ one that came up.
 
 ## Consequences
 
-- A gateway-only unit (split deployment, `~/.ava_gateway`) runs no ops daemon, so
-  its row is still written only by `ava start` and can still carry a stale latch.
+- A gateway-only unit (split deployment, `~/.meiva_gateway`) runs no ops daemon, so
+  its row is still written only by `meiva start` and can still carry a stale latch.
   The gateway process could register itself the same way; not done here to keep the
   change to the daemon whose absence caused the incident.
 - `register_self()` from the daemon rewrites the unit's capability flags and dial
   URL from the daemon's boot-time view of `machine_role()`, which is the same
-  env-and-file source `ava start` reads. A capability file edited while the daemon
+  env-and-file source `meiva start` reads. A capability file edited while the daemon
   runs is picked up at its next boot, not before.
 - `stopped_at` remains a latch that can outlive its condition on the narrow paths
   above, so the rollout's `_resolve_fanout_targets` reconcile and the roster's

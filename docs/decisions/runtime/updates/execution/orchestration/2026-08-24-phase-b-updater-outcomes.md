@@ -15,7 +15,7 @@ POSIX writes one tee log per updater run, while its backend log appends across
 runs. The appended file can be microscopically newer while it still contains a
 previous run's exit line, so selecting it incorrectly makes a live updater look
 terminal. Windows preserves nested live-session subtrees while killing a service
-tree; its updater therefore survives stopping its `ava-ops` parent and must not
+tree; its updater therefore survives stopping its `meiva-ops` parent and must not
 decline that safe restart.
 
 ## Rejected alternative

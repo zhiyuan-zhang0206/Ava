@@ -2,7 +2,7 @@
 
 ## Context
 
-The task registry (`agent_tasks`, exposed as `ava.tasks.*`) grew two adjacent
+The task registry (`agent_tasks`, exposed as `meiva.tasks.*`) grew two adjacent
 capabilities that were never actually wired to run:
 
 - `remind_after` / `last_reminded_at` columns and a reminder query, meant to nudge
@@ -19,16 +19,16 @@ notice, copy, and launch. Nothing did, so nothing ran.
 
 Run task maintenance as a **gateway-owned background daemon**
 (`services/task_maintenance/daemon.py`), registered in `build_services()` like
-`heartbeat`. One per cluster, started by `ava start`, health-checked and respawned
+`heartbeat`. One per cluster, started by `meiva start`, health-checked and respawned
 by the gateway watchdog. It does two passes:
 
-- **Nudge** every `AVA_TASK_MAINTENANCE_INTERVAL_SECONDS` (default 5 min): find
+- **Nudge** every `MEIVA_TASK_MAINTENANCE_INTERVAL_SECONDS` (default 5 min): find
   in-progress tasks whose owner has not touched them within their `remind_interval`
   (per-task, default 30 min) and INSERT a chat nudge to the owner. Terminated
   owners are included — the inbound-insert trigger auto-resurrects them. A backoff
-  (`AVA_TASK_NUDGE_BACKOFF_SECONDS`, default 1h) prevents duplicate nudges within the
+  (`MEIVA_TASK_NUDGE_BACKOFF_SECONDS`, default 1h) prevents duplicate nudges within the
   same overdue window.
-- **Escalate** when `nudge_count` reaches `AVA_TASK_ESCALATE_N` (default 3):
+- **Escalate** when `nudge_count` reaches `MEIVA_TASK_ESCALATE_N` (default 3):
   notify the parent task's owner that the current owner is unresponsive.
 
 Two supporting changes: new tasks default `remind_interval` to 30 minutes
@@ -54,7 +54,7 @@ was rejected during review in favour of an agent-driven model:
 - **Stale sweep with time-based cancellation** (original PR draft): cancelling
   tasks after 7 days conflates "abandoned" with "takes 8 days." The system
   cannot distinguish these.
-- **Literally "auto-launch the reference watcher on startup"**: `ava.watcher.*`
+- **Literally "auto-launch the reference watcher on startup"**: `meiva.watcher.*`
   is agent-scoped and dies with the agent. Structurally cannot be a cluster-wide
   service.
 - **Fold into heartbeat daemon**: rejected to keep independent disable/enable

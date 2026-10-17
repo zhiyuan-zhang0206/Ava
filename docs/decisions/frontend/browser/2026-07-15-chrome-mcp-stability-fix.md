@@ -12,8 +12,8 @@ Agent 1750 was the most severely affected, and agent 1447 accumulated 60 disconn
 
 ```
 Agent (execute_code)
-  └─> ava.mcps.chrome.* (in-process)
-       └─> Unix socket → per-agent MCP daemon (ava._mcps_daemon.py)
+  └─> meiva.mcps.chrome.* (in-process)
+       └─> Unix socket → per-agent MCP daemon (meiva._mcps_daemon.py)
             └─> stdio → per-agent chrome wrapper (services.browser.mcp_wrapper.py)
                  └─> Unix socket → shared chrome MCP daemon (services.browser.mcp_daemon.py)
                       └─> stdio → chrome-devtools-mcp (npx package)

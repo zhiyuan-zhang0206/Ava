@@ -2,7 +2,7 @@
 
 > **Decision date 2026-06-11** (governing principle, §2); the auth-as-foundation
 > restart that re-sequenced §10 into rungs was decided 2026-06-14. **Shipped
-> 2026-06-15** — every §10 rung landed and the `AVA_MULTIHOST_ENABLED` flag was
+> 2026-06-15** — every §10 rung landed and the `MEIVA_MULTIHOST_ENABLED` flag was
 > deleted outright (`c55d8136`); there is no flag and no opt-in.
 >
 > ⚠️ **READ AS HISTORY, NOT AS CURRENT FACT.** This entry is a point-in-time
@@ -17,19 +17,19 @@
 > Current behavior: auth is always on and fail-closed (the cluster secret is
 > required on every host, the gateway refuses to start without one;
 > `/api/bootstrap` + `/ops` always authenticate; pg `scram-sha-256` + redis
-> `requirepass`), pg/redis bind loopback + `AVA_MACHINE_HOST` only, trust ranges
-> are config (`AVA_TRUSTED_CIDRS`), and the agent-facing machine surface is always
+> `requirepass`), pg/redis bind loopback + `MEIVA_MACHINE_HOST` only, trust ranges
+> are config (`MEIVA_TRUSTED_CIDRS`), and the agent-facing machine surface is always
 > present (a single box simply sees one machine). Read it from
 > [`runbook.md`](../../../../conventions/runbook.md) /
 > [`dev-setup.md`](../../../../conventions/dev-setup.md), the OKF graph
-> ([`okf/index.ava.okf.md`](../../../../index.ava.okf.md)), and the per-field
+> ([`okf/index.meiva.okf.md`](../../../../index.meiva.okf.md)), and the per-field
 > `scope` metadata in `shared/config/`.
 
 ---
 
 ## 1. What this is and is not
 
-**Goal.** Run one logical Ava cluster across several physical machines on a
+**Goal.** Run one logical Meiva cluster across several physical machines on a
 Tailscale tailnet: a small always-on **gateway** owning the data plane, plus one
 or more **agent-runner** hosts (a beefier box, a corp laptop, a WSL machine)
 that only execute agents. The single-box shape (one host carrying
@@ -41,14 +41,14 @@ queue between gateway and runners. The tailnet is assumed to be a single trust
 group of machines the one operator owns. Cross-WAN federation of independent
 clusters is out of scope.
 
-**Two independent axes, not one flag.** Auth is always on (`AVA_CLUSTER_SECRET`
+**Two independent axes, not one flag.** Auth is always on (`MEIVA_CLUSTER_SECRET`
 required everywhere; `/api/bootstrap` + `/ops` always authenticated; pg role
 password + redis `requirepass` = the secret), and the data-plane bind follows
-whether an overlay address is declared (`AVA_MACHINE_HOST`: undeclared = loopback
-only, declared = loopback + the overlay address + the `AVA_TRUSTED_CIDRS` pg_hba
+whether an overlay address is declared (`MEIVA_MACHINE_HOST`: undeclared = loopback
+only, declared = loopback + the overlay address + the `MEIVA_TRUSTED_CIDRS` pg_hba
 ranges). Splitting those two axes apart is what Rung 1 + Rung 2 of §10 delivered;
 the "one flag gates bind/auth/bootstrap" framing in §4/§5/§9 below predates it.
-The residual `AVA_MULTIHOST_ENABLED` flag — which at the time of writing still
+The residual `MEIVA_MULTIHOST_ENABLED` flag — which at the time of writing still
 gated the agent-facing machine surface (`spawn(machine=)`, `list_machines`, the
 roster in the system prompt) — was deleted on 2026-06-15; that surface is now
 unconditional.
@@ -87,13 +87,13 @@ stance.
 
 **How rule 4 is satisfied — address by config, no code branch.**
 Uniformity is in the **code path**; the address is a **config value**.
-`gateway_api_base()` resolves the *one* configured `AVA_GATEWAY_URL` (env > file)
+`gateway_api_base()` resolves the *one* configured `MEIVA_GATEWAY_URL` (env > file)
 for every caller, role-blind, with no `is_gateway()` branch. What differs is the
 configured value — by where the gateway sits *from that unit's view* — and that
 lives entirely in config: a gateway box's `.env` holds `http://localhost:<port>`
 (a box reaches its own gateway over loopback — `derive_env` materializes it at
 birth), a remote agent-runner's `.env` holds the gateway's reachable URL, handed
-to it at `ava enroll --gateway`. A box never needs to know its *own* reachable
+to it at `meiva enroll --gateway`. A box never needs to know its *own* reachable
 address to call itself; that address exists only in each remote runner's enroll
 config. One path, address by config — that *is* "single-machine is a special case."
 
@@ -124,10 +124,10 @@ query-scope branch (§10.B).
   │   ┌──────────────────────────┐         ┌──────────────────────────────┐    │
   │   │ GATEWAY host             │         │ AGENT-RUNNER host(s)         │    │
   │   │ role gateway[,agent-...] │         │ role agent-runner            │    │
-  │   │ home ~/.ava              │         │ home ~/.ava                  │    │
+  │   │ home ~/.meiva              │         │ home ~/.meiva                  │    │
   │   │                          │         │                              │    │
-  │   │ native Postgres :5433  ◄─┼─────────┼── AVA_DB_URL (data plane)    │    │
-  │   │ native Redis   :6380  ◄──┼─────────┼── AVA_REDIS_URL              │    │
+  │   │ native Postgres :5433  ◄─┼─────────┼── MEIVA_DB_URL (data plane)    │    │
+  │   │ native Redis   :6380  ◄──┼─────────┼── MEIVA_REDIS_URL              │    │
   │   │ Milvus :19530 (local)    │         │                              │    │
   │   │ gateway FastAPI :8000  ◄─┼─────────┼── SDK -> gateway_api_base()  │    │
   │   │ frontend Next :3000      │         │                              │    │
@@ -152,11 +152,11 @@ Two machine **capabilities** (a host carries a frozenset of one or both —
   cluster orchestrator. **Exactly one host per cluster** carries it; the
   coordination daemons would race on the same DB rows if duplicated.
 - **`agent-runner`** — runs agent processes + the ops server + restarter +
-  watchdog. Many per cluster. Holds no data plane; its `AVA_DB_URL` /
-  `AVA_REDIS_URL` point at the gateway.
+  watchdog. Many per cluster. Holds no data plane; its `MEIVA_DB_URL` /
+  `MEIVA_REDIS_URL` point at the gateway.
 
 **Single-box anatomy under the §2 principle.** A single-box host is the union
-(`gateway,agent-runner`, one `~/.ava`) — but it is *modeled as a one-node
+(`gateway,agent-runner`, one `~/.meiva`) — but it is *modeled as a one-node
 cluster*, not as a special mode. Its agent-runner half reaches its gateway half
 through the same `gateway_api_base()` path any remote runner uses — role-blind,
 **by config not a code branch**: the box's own `.env` configures the gateway URL to
@@ -168,7 +168,7 @@ replaced by an in-process shortcut. A **split** deployment is the same picture w
 the two boxes physically separated.
 
 **Cluster identity** (name → db name, its own per-cluster Postgres + Redis
-instance and ports, port block) is born at `ava start` and inherited by
+instance and ports, port block) is born at `meiva start` and inherited by
 runners through bootstrap; mechanics in `shared/cluster.py` +
 [`runbook.md`](../../../../conventions/runbook.md).
 
@@ -197,7 +197,7 @@ is the encrypted transport — no app-layer TLS, see §5):
 | **Control: gateway → runner** | gateway orchestrator → runner ops | `:8106` (`<ops_port>`) | HTTP `POST /ops`, unauth | gateway-initiated |
 | **Data: runner → gateway PG** | agent-runner processes → Postgres | `:5433` | psql wire — today `trust` (no password); `scram-sha-256` from Rung 2 (§10) | runner-initiated |
 | **Data: runner → gateway Redis** | agent-runner processes → Redis | `:6380` | RESP — today no auth (`protected-mode no`); `requirepass` from Rung 2 | runner-initiated |
-| **Page: browser → agent page** | user browser → `ava.ui` page server | ephemeral | HTTP | browser-initiated |
+| **Page: browser → agent page** | user browser → `meiva.ui` page server | ephemeral | HTTP | browser-initiated |
 | **Browser → gateway** | user browser → frontend `:3000` → gateway `:8000` | `:3000`/`:8000` | HTTP | browser-initiated |
 
 Key properties (the design intent behind the wires):
@@ -212,9 +212,9 @@ Key properties (the design intent behind the wires):
   `inventory_read`, `inventory_write`. This is the *standard path* of §2 rules 1
   & 3 — there is no "same box, skip the dial" variant. A blackholed (powered-off)
   peer hangs in connect, so the dispatcher caps connect at `min(10s, timeout)`.
-- **The SDK is topology-blind.** Agent code calls `ava.*`, which always goes to
+- **The SDK is topology-blind.** Agent code calls `meiva.*`, which always goes to
   `shared.machine.gateway_api_base()` (architecture §6.1). Under §2 this resolves
-  the one configured `AVA_GATEWAY_URL` for every caller, role-blind (no
+  the one configured `MEIVA_GATEWAY_URL` for every caller, role-blind (no
   `is_gateway()` branch). A single-box agent-runner reaches its co-located gateway
   over loopback — that is the gateway box's configured self-URL (`derive_env`
   materializes `http://localhost:<port>` into `.env`), the correct same-machine
@@ -223,7 +223,7 @@ Key properties (the design intent behind the wires):
   (Formerly tracked as rule-4 violation §10.A — now resolved; see the self-call
   note in §2.)
 - **Reachable address is operator-declared, never auto-detected.**
-  `AVA_MACHINE_HOST` (or `$AVA_HOME/machine_host`) is each host's tailnet
+  `MEIVA_MACHINE_HOST` (or `$MEIVA_HOME/machine_host`) is each host's tailnet
   address; `reachable_host()` raises rather than guess. This is the single point
   where the codebase "knows" about the network — deliberately abstract so the
   overlay (Tailscale here) is swappable, and the single hook §2's "address by
@@ -244,7 +244,7 @@ the one remaining rule-4 delta is `list_agent_runners()`'s query scope (§10.B).
 ## 5. Security — the load-bearing boundary and the gap to close
 
 > ⚠️ **This whole section describes the security posture as it stood on
-> 2026-06-11, which this decision exists to end. It is NOT how Ava is deployed.**
+> 2026-06-11, which this decision exists to end. It is NOT how Meiva is deployed.**
 > "The tailnet IS the auth", the unauthenticated `/api/bootstrap`, pg `trust` with
 > no password, redis `protected-mode no` on `0.0.0.0` — all of it was closed by
 > Rung 1 + Rung 2 and shipped 2026-06-15. §5.3 is the plan that closed it, and it
@@ -259,7 +259,7 @@ even a shared one (`_pg_hba_body()` in `cli/commands/_compose.py`); redis runs
 overlay interface *and* the host's physical NIC, and redis has no source filter
 at all — so a same-LAN neighbour outside the CGNAT range, who pg_hba would
 reject, can still reach redis. The managed config blocks are rewritten by
-`_compose.py` on each `ava start` keyed on `multihost_enabled`.
+`_compose.py` on each `meiva start` keyed on `multihost_enabled`.
 **The WireGuard mesh is the entire trust boundary.** Anything that can route a
 packet to a port is trusted as a cluster peer. (Rung 1 closes the redis-on-LAN
 hole by binding the overlay interface; Rung 2 adds the missing passwords — §10.)
@@ -276,12 +276,12 @@ Tailscale defaults to allow-all between a tailnet's own devices. The design
 should **tighten** to least-privilege via tagged ACLs, so a compromised runner
 cannot reach the data plane on ports it has no business on:
 
-- **Tags**: `tag:ava-gateway`, `tag:ava-runner`, `tag:ava-user` (laptops/phones).
+- **Tags**: `tag:meiva-gateway`, `tag:meiva-runner`, `tag:meiva-user` (laptops/phones).
 - **ACL grants** (intent):
-  - `tag:ava-runner` → `tag:ava-gateway` on `5433, 6380, 8000` only.
-  - `tag:ava-gateway` → `tag:ava-runner` on `<ops_port>` only.
-  - `tag:ava-user` → `tag:ava-gateway` on `3000, 8000`; → any host on the
-    ephemeral page-server range for `ava.ui`.
+  - `tag:meiva-runner` → `tag:meiva-gateway` on `5433, 6380, 8000` only.
+  - `tag:meiva-gateway` → `tag:meiva-runner` on `<ops_port>` only.
+  - `tag:meiva-user` → `tag:meiva-gateway` on `3000, 8000`; → any host on the
+    ephemeral page-server range for `meiva.ui`.
   - No runner → runner path (agents never talk to each other directly — the
     `inbound_messages` table is the only bus; this matches §2 rule 2).
 - **Tailscale SSH** + ACL for operator access, replacing scattered `ssh` key
@@ -305,7 +305,7 @@ sequenced in two rungs (§10). The work, smallest-first:
   the cluster off "tailnet membership == ownership" — reachability stops being
   trust. Enough for a single operator with a handful of machines.
 - **Per-machine keys + Postgres roles (Rung 3 — refinement).** Mint a per-machine
-  credential + a per-machine `ava` role at enroll instead of the one shared role
+  credential + a per-machine `meiva` role at enroll instead of the one shared role
   (scheduled secret rotation was weighed against this and decided against):
   decommissioning a host becomes `DROP ROLE`, a leak revokes one host without
   churning the cluster's shared secret. The capability scheduled rotation is a
@@ -355,37 +355,37 @@ multi-machine-relevant shape:
 
 The design principle: **cluster identity is centralized and pushed; everything
 that describes a specific machine stays on that machine and is at most proposed
-to.** This is why a runner needs only a tiny bootstrap stub (`AVA_GATEWAY_URL` +
-`AVA_MACHINE_*` + `AVA_CONFIG_SOURCE=gateway`) to join — the rest is pulled.
+to.** This is why a runner needs only a tiny bootstrap stub (`MEIVA_GATEWAY_URL` +
+`MEIVA_MACHINE_*` + `MEIVA_CONFIG_SOURCE=gateway`) to join — the rest is pulled.
 
 ---
 
 ## 7. Deployment flow — bare machines → running cluster
 
-Detailed commands in the [`deploy-ava-cluster` skill](../../.agents/skills/deploy-ava-cluster/SKILL.md) §"Split across
+Detailed commands in the [`deploy-meiva-cluster` skill](../../.agents/skills/deploy-meiva-cluster/SKILL.md) §"Split across
 machines" and [`dev-setup.md`](../../../../conventions/dev-setup.md) §"First time bringing
 up a new dev / agent-runner". The **shape** (what must happen in what order, and why):
 
 1. **Join the tailnet first.** Every node + the operator's devices. WSL2 must
    install Tailscale *inside the distro* (it does not inherit the Windows host's
    identity). The gateway is reachable only here.
-2. **Gateway host.** `install.sh --role gateway` → fill `~/.ava/.env` with
-   `AVA_MULTIHOST_ENABLED=true`, `AVA_MACHINE_HOST=<tailnet addr>`, and data-plane
-   URLs pointing at that address → `ava start --machine-name <gw>
+2. **Gateway host.** `install.sh --role gateway` → fill `~/.meiva/.env` with
+   `MEIVA_MULTIHOST_ENABLED=true`, `MEIVA_MACHINE_HOST=<tailnet addr>`, and data-plane
+   URLs pointing at that address → `meiva start --machine-name <gw>
    --serve-gateway`. This binds pg/redis `0.0.0.0`, writes the Tailscale-trust pg_hba /
    redis blocks, brings up the gateway + daemons, and UPSERTs the gateway's
    `machines` row. **macOS extra step**: allow the Homebrew `postgres` /
    `redis-server` binaries through the Application Firewall (binding `0.0.0.0` is
    necessary but not sufficient — the deploy skill has the `socketfilterfw` commands).
-3. **Each agent-runner.** `install.sh --role agent-runner` → `ava enroll
+3. **Each agent-runner.** `install.sh --role agent-runner` → `meiva enroll
    --gateway http://<gw-tailnet>:8000 --machine-name <name>` (writes the bootstrap
-   stub; `--ssl-cert-file` if behind a corp TLS-MITM proxy) → `ava start`. The
+   stub; `--ssl-cert-file` if behind a corp TLS-MITM proxy) → `meiva start`. The
    runner fetches its config from `/api/bootstrap`, brings up ops / restarter /
    watchdog, and UPSERTs its `machines` row advertising `http://<runner-tailnet>:
    <ops_port>`.
 4. **Verify reachability both ways** (the NOT-automatically-tested boundary): the
    runner can reach pg `:5433` / redis `:6380` / gateway `:8000`, *and* the
-   gateway can reach the runner's `<ops_port>` (`ava cluster status` round-trips a
+   gateway can reach the runner's `<ops_port>` (`meiva cluster status` round-trips a
    `status_probe` op to each runner). A one-way firewall hole is the classic
    split-deploy failure.
 
@@ -401,27 +401,27 @@ server). A runner that boots before the gateway just retries its bootstrap fetch
 
 | Who is down | Symptom | Behavior / recovery |
 |---|---|---|
-| **An agent-runner** | gateway's dial to its ops server times out | `dispatch_to_machine` raises `ClusterOpUnreachable`; spawn-to-that-host fails fast, `ava cluster status` shows it unreachable. The cluster keeps running on the other runners. Its agents' processes are gone until it returns; `agents_meta` rows persist (lifecycle is in the DB, not the process). |
+| **An agent-runner** | gateway's dial to its ops server times out | `dispatch_to_machine` raises `ClusterOpUnreachable`; spawn-to-that-host fails fast, `meiva cluster status` shows it unreachable. The cluster keeps running on the other runners. Its agents' processes are gone until it returns; `agents_meta` rows persist (lifecycle is in the DB, not the process). |
 | **The gateway** | runners can't reach pg/redis/`:8000` | **Hard outage.** Runners can't claim inbound, the SDK 503s, the frontend can't load. Agents mid-turn lose their DB; on gateway return they resume from the LangGraph checkpoint. No failover (single data plane by design — non-goal: HA). |
 | **A user device** | — | No cluster impact; it is only a client. |
 
-`last_seen_at` is stamped at `ava start`, **not** a heartbeat — "online" is
+`last_seen_at` is stamped at `meiva start`, **not** a heartbeat — "online" is
 decided by the live dial, never by a stale timestamp. A host announcing an
 intentional stop POSTs `/api/cluster/stopping` so the roster shows "stopped" vs
 "offline" (a crash a probe can't distinguish).
 
 ### 8.2 Rolling update across machines (built)
 
-The three-phase `ava update` orchestration (`gateway/cluster.py`,
+The three-phase `meiva update` orchestration (`gateway/cluster.py`,
 [`runbook.md`](../../../../conventions/runbook.md)) is the load-bearing multi-machine flow,
 hardened by three recovery layers — all **already landed**:
 
 - **Phase A** — gateway pauses every runner (`cluster_stop` op: touch
-  `$AVA_HOME/cluster_paused`, kill its restarter; watchdog skips reconcile while
+  `$MEIVA_HOME/cluster_paused`, kill its restarter; watchdog skips reconcile while
   paused). **Pin target_sha once** so every node force-checks-out the same commit
   (no per-node `git pull` re-resolving a moving tip — the 2026-06-01 collision).
 - **Phase B** — gateway migrates locally, then fans out `cluster_update` with the
-  pinned sha; each runner force-checks-out, `uv sync`, `ava restart`, and clears
+  pinned sha; each runner force-checks-out, `uv sync`, `meiva restart`, and clears
   its own pause.
 - **Layer 1** — compensating unpause: any aborting exit dials `cluster_resume` to
   every paused host (`try/finally`).
@@ -451,10 +451,10 @@ Detail + the failure matrix: `cli/commands/update.py` + `cli/commands/_update_re
 
 ## 9. Migration path: single-box → split, and back
 
-> ⚠️ **The flag steps below no longer exist.** `AVA_MULTIHOST_ENABLED` was deleted
-> 2026-06-15: pg/redis always bind loopback + `AVA_MACHINE_HOST`, `/api/bootstrap`
+> ⚠️ **The flag steps below no longer exist.** `MEIVA_MULTIHOST_ENABLED` was deleted
+> 2026-06-15: pg/redis always bind loopback + `MEIVA_MACHINE_HOST`, `/api/bootstrap`
 > is always served and always authenticated, and the roster is always on. Going
-> split is now just step 2 (stand up a runner and `ava enroll`); reversal is just
+> split is now just step 2 (stand up a runner and `meiva enroll`); reversal is just
 > dropping its `machines` row. The *reason* the round-trip is safe — cluster
 > identity is untouched by topology, so the data plane never migrates — is what
 > this section is kept for.
@@ -463,7 +463,7 @@ Single-box and a split gateway host are the **same unit** — `gateway,agent-run
 vs `gateway`. Per §2 they are the same code on the same path; the migration is
 additive and reversible:
 
-1. On the single box, flip `AVA_MULTIHOST_ENABLED=true` and restart (this
+1. On the single box, flip `MEIVA_MULTIHOST_ENABLED=true` and restart (this
    re-binds pg/redis to `0.0.0.0` + the Tailscale-trust blocks, and turns on
    `/api/bootstrap`). The box keeps running every agent locally — nothing else
    changes yet. (Its agent-runner half already dials the gateway over loopback —
@@ -520,7 +520,7 @@ identity, which §2/§4/§9 reference).
     redis-with-no-source-filter hole, §5.1). macOS keeps its loopback default
     where the firewall blocks the overlay interface.
   - **De-hardcode the trust ranges.** Replace the literal Tailscale CGNAT blocks
-    in `_pg_hba_body()` with a config field (`AVA_TRUSTED_CIDRS`, default
+    in `_pg_hba_body()` with a config field (`MEIVA_TRUSTED_CIDRS`, default
     loopback only). The core stops naming Tailscale; the overlay becomes the one
     the operator happens to use. **Pain point #1 is structurally gone here** — no
     Tailscale assumption survives in core code.
@@ -557,14 +557,14 @@ identity, which §2/§4/§9 reference).
 
 ### A. Gateway box self-call routing (§2 rule 4) — RESOLVED (2026-06-27)
 
-`gateway_api_base()` is role-blind: it resolves the configured `AVA_GATEWAY_URL`
-(env > `$AVA_HOME/gateway_url` file) for every caller, with no `is_gateway()`
+`gateway_api_base()` is role-blind: it resolves the configured `MEIVA_GATEWAY_URL`
+(env > `$MEIVA_HOME/gateway_url` file) for every caller, with no `is_gateway()`
 branch. A gateway box's self-URL is **loopback by config** — `derive_env`
-materializes `AVA_GATEWAY_URL=http://localhost:<gateway_port>` into every cluster's
+materializes `MEIVA_GATEWAY_URL=http://localhost:<gateway_port>` into every cluster's
 `.env` at birth, so a box reaches its own gateway over loopback; a remote
 agent-runner's `.env` carries the gateway's reachable URL, set at
-`ava enroll --gateway`. The reachable address is a remote-only concern, never the
-gateway's own self-URL. `ava start` reads `AVA_GATEWAY_URL` from `.env` with no
+`meiva enroll --gateway`. The reachable address is a remote-only concern, never the
+gateway's own self-URL. `meiva start` reads `MEIVA_GATEWAY_URL` from `.env` with no
 runtime default; on a gateway host it also prints its reachable address so an
 operator can enroll runners against it.
 
@@ -575,7 +575,7 @@ connect to its own Tailscale IP (the connect times out), even though remote peer
 reach that same address fine. Loopback is the correct, dependency-free same-machine
 path; routing self-calls over the reachable address bought nothing but a fragile
 dependency. The watchdog *health probe* stays on its separate
-`AVA_GATEWAY_HEALTH_URL` (also loopback, host-local supervision).
+`MEIVA_GATEWAY_HEALTH_URL` (also loopback, host-local supervision).
 
 ### B. Fix `list_agent_runners()`'s query-scope branch (§2 rule 4) — Rung 0
 
@@ -625,7 +625,7 @@ because it is the §2 principle made true in code.
 
 ## Related
 
-- [`okf/index.ava.okf.md`](../../../../index.ava.okf.md) — built process shape, the gateway/ops dial, keep-alive
+- [`okf/index.meiva.okf.md`](../../../../index.meiva.okf.md) — built process shape, the gateway/ops dial, keep-alive
 - `shared/config/` — the per-field `scope` model this builds on
 - [`runbook.md`](../../../../conventions/runbook.md) · [`dev-setup.md`](../../../../conventions/dev-setup.md) — concrete bring-up + roster
 - `commit-pinned-cluster.md` (since removed) — version-consistency foundation

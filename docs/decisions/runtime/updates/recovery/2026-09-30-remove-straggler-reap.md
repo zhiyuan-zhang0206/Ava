@@ -18,7 +18,7 @@ unified lifecycle) and the release drain and the PITR activation transition
 (directly), which went with the
 [release/image update path](../release/2026-09-30-remove-release-image-path.md). A cluster
 is now updated by `python -m cli.fleet_update`, whose stop is
-`ava stop -y --timeout N`: a member in a long turn holds the stop until the
+`meiva stop -y --timeout N`: a member in a long turn holds the stop until the
 timeout, the stop fails with its hold retained, and the operator retries or
 escalates with `--force` on site, as the
 [source-mode decision](../release/2026-09-30-networked-cluster-stays-on-source-updates.md)
@@ -58,7 +58,7 @@ projection) stay; the schema and enum are cleaned up in their own step.
   second set of receipts and a hot-path SQL branch to keep compiling and proving,
   for a trigger no operator has. Git history keeps it, and a later update path
   starts from a design against its own need.
-- **Give `ava stop` a reap.** It would add an automatic kill to an attended
+- **Give `meiva stop` a reap.** It would add an automatic kill to an attended
   stop whose failure the operator handles on site, and reintroduce at-least-once
   replay of a turn's side effects that the operator can judge case by case.
 - **Drop the `restarting` status now.** It is a schema and API-contract change
@@ -67,12 +67,12 @@ projection) stay; the schema and enum are cleaned up in their own step.
 
 ## Consequences
 
-- `ava stop`, `ava pause` and the fleet update stop behave as before: a long
+- `meiva stop`, `meiva pause` and the fleet update stop behave as before: a long
   turn holds the drain until its deadline, the hold is retained, and an operator
   decides.
 - A hold journal written by the previous code still reads: its `reaped` map is
   ignored and no longer written.
-- `AVA_UPDATE_STRAGGLER_REAP_SECONDS` and `AVA_UPDATE_QUIESCE_TIMEOUT_SECONDS`
+- `MEIVA_UPDATE_STRAGGLER_REAP_SECONDS` and `MEIVA_UPDATE_QUIESCE_TIMEOUT_SECONDS`
   are unknown to the settings; a stale line for either in a `.env` is inert.
 - A row left in `restarting` by an earlier reap is no longer settled at boot or
   resume. None is expected (a mark was settled at the next agent-host boot or
@@ -81,4 +81,4 @@ projection) stay; the schema and enum are cleaned up in their own step.
 - The two decisions of 2026-09-19 and 2026-09-20 about the reap stay as the
   record of what it was.
 
-Forward link (2026-10-03): `ava pause` was deleted; a stop with a different keep set replaces it. See [delete ava pause](../../../agents/graph/2026-10-03-delete-ava-pause.md).
+Forward link (2026-10-03): `meiva pause` was deleted; a stop with a different keep set replaces it. See [delete meiva pause](../../../agents/graph/2026-10-03-delete-meiva-pause.md).

@@ -2,7 +2,7 @@
 
 ## Context
 
-The `telegram` skill (`ava_builtins/skills/telegram/`) let any agent push a
+The `telegram` skill (`meiva_builtins/skills/telegram/`) let any agent push a
 one-way message to the owner's phone (and pull replies) by calling
 `api.telegram.org` inline with the cluster bot token. It replaced the earlier
 framework-registered Telegram service (see `2026-07-22-telegram-out-of-core.md`).
@@ -24,9 +24,9 @@ low-frequency push channel belongs at skill altitude.
 
 ## Consequences
 
-- `ava_builtins/skills/telegram/` and its OKF doc are deleted; the comms skill
+- `meiva_builtins/skills/telegram/` and its OKF doc are deleted; the comms skill
   index no longer lists Telegram.
-- Agents reach the owner through `ava.ui.notify` (queue) and the IM Bridge
+- Agents reach the owner through `meiva.ui.notify` (queue) and the IM Bridge
   (frontend); nothing else.
 - The bridge's Telegram adapter (`services/im_bridge/adapters/telegram.py`)
   remains the single implementation of Bot API access.

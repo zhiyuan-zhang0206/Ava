@@ -27,12 +27,12 @@ AX automation, signed launchd helper); K8s on macOS lives in a Linux VM and
 none of that can follow, so adopting it yields two supervision systems, not
 one. (2) Agents operate the host by design; containerizing them means
 privileged/hostPath escapes — isolation as theater. (3) Deployment is
-source-checkout + uv self-update (PR → merge → `ava.self.update`), not
+source-checkout + uv self-update (PR → merge → `meiva.self.update`), not
 images; a registry/build pipeline in the self-update loop is a large new
 liability. Empirical test: of ~11 incident classes, K8s structurally
 eliminates ~2, half-helps 2, and swaps the git-pin rollout class for an
 image-pipeline class; the majority (data-plane identity, application
-semantics) are outside its jurisdiction. Re-evaluate if Ava targets a
+semantics) are outside its jurisdiction. Re-evaluate if Meiva targets a
 headless Linux fleet, where the desktop half does not exist.
 
 **K8s the semantics: adopted.** Ops is extracted into one module speaking
@@ -43,11 +43,11 @@ dimension with its own cooldown/backoff), a controller-manager tick (watchdog
 slims down to running the controller list), CronJobs (pg-backup stops
 piggybacking healthchecks; the debt sweeper gets scheduled), and Drain (agent
 quiescing as a shared primitive for update and stop). Rollout goes
-declarative: `ava update` = write the new SHA into spec, per-machine
+declarative: `meiva update` = write the new SHA into spec, per-machine
 controllers converge, rollout watches status — completing the half-converted
 state (pin was already reconciler-driven while rollout stayed imperative;
 that mismatch is what made them fight). Aligning our vocabulary with K8s
-also lets model prior knowledge transfer to operating Ava.
+also lets model prior knowledge transfer to operating Meiva.
 
 **Module naming.** Reclaim `ops/`: evict the wire schemas it currently holds
 (they belong to gateway), grow the real ops layer in place. Layering:
@@ -67,5 +67,5 @@ also lets model prior knowledge transfer to operating Ava.
 
 Final-state blueprint in `future/infra/ops-module.md` (spec content,
 controller inventory, identity truth-table, probe audit, state-dimension
-inventory). Implementation is left to Ava agents; sequencing deliberately
+inventory). Implementation is left to Meiva agents; sequencing deliberately
 undiscussed.

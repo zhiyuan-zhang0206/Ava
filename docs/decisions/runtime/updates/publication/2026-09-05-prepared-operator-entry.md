@@ -13,7 +13,7 @@ lookup and full-byte verification use `prepared_receipt_digest`; the embedded
 Local validation binds both facts but is not promoted to participant evidence.
 
 The earlier dispatch draft had two invalid assumptions. First, a pure runner's
-`ava_runner` database projection cannot update `deployment_state`; owner-backed
+`meiva_runner` database projection cannot update `deployment_state`; owner-backed
 tests hid that production permission boundary. Second, a stage-only pending
 record has no checked abort or forward transition, so it would continue freezing
 admission and later updates after the request deadline. The rebuild therefore

@@ -21,14 +21,14 @@ truncation threshold sat near 38 sessions.
    read in one, so a batch of the incident's size costs a handful of round
    trips and the thirty-second limit stops binding long before the batch does.
 2. The service stages the sweep's notices on disk
-   (`$AVA_HOME/run/pty-close-notices.json`, `close_notices_path`) before the
+   (`$MEIVA_HOME/run/pty-close-notices.json`, `close_notices_path`) before the
    child starts, merging them beside anything an earlier start staged; the
    child removes the file only once every notice of it is written. A child cut
    short by the limit — or failing on a database that answers nothing — loses
    nothing: the service reports the leftover batch at ERROR with its count, and
    the next start re-sends it. The re-send reuses the same idempotency keys, so
    a notice that already committed is skipped, never delivered twice.
-3. The stop path keeps its posture: `ava stop` still writes its notices
+3. The stop path keeps its posture: `meiva stop` still writes its notices
    directly while its database is up, and a stop-time failure stays loud on
    stderr without a retry
    ([2026-10-02-close-notices-written-at-terminals](2026-10-02-close-notices-written-at-terminals.md)) —

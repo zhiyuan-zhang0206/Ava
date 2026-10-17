@@ -33,6 +33,6 @@ Task-cost runtime code and public fields are removed first. Existing database
 columns remain inactive for expand-contract compatibility; a later migration can
 drop them after old readers and writers have been retired.
 
-Current owners: [Workflow](../../../../ava_builtins/skills/practice/ava-workflow/SKILL.md),
-[usage reports](../../../../ava_builtins/skills/coordination/ava-being-a-long-running-agent/references/usage.md),
-and [task records](../../../../ava_builtins/plugins/ava_fleet/docs/tasks/tasks.ava.okf.md).
+Current owners: [Workflow](../../../../meiva_builtins/skills/practice/meiva-workflow/SKILL.md),
+[usage reports](../../../../meiva_builtins/skills/coordination/meiva-being-a-long-running-agent/references/usage.md),
+and [task records](../../../../meiva_builtins/plugins/meiva_fleet/docs/tasks/tasks.meiva.okf.md).

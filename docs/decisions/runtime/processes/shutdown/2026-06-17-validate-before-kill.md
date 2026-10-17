@@ -1,7 +1,7 @@
 # Vet migration layout before an update stops anything (validate-before-kill)
 
 > **Status 2026-08** — still in force; the one-time agent SDK entry
-> (`ava.self.update()`, named as a `spawn_update` trigger below) was removed —
+> (`meiva.self.update()`, named as a `spawn_update` trigger below) was removed —
 > the detached per-host `spawn_update` (watchdog self-heal) and the
 > agent-runner self-update leg are the remaining triggers.
 
@@ -14,7 +14,7 @@ merged). The updater force-checked-out that main, killed every service, and *the
 failed the migrate pre-flight (`version 49 duplicated`) — leaving the whole cluster
 down with no service left to recover it.
 
-The migrate runs inside `ava start`, which runs *after* the stop. So the layout
+The migrate runs inside `meiva start`, which runs *after* the stop. So the layout
 error — a pure, static property of the checked-out tree (`_list_migration_files`,
 no DB) — was only discovered after the blast had already landed. The kill happened
 before the thing that could have refused it.
@@ -31,7 +31,7 @@ Wired at the three points a rollout can take a host down, since they do not shar
 one chokepoint:
 - **gateway orchestration** (`_vet_rollout_target`, after the target is pinned,
   before Phase A) — refuses the whole rollout, nothing paused;
-- **detached `spawn_update`** (the prod path: `ava.self.update` / watchdog
+- **detached `spawn_update`** (the prod path: `meiva.self.update` / watchdog
   self-heal) — in-process fetch + vet before `pause_local_cluster`;
 - **agent-runner self-update leg** — vets the checked-out tree before its stop, and
   reverts to the prior commit on a broken layout.
@@ -45,7 +45,7 @@ one chokepoint:
   alone still leaves a poisoned main able to take down the cluster. Containment is
   the load-bearing half: with validate-before-kill, a missed collision is a refused
   rollout, not an outage — so prevention is allowed to stay cheap and best-effort.
-- **Validate inside `ava start` (where the migrate already is).** That is the
+- **Validate inside `meiva start` (where the migrate already is).** That is the
   existing behavior — too late, the stop already happened.
 - **Pre-checkout vet using the running (old) code.** Cleanest "never even checkout"
   shape, but the validator must exist in the *old* code to run before the new code

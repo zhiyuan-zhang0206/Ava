@@ -9,7 +9,7 @@ path for single-box and split, no host-mode branch.
 
 For Phase 0's fetch and Phase A's pause it is deliberate and correct — both ops are
 idempotent with what the local leg does. Phase B is different in kind. Its op is
-`spawn_update`, whose first act is killing the ava-gateway session, and by the time it
+`spawn_update`, whose first act is killing the meiva-gateway session, and by the time it
 runs the local leg has *already* checked this host out, migrated it and restarted it.
 The leg is pure redundancy that kills the cluster's gateway.
 
@@ -112,5 +112,5 @@ the shelf, unchanged, for a residual race that outlives this fix.
 - A rollout's own gateway restart is no longer a hole any runner can fall into, so a
   `STALLED` verdict once again means what it says: that host has a problem.
 - `_probe_gateway_or_die` takes ~30 s to fail on a genuinely unreachable gateway,
-  including on a plain `ava start`. That is the one place a healthy-path cost could
+  including on a plain `meiva start`. That is the one place a healthy-path cost could
   hide, and it does not: the budget is spent only when the dial fails.

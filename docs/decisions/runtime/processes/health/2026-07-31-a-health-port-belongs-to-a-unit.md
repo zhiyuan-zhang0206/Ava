@@ -2,8 +2,8 @@
 
 ## Context
 
-One physical machine hosts two Ava units — a native Windows unit
-(`C:\Users\ava\.ava`) and a WSL2 unit (`/home/ava/.ava`) — **both
+One physical machine hosts two Meiva units — a native Windows unit
+(`C:\Users\meiva\.meiva`) and a WSL2 unit (`/home/meiva/.meiva`) — **both
 agent-runners of the same cluster**. WSL2's NAT networking republishes the Linux
 unit's loopback listeners on Windows' loopback, so the Windows unit probing
 `http://localhost:8102/healthz` reached the WSL2 unit's restarter. Its watchdog
@@ -14,13 +14,13 @@ Two obvious explanations were ruled out with evidence, because both are where
 the eye goes first:
 
 - **Not a port-allocation collision.** Both units sit at their platform's
-  default `~/.ava`, so the 18000-20000 allocator never ran for either; an
+  default `~/.meiva`, so the 18000-20000 allocator never ran for either; an
   enrolled runner's health ports came from the *gateway's* `/api/bootstrap`
   payload, not from any registry. The two units were handed identical ports **by
   construction**. A shared registry would have changed nothing.
 - **Not a bind-address defect.** The WSL2 restarter already binds `127.0.0.1`
   only — the narrowest bind available — and the relay republished it anyway.
-  Binding loopback + `AVA_MACHINE_HOST` would not help; the relay reflects
+  Binding loopback + `MEIVA_MACHINE_HOST` would not help; the relay reflects
   `127.0.0.1`-bound ports.
 
 What it is: **a port block is a property of the cluster, and the collision
@@ -41,24 +41,24 @@ Health ports become a **per-unit** fact, in three parts that depend on each
 other.
 
 1. **The gateway stops owning a runner's health ports.** The seven
-   `AVA_*_HEALTH_PORT` keys leave `cli/enroll.py:_CLUSTER_ENV_KEYS`, and their
+   `MEIVA_*_HEALTH_PORT` keys leave `cli/enroll.py:_CLUSTER_ENV_KEYS`, and their
    config scope flips from `cluster-pinned` to `host`, so `/api/bootstrap` no
    longer serves them. Nothing about them was ever cluster-constrained: the
    runner computes its own ops URL from its own `health_port('ops')` and
    registers it (`shared/machines.py`), and the gateway reads that URL back off
    the machines row. This is also what makes a per-unit value **durable** —
-   `cli/start_refresh.py` re-materializes the bootstrap keys on every `ava
+   `cli/start_refresh.py` re-materializes the bootstrap keys on every `meiva
    start`, so a hand-set port was silently reverted before.
 
-2. **`ava enroll --health-port-base <N>`** writes the whole set, derived from
+2. **`meiva enroll --health-port-base <N>`** writes the whole set, derived from
    the shared block layout (`shared/port_block.py:PORT_OFFSETS`, now a
    dependency-free module so the settings-free enroll path and `shared.cluster`
    read one table). No shared state and no locking: the operator states the fact
    the machine cannot discover, at the moment they know the co-location exists.
 
-3. **`ava start` probes before it binds.** For each health port this unit is
+3. **`meiva start` probes before it binds.** For each health port this unit is
    about to use it dials `/healthz`, and refuses to start when the answer is a
-   terminal verdict — naming the occupant's `$AVA_HOME` and pointing at
+   terminal verdict — naming the occupant's `$MEIVA_HOME` and pointing at
    `--health-port-base`.
 
 Part 3 is the part that survives a *third* unit. No arithmetic range can prevent
@@ -68,16 +68,16 @@ in advance.
 
 The probe's message now says "another **unit's** daemon holds this port", and
 the surrounding prose in `shared/daemon_health.py` says unit wherever it means
-the `$AVA_HOME` boundary — including the per-home socket reasoning, since the socket
-lives under `$AVA_HOME` and a foreign *unit* is exactly as unkillable as a
+the `$MEIVA_HOME` boundary — including the per-home socket reasoning, since the socket
+lives under `$MEIVA_HOME` and a foreign *unit* is exactly as unkillable as a
 foreign cluster.
 
 ## Alternatives rejected
 
 **Allocate health ports from the host registry instead of the gateway.** The
-appealing fix, and it addresses nothing: both units sit at the default `~/.ava`,
+appealing fix, and it addresses nothing: both units sit at the default `~/.meiva`,
 where the allocator does not run, and a Windows unit and a WSL2 unit do not
-share a `~/.ava/clusters.json` anyway — they are different filesystems. It would
+share a `~/.meiva/clusters.json` anyway — they are different filesystems. It would
 also newly couple an enrolled runner to host-global state it currently has none
 of.
 
@@ -86,7 +86,7 @@ nondeterminism the incident is made of: a port that probes free at enroll can be
 taken later by a WSL2 boot, and the two sides of a relay do not observe the same
 "free". An operator-stated base is a fact that stays true; a scan is a snapshot.
 
-**Bind to `AVA_MACHINE_HOST` instead of loopback.** Ruled out by the incident
+**Bind to `MEIVA_MACHINE_HOST` instead of loopback.** Ruled out by the incident
 log — the relay reflects `127.0.0.1`-bound ports, so a wider bind changes
 nothing except exposing daemon RPC to the LAN.
 
@@ -119,8 +119,8 @@ side can see the other.
 - An already-enrolled runner keeps whatever ports its `.env` holds —
   `materialize_cluster_env` upserts, so dropping the keys from the payload
   removes nothing that is already written. A runner that should move needs a
-  re-enroll with the flag (or a hand edit, which now survives `ava start`).
-- `ava start` gains a failure mode that depends on what else is listening on the
+  re-enroll with the flag (or a hand edit, which now survives `meiva start`).
+- `meiva start` gains a failure mode that depends on what else is listening on the
   box. It is scoped to a terminal verdict on a port this start was about to
   bind, so the only way to trip it is the condition it names.
 - **The refusal is all-or-nothing, and there is no flag that waives it.** One
@@ -134,7 +134,7 @@ side can see the other.
   and it is deliberately not a waiver: a rollout cannot reach it, because
   `--disable-service` is an operator decision recorded as durable intent, not
   something an automated leg passes to get past a gate.
-- **The already-co-located WSL2 + native-Windows pair will hard-refuse `ava
+- **The already-co-located WSL2 + native-Windows pair will hard-refuse `meiva
   start` on the next attempt**, and a rollout to that host fails with it (the
   gate sits outside `_readiness_waiver` by design). That host is exactly the one
   the incident was reported from, so the first effect of this change on the fleet

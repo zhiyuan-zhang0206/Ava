@@ -5,7 +5,7 @@
 SDK-alignment discussion (2026-08-02, user-led) reviewed the fleet surface. Three
 findings:
 
-1. **`ava.ui.list_notices` had no consumer-side reason to exist.** At most one
+1. **`meiva.ui.list_notices` had no consumer-side reason to exist.** At most one
    notice is open per agent — `notify()` auto-resolves the previous one
    (`resolved_at = 'superseded'`), a structural invariant. The function's
    dominant real usage (statistics: ~80% of calls) was `list_notices(status="open")`
@@ -16,7 +16,7 @@ findings:
 2. **The id argument on `edit_notice`/`dismiss_notice` was forced ceremony.**
    Since at most one notice is open per agent, "edit/dismiss my open notice"
    needs no id — the id existed only to feed the now-removed list flow.
-3. **`ava.self.log` had weak adoption and no distinct value.** Usage data showed
+3. **`meiva.self.log` had weak adoption and no distinct value.** Usage data showed
    agents split roughly half/half on calling it; the activity trail it fed is a
    secondary view, and the same progress information flows through the reply
    text and task updates. Keeping an SDK verb for a rarely-consumed trail was
@@ -24,14 +24,14 @@ findings:
 
 ## Decision
 
-- `ava.ui.edit_notice(...)` — **no id parameter**; edits the caller's single
+- `meiva.ui.edit_notice(...)` — **no id parameter**; edits the caller's single
   open notice. Keyword-only fields unchanged (title/content/priority/blocking,
   `_UNSET` sentinel semantics preserved).
-- `ava.ui.dismiss_notice()` — **no id parameter**; withdraws the caller's single
+- `meiva.ui.dismiss_notice()` — **no id parameter**; withdraws the caller's single
   open notice. Idempotent when nothing is open.
-- `ava.ui.list_notices` — **removed** from the SDK (table, endpoints, and the
+- `meiva.ui.list_notices` — **removed** from the SDK (table, endpoints, and the
   frontend unified inbox are untouched; only the agent-facing verb is gone).
-- `ava.self.log` — **removed** from the SDK (agent_activity table + snapshot
+- `meiva.self.log` — **removed** from the SDK (agent_activity table + snapshot
   field + activity endpoints stay for history/display; only the write verb is
   gone).
 - Label semantics clarified: a label is a stable role name (`set_label`),

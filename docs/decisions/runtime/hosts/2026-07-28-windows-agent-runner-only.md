@@ -45,7 +45,7 @@ plane.
 ## Decision
 
 A Windows unit carries `agent-runner` and nothing else. It is enrolled against
-a gateway running on macOS or Linux (`ava enroll`), which is platform-neutral
+a gateway running on macOS or Linux (`meiva enroll`), which is platform-neutral
 and needs no data plane locally.
 
 Windows gateway support moves to
@@ -98,7 +98,7 @@ exist.
   Python code references it, and none should — the supported data plane is
   native per-cluster pg/redis.
 - The two WIP branches (`win-native-support-wip-20260726`,
-  `ava-windows-scheduling`) are fully harvested: their runtime fixes are already
+  `meiva-windows-scheduling`) are fully harvested: their runtime fixes are already
   on main, their scheduling work was superseded by main's slug-parameterized
   version, and the one surviving idea — a per-cluster-parameterized container
   data plane — is recorded in the future doc along with the three defects found
@@ -108,7 +108,7 @@ exist.
 `os.kill(pid, 0)` liveness check is in `_terminate_verified`, which is shared with
 `_reap_orphan_listeners` and the gate teardown and therefore runs inside `_do_stop`
 on EVERY platform — not only on the POSIX-only pooler path this cited it for. On
-2026-08-12 that raised `[WinError 87]` out of the middle of win's `ava restart` and
+2026-08-12 that raised `[WinError 87]` out of the middle of win's `meiva restart` and
 killed its self-update. Routed through `shared.proc` in the same PR as
 `cli/commands/_installed_sha.py`. -->
 

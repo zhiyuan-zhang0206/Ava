@@ -23,7 +23,7 @@ model resolves to.
 
 The ceiling knob stays in place and stays at 0 everywhere. It is the escape
 hatch if an absolute trigger is ever wanted again — per model in the registry,
-or cluster-wide via `AVA_AUTO_COMPACT_CEILING_TOKENS` — so reverting to
+or cluster-wide via `MEIVA_AUTO_COMPACT_CEILING_TOKENS` — so reverting to
 evidence-anchored tiers is a values edit, not a mechanism rebuild.
 
 ## Why a flat rule

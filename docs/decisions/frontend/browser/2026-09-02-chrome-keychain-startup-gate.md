@@ -15,7 +15,7 @@ Profile repair remains deliberately absent. Automatic setup copies a daily
 Chrome profile only into an absent destination. Every existing profile
 directory, including an empty or partial one, stays untouched. `Local State`
 receives only existence, read-permission, and future-mtime checks with
-warning-only output; Ava never reads its contents or writes it.
+warning-only output; Meiva never reads its contents or writes it.
 
 ## Rationale
 

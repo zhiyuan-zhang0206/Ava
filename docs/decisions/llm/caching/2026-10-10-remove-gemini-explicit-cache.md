@@ -1,6 +1,6 @@
 # Remove Gemini explicit caching
 
-We removed Ava's Gemini CachedContent lifecycle and its opt-in configuration.
+We removed Meiva's Gemini CachedContent lifecycle and its opt-in configuration.
 The operator observed that enabling explicit caching interfered with the
 implicit caching behavior needed by the workload and chose to remove the
 feature rather than retain a disabled compatibility path.

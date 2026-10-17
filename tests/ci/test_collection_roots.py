@@ -332,9 +332,9 @@ def test_python_files_makes_location_the_test_definition(tmp_path: Path) -> None
     )
     collected = sorted(line for line in result.stdout.splitlines() if "::" in line)
     assert collected == [
-        "meiva_builtins/skills/x/scripts/tests/test_c.py::test_it",
         "base/pkg/tests/area/test_b.py::test_it",
         "base/pkg/tests/test_a.py::test_it",
+        "meiva_builtins/skills/x/scripts/tests/test_c.py::test_it",
         "services/example/area/tests/test_d.py::test_it",
         "tests/components/agent/test_nested.py::test_it",
         "tests/test_top.py::test_it",

@@ -24,7 +24,7 @@ Neither store is a system of record:
   live Loki tail since 2026-08-13, so message-edge counts there cover only the
   last 84h, and the weekly self-evolution scan asks for a 7-day audit window.
 
-Ava is not event-sourced: the truth about business state already lives in
+Meiva is not event-sourced: the truth about business state already lives in
 Postgres business tables. What is missing is a durable record of *who did what*.
 The user ruled on 2026-10-02 that audit facts are truth in Postgres and Loki is
 only a projection; telemetry and log stay in Loki, unchanged.

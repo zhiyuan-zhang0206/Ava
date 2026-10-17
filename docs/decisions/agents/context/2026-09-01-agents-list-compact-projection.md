@@ -5,7 +5,7 @@ title: Agent list compact projection
 # Agent list compact projection
 
 The summary roster projection deliberately retains enough state for the SDK,
-MCP, and frontend. That remains too broad for `ava agents ls`, which renders
+MCP, and frontend. That remains too broad for `meiva agents ls`, which renders
 only an agent id, lifecycle status, and label across all historical rows.
 
 `GET /api/agents?fields=compact` therefore uses a separate three-column SQL

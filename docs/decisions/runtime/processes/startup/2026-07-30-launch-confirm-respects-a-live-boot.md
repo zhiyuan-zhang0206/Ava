@@ -34,7 +34,7 @@ started for it.
    two files that do not reference each other.
 3. Make the deadline load-tolerant, not merely larger: at expiry the launcher asks
    the platform supervisor whether the process it launched is still alive (the
-   session record under `$AVA_HOME/run/sessions/`, which carries pid + start time).
+   session record under `$MEIVA_HOME/run/sessions/`, which carries pid + start time).
    Alive → **one** extension, to the reap grace measured from the start of the
    wait. Dead → fail immediately, unchanged.
 
@@ -72,7 +72,7 @@ else's row. Reaper and launcher never contend.
   fights it — but it does mean "retries exhausted" and "reaped" can both appear
   for one launch.
 - The launcher now depends on the supervisor's session record being accurate. It
-  already is the basis of `ava stop`'s no-DB reap, and pid recycling is defeated by
+  already is the basis of `meiva stop`'s no-DB reap, and pid recycling is defeated by
   the recorded start time.
 
 ---

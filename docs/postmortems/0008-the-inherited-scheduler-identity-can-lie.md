@@ -10,7 +10,7 @@ company-air preview home, macOS 26.6.2 (25G83).
 
 ## Summary
 
-A health probe's automatic rollback ran `ava start` beneath its own launchd
+A health probe's automatic rollback ran `meiva start` beneath its own launchd
 job, registration booted that job out, and the recovery tree died mid-flight —
 leaving the host paused with its deploy lease orphaned. This is the 0005 class
 a second time, but the guard added then never fired: it keyed on the inherited
@@ -29,11 +29,11 @@ as the proof for descendants.
   guard reverted it on the next cycle, so the probe's checks began failing (by
   design) and the consecutive-failure counter started.
 - 15:30:26: failure count reached threshold 3. The probe process (launchd job
-  `...health-probe`, pid `py41817`) spawned `ava cluster rollback --yes`
+  `...health-probe`, pid `py41817`) spawned `meiva cluster rollback --yes`
   (`py41820`); the rollback took the deploy lease, paused and drained the
   agent-runner.
 - 15:30:28: checkout back to the installed sha; `uv sync`; then
-  `ava start --persist-services` (`py41844`) — whose service ports answered
+  `meiva start --persist-services` (`py41844`) — whose service ports answered
   EADDRINUSE from the still-running old processes.
 - 15:30:34.405/.412/.419: converge reached the OS-job register steps and issued
   `launchctl bootout` for logs-maintenance, packages-refresh, and finally
@@ -44,7 +44,7 @@ as the proof for descendants.
   lease release) never ran.
 - 15:30:46: the deploy watchdog reclaimed the dead lease, but the pause had no
   owner left: ops rounds blocked and `cluster update` refused for ~9 minutes.
-- 15:39: the documented recovery path (`ava start`) restored the host in ~30 s.
+- 15:39: the documented recovery path (`meiva start`) restored the host in ~30 s.
 
 ## Root cause
 
@@ -55,7 +55,7 @@ on macOS 26.6.2 that is false in the descendant direction: three disposable
 LaunchAgent experiments on the affected host (direct python; bash -> python ->
 bash; with and without the plist environment block) show the direct job process
 reads its label, while EVERY exec'd child reads `"0"`. The rollback's
-grandchild `ava start` therefore read `"0"` — not `None`, not the label — fell
+grandchild `meiva start` therefore read `"0"` — not `None`, not the label — fell
 straight through the guard, and booted out the job.
 
 Escape analysis:
@@ -95,7 +95,7 @@ Escape analysis:
   reproduced the env behaviour and the pid-walk detected ownership
   (SELF-FOUND), so the fix's mechanism is observed, not assumed.
 
-Left open: the restart leg still does not stop services before `ava start`, so
+Left open: the restart leg still does not stop services before `meiva start`, so
 EADDRINUSE on the old ports can recur (drain is not stop; that area belongs to
 the stop-orchestration work, task #3591). No CI runs a real launchd lifecycle —
 the live-host experiment remains the evidence for the OS contract.

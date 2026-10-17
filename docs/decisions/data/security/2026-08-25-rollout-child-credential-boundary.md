@@ -3,9 +3,9 @@
 ## Context
 
 The gateway rollout deliberately keeps its orchestration interpreter alive
-across the checkout, while `ava start` runs the new tree in a child process. A
+across the checkout, while `meiva start` runs the new tree in a child process. A
 one-time data-plane credential split in that child updated Postgres, PgBouncer,
-Redis, and `$AVA_HOME/.env`. The update could not flow back into the surviving
+Redis, and `$MEIVA_HOME/.env`. The update could not flow back into the surviving
 parent process, which then tried to persist the cluster pin with its old
 PgBouncer password. That SASL failure also reached the parent's recovery and
 outcome-recording paths, leaving the pin behind the checked-out tree and
@@ -13,7 +13,7 @@ triggering watchdog convergence in the wrong direction.
 
 ## Decision
 
-Returning from the fresh `ava start` is an explicit credential boundary. The
+Returning from the fresh `meiva start` is an explicit credential boundary. The
 parent re-reads the credential-bearing data-plane values from the unit `.env`,
 updates its process environment, and refreshes the existing Settings singleton
 before it performs any subsequent pin or recovery database operation. The
@@ -37,7 +37,7 @@ journal can be removed. Native bring-up consults the journal when current
 credentials fail, and replay completes before migrations open their first DB
 client.
 
-The parent sends a one-shot `AVA_ROLLOUT_PARENT_CREDENTIAL_HANDOFF=v1` marker in
+The parent sends a one-shot `MEIVA_ROLLOUT_PARENT_CREDENTIAL_HANDOFF=v1` marker in
 the fresh child's copied environment and consumes the resulting journal before
 refreshing its data-plane settings. A child reached through an older parent has
 no marker; the executing deploy lease identifies it as a compatibility rollout,
