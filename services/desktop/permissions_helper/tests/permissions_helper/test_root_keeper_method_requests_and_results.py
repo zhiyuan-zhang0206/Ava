@@ -140,10 +140,9 @@ def test_read_file_rejects_missing_or_malformed_content(
     def handler(req: dict) -> dict:
         return {"id": req["id"], "ok": True, "result": result}
 
+    path = fake_helper(handler)
     with pytest.raises(PermissionsHelperError, match="invalid file_read response"):
-        PermissionsHelperClient(fake_helper(handler)).read_file(
-            "/Users/meiva/Downloads/example.bin"
-        )  # pyright: ignore[reportUnknownArgumentType]
+        PermissionsHelperClient(path).read_file("/Users/meiva/Downloads/example.bin")  # pyright: ignore[reportUnknownArgumentType]
 
 
 def test_file_operations_raise_server_errors(fake_helper) -> None:
