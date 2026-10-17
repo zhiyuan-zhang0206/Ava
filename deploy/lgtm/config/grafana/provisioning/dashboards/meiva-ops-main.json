@@ -3844,7 +3844,7 @@
     "type": "loki",
     "uid": "loki"
    },
-   "description": "Share of task_update events with status='done' \u2014 only updates carrying a status count toward the denominator (event_name='task_update', category='audit').",
+   "description": "Share of task status changes that are done: numerator = task_update events with status='done', denominator = task_update events carrying any status (event_name='task_update', category='audit'). This is NOT a backlog completion rate \u2014 a cluster that closes nothing has no denominator, and the panel stays empty.",
    "fieldConfig": {
     "defaults": {
      "color": {
@@ -3900,13 +3900,13 @@
       "uid": "loki"
      },
      "editorMode": "code",
-     "expr": "100 * sum(count_over_time({service_name=\"unknown_service\", event_name=\"task_update\"} | json | category=\"audit\" | attributes_status=\"done\" [5m])) / sum(count_over_time({service_name=\"unknown_service\", event_name=\"task_update\"} | json | category=\"audit\" | attributes_status!=\"\" [5m]))",
+     "expr": "100 * sum(count_over_time({service_name=\"unknown_service\", event_name=\"task_update\"} | json | category=\"audit\" | attributes_status=\"done\" [1h])) / sum(count_over_time({service_name=\"unknown_service\", event_name=\"task_update\"} | json | category=\"audit\" | attributes_status!=\"\" [1h]))",
      "legendFormat": "done %",
      "queryType": "range",
      "refId": "A"
     }
    ],
-   "title": "Task completion rate",
+   "title": "Done share of task status changes",
    "type": "timeseries"
   },
   {
