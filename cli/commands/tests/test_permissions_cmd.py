@@ -11,6 +11,7 @@ from base.host.permissions_helper.grants import checklist, gate
 from base.host.permissions_helper.grants.catalog import PREFLIGHT_SERVICES, Grant
 from base.host.permissions_helper.grants.probe import ProbeResult
 from cli.commands import permissions as cmd
+from services.desktop.permissions_helper.onboarding import GateService
 
 NOW = datetime(2026, 10, 17, 9, 0, tzinfo=UTC)
 
@@ -36,7 +37,7 @@ def _args(**kwargs: Any) -> argparse.Namespace:
     return argparse.Namespace(**base)
 
 
-class FakeService:
+class FakeService(GateService):
     def __init__(self, report: gate.GateReport, *, restart: str = "") -> None:
         self._report = report
         self._restart = restart
