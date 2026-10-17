@@ -31,6 +31,13 @@ describe("ToastHost", () => {
     expect(alert.textContent).toBe("Save failed: 500");
   });
 
+  it("stays above the composer band", () => {
+    vi.useFakeTimers();
+    render(<ToastHost />);
+    act(() => useStore.getState().showToast("boom"));
+    expect(screen.getByRole("alert").className).toContain("bottom-24");
+  });
+
   it("dismisses after 3s", () => {
     vi.useFakeTimers();
     render(<ToastHost />);
