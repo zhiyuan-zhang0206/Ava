@@ -35,6 +35,16 @@ show em dashes while TPS stays visible. Durations use the shared tiering —
 one decimal, `0` → em dash. Token counts roll `≥1000M` to `B` and past `1000B` to
 `T`. The section header carries the window picker and the ⟳ ([[ui/web/src/docs/frontend-components/inspector/queries-and-refresh.meiva.okf.md|reads and refresh]]).
 
+**Context** is the selected agent's context-window occupancy: a wide gauge (the
+same `ContextMeter` the composer used to carry, ticks at the wind-down and
+compact thresholds) with the header badge showing occupancy as a percentage,
+then two cells — used / window, and wind-down / compact in tokens. It reads the
+timeline store's token slice, the values `useTokenUsage` keeps for the selected
+agent, so the panel never disagrees with the timeline about whose window it is
+showing. The section renders nothing before the first LLM call (all zeros).
+Moved here from the composer (user ruling 2026-10-17); the composer now shows it
+only when `display.composer_context_meter` is opted in, and then as a bare gauge.
+
 **Page** lists the agent's open pages as external links (title or name plus the
 URL), hidden entirely when none is open; the read is `useAgentPages`.
 

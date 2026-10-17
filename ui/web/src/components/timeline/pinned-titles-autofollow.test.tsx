@@ -67,8 +67,7 @@ function setupStuckBlock() {
   vi.spyOn(viewport, "getBoundingClientRect").mockReturnValue(mockRect(0, 800, 800));
   const turnEl = container.querySelector<HTMLElement>('[data-turn-expanded="true"]')!;
   vi.spyOn(turnEl, "getBoundingClientRect").mockReturnValue(mockRect(10, 700, 690));
-  const wrapper = container.querySelector<HTMLElement>('[class~="group/timeline"]')!;
-  return { viewport, wrapper, toggle: screen.getByTestId("turn-toggle") };
+  return { container, viewport, toggle: screen.getByTestId("turn-toggle") };
 }
 
 afterEach(() => {
@@ -78,27 +77,26 @@ afterEach(() => {
 
 describe("TimelineView pinned titles during auto-follow", () => {
   it("keeps the pinned header through an auto-follow growth pin", async () => {
-    const { viewport, wrapper, toggle } = setupStuckBlock();
+    const { viewport, toggle } = setupStuckBlock();
     expect(toggle.getAttribute("data-stuck")).toBe("false");
 
     viewport.scrollTop = 1400;
     act(() => { fireEvent.scroll(viewport); });
 
-    expect(wrapper.dataset.fastScrolling).toBeUndefined();
     await waitFor(() => expect(toggle.getAttribute("data-stuck")).toBe("true"));
-    expect(wrapper.dataset.fastScrolling).toBeUndefined();
     expect(toggle.className).toContain("backdrop-blur-md");
   });
 
-  it("still releases the titles for fast movement after the reader leaves the bottom", async () => {
-    const { viewport, wrapper, toggle } = setupStuckBlock();
+  it("keeps the pin when the reader leaves the bottom at speed", async () => {
+    const { container, viewport, toggle } = setupStuckBlock();
 
     viewport.scrollTop = 1400;
     act(() => { fireEvent.scroll(viewport); });
     viewport.scrollTop = 1000;
     act(() => { fireEvent.scroll(viewport); });
 
-    await waitFor(() => expect(wrapper.dataset.fastScrolling).toBe("true"));
-    await waitFor(() => expect(toggle.getAttribute("data-stuck")).toBe("false"));
+    await waitFor(() => expect(toggle.getAttribute("data-stuck")).toBe("true"));
+    expect(toggle.className).toContain("sticky");
+    expect(container.querySelector("[data-fast-scrolling]")).toBeNull();
   });
 });

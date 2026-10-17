@@ -2,6 +2,7 @@
 export const INSPECT_SECTION_ORDER = {
   runLink: 50,
   costActivity: 75,
+  context: 90,
   page: 100,
   shells: 200,
   liveness: 300,

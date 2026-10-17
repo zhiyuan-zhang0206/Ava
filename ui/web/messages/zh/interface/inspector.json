@@ -47,5 +47,9 @@
   "windowedUnavailable": "窗口化检查器数据不可用",
   "retryWindowed": "重试窗口化数据",
   "openRunTimeline": "打开运行时间线",
-  "jumpNotice": "通知"
+  "jumpNotice": "通知",
+  "sectionContext": "上下文",
+  "metricContextUsed": "已用",
+  "metricContextLimits": "回收提醒 / 自动压缩",
+  "metricContextLimitsHint": "软 / 硬"
 }

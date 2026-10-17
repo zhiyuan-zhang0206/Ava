@@ -294,10 +294,8 @@ describe("MessageCard", () => {
     expect(pill?.className).toContain("pointer-events-none");
     expect(pill?.className).toContain("group-hover/msgcard:pointer-events-auto");
     expect(pill?.className).toContain("focus-within:pointer-events-auto");
-    // Touch/coarse-pointer devices have no real :hover to gate on — they opt
-    // out of the reveal gate entirely (always visible + tappable there).
-    expect(pill?.className).toContain("pointer-coarse:opacity-100");
-    expect(pill?.className).toContain("pointer-coarse:pointer-events-auto");
+    expect(pill?.className).toContain("pointer-coarse:hidden");
+    expect(pill?.className).not.toContain("pointer-coarse:opacity-100");
   });
 });
 

@@ -16,9 +16,10 @@ and each section's own rendering facts live in
 
 **One ordered list, no filter.** The body is a single list of sections
 (`INSPECT_SECTION_ORDER` in `lib/inspector/inspector-widgets.ts`): the Open run
-timeline entry (50) first, the merged Cost + Activity section (75) second, then
-the runtime sections in their established order — page (100), shells (200),
-liveness (300), configuration overlay (400) — and the open notice (800) last.
+timeline entry (50) first, the merged Cost + Activity section (75) second, the
+Context section (90), then the runtime sections in their established order —
+page (100), shells (200), liveness (300), configuration overlay (400) — and the
+open notice (800) last.
 Plugin widgets carry their own `order` and slot between those keys; equal orders
 stack built-in sections first, then widgets by (plugin, id), so the sort is
 deterministic regardless of registration order and DOM order is visual order.
@@ -54,7 +55,7 @@ scroll-to-top reset the former remount gave a new selection.
 ```meiva-contract
 id = "section-order"
 kind = "invariant"
-statement = "The panel renders one merged sorted list: the Open run timeline entry (50) first, the merged Cost + Activity section (75), then page (100), shells (200), liveness (300) and the configuration overlay (400), and the open notice (800) last. Plugin widgets keep their own order and slot between those keys; ties stack built-in sections first, then widgets by (plugin, id). The non-embedded header carries the title alone — no category or section filter — and embedded panels render no header."
+statement = "The panel renders one merged sorted list: the Open run timeline entry (50) first, the merged Cost + Activity section (75), the Context section (90), then page (100), shells (200), liveness (300) and the configuration overlay (400), and the open notice (800) last. Plugin widgets keep their own order and slot between those keys; ties stack built-in sections first, then widgets by (plugin, id). The non-embedded header carries the title alone — no category or section filter — and embedded panels render no header."
 code = [
   "ui/web/src/lib/inspector/inspector-widgets.ts:INSPECT_SECTION_ORDER",
   "ui/web/src/components/inspector/inspector-panel.tsx:InspectorPanel",

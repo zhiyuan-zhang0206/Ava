@@ -28,7 +28,6 @@ export type ComposerMode = "disabled" | "idle" | "busy";
 interface Props {
   mode: ComposerMode;
   children?: React.ReactNode;
-  details?: React.ReactNode;
   onSend: (content: string, imageUrls: string[], clientMessageId: string) => Promise<boolean>;
   onStop: () => void;
   onUploadFiles?: (files: File[]) => void;
@@ -40,6 +39,7 @@ interface Props {
   maxContextTokens?: number;
   softCompactTokens?: number;
   hardCompactTokens?: number;
+  showContextMeter?: boolean;
   agentId?: number | null;
   agentTerminated?: boolean;
   maxWidthCss?: string;
@@ -124,7 +124,7 @@ function readSendAttempt(agentId: number): SendAttempt | null {
   }
 }
 
-export function Composer({ mode, onSend, onStop, onUploadFiles, onAttachImage, filesUploading = false, focusToken, contextTokens, contextPending = false, maxContextTokens = 0, softCompactTokens = 0, hardCompactTokens = 0, agentId = null, agentTerminated = false, maxWidthCss, suggestions = null, children, details }: Props) {
+export function Composer({ mode, onSend, onStop, onUploadFiles, onAttachImage, filesUploading = false, focusToken, contextTokens, contextPending = false, maxContextTokens = 0, softCompactTokens = 0, hardCompactTokens = 0, agentId = null, agentTerminated = false, showContextMeter = false, maxWidthCss, suggestions = null, children }: Props) {
   const t = useTranslations("common");
   const prevAgentIdRef = useRef(agentId);
   const [value, setValue] = useState(() => {
@@ -444,25 +444,27 @@ export function Composer({ mode, onSend, onStop, onUploadFiles, onAttachImage, f
         {children}
         <span data-testid="composer-meta" className={cn("truncate", commandHint && "italic", MIN_W_0)}>
           {commandHint ??
-            (contextTokens > 0 ? (
-              <ContextButton
-                agentId={agentId}
-                open={breakdownOpen}
-                onOpenChange={handleBreakdownOpenChange}
-                contextTokens={contextTokens}
-                maxContextTokens={maxContextTokens}
-                softCompactTokens={softCompactTokens}
-                hardCompactTokens={hardCompactTokens}
-              />
-            ) : contextPending ? (
-              <ContextMeterGhost />
+            (showContextMeter ? (
+              contextTokens > 0 ? (
+                <ContextButton
+                  agentId={agentId}
+                  open={breakdownOpen}
+                  onOpenChange={handleBreakdownOpenChange}
+                  contextTokens={contextTokens}
+                  maxContextTokens={maxContextTokens}
+                  softCompactTokens={softCompactTokens}
+                  hardCompactTokens={hardCompactTokens}
+                  showText={false}
+                />
+              ) : contextPending ? (
+                <ContextMeterGhost />
+              ) : (
+                " "
+              )
             ) : (
               " "
             ))}
         </span>
-        {details && (
-          <span className={cn("relative ml-auto shrink-0 items-center gap-2", FLEX)}>{details}</span>
-        )}
       </div>
       {filesUploading ? (
         <div

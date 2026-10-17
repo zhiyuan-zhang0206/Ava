@@ -31,7 +31,6 @@ import { settleSavedTimelineScroll } from "./model/restore-settle";
 import { classifyItem } from "./model/runs";
 import { groupTimelineSegments } from "./model/segments";
 import { useCompactTransitionAnchor } from "./model/use-compact-transition-anchor";
-import { useStickyHeaderMotion } from "./model/use-sticky-header-motion";
 import { useOlderHistoryPull } from "./model/use-older-history-pull";
 import { applySavedTimelineScroll, useTimelineWindow, useTimelineWindowLimits } from "./model/use-timeline-window";
 import { LoadOlderSpinner, LoadOlderKeyboardButton, ColdLoadSpinner, ScrollToBottomButton } from "./overlays";
@@ -149,14 +148,10 @@ export const TimelineView = memo(function TimelineView({
       wrapperRef.current?.querySelector<HTMLElement>('[data-slot="scroll-area-viewport"]') ??
       null;
     if (!viewport) return;
-    const { topId, childId } = wrapperRef.current?.dataset.fastScrolling === "true"
-      ? { topId: null, childId: null }
-      : findClosestStuckHeaderId(viewport, BAR_HEIGHT_PX);
+    const { topId, childId } = findClosestStuckHeaderId(viewport, BAR_HEIGHT_PX);
     setActiveStuckHeaderId((prev) => (prev === topId ? prev : topId));
     setActiveStuckChildId((prev) => (prev === childId ? prev : childId));
   }, []);
-
-  const trackHeaderScrollMotion = useStickyHeaderMotion(wrapperRef, threadKey, updateStuckHeader);
 
   const stickyThresholds = useMemo(
     () =>
@@ -391,7 +386,6 @@ export const TimelineView = memo(function TimelineView({
       const isPrependEcho = prependEchoRef.current || boundaryCorrection;
       prependEchoRef.current = false;
 
-      trackHeaderScrollMotion(viewport, isPrependEcho || controller.isSticky());
       if (direction !== "none" && !isPrependEcho) {
         if (pendingRestoreRef.current) holdRestoredPositionRef.current = true;
         pendingRestoreRef.current = null;
@@ -465,7 +459,7 @@ export const TimelineView = memo(function TimelineView({
       viewport.removeEventListener("touchcancel", onTouchCancel);
       ro.disconnect();
     };
-  }, [applyPendingRestore, settleRestoredPosition, restoreInFlight, controller, stickyThresholds, measureAtBottom, maybeColdFill, pinToBottom, trimFollowing, updateStuckHeader, trackHeaderScrollMotion, prepareHistoryPull, historyPullActive, pullScroll, pullScrollEnd, pullWheel, pullTouchStart, pullTouchMove, pullTouchEnd, cancelPullTouch]);
+  }, [applyPendingRestore, settleRestoredPosition, restoreInFlight, controller, stickyThresholds, measureAtBottom, maybeColdFill, pinToBottom, trimFollowing, updateStuckHeader, prepareHistoryPull, historyPullActive, pullScroll, pullScrollEnd, pullWheel, pullTouchStart, pullTouchMove, pullTouchEnd, cancelPullTouch]);
 
   const scrollToBottomRequest = useTimelineStore((s) => s.scrollToBottomRequest);
   const lastForceRequest = useRef<{ request: number; thread: string | undefined } | null>(null);
@@ -795,7 +789,7 @@ export const TimelineView = memo(function TimelineView({
   }, [controller]);
 
   return (
-    <div ref={wrapperRef} className={cn("relative group/timeline", FLEX_1, MIN_H_0, OVERFLOW_HIDDEN)}>
+    <div ref={wrapperRef} className={cn("relative", FLEX_1, MIN_H_0, OVERFLOW_HIDDEN)}>
       <LoadOlderSpinner loadingOlder={loadingOlder} pullProgress={olderPullProgress} pullOffset={olderPullOffset} returning={olderPullReturning} />
       {hasMoreOlder && onLoadOlder ? <LoadOlderKeyboardButton loading={loadingOlder} onClick={loadOneOlderPage} /> : null}
       <ColdLoadSpinner show={loading && items.length === 0} />

@@ -315,24 +315,19 @@ export const HEADER_CLS =
 // pins one level deeper instead (STICKY_CHILD_HEADER_CLS below). While
 // `isStuck`, the header switches to the elevated frosted-glass surface over the
 // body scrolling beneath it; the resting header remains transparent.
-export const STICKY_HEADER_CLS =
-  "sticky top-11 z-10 group-data-[fast-scrolling=true]/timeline:relative group-data-[fast-scrolling=true]/timeline:top-auto";
+//
+// meiva:ref ui/web/src/docs/frontend-components/timeline-view/sticky-scroll.meiva.okf.md#sticky-header-pin
+export const STICKY_HEADER_CLS = "sticky top-11 z-10";
 
-// The nested variant (task #3215): a work block's child card pins under the
-// block header's pinned bottom — the same 2.75rem bar offset (BAR_HEIGHT_CLASS
-// h-11) plus --turn-header-h, the block header's live height, measured and set
-// on the block root by TurnBlock (run-block.tsx). z-5 keeps every child under
-// the block header (z-10) while staying above the card body scrolling beneath
-// it. Tailwind needs the literal class string (underscores = the calc spaces).
+// meiva:ref ui/web/src/docs/frontend-components/timeline-view/sticky-scroll.meiva.okf.md#sticky-header-pin
 export const STICKY_CHILD_HEADER_CLS =
-  "sticky top-[calc(2.75rem_+_var(--turn-header-h,0px))] z-[5] group-data-[fast-scrolling=true]/timeline:relative group-data-[fast-scrolling=true]/timeline:top-auto";
+  "sticky top-[calc(2.75rem_+_var(--turn-header-h,0px))] z-[5]";
 // A single frosted pane covers the header and its 2px top overlap, preserving
 // the translucent hover without an unblurred seam under HeaderBar/parent turn.
 // The button stays transparent: painting the pane twice would flatten the glass.
 // All edges are paint-only to preserve measured height and avoid a pin loop.
 // Sticky z-index contains the pane behind the label; the 16px shadow seals the
 // scrollbar gutter and the separator sits inside the pane's bottom edge.
-//
 // The pane's `::before` box is kept present (same `content-['']`, geometry,
 // and transition declarations) in BOTH stuck and unstuck states — only its
 // background/blur *values* differ. `content` flipping between `normal` (no
@@ -360,27 +355,7 @@ export const UNSTUCK_HEADER_CLS =
   HEADER_PANE_GEOMETRY_CLS + " " +
   "before:bg-transparent before:backdrop-blur-none";
 
-// The colored left-border container. cardText tints the whole card (markers).
-// `actions` (copy / fork) is an optional overlay pinned to the block's
-// bottom-right corner, revealed on hover — a null actions prop (collapsed /
-// partial / not-yet-eligible rows) mounts nothing, so those rows carry zero
-// extra DOM or listeners. The overlay uses a NAMED group (group/msgcard) so
-// it doesn't cross-talk with the unnamed `group`/`group-hover` pattern
-// already used inside item content (e.g. the code-block copy icon in
-// ./item's EnvelopeContent, python-code.tsx, markdown.tsx) — hovering the
-// card must not also reveal those unrelated inner hover affordances.
-// The outer positioning strip spans the full card width (`inset-x-0`) but
-// stays `pointer-events-none`; only the pill itself is ever interactive, and
-// even the pill stays `pointer-events-none` while invisible (opacity: 0 does
-// NOT disable hit-testing on its own) — without that, a tap in the card's
-// bottom-right corner on a fine-pointer device would silently hit an unseen
-// copy/fork button before the user ever saw it. `pointer-events-auto` only
-// switches on together with the same hover/focus-within variant that raises
-// opacity. A touch/coarse-pointer device has no real `:hover` at all, so
-// `pointer-coarse:` unconditionally opts it out of the hover gate — the pill
-// is always visible and tappable there, matching how touch UIs generally
-// forgo hover-to-discover chrome. Mouse/trackpad (fine pointer) keeps the
-// gated reveal.
+// meiva:ref ui/web/src/docs/frontend-components/timeline-view/card-chrome.meiva.okf.md#card-actions-overlay
 export function MessageCard({
   config,
   actions,
@@ -415,7 +390,7 @@ export function MessageCard({
               "group-hover/msgcard:bg-background/70 group-hover/msgcard:border group-hover/msgcard:border-border/40",
               "focus-within:opacity-100 focus-within:pointer-events-auto",
               "focus-within:bg-background/70 focus-within:border focus-within:border-border/40",
-              "pointer-coarse:opacity-100 pointer-coarse:pointer-events-auto pointer-coarse:bg-transparent pointer-coarse:border-0",
+              "pointer-coarse:hidden",
               FLEX
             )}
           >
