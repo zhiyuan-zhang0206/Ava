@@ -51,9 +51,14 @@ class FakeGate(GateService):
 
 
 @pytest.fixture
-def client() -> TestClient:
-    app = FastAPI()
-    app.include_router(host_permissions.router)
+def app() -> FastAPI:
+    built = FastAPI()
+    built.include_router(host_permissions.router)
+    return built
+
+
+@pytest.fixture
+def client(app: FastAPI) -> TestClient:
     return TestClient(app)
 
 
@@ -62,12 +67,14 @@ def gate_stub() -> FakeGate:
     return FakeGate(_report(**{"screen-recording": Grant.DENIED}))
 
 
-def _install(client: TestClient, stub: FakeGate) -> None:
-    client.app.dependency_overrides[host_permissions.gate_service] = lambda: stub
+def _install(app: FastAPI, stub: FakeGate) -> None:
+    app.dependency_overrides[host_permissions.gate_service] = lambda: stub
 
 
-def test_get_returns_the_live_checklist(client: TestClient, gate_stub: FakeGate) -> None:
-    _install(client, gate_stub)
+def test_get_returns_the_live_checklist(
+    client: TestClient, app: FastAPI, gate_stub: FakeGate
+) -> None:
+    _install(app, gate_stub)
     body = client.get("/api/host/permissions").json()
     assert body["state"] == "action_required"
     assert body["required_missing"] == 1
@@ -78,9 +85,9 @@ def test_get_returns_the_live_checklist(client: TestClient, gate_stub: FakeGate)
 
 
 def test_request_refuses_to_raise_dialogs_without_a_person_present(
-    client: TestClient, gate_stub: FakeGate
+    client: TestClient, app: FastAPI, gate_stub: FakeGate
 ) -> None:
-    _install(client, gate_stub)
+    _install(app, gate_stub)
     response = client.post("/api/host/permissions/request", json={"confirm_user_present": False})
     assert response.status_code == 400
     assert "person at the machine" in response.json()["detail"]
@@ -88,9 +95,9 @@ def test_request_refuses_to_raise_dialogs_without_a_person_present(
 
 
 def test_request_and_defer_go_through_the_same_domain_call(
-    client: TestClient, gate_stub: FakeGate
+    client: TestClient, app: FastAPI, gate_stub: FakeGate
 ) -> None:
-    _install(client, gate_stub)
+    _install(app, gate_stub)
     assert (
         client.post("/api/host/permissions/request", json={"confirm_user_present": True}).json()[
             "state"
