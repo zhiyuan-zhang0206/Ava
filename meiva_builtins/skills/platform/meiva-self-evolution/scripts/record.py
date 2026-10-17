@@ -18,6 +18,7 @@ from audit import LeakPaths, invalidated, scan
 from label import label
 
 from base.agents.history.checkpoint import CheckpointReadError, load_checkpoint_messages_full
+from base.agents.messages.envelope import SYSTEM_MARKER
 from base.db import Database
 from base.telemetry.audit_events import SkillInvokedPayload
 
@@ -84,7 +85,6 @@ PEER_FEEDBACK_KEYWORDS = [
 
 
 HUMAN_SOURCES = frozenset({"user", "ui:web"})
-SYSTEM_PREAMBLE = "[system]"
 
 
 def _detect_correction(content: str) -> bool:
@@ -229,7 +229,7 @@ def _first_human_message(transcript: list[dict[str, str]]) -> str:
         content = message.get("content") or ""
         if message.get("type") != "human" or not content.strip():
             continue
-        if content.lstrip().startswith(SYSTEM_PREAMBLE):
+        if content.lstrip().startswith(SYSTEM_MARKER):
             continue
         return content
     return ""
