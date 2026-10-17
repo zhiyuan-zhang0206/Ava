@@ -87,6 +87,9 @@ from .wire import (
     PingResult as PingResult,
 )
 from .wire import (
+    RequestGrantsResult as RequestGrantsResult,
+)
+from .wire import (
     RootConflictInfo as RootConflictInfo,
 )
 from .wire import (
@@ -673,6 +676,11 @@ class PermissionsHelperClient(StatefulCalls):
             return ScreenCaptureStatus(
                 state=ScreenCaptureState.NO_GRANT, diagnostic=_NO_GRANT_DIAGNOSTIC
             )
+
+    def request_grants(self) -> RequestGrantsResult:
+        self.require_capability("request_grants_v1", "grant requests")
+        result: RequestGrantsResult = self.call("request_grants")
+        return result
 
     def check_accessibility(self, *, settle_s: float = _PROBE_SETTLE_S) -> AccessibilityStatus:
         """Report whether the helper holds the Accessibility grant.

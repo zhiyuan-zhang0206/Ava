@@ -50,6 +50,7 @@ from cli.parsers.management import (
     add_config_parser,
     add_schedules_parser,
 )
+from cli.parsers.permissions import add_permissions_parser
 from cli.parsers.pty import add_pty_parser
 
 __all__ = ["build_parser", "command_options", "parse_args"]
@@ -78,6 +79,7 @@ def build_parser(
     add_pty_parser(sub)
     add_converge_parser(sub)
     add_firewall_parser(sub)
+    add_permissions_parser(sub)
     add_lgtm_parser(sub, retained_children=retained_children)
     add_cluster_parser(sub)
     add_computer_parser(sub)

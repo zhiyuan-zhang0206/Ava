@@ -98,6 +98,7 @@ from gateway.routers import (
 from gateway.routers import (
     guide as guide_router,
 )
+from gateway.routers import host_permissions as host_permissions_router
 from gateway.routers import (
     insights as insights_router,
 )
@@ -513,6 +514,7 @@ def create_app(
         timeline_router.router,
         reply_suggestion_router.router,
         system_router.router,
+        host_permissions_router.router,
         pages_router.router,
         notices_router.router,
         guarded_notices_router.router,
