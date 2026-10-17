@@ -45,6 +45,20 @@ track-branch read from the existing process ConfigBoot for each request. The
 indexer and memory checkout initialization retain their existing composition.
 See [[gateway/routers/docs/memory.meiva.okf.md|memory route contracts]].
 
+## One data root per process
+
+`GatewayProcess` takes `home`: the data root its entry read once from `$MEIVA_HOME`.
+Every owner the process builds reads that value — the event writer and the bus
+(`event_bus_config_from_config`), the config authority's `<home>/.env`, the insights
+socket, the skills load dir, a deleted schedule's work dir, the health identity, the
+generation ledger and session key behind `cluster_credential` / `session_mints`, and the
+pause journal `business_paused(home)` reads on every request. Request paths read
+`app.state.gateway_process.home`; none resolves the process default again, so a second
+app in one process reads none of the first root's files. `GatewayProcess.home` keeps the
+entry's unresolved string, so `/api/health` still reports the exact `$MEIVA_HOME` that
+`probe_unit_home` compares against; owners that take a filesystem path resolve it
+themselves.
+
 Parent node: [[gateway.meiva.okf.md|Gateway]].
 
 The route-contract test recursively follows the current FastAPI include
