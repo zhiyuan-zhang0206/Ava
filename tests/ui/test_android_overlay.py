@@ -80,6 +80,31 @@ android {
 }
 """
 
+GENERATED_MAIN_ACTIVITY = """package com.meiva.app
+
+import android.os.Bundle
+import androidx.activity.enableEdgeToEdge
+import app.tauri.plugin.TauriActivity
+
+class MainActivity : TauriActivity() {
+  override fun onCreate(savedInstanceState: Bundle?) {
+    enableEdgeToEdge()
+    super.onCreate(savedInstanceState)
+  }
+}
+"""
+
+
+def _write_generated(tmp_path: Path) -> Path:
+    main = tmp_path / "app" / "src" / "main"
+    main.mkdir(parents=True)
+    (main / "AndroidManifest.xml").write_text(GENERATED_MANIFEST)
+    (tmp_path / "app" / "build.gradle.kts").write_text(GENERATED_GRADLE)
+    package = main / "java" / Path(*overlay.PACKAGE.split("."))
+    package.mkdir(parents=True)
+    (package / "MainActivity.kt").write_text(GENERATED_MAIN_ACTIVITY)
+    return main
+
 
 def _load_overlay():
     """Import the patcher by path — `ui/app/android/` is not an import package."""
@@ -209,11 +234,7 @@ def test_overlay_carries_the_keystore_secret_plugin() -> None:
 
 
 def test_apply_copies_the_keystore_sources_into_the_generated_package(tmp_path: Path) -> None:
-    main = tmp_path / "app" / "src" / "main"
-    main.mkdir(parents=True)
-    (main / "AndroidManifest.xml").write_text(GENERATED_MANIFEST)
-    gradle = tmp_path / "app" / "build.gradle.kts"
-    gradle.write_text(GENERATED_GRADLE)
+    main = _write_generated(tmp_path)
 
     overlay.apply(_OVERLAY.parent, tmp_path)
 
@@ -225,11 +246,7 @@ def test_apply_copies_the_keystore_sources_into_the_generated_package(tmp_path: 
 def test_apply_copies_the_update_installer_plugin_into_the_generated_package(
     tmp_path: Path,
 ) -> None:
-    main = tmp_path / "app" / "src" / "main"
-    main.mkdir(parents=True)
-    (main / "AndroidManifest.xml").write_text(GENERATED_MANIFEST)
-    gradle = tmp_path / "app" / "build.gradle.kts"
-    gradle.write_text(GENERATED_GRADLE)
+    main = _write_generated(tmp_path)
 
     overlay.apply(_OVERLAY.parent, tmp_path)
 
@@ -243,11 +260,7 @@ def test_apply_copies_the_update_installer_plugin_into_the_generated_package(
 def test_apply_copies_the_cookie_injection_plugin_into_the_generated_package(
     tmp_path: Path,
 ) -> None:
-    main = tmp_path / "app" / "src" / "main"
-    main.mkdir(parents=True)
-    (main / "AndroidManifest.xml").write_text(GENERATED_MANIFEST)
-    gradle = tmp_path / "app" / "build.gradle.kts"
-    gradle.write_text(GENERATED_GRADLE)
+    main = _write_generated(tmp_path)
 
     overlay.apply(_OVERLAY.parent, tmp_path)
 
@@ -258,14 +271,39 @@ def test_apply_copies_the_cookie_injection_plugin_into_the_generated_package(
 def test_apply_copies_the_proguard_rules_that_preserve_plugin_reflection(
     tmp_path: Path,
 ) -> None:
-    main = tmp_path / "app" / "src" / "main"
-    main.mkdir(parents=True)
-    (main / "AndroidManifest.xml").write_text(GENERATED_MANIFEST)
-    gradle = tmp_path / "app" / "build.gradle.kts"
-    gradle.write_text(GENERATED_GRADLE)
+    _write_generated(tmp_path)
 
     overlay.apply(_OVERLAY.parent, tmp_path)
     overlay.apply(_OVERLAY.parent, tmp_path)
 
     rules = (tmp_path / "app" / "proguard-meiva.pro").read_text()
     assert "-keep class com.meiva.app.** { *; }" in rules
+
+
+def test_activity_pads_the_content_root_by_the_system_bar_insets() -> None:
+    patched = overlay.patch_main_activity(GENERATED_MAIN_ACTIVITY)
+    assert overlay._MAIN_ACTIVITY_MARKER in patched
+    assert "WindowInsetsCompat.Type.systemBars()" in patched
+    assert "WindowInsetsCompat.Type.displayCutout()" in patched
+    assert "setPadding(bars.left, bars.top, bars.right, bars.bottom)" in patched
+    assert "ViewCompat.requestApplyInsets(meivaContent)" in patched
+    assert "enableEdgeToEdge()" in patched
+    assert patched.count("import android.os.Bundle") == 1
+    assert "import androidx.core.view.WindowInsetsCompat" in patched
+
+
+def test_activity_patch_is_idempotent() -> None:
+    once = overlay.patch_main_activity(GENERATED_MAIN_ACTIVITY)
+    assert overlay.patch_main_activity(once) == once
+
+
+def test_activity_patch_rejects_an_unknown_template() -> None:
+    with pytest.raises(ValueError):
+        overlay.patch_main_activity("class MainActivity : TauriActivity()\n")
+
+
+def test_apply_patches_the_generated_activity(tmp_path: Path) -> None:
+    main = _write_generated(tmp_path)
+    overlay.apply(_OVERLAY.parent, tmp_path)
+    source = (main / "java" / Path(*overlay.PACKAGE.split(".")) / "MainActivity.kt").read_text()
+    assert "WindowInsetsCompat.Type.systemBars()" in source

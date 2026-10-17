@@ -23,7 +23,7 @@
       "position:fixed",
       "left:0",
       "right:0",
-      "bottom:0",
+      "top:52px",
       "z-index:2147483647",
       "display:flex",
       "gap:12px",
@@ -33,7 +33,7 @@
       "font:14px system-ui,sans-serif",
       "background:#1b1b22",
       "color:#f4f4f5",
-      "box-shadow:0 -2px 12px rgba(0,0,0,.35)",
+      "box-shadow:0 2px 12px rgba(0,0,0,.35)",
     ].join(";");
 
     var text = document.createElement("span");
