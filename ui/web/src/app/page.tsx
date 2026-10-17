@@ -61,9 +61,11 @@ export default function HomePage() {
   return (
     <main id="main-content" className={cn(FLEX, FLEX_1, MIN_H_0)}>
       <CodeHighlighterPreloader />
-      <div className={cn(FLEX_COL, FLEX_1, MIN_H_0, MIN_W_0)}>
+      <div className={cn(FLEX, FLEX_COL, FLEX_1, MIN_H_0, MIN_W_0)}>
         <PermissionBanner />
-        <HomeShell showError={showError} />
+        <div className={cn(FLEX, FLEX_1, MIN_H_0, MIN_W_0)}>
+          <HomeShell showError={showError} />
+        </div>
       </div>
     </main>
   );
