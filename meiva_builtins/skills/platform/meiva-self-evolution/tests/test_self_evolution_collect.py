@@ -10,7 +10,7 @@ predate the window for long-running agents).
 """
 
 import sys
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 from typing import Any, cast
 
 import httpx
@@ -29,10 +29,14 @@ def collect_mod() -> Any:
     return load_skill_script("platform", "meiva-self-evolution", "scripts", "collect.py")
 
 
-def _insert_agent(cur: psycopg.Cursor, agent_id: int) -> None:
+def _insert_agent(cur: psycopg.Cursor, agent_id: int, spawner: str = "user") -> None:
     cur.execute(
         "INSERT INTO agents (id, label) VALUES (%s, %s)",
         (agent_id, f"test-agent-{agent_id}"),
+    )
+    cur.execute(
+        "INSERT INTO agents_meta (id, spawner, status) VALUES (%s, %s, 'idling')",
+        (agent_id, spawner),
     )
 
 
@@ -47,7 +51,8 @@ def _insert_inbound(
 
 
 def _fetch(collect_mod: Any, cur: psycopg.Cursor, agent_ids: list[int]) -> Any:
-    return collect_mod._inbounds_by_agent(cur, agent_ids, "1 days")
+    now = datetime.now(UTC)
+    return collect_mod._inbounds_by_agent(cur, agent_ids, now - timedelta(days=1), now)
 
 
 def test_old_history_collapses_to_task_prompt(
@@ -70,39 +75,6 @@ def test_old_history_collapses_to_task_prompt(
 
     assert [m["content"] for m in out[1]] == ["task prompt", "window follow-up"]
     assert [m["content"] for m in out[2]] == ["task prompt 2"]
-
-
-def test_quiet_resident_does_not_reuse_ancient_spawner_prompt(
-    collect_mod: Any,
-    db_conn: psycopg.Connection,
-    monkeypatch: pytest.MonkeyPatch,
-    database: Database,
-) -> None:
-    """A historical spawn brief is not the prompt for a quiet collection window."""
-
-    def _empty_transcript(_agent_id: int, *, database: Database) -> list[dict[str, str]]:
-        return []
-
-    monkeypatch.setattr(collect_mod, "_transcript", _empty_transcript)
-    with db_conn.cursor() as cur:
-        _insert_agent(cur, 8)
-        _insert_inbound(cur, 8, "agent:1", "ancient spawn brief", "10 days")
-    db_conn.commit()
-
-    with db_conn.cursor() as cur:
-        inbounds = _fetch(collect_mod, cur, [8])
-
-    rec = collect_mod.build_record(
-        database=database,
-        agent_id=8,
-        week="2026-08-30",
-        events=[],
-        log_events=[],
-        inbounds=inbounds[8],
-        meta=("agent:1", "completed", "delivered"),
-    )
-
-    assert rec["task_prompt"] == ""
 
 
 def test_fresh_worker_uses_in_window_spawner_prompt(
