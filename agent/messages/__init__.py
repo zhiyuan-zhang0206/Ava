@@ -39,6 +39,7 @@ from langchain_core.messages import (
     ToolMessage,
 )
 
+from base.agents.messages.envelope import SYSTEM_MARKER
 from base.agents.messages.kwargs import (
     COMPACT_SUMMARY_HEADER as COMPACT_SUMMARY_HEADER,  # public: the header's owner is the base leaf
 )
@@ -152,7 +153,7 @@ def system_note_message(
     if task_id is not None:
         kwargs["meiva_task_id"] = task_id
     return HumanMessage(
-        content=f"[system] {content}",
+        content=f"{SYSTEM_MARKER} {content}",
         additional_kwargs=_stamp_created_at(_stamp_picked_up(kwargs), created_at),
     )
 
