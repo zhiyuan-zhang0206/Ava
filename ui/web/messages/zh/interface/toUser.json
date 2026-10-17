@@ -11,7 +11,7 @@
   "stale": "连接不可用，显示旧文档。",
   "unavailable": "暂无法读取文档，请稍后重试。",
   "loading": "正在加载…",
-  "empty": "这个 agent 还没有写共享文档。它的当前状态、决策与下一步会出现在这里。",
+  "empty": "No content",
   "noticesUnavailable": "通知刷新失败。",
   "expandNotice": "展开通知",
   "collapseNotice": "折叠通知",
