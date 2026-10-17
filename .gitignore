@@ -15,6 +15,9 @@ __pycache__/
 *.so
 .Python
 .venv/
+# A worktree may symlink its venv at the main checkout's; a symlink is not a
+# directory, so the pattern above misses it.
+.venv
 /env/
 venv/
 *.egg-info/
