@@ -33,7 +33,6 @@ import contextlib
 import json
 import os
 import shutil
-import socket
 import subprocess
 import sys
 import time
@@ -67,6 +66,7 @@ from tests.e2e._ports import (
     GATEWAY_PORT,
     GATEWAY_SOCKET,
     GATEWAY_URL,
+    reserve_health_port,
 )
 from tests.e2e._truncate import truncate_with_deadlock_retry
 from tests.e2e.fixture_environment import E2EEnv
@@ -626,12 +626,11 @@ def agent_host_proc(gateway_proc: str, pty_sessions_proc: None) -> Iterator[None
     env["MEIVA_PROCESS_PROFILE"] = "agent"
     env.update(current_credentials().service_env("runner"))
     env["MEIVA_DB_URL"] = runner_projection()
-    # Kernel-assigned per worker, avoiding a shared health port across tests.
-    with socket.socket() as s:
-        s.bind(("127.0.0.1", 0))
-        agent_host_health_port = s.getsockname()[1]
+    agent_host_reservation = reserve_health_port("agent-host")
+    agent_host_health_port = agent_host_reservation.port
     env["MEIVA_AGENT_HOST_HEALTH_PORT"] = str(agent_host_health_port)
     log_path = _LOG_DIR / f"agent-host-{_E2E_SUFFIX}.log"
+    agent_host_reservation.release()
     with managed_proc(cmd, env=env, label="agent-host", log_path=str(log_path)) as proc:
         try:
             wait_for_port("127.0.0.1", agent_host_health_port, timeout=30.0, label="agent-host")
@@ -661,9 +660,8 @@ def ops_proc(gateway_proc: str) -> Iterator[None]:
     env = os.environ.copy()
     env["MEIVA_PROCESS_PROFILE"] = "runner"
     env.update(current_credentials().service_env("runner"))
-    with socket.socket() as s:
-        s.bind(("127.0.0.1", 0))
-        ops_port = s.getsockname()[1]
+    reservation = reserve_health_port("ops")
+    ops_port = reservation.port
     env["MEIVA_OPS_HEALTH_PORT"] = str(ops_port)
     # Register this single box as a runner advertising its ops URL — what the
     # gateway dials. UPSERT (function-scoped; the port is re-allocated per test).
@@ -676,6 +674,7 @@ def ops_proc(gateway_proc: str) -> Iterator[None]:
         )
         conn.commit()
     log_path = _LOG_DIR / f"ops-{_E2E_SUFFIX}.log"
+    reservation.release()
     with managed_proc(
         [sys.executable, "-m", "tests.e2e.process_support", gateway_proc, _AGENT_OPS_MODULE],
         env=env,
