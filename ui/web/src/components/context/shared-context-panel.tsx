@@ -56,7 +56,7 @@ export function SharedContextPanel({ agentId, document, notices, noticesFailed, 
             <OpenNoticeDetail key={notice.id} agentId={agentId} notice={notice} onResolved={() => dropOpenNotices(queryClient, [notice.id])} />
           </div>}
         </section>}
-        <ToUserDocumentView key={agentId} agentId={agentId} document={document.data} failed={document.isError} pending={document.isFetching} refresh={() => void document.refetch()} />
+        <ToUserDocumentView key={agentId} agentId={agentId} document={document.data} failed={document.isError} pending={document.isFetching} refresh={() => void document.refetch()} mobile={mobile} />
       </div>
       {inspecting && (
         <div data-testid="shared-inspector" className={cn(FLEX, MIN_H_0, FLEX_1)}><Inspector agentId={agentId} embedded /></div>

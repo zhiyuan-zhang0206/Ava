@@ -66,13 +66,43 @@ async def get_to_user(
     return await read_snapshot(request, resource_request(agent_id, reference or []), machine)
 
 
-def attachment_response(content: bytes, name: str) -> Response:
+_PASSIVE_PREFIXES = ("image/", "audio/", "video/")
+_PASSIVE_TYPES = frozenset(
+    {
+        "application/json",
+        "application/pdf",
+        "application/xml",
+        "text/csv",
+        "text/markdown",
+        "text/plain",
+        "text/xml",
+    }
+)
+
+_HTML_TYPES = frozenset({"text/html"})
+
+_HTML_POLICY = (
+    "sandbox allow-scripts; default-src 'none'; "
+    "img-src data: https:; media-src data: https:; font-src data: https:; "
+    "style-src 'unsafe-inline' data: https:; script-src 'unsafe-inline' data: https:; "
+    "form-action 'none'; base-uri 'none'"
+)
+_PASSIVE_POLICY = "sandbox; default-src 'none'; style-src 'unsafe-inline'"
+
+
+# meiva:ref gateway/agents/docs/to-user-resources.meiva.okf.md#resource-disposition
+def response_policy(media_type: str) -> tuple[str, str]:
+
+    if media_type in _HTML_TYPES:
+        return "inline", _HTML_POLICY
+    passive = media_type.startswith(_PASSIVE_PREFIXES) or media_type in _PASSIVE_TYPES
+    return ("inline" if passive else "attachment"), _PASSIVE_POLICY
+
+
+def resource_response(content: bytes, name: str) -> Response:
 
     media_type = mimetypes.guess_type(name)[0] or "application/octet-stream"
-    inline = (
-        media_type.startswith(("image/", "audio/", "video/")) or media_type == "application/pdf"
-    )
-    disposition = "inline" if inline else "attachment"
+    disposition, policy = response_policy(media_type)
     return Response(
         content,
         media_type=media_type,
@@ -80,7 +110,7 @@ def attachment_response(content: bytes, name: str) -> Response:
             "Content-Disposition": f"{disposition}; filename*=UTF-8''{quote(name, safe='')}",
             "Cache-Control": "no-store",
             "X-Content-Type-Options": "nosniff",
-            "Content-Security-Policy": "sandbox; default-src 'none'; style-src 'unsafe-inline'",
+            "Content-Security-Policy": policy,
             "Referrer-Policy": "no-referrer",
         },
     )
@@ -132,4 +162,4 @@ async def get_resource(
             )
     except (httpx.HTTPError, MachineGatewayUrlMissing, MachineNotRegistered) as exc:
         raise HTTPException(503, "The agent's machine is unavailable") from exc
-    return attachment_response(content, resource.name)
+    return resource_response(content, resource.name)
