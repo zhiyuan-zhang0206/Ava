@@ -94,10 +94,13 @@ their JNI response; direct synchronous mobile-plugin calls would deadlock it.
 The console page carries no app-injected floating controls: the Android
 settings shortcut that used to float at the bottom-right corner sat exactly on
 top of the composer's send/stop button (measured 390x844: 34x36 of a 36x36
-button, z-index 2147483646) and is gone. Losing it also loses the console's
-one-tap way back to the bundled settings page; the failure screen still offers
-"Change address", and the update check runs on every console load. Anything the
-injection layer adds to the console must stay out of the composer band.
+button, z-index 2147483646) and is gone. The route back to the bundled
+settings page now lives in the console's own Control page: its App section
+renders only when `window.__TAURI_INTERNALS__` exists (that is, inside the app)
+and calls `app_open_settings`, which the console origin is granted at runtime.
+The failure screen still offers "Change address", and the update check runs on
+every console load. Anything the injection layer adds to the console must stay
+out of the composer band.
 
 
 Android's network-security XML cannot express IP prefixes, so it permits

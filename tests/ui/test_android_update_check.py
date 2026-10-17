@@ -74,6 +74,7 @@ const tick = () => new Promise((resolve) => setTimeout(resolve, 0));
   const banner = appended[0] || null;
   const result = {
     banner: banner !== null,
+    style: banner ? banner.style.cssText : "",
     text: banner ? banner.children[0].textContent : "",
     actions: banner ? banner.children[1].children.map((child) => child.textContent) : [],
     commands: invocations.map((call) => call.command),
@@ -150,6 +151,12 @@ def _run(
         text=True,
     )
     return json.loads(result.stdout)
+
+
+def test_the_banner_stays_out_of_the_composer_band() -> None:
+    style = _run(check=_available())["style"]
+    assert "top:52px" in style
+    assert "bottom:0" not in style
 
 
 def test_offers_a_newer_build_with_an_install_action() -> None:
