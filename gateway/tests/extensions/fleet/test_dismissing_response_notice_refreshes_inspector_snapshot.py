@@ -86,7 +86,7 @@ def test_cross_type_supersede_refreshes_inbox_and_inspector_projections(
     async def _capture_posted(_bus: object, _agent_id: int, notice_id: int, *_args: object) -> None:
         posted.append(notice_id)
 
-    async def _capture_resolved(_bus: object, _agent_id: int, notice_id: int) -> None:
+    async def _capture_resolved(_bus: object, _agent_id: int, notice_id: int, **_: object) -> None:
         resolved.append(notice_id)
 
     monkeypatch.setattr(

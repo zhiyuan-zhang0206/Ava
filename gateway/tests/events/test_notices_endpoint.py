@@ -1,9 +1,12 @@
+import json
 from uuid import uuid4
 
 import psycopg
 
 from base.agents.observation.snapshot import select_one
+from base.api_contracts.idempotency import keyed_headers
 from base.config import settings
+from base.events.live.bus import EventBus, event_bus_config_from_settings
 from base.lm.catalog import ModelCatalog
 from tests.fixtures.gateway_config import gateway_test_client
 
@@ -616,3 +619,72 @@ def test_dismiss_on_fyi_is_409(db_conn: psycopg.Connection) -> None:
         )
     assert resp.status_code == 409
     assert pending_rows(db_conn, a) == []
+
+
+class _RecordingBus(EventBus):
+    def __init__(self) -> None:
+        super().__init__(event_bus_config_from_settings())
+        self.payloads: list[dict[str, object]] = []
+
+    async def publish_best_effort(
+        self, payload: str, *, channel: str | None = None, context: str = ""
+    ) -> int | None:
+        self.payloads.append(json.loads(payload))
+        return 1
+
+
+def test_answer_event_carries_resolution_fields(
+    db_conn: psycopg.Connection, event_bus: EventBus
+) -> None:
+    a = seed_agent(db_conn)
+    nid = insert_notice(db_conn, a, "ship it?", require_response=True)
+    bus = _RecordingBus()
+    with gateway_test_client() as client:
+        client.app.state.bus = bus
+        resp = client.post(
+            f"/api/keyed/v1/agents/{a}/notices/{nid}/resolve",
+            json={"action": "answer", "reply": "yes"},
+            headers={"Idempotency-Key": str(uuid4()), "Idempotency-Scope": "principal-v1"},
+        )
+    assert resp.status_code == 201
+    resolved = [e for e in bus.payloads if e.get("role") == "notice_resolved"]
+    assert len(resolved) == 1
+    event = resolved[0]
+    assert event["notice_id"] == nid
+    assert event["resolution"] == "answered"
+    assert event["require_response"] is True
+    assert event["had_reply"] is True
+    assert isinstance(event["age_seconds"], int) and event["age_seconds"] >= 0
+    assert event["superseded_by"] is None
+
+
+def test_supersede_event_carries_superseded_by(
+    db_conn: psycopg.Connection, event_bus: EventBus
+) -> None:
+    a = seed_agent(db_conn)
+    bus = _RecordingBus()
+    with gateway_test_client() as client:
+        client.app.state.bus = bus
+        first = client.post(
+            f"/api/agents/{a}/notices",
+            json={"title": "first", "require_response": True},
+            headers=keyed_headers("supersede-first"),
+        )
+        second = client.post(
+            f"/api/agents/{a}/notices",
+            json={"title": "second", "require_response": True},
+            headers=keyed_headers("supersede-second"),
+        )
+    assert first.status_code == second.status_code == 201
+    with db_conn.cursor() as cur:
+        cur.execute("SELECT id, title FROM agent_notices WHERE agent_id = %s ORDER BY id", (a,))
+        ids = {title: notice_id for notice_id, title in cur.fetchall()}
+    event = next(
+        e
+        for e in bus.payloads
+        if e.get("role") == "notice_resolved" and e.get("notice_id") == ids["first"]
+    )
+    assert event["resolution"] == "superseded"
+    assert event["require_response"] is True
+    assert event["had_reply"] is False
+    assert event["superseded_by"] == ids["second"]
