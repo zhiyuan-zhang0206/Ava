@@ -1,0 +1,36 @@
+# Rules for the user-facing panel gate (scripts/content_lint/lint_panel_jargon.py).
+#
+# Every pattern and threshold lives here so the writing rule can change without a
+# code change. Chinese markers are \u-escaped: the repo is ASCII-only
+# (scripts/content_lint/lint_no_cjk.py). The body is everything before the first
+# evidence heading; identifiers, paths and links belong there.
+
+[panel]
+evidence_headings = ["\u8be6\u7ec6\u8bc1\u636e", "\u7ec6\u8282\u9875", "\u8bc1\u636e", "Evidence"]
+glossary_headings = ["\u540d\u8bcd\u8868", "\u672f\u8bed\u8868", "Glossary"]
+glossary_table_headers = ["\u8bcd", "\u672f\u8bed", "term", "word"]
+max_body_findings = 5
+max_glossary_entries = 8
+allowed_acronyms = ["CI", "PR", "API", "SDK", "URL", "HTTP", "JSON", "UI", "DB", "ID", "CPU", "GPU"]
+
+[[rule]]
+id = "bare-identifier"
+description = "an internal change or task number appears in the body"
+pattern = '''(?<![A-Za-z0-9_])(?:P|T)\d{1,4}(?![A-Za-z0-9_])'''
+hard = true
+
+[[rule]]
+id = "issue-number"
+description = "a bare issue or task number appears in the body"
+pattern = '''#\d{2,}'''
+hard = true
+
+[[rule]]
+id = "file-path"
+description = "a repository path or source file name appears in the body"
+pattern = '''(?:~/[\w./-]+|[\w.-]+/[\w./-]+\.(?:md|py|json|toml|sh|ts|tsx|html)|\b[\w-]+\.(?:md|py|json|toml|sh)\b)'''
+hard = false
+
+# Internal batch codewords. Extend the list as new batches appear; every entry is
+# matched as a whole token in the body.
+codeword = ["W1", "W2", "W3", "F-P2", "B-T2", "\u5e76\u884c\u6279", "\u91cd\u5efa\u6807\u8bb0", "\u56de\u5f52\u57fa\u7ebf"]
