@@ -10,26 +10,26 @@ from scripts.content_lint.code_comments.tests.cases import record, repository
 
 def api_files() -> dict[str, str]:
     return {
-        "ava/__init__.py": "from . import files\n__all_for_ava__ = ['files']\n",
-        "ava/files.py": "def read(path):\n    return path\n__all_for_ava__ = ['read']\nraise RuntimeError('Never import application code')\n",
-        "ava/docs/files.ava.okf.md": record(
+        "meiva/__init__.py": "from . import files\n__all_for_meiva__ = ['files']\n",
+        "meiva/files.py": "def read(path):\n    return path\n__all_for_meiva__ = ['read']\nraise RuntimeError('Never import application code')\n",
+        "meiva/docs/files.meiva.okf.md": record(
             id="read-contract",
             kind="api",
             statement="Read a file.",
-            code=["ava/files.py:read"],
-            tests=["ava/tests/test_files.py::test_read"],
-            api="ava.files.read",
+            code=["meiva/files.py:read"],
+            tests=["meiva/tests/test_files.py::test_read"],
+            api="meiva.files.read",
         ),
-        "ava/tests/test_files.py": "def test_read():\n    assert True\n",
+        "meiva/tests/test_files.py": "def test_read():\n    assert True\n",
     }
 
 
 def test_generated_docstrings_keep_the_existing_help_input_and_are_checked(tmp_path: Path) -> None:
     repo = repository(tmp_path, api_files())
     assert any(item.code == "contract-binding" for item in check(repo).findings)
-    assert render(repo) == ["ava/files.py"]
+    assert render(repo) == ["meiva/files.py"]
     assert not check(repo, strict_paths=repo.files).findings
-    tree = ast.parse(repo.text("ava/files.py"))
+    tree = ast.parse(repo.text("meiva/files.py"))
     first = tree.body[0]
     assert isinstance(first, ast.FunctionDef)
     assert ast.get_docstring(first) == "Read a file."
@@ -38,7 +38,7 @@ def test_generated_docstrings_keep_the_existing_help_input_and_are_checked(tmp_p
 
 def test_a_private_function_cannot_be_declared_api_to_keep_its_notes(tmp_path: Path) -> None:
     source = api_files()
-    source["ava/files.py"] = "def read(path): return path\n__all_for_ava__ = []\n"
+    source["meiva/files.py"] = "def read(path): return path\n__all_for_meiva__ = []\n"
     repo = repository(tmp_path, source)
     result = check(repo)
     assert any("cannot be proved" in item.message for item in result.findings)
@@ -70,20 +70,20 @@ def test_exported_attribute_help_is_preserved_and_regenerated(
     tmp_path: Path, declaration: str
 ) -> None:
     source = api_files()
-    source["ava/files.py"] = declaration + '\n"Old help."\n__all_for_ava__ = ["LIMIT"]\n'
-    source["ava/docs/files.ava.okf.md"] = record(
+    source["meiva/files.py"] = declaration + '\n"Old help."\n__all_for_meiva__ = ["LIMIT"]\n'
+    source["meiva/docs/files.meiva.okf.md"] = record(
         id="limit-contract",
         kind="api",
         statement="Maximum request count.",
-        code=["ava/files.py:LIMIT"],
-        tests=["ava/tests/test_files.py::test_read"],
-        api="ava.files.LIMIT",
+        code=["meiva/files.py:LIMIT"],
+        tests=["meiva/tests/test_files.py::test_read"],
+        api="meiva.files.LIMIT",
     )
     repo = repository(tmp_path, source)
-    assert render(repo) == ["ava/files.py"]
+    assert render(repo) == ["meiva/files.py"]
     assert not check(repo, strict_paths=repo.files).findings
-    assert "Maximum request count." in repo.text("ava/files.py")
-    assert declaration in repo.text("ava/files.py")
+    assert "Maximum request count." in repo.text("meiva/files.py")
+    assert declaration in repo.text("meiva/files.py")
     assert render(repo) == []
 
 
@@ -98,28 +98,30 @@ def test_attribute_generation_without_existing_help_keeps_the_assignment() -> No
 
 def test_unproved_dynamic_attribute_fails_without_deleting_help(tmp_path: Path) -> None:
     source = api_files()
-    source["ava/files.py"] = 'LIMIT: int\n"Keep this dynamic help."\n__all_for_ava__ = ["LIMIT"]\n'
-    source["ava/docs/files.ava.okf.md"] = record(
+    source["meiva/files.py"] = (
+        'LIMIT: int\n"Keep this dynamic help."\n__all_for_meiva__ = ["LIMIT"]\n'
+    )
+    source["meiva/docs/files.meiva.okf.md"] = record(
         id="limit-contract",
         kind="api",
         statement="Maximum request count.",
-        code=["ava/files.py:LIMIT"],
-        tests=["ava/tests/test_files.py::test_read"],
-        api="ava.files.LIMIT",
+        code=["meiva/files.py:LIMIT"],
+        tests=["meiva/tests/test_files.py::test_read"],
+        api="meiva.files.LIMIT",
     )
     repo = repository(tmp_path, source)
     with pytest.raises(ValueError, match="cannot be proved"):
         render(repo)
-    assert repo.text("ava/files.py") == source["ava/files.py"]
+    assert repo.text("meiva/files.py") == source["meiva/files.py"]
 
 
 def property_files() -> dict[str, str]:
     source = api_files()
-    source["ava/files.py"] = "\n".join(
+    source["meiva/files.py"] = "\n".join(
         [
             "import sys",
             "from types import ModuleType",
-            "__all_for_ava__ = ['context']",
+            "__all_for_meiva__ = ['context']",
             "context: object",
             '"Original context help."',
             "class Surface(ModuleType):",
@@ -134,13 +136,13 @@ def property_files() -> dict[str, str]:
             "",
         ]
     )
-    source["ava/docs/files.ava.okf.md"] = record(
+    source["meiva/docs/files.meiva.okf.md"] = record(
         id="context-help",
         kind="api",
         statement="Your execution context.",
-        code=["ava/files.py:context"],
-        tests=["ava/tests/test_files.py::test_read"],
-        api="ava.files.context",
+        code=["meiva/files.py:context"],
+        tests=["meiva/tests/test_files.py::test_read"],
+        api="meiva.files.context",
     )
     return source
 
@@ -148,13 +150,13 @@ def property_files() -> dict[str, str]:
 def test_module_property_help_is_projected_at_the_annotation(tmp_path: Path) -> None:
     source = property_files()
     repo = repository(tmp_path, source)
-    assert repo.source("ava/files.py").symbols["Surface.context"].ambiguous
+    assert repo.source("meiva/files.py").symbols["Surface.context"].ambiguous
     assert any(item.code == "contract-binding" for item in check(repo).findings)
-    assert render(repo) == ["ava/files.py"]
+    assert render(repo) == ["meiva/files.py"]
     assert not check(repo, strict_paths=repo.files).findings
-    after = repo.text("ava/files.py")
+    after = repo.text("meiva/files.py")
     assert "context: object\n'Your execution context.'\nclass Surface" in after
-    before_tree = WithoutDocstrings().visit(ast.parse(source["ava/files.py"]))
+    before_tree = WithoutDocstrings().visit(ast.parse(source["meiva/files.py"]))
     after_tree = WithoutDocstrings().visit(ast.parse(after))
     assert ast.dump(before_tree) == ast.dump(after_tree)
     assert render(repo) == []
@@ -170,8 +172,8 @@ def test_module_property_help_is_projected_at_the_annotation(tmp_path: Path) -> 
 )
 def test_unproved_property_help_remains_untouched(tmp_path: Path, old: str, new: str) -> None:
     source = property_files()
-    source["ava/files.py"] = source["ava/files.py"].replace(old, new)
+    source["meiva/files.py"] = source["meiva/files.py"].replace(old, new)
     repo = repository(tmp_path, source)
     with pytest.raises(ValueError):
         render(repo)
-    assert repo.text("ava/files.py") == source["ava/files.py"]
+    assert repo.text("meiva/files.py") == source["meiva/files.py"]

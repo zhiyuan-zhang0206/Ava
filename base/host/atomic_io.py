@@ -62,7 +62,7 @@ def _fchmod(fd: int, mode: int) -> None:
 #   - os.replace, os.fchmod and Path.replace in the tests of modules that do their own replace or
 #     chmod: base/host (private_storage), base/tests/config (dotenv), cli/commands/data_plane,
 #     cli/commands/agents, cli/commands/extensions, agent/graph/exec, services/entrypoints/im_bridge,
-#     ava/tests, scripts/ci and scripts/tests. Each goes with its component's batch.
+#     meiva/tests, scripts/ci and scripts/tests. Each goes with its component's batch.
 # When the last is gone, SYSTEM_FS binds the os functions directly and the wrappers are deleted.
 SYSTEM_FS = Fs(replace=_replace, fsync=_fsync, fchmod=_fchmod)
 

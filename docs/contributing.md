@@ -1,13 +1,13 @@
-# Contributing to Ava
+# Contributing to Meiva
 
-This is the entry point for coding agents contributing to Ava. Start from the
+This is the entry point for coding agents contributing to Meiva. Start from the
 user's goal and authorized scope. Inspect existing behavior before editing;
 discuss unresolved design, contract or dependency choices with the user. Follow
 [AGENTS.md](../AGENTS.md) for project invariants.
 
 ## Find the owner
 
-Read the relevant component's local `docs/` and the [OKF index](index.ava.okf.md).
+Read the relevant component's local `docs/` and the [OKF index](index.meiva.okf.md).
 Use `scripts/audit/where_used.py` before changing a symbol or contract so the
 change includes real consumers, tests, patch targets and current documentation.
 Cross-cutting rules live in [conventions](conventions/README.md); historical
@@ -25,7 +25,7 @@ virtualenv. See [development setup](conventions/dev-setup.md) and
 [Git hook setup](conventions/runbook.md#git-hooks-pre-commit--pre-push).
 
 Pytest isolates its environment. Other development tools importing application
-code must set a temporary `AVA_HOME` before import; unset `AVA_HOME` selects the
+code must set a temporary `MEIVA_HOME` before import; unset `MEIVA_HOME` selects the
 default home and can target a running deployment.
 
 ## Change and verify
@@ -43,13 +43,13 @@ schema changes, immutable migration history and baseline verification.
 ### Locality gate (meizel)
 
 `python -m meizel check` judges every first-party dependency against the
-`meizel.toml` manifests (see [the checker](../meizel/docs/checker/checker.ava.okf.md)).
+`meizel.toml` manifests (see [the checker](../meizel/docs/checker/checker.meiva.okf.md)).
 A commit runs `check --changed` on the staged files, a push and CI run the whole
 `check`, and CI also compares recorded debt with the base branch.
 
 Directories that still carry recorded debt are strict-to-be: the recorded
 violations pass, anything new fails, and the debt may only shrink
-([recorded debt](../meizel/docs/checker/debt.ava.okf.md)).
+([recorded debt](../meizel/docs/checker/debt.meiva.okf.md)).
 
 - Fix a violation instead of recording it. Move the code, use the public door,
   inject the collaborator, or declare the edge in the manifest of the directory
@@ -78,7 +78,7 @@ violations pass, anything new fails, and the debt may only shrink
 - Patching is debt of every kind: `first-party-patch`, `stdlib-patch`, `third-party-patch`,
   `env-patch` and `unresolved-patch` (a target the imports do not resolve). Do not add one;
   pass the dependency in as an explicit parameter
-  ([patching](../meizel/docs/checker/patching.ava.okf.md)). When a symbol is renamed, `debt carry
+  ([patching](../meizel/docs/checker/patching.meiva.okf.md)). When a symbol is renamed, `debt carry
   --rename-target OLD=NEW` moves its entries; when a function or class moves to another file,
   `debt carry --move-symbol OLD_FILE::NAME=NEW_FILE` does. `debt sites --code <patch code>
   --target-prefix <prefix>` lists where a target is patched (file, line, form), and `debt diff
@@ -88,7 +88,7 @@ violations pass, anything new fails, and the debt may only shrink
   `meizel/` (ambient state, clock lattice, single owners, `os.environ`, per-agent settings,
   `TYPE_CHECKING`). Rule code holds no exemption of its own. Do not edit the file unless the task
   names the entry; CI prints every change to it
-  ([the policy file](../meizel/docs/checker/policy.ava.okf.md)).
+  ([the policy file](../meizel/docs/checker/policy.meiva.okf.md)).
 
 Before submitting, review your own diff with
 [review-contribution](../.agents/skills/review-contribution/SKILL.md). It routes
@@ -114,4 +114,4 @@ removal is safe. See [development setup](conventions/dev-setup.md).
 
 A merge proves repository integration, not production health. Runtime rollout is
 a separately authorized operator action with compatibility and recovery checks;
-see [kernel change and deployment safety](../.agents/skills/ava-self-development/SKILL.md).
+see [kernel change and deployment safety](../.agents/skills/meiva-self-development/SKILL.md).

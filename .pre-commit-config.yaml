@@ -89,7 +89,7 @@ repos:
 
       # `--only FILE...` on the lints below: the commit judges the changed files under the lint's own
       # scope, and a change to the lint tooling or to an input its rule reads widens it to the full
-      # scan (scripts/lint/docs/changed-files-mode.ava.okf.md). CI's `--all-files` is the full scan.
+      # scan (scripts/lint/docs/changed-files-mode.meiva.okf.md). CI's `--all-files` is the full scan.
       #
       # No sync blocking calls in async bodies (gateway + ops event-loop surfaces).
       # One sync psycopg / subprocess call in an async handler freezes the
@@ -160,7 +160,7 @@ repos:
           (?x)^(
             (tests|(
               # meizel:roles BEGIN regex-names application tooling
-              agent|ava|ava_builtins|base|cli|gateway|ops|services|meizel|scripts
+              agent|meiva|meiva_builtins|base|cli|gateway|ops|services|meizel|scripts
               # meizel:roles END
             )(/.*)?/tests)/.*\.py
             |scripts/structure/(tests_location|tests_location_allowed|tests_location_suggest)\.py
@@ -239,7 +239,7 @@ repos:
         language: system
 
       # Ban tailnet IP literals (100.64.0.0/10 host addresses) repo-wide — the
-      # cluster's user-visible URL derives from AVA_GATEWAY_URL / reachable_host(),
+      # cluster's user-visible URL derives from MEIVA_GATEWAY_URL / reachable_host(),
       # never from a literal. CIDR range notation (100.64.0.0/10) stays allowed;
       # a test that exercises the range boundary opts out inline with
       # `# tailnet-ip-ok: <reason>`. See scripts/content_lint/lint_no_tailnet.py header.
@@ -248,17 +248,17 @@ repos:
         entry: .venv/bin/python scripts/content_lint/lint_no_tailnet.py --only
         language: system
 
-      # The root supervisor's own code (services/supervision/ava_root/) must stay free of
+      # The root supervisor's own code (services/supervision/meiva_root/) must stay free of
       # permission-domain and macOS-specific symbols — the privileged helper
       # program is a separate codebase by design (ruling 2026-09-12), and this
       # lint is the machine-checkable half of that constraint. A line that
       # genuinely must carry a name opts out inline with
-      # `# ava-root-scope-ok: <reason>`; see scripts/lint/ava_root_scope.py header.
-      - id: lint-ava-root-scope
-        name: lint ava-root scope (no permission-domain symbols)
-        entry: .venv/bin/python scripts/lint/ava_root_scope.py
+      # `# meiva-root-scope-ok: <reason>`; see scripts/lint/meiva_root_scope.py header.
+      - id: lint-meiva-root-scope
+        name: lint meiva-root scope (no permission-domain symbols)
+        entry: .venv/bin/python scripts/lint/meiva_root_scope.py
         language: system
-        files: ^(services/supervision/ava_root/(?!(?:.*/)?tests/)|scripts/lint/ava_root_scope\.py$|scripts/lint/tests/test_lint_ava_root_scope\.py$)
+        files: ^(services/supervision/meiva_root/(?!(?:.*/)?tests/)|scripts/lint/meiva_root_scope\.py$|scripts/lint/tests/test_lint_meiva_root_scope\.py$)
         pass_filenames: false
 
       # Ban decorative emoji in core Python (agent + backend layers). UX surfaces
@@ -271,26 +271,26 @@ repos:
         language: system
         types: [python]
 
-      # Ban bare `ava.x.y = ...` / setattr monkey-patching in plugins — SDK wraps
-      # go through `ava.extend.wrap` so the stack stays introspectable + reversible.
+      # Ban bare `meiva.x.y = ...` / setattr monkey-patching in plugins — SDK wraps
+      # go through `meiva.extend.wrap` so the stack stays introspectable + reversible.
       # Deliberate exceptions use an inline `# wrap-ok: <reason>`; see
       # scripts/lint/plugins/no_plugin_wrap.py header.
       - id: lint-no-plugin-wrap
-        name: lint no plugin wrap (force ava.extend.wrap)
+        name: lint no plugin wrap (force meiva.extend.wrap)
         entry: .venv/bin/python scripts/lint/plugins/no_plugin_wrap.py --only
         language: system
         types: [python]
 
       # Hook modules (agent/hooks/, agent_runtime.py faces, any module defining a `Hook`
-      # subclass) may not import `ava`: hooks run in the agent host and operate on the graph
-      # state they are handed. No exemption; see scripts/lint/plugins/no_ava_in_hooks.py.
-      - id: lint-no-ava-in-hooks
-        name: lint hook modules (no `import ava`)
-        entry: .venv/bin/python scripts/lint/plugins/no_ava_in_hooks.py --only
+      # subclass) may not import `meiva`: hooks run in the agent host and operate on the graph
+      # state they are handed. No exemption; see scripts/lint/plugins/no_meiva_in_hooks.py.
+      - id: lint-no-meiva-in-hooks
+        name: lint hook modules (no `import meiva`)
+        entry: .venv/bin/python scripts/lint/plugins/no_meiva_in_hooks.py --only
         language: system
         types: [python]
 
-      # Agent-visible docstring lint — docstrings in ava/*.py + plugin namespace
+      # Agent-visible docstring lint — docstrings in meiva/*.py + plugin namespace
       # modules + plugin.py wrap targets are spliced into the LLM system prompt
       # and must be all English with no framework impl-details. Rules and the
       # _KNOWN_DIRTY_FILES allowlist live in scripts/lint/agent_docstrings.py
@@ -299,8 +299,8 @@ repos:
         name: lint agent-visible docstrings (no CJK, no impl-detail leak)
         entry: .venv/bin/python scripts/lint/agent_docstrings.py
         language: system
-        # Judges only the agent-visible docstrings of ava/ and plugin modules (plus AGENTS.md).
-        files: ^(ava/|ava_builtins/plugins/|AGENTS\.md$|scripts/lint/agent_docstrings\.py$)
+        # Judges only the agent-visible docstrings of meiva/ and plugin modules (plus AGENTS.md).
+        files: ^(meiva/|meiva_builtins/plugins/|AGENTS\.md$|scripts/lint/agent_docstrings\.py$)
         pass_filenames: false
 
       # Structural lints: 20 tracked direct entries in every non-root directory.
@@ -338,7 +338,7 @@ repos:
           (?x)^(
             (
               # meizel:roles BEGIN regex-names application templates
-              agent|ava|ava_builtins|base|cli|gateway|ops|services|schedules
+              agent|meiva|meiva_builtins|base|cli|gateway|ops|services|schedules
               # meizel:roles END
             )/.*\.py
             |meizel/state/ambient_state/handle_ratchet\.py
@@ -367,12 +367,12 @@ repos:
         name: lint SKILL.md frontmatter (parse + required fields + description length)
         entry: .venv/bin/python scripts/content_lint/lint_skill_descriptions.py
         language: system
-        files: '((\.ava/)?skills|plugins)/.*/SKILL\.md$'
+        files: '((\.meiva/)?skills|plugins)/.*/SKILL\.md$'
         pass_filenames: false
 
       # Core-content manifest gate (content channel, tasks #2915/#3267):
-      # every builtin plugin must ship an `ava-plugin.json`, every one under
-      # ava_builtins/ must validate and its declared gates (engines.ava range /
+      # every builtin plugin must ship an `meiva-plugin.json`, every one under
+      # meiva_builtins/ must validate and its declared gates (engines.meiva range /
       # requires_commit ancestry) must hold against the repo's DERIVED host
       # version (HEAD's commit date). The non-core manifests in the tree are
       # audited (report-only).
@@ -380,7 +380,7 @@ repos:
         name: lint core-content manifests (ranges + requires_commit vs derived host version)
         entry: .venv/bin/python scripts/content_lint/lint_core_content_manifests.py
         language: system
-        files: '(ava-plugin\.json$|^ava_builtins/plugins/[^/]+/plugin\.py$|^scripts/content_lint/lint_core_content_manifests\.py$|^base/packages/plugins/manifest\.py$|^base/deploy/git/host_version\.py$)'
+        files: '(meiva-plugin\.json$|^meiva_builtins/plugins/[^/]+/plugin\.py$|^scripts/content_lint/lint_core_content_manifests\.py$|^base/packages/plugins/manifest\.py$|^base/deploy/git/host_version\.py$)'
         pass_filenames: false
 
       # SKILL.md line-count ceiling to prevent progressive bloat.
@@ -389,37 +389,37 @@ repos:
         name: lint SKILL.md size (line-count ceiling)
         entry: .venv/bin/python scripts/content_lint/lint_skill_md_size.py
         language: system
-        files: '((\.ava/)?skills|plugins)/.*/SKILL\.md$'
+        files: '((\.meiva/)?skills|plugins)/.*/SKILL\.md$'
         pass_filenames: false
 
       # Service-domain roster <-> build_services() must agree (both directions).
       # Catches "deleted a daemon but left it documented" (#728's scheduler row)
       # and "added a daemon, forgot the roster". Parses the table under the
       # <!-- lint:roster-table --> sentinel; reads both sides itself. Also pins the
-      # healthcheck roster (check-roster.ava.okf.md) to the healthcheck modules.
+      # healthcheck roster (check-roster.meiva.okf.md) to the healthcheck modules.
       - id: lint-doc-roster
         name: lint-doc-roster
         language: system
         entry: .venv/bin/python scripts/content_lint/lint_doc_roster.py
-        files: ^(services/supervision/roster/.*\.py|cli/commands/_repo\.py|services/supervision/roster/docs/service-roster\.md|scripts/content_lint/lint_doc_roster\.py|services/supervision/healthchecks/docs/check-roster/check-roster\.ava\.okf\.md)$
+        files: ^(services/supervision/roster/.*\.py|cli/commands/_repo\.py|services/supervision/roster/docs/service-roster\.md|scripts/content_lint/lint_doc_roster\.py|services/supervision/healthchecks/docs/check-roster/check-roster\.meiva\.okf\.md)$
         pass_filenames: false
 
-      # Every `ava.<name>` reference in the procedural docs — conventions and
+      # Every `meiva.<name>` reference in the procedural docs — conventions and
       # the repo's own dev skills under .agents/skills — (inside a code span) must
-      # resolve to a live member of the ava namespace. Catches "deleted/renamed
-      # an SDK module, forgot to scrub the doc" (the ava.monitor/ava.schedule
-      # drift class). Valid set = ava.__all__ + real submodules + module attrs +
+      # resolve to a live member of the meiva namespace. Catches "deleted/renamed
+      # an SDK module, forgot to scrub the doc" (the meiva.monitor/meiva.schedule
+      # drift class). Valid set = meiva.__all__ + real submodules + module attrs +
       # plugin-registered namespaces; prose mentions are excluded (zero-FP guard).
       - id: lint-doc-symbols
         name: lint-doc-symbols
         language: system
         entry: .venv/bin/python scripts/content_lint/lint_doc_symbols.py
-        files: ^(docs/conventions/.*\.md|\.agents/skills/.*\.md|ava/__init__\.py|scripts/content_lint/lint_doc_symbols\.py)$
+        files: ^(docs/conventions/.*\.md|\.agents/skills/.*\.md|meiva/__init__\.py|scripts/content_lint/lint_doc_symbols\.py)$
         pass_filenames: false
 
       # The other half of the same guard: every `path/to/file.py:symbol` anchor
       # in those same procedural docs (inside a code span) must resolve against
-      # the AST of the file it names. lint-doc-symbols validates the `ava.*` SDK
+      # the AST of the file it names. lint-doc-symbols validates the `meiva.*` SDK
       # namespace and never sees this shape. Triggered by ANY .py change, not
       # just a doc edit — a rename is what dangles an anchor, and it happens in
       # the code, in a file the citing doc never mentions. Whole-corpus scan
@@ -429,7 +429,7 @@ repos:
         name: lint-doc-anchors
         language: system
         entry: .venv/bin/python scripts/content_lint/lint_doc_anchors.py
-        files: ^(docs/conventions/.*|\.agents/skills/.*|ava_builtins/skills/.*|.*\.ava\.okf\.md|.*\.py)$
+        files: ^(docs/conventions/.*|\.agents/skills/.*|meiva_builtins/skills/.*|.*\.meiva\.okf\.md|.*\.py)$
         pass_filenames: false
 
       # Every CLI flag written as a command invocation, and every relative
@@ -762,8 +762,8 @@ repos:
 
   - repo: local
     hooks:
-      - id: lint-ava-okf
-        name: Lint Ava OKF documents
-        entry: .venv/bin/python scripts/content_lint/lint_ava_okf.py
+      - id: lint-meiva-okf
+        name: Lint Meiva OKF documents
+        entry: .venv/bin/python scripts/content_lint/lint_meiva_okf.py
         language: system
-        files: \.ava\.okf\.md$
+        files: \.meiva\.okf\.md$

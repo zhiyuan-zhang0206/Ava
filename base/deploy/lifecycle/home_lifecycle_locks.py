@@ -1,7 +1,7 @@
 """Home lifecycle mutex shared by local start/stop.
 
 ``resource_lock`` (``deploy-state.lifecycle.lock``) is an OS advisory lock under
-``$AVA_HOME`` that serializes long local start/stop transitions with a
+``$MEIVA_HOME`` that serializes long local start/stop transitions with a
 bounded wait.
 
 The lock has an atomically replaced ``.holder.json`` sidecar naming the last
@@ -32,7 +32,7 @@ _log = logging.getLogger("base.deploy.lifecycle.home_lifecycle_locks")
 
 def lifecycle_lock_path() -> Path:
     """Stable mutex for long local resource transitions and the hold probe."""
-    return base.paths.ava_home() / "deploy-state.lifecycle.lock"
+    return base.paths.meiva_home() / "deploy-state.lifecycle.lock"
 
 
 def holder_path(path: Path) -> Path:

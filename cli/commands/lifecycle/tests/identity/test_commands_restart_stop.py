@@ -184,7 +184,7 @@ def test_cmd_restart_finishes_the_journal_only_when_it_owns_it(
 
     # Real phases create an implicit journal while begin/finish are stubbed.
     # Keep that unfinished record out of later tests' journal ownership.
-    monkeypatch.setenv("AVA_HOME", str(tmp_path))
+    monkeypatch.setenv("MEIVA_HOME", str(tmp_path))
 
     def preflight(_db: object, *, command: CommandRuntime) -> int:
         assert command is command_runtime
@@ -288,7 +288,7 @@ def test_cmd_restart_aborts_when_preflight_fails(
 ) -> None:
     """When preflight probes fail, cmd_restart aborts without stopping — and says so
     with its OWN exit code, since "nothing was stopped, host still serving" is what
-    the detached updater must not run `ava start` over."""
+    the detached updater must not run `meiva start` over."""
     from base.host.exit_codes import RESTART_DECLINED_EXIT_CODE
 
     stopped: list[bool] = []
@@ -339,7 +339,7 @@ def test_cmd_restart_aborts_when_start_readiness_fails(
     entry points, migrations) stops nothing — the same decline contract as the
     probes gate, with stop and start neither run. The gate is called with
     `check_launcher=False`: this start is in-process and never execs
-    `.venv/bin/ava`."""
+    `.venv/bin/meiva`."""
     from base.host.exit_codes import RESTART_DECLINED_EXIT_CODE
 
     stopped: list[bool] = []

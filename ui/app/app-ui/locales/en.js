@@ -1,12 +1,12 @@
-// Ava app UI locale copy — en.
+// Meiva app UI locale copy — en.
 // Loaded by index.html; the page picks the matching one via navigator.language.
 // English strings are also the static HTML defaults; this file is the canonical
 // copy so the page can switch without touching markup.
-window.AVA_APP_I18N = window.AVA_APP_I18N || {};
-window.AVA_APP_I18N['en'] =
+window.MEIVA_APP_I18N = window.MEIVA_APP_I18N || {};
+window.MEIVA_APP_I18N['en'] =
 {
-  "connectTitle": "Connect to Ava",
-  "connectIntro": "Enter the Ava server address; the secret is optional — with it you land already signed in",
+  "connectTitle": "Connect to Meiva",
+  "connectIntro": "Enter the Meiva server address; the secret is optional — with it you land already signed in",
   "serverLabel": "Server address",
   "serverPlaceholder": "host or http://host:port",
   "secretLabel": "Cluster secret",
@@ -42,10 +42,10 @@ window.AVA_APP_I18N['en'] =
   "openDownloadPage": "Open download page",
   "checkingUpdates": "Checking for updates…",
   "updateCurrent": "You are on the latest build.",
-  "updateAvailable": "Ava {version} (build {build}) is available.",
+  "updateAvailable": "Meiva {version} (build {build}) is available.",
   "updateCheckFailed": "Could not check for updates.",
   "updateDownloading": "Downloading and verifying the update…",
   "updateInstallerOpened": "The system installer is open.",
-  "updatePermissionRequired": "Allow Ava to install unknown apps in system settings, then try again.",
+  "updatePermissionRequired": "Allow Meiva to install unknown apps in system settings, then try again.",
   "updateInstallFailed": "The update could not be installed."
 };

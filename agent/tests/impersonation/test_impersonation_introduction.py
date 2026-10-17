@@ -59,7 +59,7 @@ async def test_first_takeover_explains_borrowed_identity_and_later_leases_do_not
     assert explanation.id == "impersonation-introduction"
     assert "You are paused" in explanation.content
     assert "receives incoming messages" in explanation.content
-    assert "coming from you, an Ava agent" in explanation.content
+    assert "coming from you, an Meiva agent" in explanation.content
     assert "continue any unfinished requests" in explanation.content
     assert first.values["messages"][-1].id == "impersonation-start:42:0"
 
@@ -158,8 +158,8 @@ async def test_all_takeover_notes_stamp_their_real_creation_time(
     prefix = f"[system] [{date} 09:39:25] " if timestamps else "[system] Impersonation"
     for note in notes:
         assert str(note.content).startswith(prefix)
-        assert note.additional_kwargs["ava_created_at"] == moment.isoformat()
-        assert note.additional_kwargs["ava_note_tag"] == "impersonation"
+        assert note.additional_kwargs["meiva_created_at"] == moment.isoformat()
+        assert note.additional_kwargs["meiva_note_tag"] == "impersonation"
 
 
 def test_notes_keep_two_live_configuration_roots_and_read_order() -> None:

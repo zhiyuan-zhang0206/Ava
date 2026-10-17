@@ -14,7 +14,7 @@ on the checkpoint tables during the measured agent-lowest window. Each run is
 small and lock-free (VACUUM allows concurrent reads and writes), matching the
 "little and often, never blocking agents" retention philosophy.
 
-Window: 05:00-08:00 CLUSTER time (`AVA_TIMEZONE`, cluster-pinned). The hours
+Window: 05:00-08:00 CLUSTER time (`MEIVA_TIMEZONE`, cluster-pinned). The hours
 themselves were measured on one fleet in America/Los_Angeles (turn_end/1h:
 150-528 vs 6.8k peak at 11:00, 7-day sample, 2026-08-10) and are now read as
 cluster wall clock — the same clock the built-in schedules fire on, so
@@ -145,7 +145,7 @@ def _sizes_attributes(sizes: CheckpointTableSizes) -> dict[str, int]:
 def emit_checkpoint_table_sizes(cur: Any) -> CheckpointTableSizes | None:
     """Sample the checkpoint tables and emit the size/row-count gauge.
 
-    The gauge feeds the ava-ops checkpoint high-water rules and the growth
+    The gauge feeds the meiva-ops checkpoint high-water rules and the growth
     curve. The daemon emits it every hourly maintenance pass so the series
     stays dense outside the vacuum window (rate/delta queries need more than
     one sample a day), and the vacuum pass emits it again after each run so

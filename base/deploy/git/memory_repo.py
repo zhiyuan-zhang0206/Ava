@@ -14,7 +14,7 @@ from base.host.proc import run_bounded
 from base.paths import gateway_memory_dir, memory_dir
 
 _DEFAULT_GITIGNORE = """\
-# Ava memory pool — markdown notes only; swap / cache files do not enter history.
+# Meiva memory pool — markdown notes only; swap / cache files do not enter history.
 .DS_Store
 *.swp
 *.swo
@@ -24,22 +24,22 @@ _DEFAULT_GITIGNORE = """\
 
 
 class MemoryRemoteMissing(RuntimeError):  # noqa: N818
-    # ava:ref base/deploy/git/docs/memory-repo.ava.okf.md#split-runner-bootstrap
+    # meiva:ref base/deploy/git/docs/memory-repo.meiva.okf.md#split-runner-bootstrap
     pass
 
 
 class MemoryPoolBootstrapFailed(RuntimeError):  # noqa: N818
-    # ava:ref base/deploy/git/docs/memory-repo.ava.okf.md#split-runner-bootstrap
+    # meiva:ref base/deploy/git/docs/memory-repo.meiva.okf.md#split-runner-bootstrap
     pass
 
 
 class MemoryRepoUninitialized(RuntimeError):  # noqa: N818
-    # ava:ref base/deploy/git/docs/memory-repo.ava.okf.md#repository-status
+    # meiva:ref base/deploy/git/docs/memory-repo.meiva.okf.md#repository-status
     pass
 
 
 class MemoryBranchMismatch(RuntimeError):  # noqa: N818
-    # ava:ref base/deploy/git/docs/memory-repo.ava.okf.md#checkout-roles
+    # meiva:ref base/deploy/git/docs/memory-repo.meiva.okf.md#checkout-roles
     pass
 
 
@@ -49,19 +49,19 @@ def memory_remote() -> str:
         return env
     raise MemoryRemoteMissing(
         "memory remote not set. Configure one before a remote-backed memory "
-        "operation: set AVA_MEMORY_REMOTE=<git-url> in the home's `.env`."
+        "operation: set MEIVA_MEMORY_REMOTE=<git-url> in the home's `.env`."
     )
 
 
 def branch_name(*, machine: MachineIdentity) -> str:
-    # ava:ref base/deploy/git/docs/memory-repo.ava.okf.md#checkout-roles
+    # meiva:ref base/deploy/git/docs/memory-repo.meiva.okf.md#checkout-roles
     if "agent-runner" in machine.role():
         return f"machine-{machine.name()}"
     return "main"
 
 
 def pull_main(*, root: Path, keep_local: bool, branch: str) -> str:
-    # ava:ref base/deploy/git/docs/memory-repo.ava.okf.md#refresh-checkout
+    # meiva:ref base/deploy/git/docs/memory-repo.meiva.okf.md#refresh-checkout
     if keep_local:
         return run_git("rev-parse", "HEAD", cwd=root)
     run_git("fetch", "origin", branch, cwd=root)
@@ -81,7 +81,7 @@ GIT_TIMEOUT_S = 120.0
 
 
 def run_git(*args: str, cwd: Path | None = None) -> str:
-    # ava:ref base/deploy/git/docs/memory-repo.ava.okf.md#git-command-bound
+    # meiva:ref base/deploy/git/docs/memory-repo.meiva.okf.md#git-command-bound
     cwd_path = cwd if cwd is not None else memory_dir()
     argv = ["git", *args]
 
@@ -101,13 +101,13 @@ def run_git(*args: str, cwd: Path | None = None) -> str:
 
 
 def init_local_repo(branch: str, cwd: Path) -> None:
-    # ava:ref base/deploy/git/docs/memory-repo.ava.okf.md#checkout-roles
+    # meiva:ref base/deploy/git/docs/memory-repo.meiva.okf.md#checkout-roles
     cwd.parent.mkdir(parents=True, exist_ok=True)
     subprocess.run(  # noqa: S603
         ["git", "init", "-q", "-b", branch, str(cwd)], check=True
     )
-    run_git("config", "user.email", "ava@local", cwd=cwd)
-    run_git("config", "user.name", "Ava Local", cwd=cwd)
+    run_git("config", "user.email", "meiva@local", cwd=cwd)
+    run_git("config", "user.name", "Meiva Local", cwd=cwd)
     gitignore = cwd / ".gitignore"
     gitignore.write_text(_DEFAULT_GITIGNORE)
     run_git("add", ".gitignore", cwd=cwd)
@@ -124,7 +124,7 @@ _POOL_FETCH_TIMEOUT_S = 120.0
 
 
 def _stream_pool(client: Any, url: str, headers: dict[str, str]) -> tuple[str | None, bytes]:
-    # ava:ref base/deploy/git/docs/memory-repo.ava.okf.md#pool-download-bound
+    # meiva:ref base/deploy/git/docs/memory-repo.meiva.okf.md#pool-download-bound
     with client.stream("GET", url, headers=headers) as resp:
         if resp.status_code != 200:
             raise MemoryPoolBootstrapFailed(f"GET {url} -> HTTP {resp.status_code}")
@@ -145,7 +145,7 @@ def _stream_pool(client: Any, url: str, headers: dict[str, str]) -> tuple[str | 
 
 
 def download_pool_snapshot(url: str, headers: dict[str, str]) -> tuple[str | None, bytes]:
-    # ava:ref base/deploy/git/docs/memory-repo.ava.okf.md#pool-download-bound
+    # meiva:ref base/deploy/git/docs/memory-repo.meiva.okf.md#pool-download-bound
     import httpx
 
     try:
@@ -156,7 +156,7 @@ def download_pool_snapshot(url: str, headers: dict[str, str]) -> tuple[str | Non
 
 
 def bootstrap_from_gateway(*, machine: MachineIdentity) -> None:
-    # ava:ref base/deploy/git/docs/memory-repo.ava.okf.md#split-runner-bootstrap
+    # meiva:ref base/deploy/git/docs/memory-repo.meiva.okf.md#split-runner-bootstrap
     import shutil
     import tempfile
 
@@ -189,7 +189,7 @@ def bootstrap_from_gateway(*, machine: MachineIdentity) -> None:
 def _unpack_bundle(
     bundle_bytes: bytes, head: str | None, tmp_dir: Path, *, machine: MachineIdentity
 ) -> Path:
-    # ava:ref base/deploy/git/docs/memory-repo.ava.okf.md#split-runner-bootstrap
+    # meiva:ref base/deploy/git/docs/memory-repo.meiva.okf.md#split-runner-bootstrap
     bundle_path = tmp_dir / "pool.bundle"
     bundle_path.write_bytes(bundle_bytes)
     checkout_dir = tmp_dir / "pool"
@@ -217,7 +217,7 @@ def _unpack_bundle(
 
 @dataclass(frozen=True)
 class RepoStatus:
-    # ava:ref base/deploy/git/docs/memory-repo.ava.okf.md#repository-status
+    # meiva:ref base/deploy/git/docs/memory-repo.meiva.okf.md#repository-status
     branch: str
     is_clean: bool
     local_commits_on_branch: int
@@ -227,7 +227,7 @@ class RepoStatus:
 
 
 def _reconcile_initialized(branch: str, *, keep_local: bool, machine: MachineIdentity) -> None:
-    # ava:ref base/deploy/git/docs/memory-repo.ava.okf.md#checkout-roles
+    # meiva:ref base/deploy/git/docs/memory-repo.meiva.okf.md#checkout-roles
     current = run_git("rev-parse", "--abbrev-ref", "HEAD")
     if current != branch:
         if "gateway" in machine.role() and "agent-runner" not in machine.role():
@@ -247,16 +247,16 @@ def _reconcile_initialized(branch: str, *, keep_local: bool, machine: MachineIde
 
 
 def _init_without_remote(branch: str, *, machine: MachineIdentity) -> None:
-    # ava:ref base/deploy/git/docs/memory-repo.ava.okf.md#split-runner-bootstrap
+    # meiva:ref base/deploy/git/docs/memory-repo.meiva.okf.md#split-runner-bootstrap
     if "agent-runner" in machine.role() and "gateway" not in machine.role():
         try:
             bootstrap_from_gateway(machine=machine)
         except MemoryPoolBootstrapFailed as e:
             raise MemoryRemoteMissing(
                 "memory remote not configured and the gateway pool snapshot "
-                f"fetch failed ({e}). Set AVA_MEMORY_REMOTE for the GitHub sync "
+                f"fetch failed ({e}). Set MEIVA_MEMORY_REMOTE for the GitHub sync "
                 "path, fix the gateway URL / cluster secret, or set "
-                "AVA_MEMORY_KEEP_LOCAL=true "
+                "MEIVA_MEMORY_KEEP_LOCAL=true "
                 "to run an explicitly local-only pool."
             ) from e
         return
@@ -265,7 +265,7 @@ def _init_without_remote(branch: str, *, machine: MachineIdentity) -> None:
 
 
 def init(*, machine: MachineIdentity) -> None:
-    # ava:ref base/deploy/git/docs/memory-repo.ava.okf.md#checkout-roles
+    # meiva:ref base/deploy/git/docs/memory-repo.meiva.okf.md#checkout-roles
     branch = branch_name(machine=machine)
     keep_local = settings.general.memory_keep_local
     if is_initialized():
@@ -304,7 +304,7 @@ def init(*, machine: MachineIdentity) -> None:
 
 
 def init_gateway(*, machine: MachineIdentity) -> None:
-    # ava:ref base/deploy/git/docs/memory-repo.ava.okf.md#checkout-roles
+    # meiva:ref base/deploy/git/docs/memory-repo.meiva.okf.md#checkout-roles
     branch = "main"
     gmd = gateway_memory_dir(roles=machine.role())
     keep_local = settings.general.memory_keep_local
@@ -350,10 +350,10 @@ def init_gateway(*, machine: MachineIdentity) -> None:
 
 
 def status() -> RepoStatus:
-    # ava:ref base/deploy/git/docs/memory-repo.ava.okf.md#repository-status
+    # meiva:ref base/deploy/git/docs/memory-repo.meiva.okf.md#repository-status
     if not is_initialized():
         raise MemoryRepoUninitialized(
-            f"{memory_dir()} is not yet a git repo — run `ava memory init` first."
+            f"{memory_dir()} is not yet a git repo — run `meiva memory init` first."
         )
 
     branch = run_git("rev-parse", "--abbrev-ref", "HEAD")

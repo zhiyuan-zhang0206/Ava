@@ -1,4 +1,4 @@
-"""`ava lgtm on|off`: declare or retract this home as an observability station, then restart
+"""`meiva lgtm on|off`: declare or retract this home as an observability station, then restart
 the cluster so the desired services take effect.
 
 The switch itself belongs to observability (`observability/lgtm.py`: the station marker, the

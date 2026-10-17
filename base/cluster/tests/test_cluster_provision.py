@@ -22,7 +22,7 @@ def _admin_url() -> str:
 
 
 def _fresh_identity() -> str:
-    return f"ava_provtest_{os.getpid()}_{int(time.time() * 1_000_000)}"
+    return f"meiva_provtest_{os.getpid()}_{int(time.time() * 1_000_000)}"
 
 
 def test_provision_database_creates_db_and_applies_schema(db_conn: object) -> None:
@@ -205,7 +205,7 @@ def test_ensure_pgvector_extension_noop_when_binaries_absent(
     from base.cluster.provision import ensure_pgvector_extension
 
     urls, conns = _patch_pg_connect(monkeypatch, [None])
-    ensure_pgvector_extension("ava_ident", base_admin_url="postgresql://admin@/postgres")
+    ensure_pgvector_extension("meiva_ident", base_admin_url="postgresql://admin@/postgres")
     assert urls == ["postgresql://admin@/postgres"]
     assert conns[0].executed == ["SELECT 1 FROM pg_available_extensions WHERE name = 'vector'"]
 
@@ -217,10 +217,10 @@ def test_ensure_pgvector_extension_precreates_in_cluster_db(
 
     urls, conns = _patch_pg_connect(monkeypatch, [(1,), None])
     ensure_pgvector_extension(
-        "ava_ident", base_admin_url="postgresql://admin@/postgres?host=/tmp/x"
+        "meiva_ident", base_admin_url="postgresql://admin@/postgres?host=/tmp/x"
     )
     assert len(urls) == 2
-    assert urlsplit(urls[1]).path == "/ava_ident"
+    assert urlsplit(urls[1]).path == "/meiva_ident"
     assert conns[1].executed == ["CREATE EXTENSION IF NOT EXISTS vector"]
 
 
@@ -237,7 +237,7 @@ def test_ensure_pgvector_extension_noop_on_connect_failure(
         raise psycopg.OperationalError("connection is bad")
 
     monkeypatch.setattr(psycopg, "connect", boom)
-    ensure_pgvector_extension("ava_ident", base_admin_url="postgresql://admin@/postgres")
+    ensure_pgvector_extension("meiva_ident", base_admin_url="postgresql://admin@/postgres")
     [warning] = [r for r in loguru_records if "[pgvector] pre-create skipped" in r["message"]]
     assert "(connection is bad)" in warning["message"]
 
@@ -307,6 +307,6 @@ def test_default_schema_check_never_setup_after_concurrent_repair(
     monkeypatch.setattr(provision, "checkpoint_schema_versions", checkpoint_versions)
     monkeypatch.setattr(PostgresSaver, "setup", setup_must_not_run)
 
-    provision.ensure_checkpoint_schema("ava_repaired", base_admin_url=_admin_url())
+    provision.ensure_checkpoint_schema("meiva_repaired", base_admin_url=_admin_url())
     with pytest.raises(StopIteration):
         next(observed)

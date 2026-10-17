@@ -156,7 +156,7 @@ def test_markdown_is_not_a_data_change(tmp_path: Path) -> None:
     ("changed", "reader", "needle"),
     [
         ("base/skills/demo/SKILL.md", "tests/consumer/test_skill_reader.py", "SKILL.md"),
-        ("base/docs/base.ava.okf.md", "tests/consumer/test_okf_reader.py", "*.ava.okf.md"),
+        ("base/docs/base.meiva.okf.md", "tests/consumer/test_okf_reader.py", "*.meiva.okf.md"),
     ],
 )
 def test_known_readers_of_skills_and_okf_documents_are_pinned(
@@ -164,7 +164,7 @@ def test_known_readers_of_skills_and_okf_documents_are_pinned(
 ) -> None:
     root = _repo(tmp_path)
     _write(root, "base/skills/demo/SKILL.md", "---\n---\n")
-    _write(root, "base/docs/base.ava.okf.md", "okf\n")
+    _write(root, "base/docs/base.meiva.okf.md", "okf\n")
     _write(root, "base/NOTES.md", "notes\n")
     _write(root, reader, f"PATTERN = {needle!r}\n")
     _write(

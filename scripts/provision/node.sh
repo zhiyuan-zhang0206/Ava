@@ -1,13 +1,13 @@
 #!/usr/bin/env bash
 # Node for the frontend (Next.js) build + agent tooling — one source for
 # host preparation / the verification image / CI. Linux: nodesource 22 (Ubuntu 24.04 ships 18).
-# macOS: the linked `node` formula (npx must land on PATH for ava-browser);
+# macOS: the linked `node` formula (npx must land on PATH for meiva-browser);
 # the keg-only `node@22` is the force-linked fallback. Idempotent.
 #
 # Without sudo: a host that already runs node >= 20.9 (the frontend's floor)
 # skips apt entirely — the nodesource setup + apt install need root. An apt
 # failure degrades to a warning: the gateway can run headless without the
-# frontend (`ava start --disable-service frontend`).
+# frontend (`meiva start --disable-service frontend`).
 . "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/_lib.sh"
 
 OS="$(prov_os)"
@@ -27,7 +27,7 @@ case "$OS" in
   macos)
     # The unversioned `node` formula is linked into /opt/homebrew, so npx lands
     # on PATH; `node@22` is keg-only (never symlinked) and would leave npx
-    # unreachable for the ava-browser daemon. Prefer the linked formula, and
+    # unreachable for the meiva-browser daemon. Prefer the linked formula, and
     # force-link the keg on the fallback path (QA review 2026-09-01, PR #1286 P1).
     brew install node 2>/dev/null \
         || { brew install node@22 2>/dev/null && brew link --force node@22; }

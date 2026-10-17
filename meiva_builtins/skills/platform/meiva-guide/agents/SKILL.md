@@ -1,0 +1,135 @@
+---
+name: agents
+description: "Manages Meiva agents and configuration overlays. Use when spawning, inspecting, restarting, stopping, or configuring agents."
+---
+
+# Agent-Level Concepts
+
+This sub-skill covers the concepts that live at the agent layer: agents
+themselves, commands, and schedules.
+
+## Agents (running AI process)
+
+An **agent** is a running AI process — you are one. The lifecycle verbs:
+
+- `spawn` — start a brand-new agent.
+- `fork_from` — copy another agent's conversation state into a new one.
+- `terminate` — end it (default: finish current turn first; `force=True` requests
+  interruption when a clean stop cannot progress; `enqueued` confirms
+  acceptance, not exit or completion of owned work).
+- `restart` — finish current turn, then restart as a fresh process under the
+  same `agent_id`.
+- `resurrect` — wake a `terminated` agent with its full conversation state
+  intact (must include a `prompt` telling it why it was woken).
+
+State machine: `idling (unclaimed) → running ⇄ idling → terminated`.
+
+Agent-to-agent communication: `meiva.agents.send_message(agent_id, content)` —
+pure INSERT, no status check, no wait, no delivery receipt. If the target is
+`terminated`, it is auto-resurrected to handle the message. Use
+`get_neighbors` to see which agents are most closely tied to you (ties form on
+spawn/fork/resurrect/send_message and decay over time), and `get_ancestors`
+to see the spawn chain above an agent (who spawned whom, nearest first —
+the responsibility-attribution read).
+
+Each agent can have a **label** (`meiva.self.set_label`) — a
+human-readable role/name that persists once set; it is also stated in the
+agent's own agent-ID context note at each window establishment.
+
+SDK reference: `meiva.agents` (`spawn` / `terminate` / `restart` / `resurrect` /
+`send_message` / `list_agents` / `list_machines` / `get_neighbors` /
+`get_ancestors` / `commands` / `get_last_message`).
+
+## Command (user-level command)
+
+A **command** is a `/name <natural language instruction>` — issued from the
+frontend Composer or via `send_message` between peers. The receiving agent's host expands
+it into the prompt the model actually sees; the model never sees the `/`-trigger
+process, only the expanded text. Commands are addressable prompt functions —
+agents can use `meiva.agents.send_message(peer, "/name ...")` to send a named
+intent with a description.
+
+Two sources:**built-in commands** (`commands/*.md` + `~/.meiva/commands/*.md` for
+user overrides) and **plugin commands** (plugins carrying a `commands/` directory,
+exposed as `/plugin.name`). Every active skill also gets a free eponymous command
+(calling it loads the skill via `meiva.help(meiva.skills.<name>)`).
+
+Create a command by placing a `<name>.md` file with optional frontmatter
+(`description` + `instruction-hint`) and a fixed prompt template as the body. One
+command accepts one argument — the free text after `/`.
+
+Commands are **user-level** operations ("what should the agent do this
+conversation"), distinct from the `meiva` CLI (ops-level, runs in shell, operates
+the deployment itself). Peers discover each other's commands via the read-only
+`meiva.agents.commands()` (name + description + instruction-hint, no body).
+
+## Schedules (time-based / condition-triggered persistent tasks)
+
+The gateway hosts **schedules**: scripts written by agents, run persistently in
+a session, auto-restarted on crash (time-triggered, event/threshold-triggered, or
+both). Managed via REST API (`/api/schedules`) or the frontend
+`/control/schedules` page.
+
+To turn a natural-language scheduling need into a schedule, load
+`meiva.skills.meiva_guide.schedules` and follow it (it clarifies trigger/skip/error
+handling, writes a resumable script, then `POST /api/schedules` to create).
+
+
+## Config adjustment (modifying system configuration)
+
+Meiva's config surface has three layers, each with its own adjustment path. Know
+which layer you're touching before picking the tool.
+
+### The three config layers
+
+| Layer | What it controls | Where it lives |
+|---|---|---|
+| **Cluster / host config** | Model keys, DB URLs, service ports, timezone, feature flags — the `.env` fields. | `$MEIVA_HOME/.env` (gateway's for cluster fields; each host's for host fields) |
+| **Agent per-agent config** | Per-agent overrides: model, skills, reasoning effort — the fields a spawn/restart overlay carries. | Passed at spawn as `config_overlay` fields, snapshotted into the agent row |
+| **User settings** | Frontend display preferences (timeline density, theme, etc.) — per-user, synced across frontends. | `user_settings` DB table (TanStack Query + `useUserSettings`) |
+
+### Adjustment paths by layer
+
+#### Cluster / host config
+
+| Path | Command / URL | Notes |
+|---|---|---|
+| **CLI** | `meiva config get [KEY] [--machine M]` | Read all or one field |
+| | `meiva config set KEY=VALUE [...] [--machine M]` | Write; restart hint printed |
+| | `meiva config unset KEY [...] [--machine M]` | Revert to default |
+| **REST API** | `GET/PUT /api/config[?machine=M]` | Same surface the CLI uses; reducer semantics (absent key = left untouched, null = unset) |
+| **Frontend** | `/control/config` | Machine selector + capability sections; bool toggles, text edits, sensitive-field masking |
+| **Direct .env edit** | Edit `$MEIVA_HOME/.env` then restart | Last resort; prefer `meiva config set` which validates + routes correctly |
+
+`--machine` targets a remote agent-runner's host fields; omit for the
+cluster/gateway view.
+
+#### Agent per-agent config
+
+Passed at spawn time — not edited on a running agent:
+
+```python
+from uuid import uuid4
+
+# Explicit fields — model id from the registry roster, see the models sub-skill
+meiva.agents.spawn(prompt="...", config_overlay={"llm_model": "deepseek-flash"}, idempotency_key=str(uuid4()))
+
+# Several fields at once — every key must be a per_agent field
+meiva.agents.spawn(prompt="...",
+                 config_overlay={"llm_model": "deepseek-flash", "reasoning_effort": "high"},
+                 idempotency_key=str(uuid4()))
+```
+
+Per-agent config is snapshotted into the agent row at spawn; a later
+cluster-default change does not affect agents already spawned.
+
+To change an agent's config after spawn: restart it with a new `config_overlay`
+(`meiva.agents.restart(agent_id)` in SDK, or `meiva agents restart <id>` in CLI —
+the restart path accepts a config_overlay).
+
+#### User settings
+
+User settings are frontend-only (display preferences, not cluster config).
+Managed via the settings panel in the web UI; synced through TanStack Query
+(`useUserSettings` hook, `user_settings` DB table). Not accessible from CLI or
+SDK.

@@ -3,7 +3,7 @@
 //! The app has no tabs, so every link that is not the console itself is
 //! handed off through this fallback chain:
 //!
-//! 1. the cluster's own headed Chrome (`ava-browser`), when its browser-MCP
+//! 1. the cluster's own headed Chrome (`meiva-browser`), when its browser-MCP
 //!    unix socket is present locally — the link lands in the browser the agents
 //!    already drive, logged into the sites the operator signed into;
 //! 2. otherwise the system default browser.
@@ -29,7 +29,7 @@ pub fn open_external<R: tauri::Runtime>(
     let app = app.clone();
     std::thread::spawn(move || {
         if matches!(url.scheme(), "http" | "https") && open_in_cluster_chrome(url.as_str()) {
-            log::info!("external link -> ava-browser new tab");
+            log::info!("external link -> meiva-browser new tab");
             return;
         }
         log::info!("external link -> system browser");
@@ -90,13 +90,13 @@ fn open_in_cluster_chrome(_url: &str) -> bool {
     false
 }
 
-/// Locate `$AVA_HOME/run/chrome-mcp.<cdp_port>.sock` (the port varies with the
+/// Locate `$MEIVA_HOME/run/chrome-mcp.<cdp_port>.sock` (the port varies with the
 /// cluster's port block, hence the scan rather than a fixed name).
 #[cfg(all(unix, not(target_os = "android"), not(target_os = "ios")))]
 fn browser_mcp_socket() -> Option<std::path::PathBuf> {
-    let home = match std::env::var("AVA_HOME") {
+    let home = match std::env::var("MEIVA_HOME") {
         Ok(value) if !value.trim().is_empty() => std::path::PathBuf::from(value),
-        _ => std::path::PathBuf::from(std::env::var("HOME").ok()?).join(".ava"),
+        _ => std::path::PathBuf::from(std::env::var("HOME").ok()?).join(".meiva"),
     };
     let run_dir = home.join("run");
     for entry in std::fs::read_dir(run_dir).ok()?.flatten() {
@@ -131,7 +131,7 @@ mod tests {
         for rejected in [
             "file:///etc/passwd",
             "javascript:alert(1)",
-            "ava-exec://command",
+            "meiva-exec://command",
             "not a URL",
         ] {
             assert!(allowed_external_url(rejected).is_none(), "{rejected}");

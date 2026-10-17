@@ -16,7 +16,7 @@ exists.
   (`install_bundle`) only when it names this unit, this gateway's served
   endpoint, a generation not older than the installed one, has not expired,
   and the cluster accepts its login. Installation writes
-  `$AVA_HOME/db-authority/unit.json` (0600); nothing else on the unit holds the
+  `$MEIVA_HOME/db-authority/unit.json` (0600); nothing else on the unit holds the
   login.
 - The unit's root launcher delivers that login per service
   (`unit_delivery`), an admitted operator process consumes it
@@ -31,7 +31,7 @@ A bundle is bound to one unit, but nothing in it is that unit's own: the runner
 login and API token are the write generation's, shared by every runner unit, and
 the telemetry token is the cluster's. The binding guards against installing on
 the wrong unit by mistake, not against theft; what a lost bundle exposes and how
-to contain it: `base/host/db_authority/docs/unit-bundle.ava.okf.md`.
+to contain it: `base/host/db_authority/docs/unit-bundle.meiva.okf.md`.
 """
 
 from __future__ import annotations
@@ -74,9 +74,9 @@ from base.host.net.url_secret import url_with_userinfo
 from base.host.private_storage import write_private_bytes
 
 # The operator supplies the transport key through this environment variable
-# (from a non-echoing prompt); `ava start` pops it before anything is forwarded.
-CAPABILITY_KEY_ENV = "AVA_DB_CAPABILITY_KEY"
-_FORMAT = "ava-db-capability/1"
+# (from a non-echoing prompt); `meiva start` pops it before anything is forwarded.
+CAPABILITY_KEY_ENV = "MEIVA_DB_CAPABILITY_KEY"
+_FORMAT = "meiva-db-capability/1"
 _MAX_BUNDLE_BYTES = 64 * 1024
 _KEY_BYTES = 32
 _IV_BYTES = 12
@@ -106,11 +106,11 @@ def no_capability_message(home: Path) -> str:
     """The refusal a remote agent-runner without an installed capability reports."""
     return (
         f"this agent-runner home ({home}) holds no database capability. On the gateway run "
-        f"`ava cluster db-authority issue-unit --machine <this machine> --home {home} --out "
-        "<bundle>`, carry the bundle here, export AVA_DB_CAPABILITY_KEY from a non-echoing "
+        f"`meiva cluster db-authority issue-unit --machine <this machine> --home {home} --out "
+        "<bundle>`, carry the bundle here, export MEIVA_DB_CAPABILITY_KEY from a non-echoing "
         "prompt with the transport key it printed, and install it with "
-        "`ava cluster db-authority install-unit <bundle>` (a first join passes it to "
-        "`ava init --db-capability <bundle>`)"
+        "`meiva cluster db-authority install-unit <bundle>` (a first join passes it to "
+        "`meiva init --db-capability <bundle>`)"
     )
 
 
@@ -195,7 +195,7 @@ class Bundle(_Record):
 class _Header(_Record):
     """Readable, authenticated (AEAD associated data), never secret."""
 
-    format: Literal["ava-db-capability/1"]
+    format: Literal["meiva-db-capability/1"]
     machine: MachineName
     home: str
     generation: int = Field(ge=0)
@@ -461,7 +461,7 @@ def require_unit_capability(home: Path) -> UnitCapability:
 def unit_delivery(home: Path) -> dict[str, str]:
     """The launch-environment delivery of the installed runner login."""
     capability = require_unit_capability(home)
-    return {"AVA_DB_URL": capability.dsn, GENERATION_ENV: str(capability.generation.number)}
+    return {"MEIVA_DB_URL": capability.dsn, GENERATION_ENV: str(capability.generation.number)}
 
 
 def unit_api_delivery(home: Path) -> dict[str, str]:

@@ -10,7 +10,7 @@ from psycopg_pool import AsyncConnectionPool
 from agent import state as states
 from agent.ownership.hosted import admit_hosted_runtime
 from base.agents.birth.spawn import create_agent_row
-from base.agents.context import AvaContext
+from base.agents.context import MeivaContext
 from base.agents.history.delta_read_compat import wrap_saver_reads_with_delta_reconstruction
 from base.agents.incarnation.resources import ResourceBirth
 from base.cluster.machine import MachineIdentity
@@ -61,7 +61,7 @@ async def checkpoint_graph(
     saver = AsyncPostgresSaver(pool)
     await saver.setup()
     wrap_saver_reads_with_delta_reconstruction(saver)
-    builder: Any = StateGraph(states.AgentState, context_schema=AvaContext)
+    builder: Any = StateGraph(states.AgentState, context_schema=MeivaContext)
     builder.add_node("work", node)
     builder.add_edge(START, "work")
     builder.add_edge("work", "__end__")

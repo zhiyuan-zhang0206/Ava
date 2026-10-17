@@ -7,9 +7,7 @@ import psycopg
 import pytest
 from fastapi.testclient import TestClient
 
-import ava
-from ava.gateway_client import use_client
-from ava.sdk_surface.installation import Installation
+import meiva
 from base.cluster.machine import MachineIdentity
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from base.config.service_read import ConfigAuthority
@@ -17,6 +15,8 @@ from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
 from base.events.live.bus import EventBus
 from base.packages.plugin_providers import build_model_catalog
+from meiva.gateway_client import use_client
+from meiva.sdk_surface.installation import Installation
 
 
 def spawn_agent(
@@ -52,12 +52,12 @@ def sdk_via_gateway(
 ):
     """SDK ↔ Gateway path in-process test apparatus:
     1. monkeypatch session noop — spawn / resurrect / respawn don't really start child python
-    2. TestClient(app) starts lifespan (build db_pool etc.), mount it as ava SDK's
+    2. TestClient(app) starts lifespan (build db_pool etc.), mount it as meiva SDK's
        httpx client — SDK calls go through ASGI directly into gateway endpoint, real DB real logic,
        not bound to TCP port
     """
     monkeypatch.setattr(
-        ava,
+        meiva,
         "__plugin_installation__",
         replace(model_installation, authority=config_authority),
         raising=False,

@@ -8,7 +8,7 @@ from base.config.base import EnvSettings
 class AgentSkillRecallSettings(EnvSettings):
     skill_recall_enabled: bool = Field(
         default=True,
-        alias="AVA_SKILL_RECALL",
+        alias="MEIVA_SKILL_RECALL",
         description=(
             "Before each turn woken by a message from a person or by a schedule, score every "
             "skill in the agent's index against the recent conversation and name the best "
@@ -29,7 +29,7 @@ class AgentSkillRecallSettings(EnvSettings):
 
     skill_recall_model: str = Field(
         default="jev-1.13.0",
-        alias="AVA_SKILL_RECALL_MODEL",
+        alias="MEIVA_SKILL_RECALL_MODEL",
         description=(
             "Decision model that scores the skill index for skill recall: one request per "
             "inbound-woken turn, one yes/no question per skill. Must be a decision model "
@@ -52,7 +52,7 @@ class AgentSkillRecallSettings(EnvSettings):
         default=0.60,
         gt=0,
         le=1,
-        alias="AVA_SKILL_RECALL_THRESHOLD",
+        alias="MEIVA_SKILL_RECALL_THRESHOLD",
         description=(
             "Lowest probability of 'yes' at which a skill is offered. The model's probabilities "
             "are coarse, so this is a cut between 'clearly helps' and everything else rather "
@@ -72,7 +72,7 @@ class AgentSkillRecallSettings(EnvSettings):
     skill_recall_max: int = Field(
         default=2,
         ge=0,
-        alias="AVA_SKILL_RECALL_MAX",
+        alias="MEIVA_SKILL_RECALL_MAX",
         description=(
             "The most skills one recall note offers. Kept small: an offered skill is a "
             "suggestion to spend context on loading its instructions. Ties on the score are "
@@ -91,7 +91,7 @@ class AgentSkillRecallSettings(EnvSettings):
     skill_recall_deadline_seconds: float = Field(
         default=3.0,
         gt=0,
-        alias="AVA_SKILL_RECALL_DEADLINE_SECONDS",
+        alias="MEIVA_SKILL_RECALL_DEADLINE_SECONDS",
         description=(
             "Wall-clock budget (seconds) for one skill-recall pass. Recall runs before the LLM "
             "on every person- or schedule-woken turn, so a slow decision provider must not hold "

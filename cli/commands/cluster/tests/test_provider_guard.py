@@ -58,7 +58,7 @@ def test_balance_below_minimum_reports_a_stable_message(
 
     assert first is not None
     assert first == second
-    assert "AVA_PROVIDER_GUARD_BALANCE_MIN_CNY=\u00a5500" in first
+    assert "MEIVA_PROVIDER_GUARD_BALANCE_MIN_CNY=\u00a5500" in first
     assert "100.00" not in first and "99.50" not in first
     err = capsys.readouterr().err
     assert "100.00" in err and "99.50" in err
@@ -172,7 +172,7 @@ def test_blocked_agents_at_threshold_reports_a_stable_message(
 
     assert first is not None
     assert first == second
-    assert "AVA_PROVIDER_GUARD_BLOCKED_AGENTS_MIN=3" in first
+    assert "MEIVA_PROVIDER_GUARD_BLOCKED_AGENTS_MIN=3" in first
     err = capsys.readouterr().err
     assert "3 agent(s)" in err and "7 agent(s)" in err
 

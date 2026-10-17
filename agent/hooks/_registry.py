@@ -14,7 +14,7 @@ Hook signature (aligned with the business node three-arg signature):
         async def __call__(
             self,
             state: _state.AgentState,
-            runtime: Runtime[AvaContext],
+            runtime: Runtime[MeivaContext],
             config: RunnableConfig,
             /,
         ) -> dict | None: ...
@@ -57,7 +57,7 @@ from langgraph.types import Command
 
 from agent import state as _state
 from agent.nodes import NodeName
-from base.agents.context import AvaContext
+from base.agents.context import MeivaContext
 from base.log import logger
 from base.packages.plugins import activation
 from base.packages.plugins.extensions import GraphHook, HookPoint
@@ -88,7 +88,7 @@ class Hook(ABC):
     async def __call__(
         self,
         state: _state.AgentState,
-        runtime: Runtime[AvaContext],
+        runtime: Runtime[MeivaContext],
         config: RunnableConfig,
         /,
     ) -> dict | None: ...
@@ -166,7 +166,7 @@ def make_hook_runner(
     default_next: NodeName | Callable[[_state.AgentState], NodeName],
     hooks: Sequence[tuple[str | None, GraphHook]],
 ) -> Callable[
-    [_state.AgentState, Runtime[AvaContext], RunnableConfig], Awaitable[Command[NodeName]]
+    [_state.AgentState, Runtime[MeivaContext], RunnableConfig], Awaitable[Command[NodeName]]
 ]:
     """Generate a LangGraph Node function that runs the given hooks at one graph edge.
 
@@ -197,7 +197,7 @@ def make_hook_runner(
       reducer (e.g. `messages` → add_messages) merges both hooks' values via
       that reducer; a key WITHOUT a reducer raises RuntimeError (fail-loud),
       since a silent last-wins merge would let one hook's update clobber
-      another's (e.g. ava_compact's full-history replacement swallowing a
+      another's (e.g. meiva_compact's full-history replacement swallowing a
       sibling's appended note). Reducerless same-key co-writes are a
       coordination bug to surface, not a merge to resolve — hooks that share a
       node sequence the collision themselves (the sibling defers when the
@@ -213,7 +213,7 @@ def make_hook_runner(
 
     async def run(
         state: _state.AgentState,
-        runtime: Runtime[AvaContext],
+        runtime: Runtime[MeivaContext],
         config: RunnableConfig,
     ) -> Command[NodeName]:
         update: dict[str, Any] = {}

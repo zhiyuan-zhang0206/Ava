@@ -7,12 +7,12 @@ import pytest
 
 
 def plugin_registrations_present() -> bool:
-    installation = sys.modules.get("ava.sdk_surface.installation")
+    installation = sys.modules.get("meiva.sdk_surface.installation")
     return installation is not None and installation.installed() is not None
 
 
 def drop_plugin_registrations() -> None:
-    install = sys.modules.get("ava.sdk_surface.install")
+    install = sys.modules.get("meiva.sdk_surface.install")
     if install is not None:
         install.uninstall()
 

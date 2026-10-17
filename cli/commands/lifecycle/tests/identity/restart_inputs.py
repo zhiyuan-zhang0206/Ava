@@ -51,7 +51,7 @@ def restart_command_environment(
         return {
             "machine_name": "test-machine",
             "machine_role": "gateway",
-            "memory_remote": "git@github.com:test/AvaMemory.git",
+            "memory_remote": "git@github.com:test/MeivaMemory.git",
             "gateway_url": "http://test-gateway:8000",
         }, []
 
@@ -59,7 +59,7 @@ def restart_command_environment(
     monkeypatch.setattr(_root_driver_commands, "admit_live_start", lambda *_a, **_kw: False)  # pyright: ignore[reportUnknownArgumentType] — untyped test double
     monkeypatch.setattr(converge_host, "converge_host", lambda *_a, **_kw: None)  # pyright: ignore[reportUnknownArgumentType]
     # The per-cluster pg/redis bring-up (`ensure_gateway_data_plane`) starts a real
-    # native instance under $AVA_HOME. These tests assert session/stop/status call
+    # native instance under $MEIVA_HOME. These tests assert session/stop/status call
     # shapes, not infra, so stub it to a noop — keeping them hermetic regardless of
     # the dev host's pg/redis.
     monkeypatch.setattr(start, "cmd_status", ignore_retained_children(lambda: 0))
@@ -88,7 +88,7 @@ def restart_command_environment(
     )
 
     # roles_or_none (stop/status/converge) + machine_role (cmd_start service
-    # resolution) both read the AVA_MACHINE_SERVE_* settings; the test env sets only
+    # resolution) both read the MEIVA_MACHINE_SERVE_* settings; the test env sets only
     # the agent-runner flag. Pin both to gateway so the default path is the
     # full-service gateway box, deterministic regardless of the dev host's
     # environment. Agent-runner tests override machine_role explicitly.
@@ -122,7 +122,7 @@ def restart_command_environment(
     # runner's bootstrap projection. Credential forwarding has its own tests
     # in test_agent_profile_launch_env.py.
     def _fixture_runner_url() -> str:
-        return "postgresql://ava_runner:test-runner@127.0.0.1:1/ava_citest"
+        return "postgresql://meiva_runner:test-runner@127.0.0.1:1/meiva_citest"
 
     monkeypatch.setattr(root_driver, "runner_db_url_projection", _fixture_runner_url)
 

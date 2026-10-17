@@ -6,7 +6,7 @@ channel — nothing here touches agent_notices.
 - ``POST /api/alerts`` — the alert webhook. Grafana's embedded Alertmanager
   contact point delivers the Alertmanager standard webhook payload here — the
   one way into the store. Each alert instance is stored in ``alerts``
-  (deduped by fingerprint x starts_at), published on the ``ava:alerts`` Redis
+  (deduped by fingerprint x starts_at), published on the ``meiva:alerts`` Redis
   channel for the SSE stream, and fanned out to the user's connected IM
   channels via the local im_bridge daemon — every severity pushes
   (critical/warning/error).
@@ -148,7 +148,7 @@ def ingest_alerts(body: AlertWebhookPayload, request: Request) -> AlertIngestRes
 
 @router.get("/api/alerts/stream")
 async def get_alerts_stream(request: Request) -> StreamingResponse:
-    """SSE endpoint — subscribe to the ``ava:alerts`` Redis channel, forward.
+    """SSE endpoint — subscribe to the ``meiva:alerts`` Redis channel, forward.
 
     Client ``EventSource`` receives ``data: {json}\n\n`` frames, one
     ``AlertRow`` JSON per frame, on every ingest. Same machinery as the

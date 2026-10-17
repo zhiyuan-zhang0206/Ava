@@ -1,0 +1,20 @@
+---
+type: doc
+title: Cross-Cutting Concerns
+description: Meiva's **cross-cutting concerns**—shared mechanisms that span all subsystems. These are not independent "modules", but foundational capabilities that permeate every domain like agent-runtime, infra, gateway
+  and so on.
+tags:
+- cross-cutting
+---
+
+# Cross-Cutting Concerns
+
+Meiva's **cross-cutting concerns**—shared mechanisms that span all subsystems. These are not independent "modules", but foundational capabilities that permeate every domain like agent-runtime, infra, gateway, etc.
+
+## Sub-concepts
+
+- **Logging** — Structured logging system: event-driven logfmt format, unified event pipeline (emitter → JSONL mirror + OTLP), node_enter/node_exit lifecycle events
+- **Sessions** — session lifecycle: naming conventions, environment variable forwarding, records + logs
+- **Startup Sequence** — agent process startup sequence: schema gate → 'running' claim → heavy imports → run loop
+- **Environment Variables** — Key environment variables and their propagation chain: MEIVA_AGENT_ID, MEIVA_CLUSTER_SECRET, MEIVA_HOME, etc.
+- **Process Lifecycle** — Process lifecycle management: spawn → running → terminate → resurrect

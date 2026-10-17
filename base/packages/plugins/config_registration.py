@@ -15,7 +15,7 @@ from base.packages.plugins.plugin_errors import (
     InvalidConfigOverlay,
     SchemaDriftError,
 )
-from base.paths.home import resolve_ava_home
+from base.paths.home import resolve_meiva_home
 
 
 def bind_plugin_config(
@@ -83,7 +83,7 @@ def config_from_image[C: BaseModel](cls: type[C], content: str, config_path: Pat
         raise SchemaDriftError(
             f"plugin config disk image schema drift ({config_path}): "
             f"added={sorted(added)} removed={sorted(removed)}. "
-            f"Run `ava plugins update` to auto-merge."
+            f"Run `meiva plugins update` to auto-merge."
         )
 
     try:
@@ -95,7 +95,7 @@ def config_from_image[C: BaseModel](cls: type[C], content: str, config_path: Pat
 
 
 def disk_image_path(plugin: str) -> Path:
-    return resolve_ava_home().resolve() / "configs" / plugin / "config.json"
+    return resolve_meiva_home().resolve() / "configs" / plugin / "config.json"
 
 
 def write_default_disk_image(plugin: str, cls: type[BaseModel]) -> Path:
@@ -141,7 +141,7 @@ def reconcile_config_image[C: BaseModel](
     return candidate, cls_keys - disk_keys, disk_keys - cls_keys
 
 
-# ava:ref base/packages/plugins/docs/plugin-config/plugin-config.ava.okf.md#schema-reconciliation
+# meiva:ref base/packages/plugins/docs/plugin-config/plugin-config.meiva.okf.md#schema-reconciliation
 def merge_disk_image_schema(plugin: str, cls: type[BaseModel]) -> tuple[set[str], set[str]]:
     config_path = disk_image_path(plugin)
 
@@ -221,7 +221,7 @@ def overlay_config_classes(
     }
 
 
-# ava:ref base/packages/plugins/docs/plugin-config/plugin-config.ava.okf.md#overlay-admission
+# meiva:ref base/packages/plugins/docs/plugin-config/plugin-config.meiva.okf.md#overlay-admission
 def resolve_overlay_targets(
     overlay: dict[str, object], configs: Mapping[str, BaseModel] | None = None
 ) -> dict[str, tuple[str | None, str]]:
@@ -317,7 +317,7 @@ def _range_validator(
     return check
 
 
-# ava:ref base/packages/plugins/docs/plugin-config/plugin-config.ava.okf.md#framework-range-validators
+# meiva:ref base/packages/plugins/docs/plugin-config/plugin-config.meiva.okf.md#framework-range-validators
 _FRAMEWORK_RANGE_VALIDATORS: dict[str, Callable[[object], str | None]] = {
     "reasoning_effort": _validate_reasoning_effort_range,
     "heartbeat_pause_max_seconds": _range_validator(gt=0),
@@ -351,7 +351,7 @@ def _validate_framework_overlay_ranges(updates: dict[str, object]) -> None:
             raise InvalidConfigOverlay(f"overlay key {field!r} {error}")
 
 
-# ava:ref base/packages/plugins/docs/plugin-config/plugin-config.ava.okf.md#overlay-admission
+# meiva:ref base/packages/plugins/docs/plugin-config/plugin-config.meiva.okf.md#overlay-admission
 def validate_config_overlay_shape(
     overlay: dict[str, object], configs: Mapping[str, BaseModel] | None = None
 ) -> None:
@@ -487,7 +487,7 @@ def service_config_packet(plugin: str, config: BaseModel) -> str:
     )
 
 
-# ava:ref base/packages/plugins/docs/plugin-config/plugin-config.ava.okf.md#service-birth-snapshot
+# meiva:ref base/packages/plugins/docs/plugin-config/plugin-config.meiva.okf.md#service-birth-snapshot
 def read_service_config[C: BaseModel](plugin: str, cls: type[C]) -> C | None:
     from base.host.env.bootstrap import service_plugin_config_packet
 

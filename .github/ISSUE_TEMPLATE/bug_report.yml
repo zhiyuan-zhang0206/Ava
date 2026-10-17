@@ -34,7 +34,7 @@ body:
   - type: input
     id: version
     attributes:
-      label: Ava version
+      label: Meiva version
       description: As shown in the web UI's Control > Status section, or `git rev-parse --short HEAD`.
   - type: dropdown
     id: deployment

@@ -1,13 +1,13 @@
-"""Plugin enable config — per-machine local file `~/.ava/plugins_config.json`.
+"""Plugin enable config — per-machine local file `~/.meiva/plugins_config.json`.
 
 Different concept from `base/config.py` (env-driven Settings): this
 controls "which plugins are imported and registered at process
-startup"; editable via `ava plugins enable/disable`.
+startup"; editable via `meiva plugins enable/disable`.
 
 Unified plugin concept:
 - Only "plugins"; no "builtin hook" / "external plugin" distinction
-- Builtin plugins in `<repo>/ava_builtins/plugins/`, external plugins in
-  `~/.ava/plugins/`
+- Builtin plugins in `<repo>/meiva_builtins/plugins/`, external plugins in
+  `~/.meiva/plugins/`
 - Config stores one flat `plugins` dict: {name: {enabled: bool}}
 - Builtin/external distinction lives on the filesystem layer, not
   in config
@@ -76,12 +76,12 @@ def discover_plugins() -> dict[str, Path]:
 
     Dot-prefixed directories (`.name.staging`, `.name.backup-<pid>` — the
     atomic-install residue a hard kill can leave behind, 2026-08-28
-    ava_ledger defense line) are skipped: they are transient by name and must
+    meiva_ledger defense line) are skipped: they are transient by name and must
     never surface as ghost plugins.
     """
     discovered: dict[str, Path] = {}
 
-    # Builtin plugin: <repo>/ava_builtins/plugins/<name>/plugin.py
+    # Builtin plugin: <repo>/meiva_builtins/plugins/<name>/plugin.py
     repo_dir = paths.repo_plugins_dir()
     if repo_dir.exists():
         for p in sorted(repo_dir.iterdir()):
@@ -90,7 +90,7 @@ def discover_plugins() -> dict[str, Path]:
             if p.is_dir() and (p / "plugin.py").exists():
                 discovered[p.name] = p
 
-    # External plugin: ~/.ava/plugins/<name>/plugin.py
+    # External plugin: ~/.meiva/plugins/<name>/plugin.py
     from base.host.runtime_interpreter import external_plugin_read_root
 
     user_dir = external_plugin_read_root()
@@ -168,8 +168,8 @@ def _default_config(known_plugins: set[str]) -> PluginsConfig:
 
 
 def local_config_path() -> Path:
-    """Per-machine plugin-config file path: `~/.ava/plugins_config.json`."""
-    return paths.ava_home() / "plugins_config.json"
+    """Per-machine plugin-config file path: `~/.meiva/plugins_config.json`."""
+    return paths.meiva_home() / "plugins_config.json"
 
 
 def _read_local() -> dict[str, Any] | None:
@@ -192,7 +192,7 @@ def _read_local() -> dict[str, Any] | None:
 
 def write_local(raw: dict[str, Any]) -> None:
     """Full-replace the per-machine plugin-config file. The write path for
-    `set_local_enabled` (and `ava plugins enable/disable`)."""
+    `set_local_enabled` (and `meiva plugins enable/disable`)."""
     local_config_path().write_text(json.dumps(raw, indent=2))
 
 
@@ -216,7 +216,7 @@ def load(known_plugins: set[str], *, allow_dangling: bool = False) -> PluginsCon
        filesystem (DanglingPlugin) — unless `allow_dangling=True`, which
        drops the dangling entries instead (treated as disabled; the caller
        is the runtime loader, whose fail-soft contract forbids a config
-       mismatch from blocking `import ava`)
+       mismatch from blocking `import meiva`)
     5. Auto-merge: known plugins not in config -> add enabled=true
        in memory (not persisted)
 
@@ -233,10 +233,10 @@ def load(known_plugins: set[str], *, allow_dangling: bool = False) -> PluginsCon
     cfg = _validate_schema(raw)
 
     # Fold each config key onto the plugin's real directory spelling. A plugin
-    # directory has to stay a Python package (`ava_builtins.plugins.<name>` is
+    # directory has to stay a Python package (`meiva_builtins.plugins.<name>` is
     # imported by path), so underscore is the on-disk identity while dash is the
     # name everywhere a human writes it — a hand-edited `plugins_config.json`
-    # saying `ava-code` addresses the `ava_code` plugin.
+    # saying `meiva-code` addresses the `meiva_code` plugin.
     cfg.plugins = {
         (skill_naming.find(name, known_plugins) or name): entry
         for name, entry in cfg.plugins.items()
@@ -284,11 +284,11 @@ def load_for_runtime(known_plugins: set[str]) -> PluginsConfig:
     (treated as disabled) and reported through the canonical reporter instead
     of raising DanglingPlugin.
 
-    For long-lived / start-critical consumers — converge (`ava start`), the
+    For long-lived / start-critical consumers — converge (`meiva start`), the
     model-provider factory, gateway request paths, ops inventory — a config
     entry whose plugin directory is gone (interrupted upgrade, manual rm)
     must not block a service from starting or answering. This is the same
-    fail-soft contract `load_extensions` follows (2026-08-28 ava_ledger
+    fail-soft contract `load_extensions` follows (2026-08-28 meiva_ledger
     incident); interactive CLI paths (`set_local_enabled`) keep the strict
     `load()` and its DanglingPlugin error. Each dangling name is reported on each failed load through `report_dangling`.
     """
@@ -305,7 +305,7 @@ def installed_plugin_dirs() -> dict[str, Path]:
 
     A thin public alias for `discover_plugins()`. The service roster
     (`services.supervision.roster.plugin_services.plugin_services`) uses this — presence, NOT the agent-facing
-    enable-state (`ava plugins enable/disable`) — to fold plugin-declared
+    enable-state (`meiva plugins enable/disable`) — to fold plugin-declared
     ServiceSpecs into `build_services()`. The roster is a machine/cluster concern
     and must not depend on the agent-plugin-registration plane; a plugin gates its
     own service via an explicit settings field in `ServiceSpec.gate` (e.g.

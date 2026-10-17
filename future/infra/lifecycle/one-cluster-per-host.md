@@ -10,12 +10,12 @@ order and of what each slice deleted.
 
 Slice 6 has its Linux container recipe and its Tart recipe (`scripts/verify/`: the
 golden image build and the per-run clone driver) and the Tart clone-inheritance
-experiment; `ava start` end to end inside a cloned macOS guest has run once. The
+experiment; `meiva start` end to end inside a cloned macOS guest has run once. The
 open items are in [verification boundaries](../engineering/verification-boundaries.md#not-yet-known).
 
 ## Boundary
 
-A host runs one cluster at `~/.ava`. Anything that verifies something runs in a
+A host runs one cluster at `~/.meiva`. Anything that verifies something runs in a
 container, a VM or a Tart macOS VM, where it is that boundary's one cluster.
 In scope: the mechanisms that keep several clusters apart on one host, and the
 way a process learns its home. Out of scope: the release path and PITR shell
@@ -26,19 +26,19 @@ and tests relocation (the locality work), and the data plane itself.
 ## What must survive every slice
 
 1. **The production home keeps resolving.** The production source checkout owns
-   `~/.ava`. Existing production `start-intent.json` files carry a `worktree`
+   `~/.meiva`. Existing production `start-intent.json` files carry a `worktree`
    field and a `record` with ports; a slice either reads them or names, in its
    PR, the hand step that rewrites them before the first start. No
    compatibility code is added for them.
 2. **Development code never drives the host's cluster.** A test session sets
-   `AVA_HOME` before it spawns anything; the scripts git hooks launch that reach
-   application code set a scratch `AVA_HOME`; the `~/.ava` cluster is started and
-   stopped only from `~/.ava/source`. Those three rules have a test that fails if
+   `MEIVA_HOME` before it spawns anything; the scripts git hooks launch that reach
+   application code set a scratch `MEIVA_HOME`; the `~/.meiva` cluster is started and
+   stopped only from `~/.meiva/source`. Those three rules have a test that fails if
    one is broken. Every other development tool that imports application code
-   follows the convention in `docs/conventions/dev-setup.md` (a temporary `AVA_HOME`, or
+   follows the convention in `docs/conventions/dev-setup.md` (a temporary `MEIVA_HOME`, or
    a Docker or Tart boundary); see
    [guard only irreversible mistakes](../../../docs/decisions/engineering/design/simplification/2026-10-01-guard-only-irreversible-mistakes.md).
-3. **`AVA_HOME` is the one override of the home.** Unset means `~/.ava`. It is
+3. **`MEIVA_HOME` is the one override of the home.** Unset means `~/.meiva`. It is
    read when needed, never captured at import, and there is no second channel.
 4. **A test home never uses the production ports.** Tests on a machine that also
    runs production bind and dial only ports of their own.
@@ -50,11 +50,11 @@ and tests relocation (the locality work), and the data plane itself.
 | # | Status | Delete | Main files | Risk |
 |---|---|---|---|---|
 | 1 | done (#3764) | The native local preview controller, its mock and validation tasks, its tests and the lint allowlist entry | `scripts/preview/**` (15 files), six of the seven tests in `tests/components/lifecycle/preview/` (`test_visual_gate.py` stays), `scripts/lint/no_os_environ.py`, docs and skills that name it | Leaf: one importer outside itself, no production path |
-| 2 | done (#3776; the scratch-home rule for tools is enforced for the git hooks only, the rest is convention) | `ava start --worktree`, the `.ava_home` pointer, checkout binding and lock, the env-versus-pointer contradiction check, `AVA_HOME_OVERRIDE`, the unanchored scratch home. The home becomes `AVA_HOME` or `~/.ava`, read when called; the import-time users of the home become lazy; only `~/.ava/source` may start or stop `~/.ava`; the scripts hooks launch set a scratch home | `base/host/env/dotenv_boot.py`, `base/paths`, `cli/start_identity.py`, `cli/start_intent.py`, `cli/parsers/host.py`, `tests/fixtures/env_bootstrap.py`, the hook configuration | Start path, and every tool that relied on the scratch home. Existing intents carry `worktree` |
-| 3 | done (#3774) | Port-block allocation and cross-cluster preflight; `--health-port-base`, `health_port_env` and the WSL default base; the retired `restarter` and `coordinator` slots. New homes record the fixed port table (21 slots, `base/host/env/port_table.py`); a home keeps reading its recorded ports; tests keep ports of their own (the session's kernel-assigned table for homes born in tests) | `base/cluster/{ports,port_preflight,derive}.py`, `base/host/env/{port_table,registry}.py`, `cli/commands/converge/{port_preflight,health_preflight}.py`, `cli/preflight.py`, `cli/start_identity.py`, `cli/start_intent.py`, `cli/parsers/host.py`, and the 9 consumers of `record_*_port`, now `rec.ports[...]` (`base/db/{connections,pg_admin}.py`, `cli/commands/data_plane/{bringup,cluster_instance,pgbouncer}.py`, `cli/commands/converge/redis_bridge.py`, `cli/commands/observability/otel_collector.py`, `services/supervision/ava_root_glue/diagnostic_probes.py`, `scripts/data_plane_ops/rotate_data_plane_secrets.py`) | Bring-up reads recorded ports unchanged. A record that still carries a retired slot is refused at start, so each retirement (`restarter` and `coordinator`; later `pitr_uploader` and `pitr_base_backup`) deletes its slots from `start-intent.json` by hand between the stop and the start |
-| 4 | done (#3787) | The bare-`ava` launcher routing, the per-home CLI link, `AVA_HOST_STATE_DIR` (host state is the home), per-home OS job slugs; `ava` on PATH becomes a direct link to the production source CLI. `cluster down` is deleted and `cluster destroy` loses `--path`: it acts on this home, the default one included, and needs an interactive confirmation (type the home path, no bypass flag). Fixed OS job labels need a gate in the same slice: only the default home registers or removes OS jobs. The permissions helper keeps its per-home launchd label for now (a fixed label changes its launchd identity on every Mac, to be taken on its own) | `scripts/ava-launcher.sh`, `cli/commands/converge/{_steps,host}.py`, `cli/commands/cluster/home.py`, `base/config/domains/general.py`, `base/paths`, `base/host/system/*`, `cli/commands/converge/tests/test_bare_ava.py` | Host wiring. Converge rewrites the PATH link and the crontab lines on the next start; the old launchd jobs and the old Linux boot unit are removed by hand between the stop and the start |
-| 5 | done (#3795) | The one-step birth inside `ava start`: `ava init` takes the first-start flags (11 of `start`'s 15; `--worktree` and `--health-port-base`, the other two of the original 17, went with slices 2 and 3), writes the home's identity and starts nothing; `start` keeps service selection and fails fast on an uninitialized home. The data plane is still born by the first `start` (the birth branches follow the intent's phase). `--db-capability` also serves a runner's later bundle, so it moves to `ava cluster db-authority install-unit` beside `issue-unit` | `cli/parsers/host.py`, `cli/init_intent.py` (new), `cli/unit_join.py` (new), `cli/start_intent.py`, `cli/start_identity.py`, `cli/commands/lifecycle/start.py`, `cli/commands/_setup.py`, `cli/commands/cluster/control.py`, `scripts/verify/container.py` | Small: the identity half of `start` was already a settings-free phase. No intent change, so no hand step on a running home |
-| 6 | done: container recipe (#3779), Tart experiment (#3782), Tart recipe scripts | Nothing is deleted: the container and Tart recipes that replace the native preview (a Linux image running the normal stack, a Tart base image with its one-time grants) | new: [verification boundaries](../engineering/verification-boundaries.md); the container recipe is `scripts/verify/`; the Tart clone-inheritance experiment passed (Experiment B there: a clone of a granted image keeps the helper identity and both grants); the Tart recipe is `scripts/verify/tart_run.py` (per run) and `tart_golden.py` (golden image), and one run of it carried `ava start` end to end in a guest | Separate design; slices 1 to 5 do not wait for it |
+| 2 | done (#3776; the scratch-home rule for tools is enforced for the git hooks only, the rest is convention) | `meiva start --worktree`, the `.meiva_home` pointer, checkout binding and lock, the env-versus-pointer contradiction check, `MEIVA_HOME_OVERRIDE`, the unanchored scratch home. The home becomes `MEIVA_HOME` or `~/.meiva`, read when called; the import-time users of the home become lazy; only `~/.meiva/source` may start or stop `~/.meiva`; the scripts hooks launch set a scratch home | `base/host/env/dotenv_boot.py`, `base/paths`, `cli/start_identity.py`, `cli/start_intent.py`, `cli/parsers/host.py`, `tests/fixtures/env_bootstrap.py`, the hook configuration | Start path, and every tool that relied on the scratch home. Existing intents carry `worktree` |
+| 3 | done (#3774) | Port-block allocation and cross-cluster preflight; `--health-port-base`, `health_port_env` and the WSL default base; the retired `restarter` and `coordinator` slots. New homes record the fixed port table (21 slots, `base/host/env/port_table.py`); a home keeps reading its recorded ports; tests keep ports of their own (the session's kernel-assigned table for homes born in tests) | `base/cluster/{ports,port_preflight,derive}.py`, `base/host/env/{port_table,registry}.py`, `cli/commands/converge/{port_preflight,health_preflight}.py`, `cli/preflight.py`, `cli/start_identity.py`, `cli/start_intent.py`, `cli/parsers/host.py`, and the 9 consumers of `record_*_port`, now `rec.ports[...]` (`base/db/{connections,pg_admin}.py`, `cli/commands/data_plane/{bringup,cluster_instance,pgbouncer}.py`, `cli/commands/converge/redis_bridge.py`, `cli/commands/observability/otel_collector.py`, `services/supervision/meiva_root_glue/diagnostic_probes.py`, `scripts/data_plane_ops/rotate_data_plane_secrets.py`) | Bring-up reads recorded ports unchanged. A record that still carries a retired slot is refused at start, so each retirement (`restarter` and `coordinator`; later `pitr_uploader` and `pitr_base_backup`) deletes its slots from `start-intent.json` by hand between the stop and the start |
+| 4 | done (#3787) | The bare-`meiva` launcher routing, the per-home CLI link, `MEIVA_HOST_STATE_DIR` (host state is the home), per-home OS job slugs; `meiva` on PATH becomes a direct link to the production source CLI. `cluster down` is deleted and `cluster destroy` loses `--path`: it acts on this home, the default one included, and needs an interactive confirmation (type the home path, no bypass flag). Fixed OS job labels need a gate in the same slice: only the default home registers or removes OS jobs. The permissions helper keeps its per-home launchd label for now (a fixed label changes its launchd identity on every Mac, to be taken on its own) | `scripts/meiva-launcher.sh`, `cli/commands/converge/{_steps,host}.py`, `cli/commands/cluster/home.py`, `base/config/domains/general.py`, `base/paths`, `base/host/system/*`, `cli/commands/converge/tests/test_bare_meiva.py` | Host wiring. Converge rewrites the PATH link and the crontab lines on the next start; the old launchd jobs and the old Linux boot unit are removed by hand between the stop and the start |
+| 5 | done (#3795) | The one-step birth inside `meiva start`: `meiva init` takes the first-start flags (11 of `start`'s 15; `--worktree` and `--health-port-base`, the other two of the original 17, went with slices 2 and 3), writes the home's identity and starts nothing; `start` keeps service selection and fails fast on an uninitialized home. The data plane is still born by the first `start` (the birth branches follow the intent's phase). `--db-capability` also serves a runner's later bundle, so it moves to `meiva cluster db-authority install-unit` beside `issue-unit` | `cli/parsers/host.py`, `cli/init_intent.py` (new), `cli/unit_join.py` (new), `cli/start_intent.py`, `cli/start_identity.py`, `cli/commands/lifecycle/start.py`, `cli/commands/_setup.py`, `cli/commands/cluster/control.py`, `scripts/verify/container.py` | Small: the identity half of `start` was already a settings-free phase. No intent change, so no hand step on a running home |
+| 6 | done: container recipe (#3779), Tart experiment (#3782), Tart recipe scripts | Nothing is deleted: the container and Tart recipes that replace the native preview (a Linux image running the normal stack, a Tart base image with its one-time grants) | new: [verification boundaries](../engineering/verification-boundaries.md); the container recipe is `scripts/verify/`; the Tart clone-inheritance experiment passed (Experiment B there: a clone of a granted image keeps the helper identity and both grants); the Tart recipe is `scripts/verify/tart_run.py` (per run) and `tart_golden.py` (golden image), and one run of it carried `meiva start` end to end in a guest | Separate design; slices 1 to 5 do not wait for it |
 
 Dependency order: slice 1 first, a pure deletion that removes the largest
 consumer of everything after it. Slice 3 is implemented against whatever of
@@ -81,12 +81,12 @@ their packages' own `tests/` directories under the locality work.
   work.
 - **The older identity channels are retired** (done; see
   [a home's identity lives in its `.env`](../../../docs/decisions/runtime/hosts/2026-10-01-retire-machine-identity-files.md)).
-  The `$AVA_HOME/machine_*`, `gateway_url` and `memory_remote` files are no longer
-  read, and `ava start` admits a home only through its intent. A home that still has the
+  The `$MEIVA_HOME/machine_*`, `gateway_url` and `memory_remote` files are no longer
+  read, and `meiva start` admits a home only through its intent. A home that still has the
   files gets their values into its `.env` by a hand step before the first start of the
   code that contains the change, and the files deleted.
 - **The permissions helper's launchd label is still per home**
-  (`com.ava.permissions-helper.<slug>`, `helper_job_label` in
+  (`com.meiva.permissions-helper.<slug>`, `helper_job_label` in
   `services/desktop/permissions_helper/launchd_job.py`), while every other OS job label is
   fixed and gated on the default home. Slice 4 left it on purpose: on macOS a
   different label is a different background item, which can ask the user to
@@ -100,7 +100,7 @@ their packages' own `tests/` directories under the locality work.
   across days and commits; the open Tart items are in
   [verification boundaries](../engineering/verification-boundaries.md#not-yet-known). Answered: a clone
   keeps the helper identity and both grants with no approval at clone time (Experiment B
-  there), and `ava start` runs end to end inside a cloned guest (its Recipe C run).
+  there), and `meiva start` runs end to end inside a cloned guest (its Recipe C run).
 - Whether any agent workflow still depends on a worktree cluster; the
   self-development skill does not require one.
 - Whether the impersonation preview can run in a container with the CLI logins

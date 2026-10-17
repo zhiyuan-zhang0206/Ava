@@ -25,8 +25,8 @@ _UID = 501
 _GH = {"gh": "/opt/homebrew/bin/gh"}
 
 
-def _ava(*, host: Host) -> str:
-    return "/work tree/.venv/bin/ava"
+def _meiva(*, host: Host) -> str:
+    return "/work tree/.venv/bin/meiva"
 
 
 def _path(*, host: Host) -> str:
@@ -56,8 +56,8 @@ def _recorder(calls: list[str], label: str) -> Callable[..., None]:
 @pytest.fixture(autouse=True)
 def _configure_job(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     monkeypatch.setenv("HOME", str(tmp_path))
-    monkeypatch.setattr(cron, "ava_binary_path", _ava)
-    monkeypatch.setattr(cron, "job_home", lambda: str(tmp_path / ".ava"))
+    monkeypatch.setattr(cron, "meiva_binary_path", _meiva)
+    monkeypatch.setattr(cron, "job_home", lambda: str(tmp_path / ".meiva"))
     monkeypatch.setattr(cron, "launchd_path_env", _path)
     monkeypatch.setattr(paths, "repo_root", lambda: Path("/check/out"))
 
@@ -67,7 +67,7 @@ def test_launchd_plist_schedules_the_daily_sampler(tmp_path: Path) -> None:
     root = ET.fromstring(content)  # noqa: S314 — self-generated plist
     values = [element.text for element in root.findall("./dict/array/string")]
 
-    assert "<string>com.ava.pr-flow</string>" in content
+    assert "<string>com.meiva.pr-flow</string>" in content
     assert values[0:2] == ["/bin/sh", "-c"]
     command = values[2]
     assert command is not None
@@ -79,8 +79,8 @@ def test_launchd_plist_schedules_the_daily_sampler(tmp_path: Path) -> None:
         "            <key>Minute</key>\n            <integer>25</integer>\n"
     ) in content
     assert "<key>RunAtLoad</key>\n    <false/>" in content
-    assert f"{tmp_path}/.ava/logs/pr-flow.out.log" in content
-    assert f"<string>{tmp_path}/.ava</string>" in content  # AVA_HOME pin
+    assert f"{tmp_path}/.meiva/logs/pr-flow.out.log" in content
+    assert f"<string>{tmp_path}/.meiva</string>" in content  # MEIVA_HOME pin
 
 
 def test_macos_reregistration_rewrites_and_reloads_idempotently() -> None:
@@ -96,8 +96,8 @@ def test_macos_reregistration_rewrites_and_reloads_idempotently() -> None:
 
 
 def test_linux_registration_replaces_only_its_own_lines(tmp_path: Path) -> None:
-    other = "40 4 * * * /x/ava logs rotate  # ava-logs-maintenance"
-    old = "25 0 * * * /old/ava  # ava-pr-flow"
+    other = "40 4 * * * /x/meiva logs rotate  # meiva-logs-maintenance"
+    old = "25 0 * * * /old/meiva  # meiva-pr-flow"
     crontab = FakeCrontab(f"{other}\n\n{old}\n{old}\n")
 
     assert job.register_linux(host=_linux(crontab)) == 0
@@ -105,10 +105,10 @@ def test_linux_registration_replaces_only_its_own_lines(tmp_path: Path) -> None:
     assert other in body
     assert f"{other}\n\n" in body
     assert old not in body
-    assert body.count("# ava-pr-flow") == 1
+    assert body.count("# meiva-pr-flow") == 1
     assert "25 0 * * *" in body
     assert "pr_flow_export.py" in body
-    assert str(tmp_path / ".ava" / "logs" / "pr-flow.out.log") in body
+    assert str(tmp_path / ".meiva" / "logs" / "pr-flow.out.log") in body
 
 
 def test_linux_crontab_failures_and_empty_table(capsys: pytest.CaptureFixture[str]) -> None:
@@ -133,7 +133,7 @@ def test_linux_crontab_failures_and_empty_table(capsys: pytest.CaptureFixture[st
     assert (
         len(crontab.writes),
         crontab.writes[0].startswith("25 0 * * * "),
-        crontab.writes[0].endswith("  # ava-pr-flow\n"),
+        crontab.writes[0].endswith("  # meiva-pr-flow\n"),
         crontab.writes[0].count("\n"),
     ) == (1, True, True, 1)
 
@@ -165,7 +165,7 @@ def test_macos_bootstrap_failure_and_repeated_unregister(
     monkeypatch.setattr(job.logger, "error", record_error)
     assert job.register_macos(host=host) == 1
     assert [argv[1] for argv in commands.argvs] == ["bootout", "bootstrap"]
-    assert errors == [("launchctl bootstrap failed for {}: {}", "com.ava.pr-flow", "denied")]
+    assert errors == [("launchctl bootstrap failed for {}: {}", "com.meiva.pr-flow", "denied")]
 
     plist = job.launchd_plist_path()
     assert plist.exists()

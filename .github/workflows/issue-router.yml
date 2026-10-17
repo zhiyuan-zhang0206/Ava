@@ -1,4 +1,4 @@
-# Routes template-filed issues to the owning Ava line: bug -> QA,
+# Routes template-filed issues to the owning Meiva line: bug -> QA,
 # feature request -> PM, experience feedback -> P0 lead. The templates apply
 # their own label (bug / enhancement / ux) at filing time, so this router only
 # classifies — a blank issue (disabled by config.yml) would carry no label and
@@ -28,9 +28,9 @@ jobs:
           set -euo pipefail
           labels="$(gh api "repos/${GITHUB_REPOSITORY}/issues/${ISSUE_NUMBER}" --jq '[.labels[].name] | join(" ")')"
           case " ${labels} " in
-            *" bug "*)  route="route/qa"; line="the Ava QA line (Ava #3242)";;
-            *" enhancement "*) route="route/pm"; line="the Ava PM (Ava #3187)";;
-            *" ux "*)   route="route/p0"; line="the Ava P0 lead (Ava #405)";;
+            *" bug "*)  route="route/qa"; line="the Meiva QA line (Meiva #3242)";;
+            *" enhancement "*) route="route/pm"; line="the Meiva PM (Meiva #3187)";;
+            *" ux "*)   route="route/p0"; line="the Meiva P0 lead (Meiva #405)";;
             *)          echo "no template label — nothing to route"; exit 0;;
           esac
           gh api --method POST \

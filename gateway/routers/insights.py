@@ -1,4 +1,4 @@
-# ava:ref gateway/routers/docs/insights-proxy.ava.okf.md#insights-proxy-boundary
+# meiva:ref gateway/routers/docs/insights-proxy.meiva.okf.md#insights-proxy-boundary
 from __future__ import annotations
 
 from datetime import datetime
@@ -8,7 +8,7 @@ from urllib.parse import quote
 import httpx
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
 
-from base.paths import ava_home, insights_socket
+from base.paths import insights_socket, meiva_home
 from gateway.agents.eval_guard import deny_isolated_result_read
 from services.derived.insights.run_timeline.schemas import (
     RunTimelineContext,
@@ -31,7 +31,7 @@ _FORWARDED_RESPONSE_HEADERS = frozenset({"content-type", "cache-control", "etag"
 def build_client() -> httpx.AsyncClient:
     return httpx.AsyncClient(
         transport=httpx.AsyncHTTPTransport(
-            uds=str(insights_socket(ava_home())), limits=httpx.Limits(max_connections=32)
+            uds=str(insights_socket(meiva_home())), limits=httpx.Limits(max_connections=32)
         ),
         base_url="http://insights",
         timeout=_TIMEOUT,

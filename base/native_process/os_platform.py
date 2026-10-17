@@ -44,7 +44,7 @@ class Platform:
             return cls("darwin", machine, executable)
         if sys_platform.startswith("linux"):
             return cls("linux", machine, executable)
-        raise ValueError(f"unsupported platform {sys_platform!r}: Ava runs on macOS and Linux")
+        raise ValueError(f"unsupported platform {sys_platform!r}: Meiva runs on macOS and Linux")
 
     @classmethod
     def current(cls) -> Platform:
@@ -73,7 +73,7 @@ def launchd_job_label() -> str | None:
     converge runs under), so this is a hint, not proof of ownership:
     destructive converges must confirm against the live process tree with
     :func:`descends_from_launchd_job`. Per-process scheduler identity, not
-    operator-configurable Ava settings.
+    operator-configurable Meiva settings.
     """
     return os.environ.get("XPC_SERVICE_NAME")
 
@@ -264,12 +264,12 @@ def crontab_lock() -> Generator[None]:
     supervision, and losing it silently leaves agent-host/ops/browser
     sessions down with nobody watching (audit 2026-08-08 P1).
 
-    The lock file lives OUTSIDE $AVA_HOME (a per-home lock would not
+    The lock file lives OUTSIDE $MEIVA_HOME (a per-home lock would not
     serialize across clusters sharing one crontab) but inside the user's
     home, so a /tmp sweep cannot unlink it mid-hold. It is advisory —
     every crontab rewrite in the repo must go through this lock.
     """
-    with file_lock(Path.home() / ".ava-crontab.lock"):
+    with file_lock(Path.home() / ".meiva-crontab.lock"):
         yield
 
 
@@ -280,9 +280,9 @@ def ensure_line_buffered_stdio() -> None:
     block buffer, so a long-running command's own `print()` lines surface all at
     once when it exits. Every detached orchestration session pipes the CLI into
     `tee` (`{ <update command>; } 2>&1 | tee -a <log>`), and the CHILD processes
-    it spawns — `uv sync`, the `ava start` subprocess — write to that same pipe
+    it spawns — `uv sync`, the `meiva start` subprocess — write to that same pipe
     unbuffered. The result is a live log that is not merely late but *misordered*:
-    on 2026-07-28 a rollout's log showed `ava start` output and a pin warning with
+    on 2026-07-28 a rollout's log showed `meiva start` output and a pin warning with
     no `[update]` header, no pin line and no phase markers above them, which
     reads exactly like a rollout that skipped its orchestration. The parent's lines
     all appeared, in the right order, at the END of the file once it exited. It

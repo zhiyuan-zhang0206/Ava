@@ -8,14 +8,14 @@ exports = ["cancel_fixture.py", "test_llm_helpers.py"]
 "test_agent_traceback.py" = "executes agent-style code to check how its traceback is rendered"
 
 [debt.env-patch]
-"test_build_with_extensions.py#monkeypatch.setenv os.environ.AVA_HOME" = 1
-"test_exec_timeout_note.py#monkeypatch.delenv os.environ.AVA_AGENT_ID" = 2
+"test_build_with_extensions.py#monkeypatch.setenv os.environ.MEIVA_HOME" = 1
+"test_exec_timeout_note.py#monkeypatch.delenv os.environ.MEIVA_AGENT_ID" = 2
 
 [debt.first-party-patch]
-"test_build_with_extensions.py#monkeypatch.setattr ava.sdk_surface.metering.install" = 1
+"test_build_with_extensions.py#monkeypatch.setattr meiva.sdk_surface.metering.install" = 1
 "test_build_with_extensions.py#monkeypatch.setattr base.packages.plugin_providers.build_model_catalog" = 1
 "test_build_with_extensions.py#monkeypatch.setattr base.packages.plugins.loading.plugin_loader.load_plugin_module" = 2
-"test_build_with_extensions.py#monkeypatch.setattr base.paths.ava_home" = 1
+"test_build_with_extensions.py#monkeypatch.setattr base.paths.meiva_home" = 1
 "test_build_with_extensions.py#monkeypatch.setattr base.paths.plugins_dir" = 1
 "test_build_with_extensions.py#monkeypatch.setattr base.paths.repo_plugins_dir" = 2
 "test_callbacks.py#monkeypatch.setattr agent.graph._callbacks.time" = 1

@@ -14,7 +14,7 @@ def _manifest(**contributions: object) -> PluginManifest:
     return PluginManifest(
         name="declared",
         version="1.0.0",
-        engines={"ava": ">=0.1.0"},
+        engines={"meiva": ">=0.1.0"},
         description=None,
         contributions=contributions,
         dependencies=Dependencies(plugins={}, python_packages={}, host_capabilities={}),
@@ -33,7 +33,7 @@ def _view(
         name=name,
         enabled=enabled,
         builtin=True,
-        directory=Path("/repo/ava_builtins/plugins") / name,
+        directory=Path("/repo/meiva_builtins/plugins") / name,
         description=f"{name} does things",
         contributions=contributions,
         manifest=manifest if manifest is not None else _manifest(),
@@ -96,7 +96,7 @@ def test_detail_lists_every_registered_fact(
     assert "registered contributions (2)" in out
     assert "hooks                before_llm                demo.plugin._DemoHook" in out
     assert "state                demo__counter             DemoState.counter: int" in out
-    assert "declared 1.0.0  engines.ava=>=0.1.0" in out
+    assert "declared 1.0.0  engines.meiva=>=0.1.0" in out
     assert "  registered-not-declared  hooks/before_llm" in out
     assert "plugin_activation" in out
 

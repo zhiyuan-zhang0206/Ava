@@ -28,7 +28,7 @@ function webSocketOrigin(gatewayOrigin: string): string {
   return url.origin;
 }
 
-// ava:ref ui/web/src/lib/auth/docs/content-security-policy.ava.okf.md#forwarded-origin
+// meiva:ref ui/web/src/lib/auth/docs/content-security-policy.meiva.okf.md#forwarded-origin
 export function browserFacingRequestUrl(request: Request): URL {
   const requestUrl = new URL(request.url);
   const protocol = firstHeaderValue(request.headers.get("x-forwarded-proto"))?.toLowerCase();
@@ -44,7 +44,7 @@ export function browserFacingRequestUrl(request: Request): URL {
   return requestUrl;
 }
 
-// ava:ref ui/web/src/lib/auth/docs/content-security-policy.ava.okf.md#production-directives
+// meiva:ref ui/web/src/lib/auth/docs/content-security-policy.meiva.okf.md#production-directives
 export function buildContentSecurityPolicy({
   nonce,
   gatewayOrigin,

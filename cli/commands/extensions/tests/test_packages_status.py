@@ -1,4 +1,4 @@
-"""`ava packages status` — the read-only surface over registry schema v2.
+"""`meiva packages status` — the read-only surface over registry schema v2.
 
 Host version + channel line + per-package channel/policy/applied-rev/last
 result/declared range, in text and `--json` (tasks #2915 / #3267).
@@ -40,7 +40,7 @@ def test_empty_registry_prints_host_and_no_packages(
 def test_text_table_shows_resolved_policy_per_source_class(
     process_config: ConfigBoot, unit_home: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    _register("repo-skill", origin="repo", origin_path="/x/ava_builtins/skills/repo-skill")
+    _register("repo-skill", origin="repo", origin_path="/x/meiva_builtins/skills/repo-skill")
     _register("git-skill", origin="user", source="https://x/git-skill")
     _register("local-skill", origin="user")
 
@@ -64,7 +64,7 @@ def test_text_table_shows_resolved_policy_per_source_class(
 def test_json_output_carries_host_channels_and_packages(
     process_config: ConfigBoot, unit_home: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    _register("repo-skill", origin="repo", origin_path="/x/ava_builtins/skills/repo-skill")
+    _register("repo-skill", origin="repo", origin_path="/x/meiva_builtins/skills/repo-skill")
 
     assert cmd_packages_status(config=process_config, json_output=True) == 0
     payload = json.loads(capsys.readouterr().out)  # pyright: ignore[reportUnknownMemberType]
@@ -83,8 +83,8 @@ def test_json_output_carries_host_channels_and_packages(
 def test_invalid_manifest_reported_not_crashed(
     process_config: ConfigBoot, unit_home: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    _register("broken", origin="repo", origin_path="/x/ava_builtins/skills/broken")
-    manifest = unit_home / "skills" / "broken" / "ava-plugin.json"
+    _register("broken", origin="repo", origin_path="/x/meiva_builtins/skills/broken")
+    manifest = unit_home / "skills" / "broken" / "meiva-plugin.json"
     manifest.parent.mkdir(parents=True)
     manifest.write_text("{ not json", encoding="utf-8")
 
@@ -98,8 +98,8 @@ def test_invalid_manifest_reported_not_crashed(
 def test_declared_range_displayed(
     process_config: ConfigBoot, unit_home: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    _register("ranged", origin="repo", origin_path="/x/ava_builtins/skills/ranged")
-    manifest = unit_home / "skills" / "ranged" / "ava-plugin.json"
+    _register("ranged", origin="repo", origin_path="/x/meiva_builtins/skills/ranged")
+    manifest = unit_home / "skills" / "ranged" / "meiva-plugin.json"
     manifest.parent.mkdir(parents=True)
     manifest.write_text(
         json.dumps(
@@ -127,8 +127,8 @@ def test_host_blocked_package_surfaces_the_reason(
 ) -> None:
     """A manifest whose range excludes this host is a load-time drop, and the
     status surface carries the reason (design §5.5)."""
-    _register("blocked", origin="repo", origin_path="/x/ava_builtins/skills/blocked")
-    manifest = unit_home / "skills" / "blocked" / "ava-plugin.json"
+    _register("blocked", origin="repo", origin_path="/x/meiva_builtins/skills/blocked")
+    manifest = unit_home / "skills" / "blocked" / "meiva-plugin.json"
     manifest.parent.mkdir(parents=True)
     manifest.write_text(
         json.dumps(
@@ -136,7 +136,7 @@ def test_host_blocked_package_surfaces_the_reason(
                 "apiVersion": 2,
                 "name": "blocked",
                 "version": "1.0.0",
-                "engines": {"ava": ">=2099"},
+                "engines": {"meiva": ">=2099"},
             }
         ),
         encoding="utf-8",

@@ -1,9 +1,9 @@
-"""`ava status` data-plane rendering (`print_data_plane_status`).
+"""`meiva status` data-plane rendering (`print_data_plane_status`).
 
 The pgbouncer line must show the port the pooler actually LISTENS on — the
 port recorded in the registry (`rec.ports["pgbouncer"]`), the same value
 `ensure_cluster_instance` starts it with. The pooler port is a registry fact
-only (AVA_PGBOUNCER_PORT is no longer materialized in `.env` — AVA_DB_URL
+only (MEIVA_PGBOUNCER_PORT is no longer materialized in `.env` — MEIVA_DB_URL
 carries the pooler port when pooling is on), so no `.env` cache can go stale;
 without a registry record the line says the port is unresolvable instead of
 printing a false `:0` (the 2026-07-20 symptom class).
@@ -91,8 +91,8 @@ def test_status_remote_urls_probe_the_urls_themselves(
     (matching the test env's own loopback URL would be vacuous)."""
     data_plane_config = dataclasses.replace(
         data_plane_config,
-        db_url="postgresql://ava:p@10.0.0.7:15433/ava",
-        redis_url="redis://ava:p@10.0.0.7:16380/0",
+        db_url="postgresql://meiva:p@10.0.0.7:15433/meiva",
+        redis_url="redis://meiva:p@10.0.0.7:16380/0",
         pgbouncer_enabled=False,
     )
     seen: list[str] = []

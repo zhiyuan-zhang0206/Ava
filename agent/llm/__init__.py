@@ -42,7 +42,7 @@ def execute_code(code: str) -> str:
     keeps its head and tail (the middle is elided) and the full text is
     written to a file under `.exec_output/` in your workspace.
 
-    The `ava` module is NOT auto-imported — include ``import ava`` to use the SDK.
+    The `meiva` module is NOT auto-imported — include ``import meiva`` to use the SDK.
 
     Args:
         code: Python source code to run.

@@ -38,7 +38,7 @@ from base.events.live.bus import EventBus
 from base.log import logger
 from base.native_process.runtime_incarnation import RuntimeIncarnation
 from base.native_process.turn_identity import HostedTurnResources
-from base.paths import ava_home
+from base.paths import meiva_home
 from base.telemetry.audit_events import prepare_event_log, record_audit_async
 
 
@@ -335,7 +335,7 @@ async def admit_hosted_runtime(
         )
         return None
 
-    await asyncio.to_thread(recover_local_resources, db, agent_id, machine, home=ava_home())
+    await asyncio.to_thread(recover_local_resources, db, agent_id, machine, home=meiva_home())
     native = psutil.Process()
     host_identity = ResourceProcess.capture(native)
     recorded: list[telemetry.Event] = []

@@ -17,7 +17,7 @@ from tests.path_scoped.cli_tests import operator_pipeline as operator_pipeline
 
 __all__ = ["darwin_host", "default_provisioning", "empty_native_versions", "verifying_host"]
 
-_STUB_RENDER = '{"title": "Ava Ops", "panels": []}\n'
+_STUB_RENDER = '{"title": "Meiva Ops", "panels": []}\n'
 
 
 def verifying_host(platform: Platform) -> Host:
@@ -41,7 +41,7 @@ def darwin_host() -> Host:
 def default_provisioning(monkeypatch: pytest.MonkeyPatch) -> None:
     """Default-render assertions use an explicit default deployment configuration."""
     monkeypatch.setattr(
-        config.settings.data_plane, "db_url", "postgresql://reader@127.0.0.1:5433/ava"
+        config.settings.data_plane, "db_url", "postgresql://reader@127.0.0.1:5433/meiva"
     )
     monkeypatch.setattr(config.settings.gateway, "gateway_url", "")
     monkeypatch.setattr(config.settings.gateway, "gateway_port", 8000)

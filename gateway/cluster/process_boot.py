@@ -16,7 +16,7 @@ from base.db.config import db_config_from_boot
 from base.host.system.hostport import Host
 from base.native_process.code_version import CodeVersion
 from base.native_process.loaded_commit import LoadedCommit
-from base.paths import ava_home
+from base.paths import meiva_home
 from base.telemetry import EventPipeline, build_pipeline
 
 __all__ = ["LOADED_IMAGE", "GatewayProcess"]
@@ -42,7 +42,7 @@ class GatewayProcess:
         self.clients = ClientSet(
             database=self.database,
             pipeline_factory=lambda: build_pipeline(
-                database=self.database, machine=self.machine, home=ava_home().resolve()
+                database=self.database, machine=self.machine, home=meiva_home().resolve()
             ),
         )
 

@@ -4,11 +4,11 @@ import pytest
 
 from meizel.tests.synthetic import RepoFactory, analysis_of, diagnostics, failures
 
-PACKAGES = ["base", "ava", "agent", "gateway", "cli", "ops", "services", "ava_builtins"]
+PACKAGES = ["base", "meiva", "agent", "gateway", "cli", "ops", "services", "meiva_builtins"]
 STACK = (
-    '[uses]\n"ava" = ["base"]\n"agent" = ["ava", "base"]\n"gateway" = ["agent", "ava", "base", "ops"]\n'
-    '"cli" = ["gateway", "agent", "ava", "base", "ops", "services"]\n"ops" = ["base"]\n'
-    '"services" = ["base", "ops"]\n"ava_builtins" = ["base", "ava", "agent"]\n'
+    '[uses]\n"meiva" = ["base"]\n"agent" = ["meiva", "base"]\n"gateway" = ["agent", "meiva", "base", "ops"]\n'
+    '"cli" = ["gateway", "agent", "meiva", "base", "ops", "services"]\n"ops" = ["base"]\n'
+    '"services" = ["base", "ops"]\n"meiva_builtins" = ["base", "meiva", "agent"]\n'
 )
 
 
@@ -27,12 +27,12 @@ def layered(make_repo: RepoFactory, importer: str, imported: str) -> list[tuple[
 @pytest.mark.parametrize(
     ("importer", "imported"),
     [
-        ("base", "ava"),
+        ("base", "meiva"),
         ("base", "agent"),
-        ("ava", "agent"),
+        ("meiva", "agent"),
         ("agent", "gateway"),
         ("gateway", "cli"),
-        ("base", "ava_builtins"),
+        ("base", "meiva_builtins"),
         ("base", "services"),
         ("services", "cli"),
         ("ops", "gateway"),
@@ -48,7 +48,7 @@ def test_an_import_against_the_layering_is_an_undeclared_edge(
 
 
 @pytest.mark.parametrize(
-    ("importer", "imported"), [("cli", "base"), ("agent", "ava"), ("gateway", "ops")]
+    ("importer", "imported"), [("cli", "base"), ("agent", "meiva"), ("gateway", "ops")]
 )
 def test_an_import_down_the_stack_passes(
     make_repo: RepoFactory, importer: str, imported: str

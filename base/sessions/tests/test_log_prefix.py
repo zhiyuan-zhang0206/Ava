@@ -13,7 +13,7 @@ def test_header_format(pid: int | None) -> None:
     before = datetime.now(UTC)
     header = log_prefix.session_log_header(name, pid=pid)
     after = datetime.now(UTC)
-    prefix = f"--- ava session {name} start="
+    prefix = f"--- meiva session {name} start="
     suffix = f" pid={pid} ---\n" if pid is not None else " ---\n"
     line = header.decode("utf-8")
     assert line.startswith(prefix)
@@ -50,7 +50,7 @@ def test_new_log_has_header_before_output(tmp_path: Path) -> None:
     try:
         assert created
         header = path.read_bytes()
-        assert header.startswith(b"--- ava session one start=")
+        assert header.startswith(b"--- meiva session one start=")
         assert header.endswith(b" pid=42 ---\n")
         os.write(fd, b"child output\n")
         assert path.read_bytes() == header + b"child output\n"

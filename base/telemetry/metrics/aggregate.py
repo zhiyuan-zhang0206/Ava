@@ -353,7 +353,7 @@ def _data_agent_activity(agg: EventAggregate) -> dict[str, Any]:
 def _data_plugin_activation(agg: EventAggregate) -> dict[str, Any]:
     """The `plugin_activation` section data."""
     # plugin_activation — philosophy §6's "removable as a gauge, not a vibe".
-    # `by_contribution` is keyed the way `ava plugins inspect` spells a
+    # `by_contribution` is keyed the way `meiva plugins inspect` spells a
     # registered contribution, so a row with no counterpart here is a
     # contribution that registered and never fired; `by_plugin_model` is the
     # per-model cut that answers "does model X still need this shim".
@@ -420,7 +420,7 @@ def build_report_from_aggregate(
     }
     header = (
         "=" * 64
-        + f"\n  Ava metrics — last {days}d"
+        + f"\n  Meiva metrics — last {days}d"
         + (" — since last compact" if since_compact else "")
         + (f" — agent {agent_id}" if agent_id is not None else "")
         + f"\n  {agg.total_events} events / {agg.distinct_agents} agents"

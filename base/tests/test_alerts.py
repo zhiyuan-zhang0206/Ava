@@ -167,7 +167,7 @@ def test_format_local_empty_for_none() -> None:
 
 def test_format_local_renders_cluster_zone(monkeypatch: pytest.MonkeyPatch) -> None:
     """User ruling 2026-08-27: the IM alert timestamp follows the cluster's
-    AVA_TIMEZONE (one cluster clock), not the host OS zone — a runner whose
+    MEIVA_TIMEZONE (one cluster clock), not the host OS zone — a runner whose
     OS zone differs must not show a different wall clock from every other
     surface."""
 

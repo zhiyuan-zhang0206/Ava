@@ -64,7 +64,7 @@ runs:
         # sourceparts=/dev/null hides sources.list.d/*). A dead Ubuntu mirror is
         # irrelevant here.
         added_repos_only=(
-          -o Dir::Etc::sourcelist=/etc/apt/sources.list.d/ava-data-plane.list
+          -o Dir::Etc::sourcelist=/etc/apt/sources.list.d/meiva-data-plane.list
           -o Dir::Etc::sourceparts=/dev/null
           -o APT::Get::List-Cleanup=0
         )
@@ -92,8 +92,8 @@ runs:
 
         # One list file for both repos so the narrowed index refresh below can
         # name them together.
-        sudo sh -c 'echo "deb http://apt.postgresql.org/pub/repos/apt $(lsb_release -cs)-pgdg main" > /etc/apt/sources.list.d/ava-data-plane.list'
-        sudo sh -c 'echo "deb [signed-by=/usr/share/keyrings/redis-archive-keyring.gpg] https://packages.redis.io/deb $(lsb_release -cs) main" >> /etc/apt/sources.list.d/ava-data-plane.list'
+        sudo sh -c 'echo "deb http://apt.postgresql.org/pub/repos/apt $(lsb_release -cs)-pgdg main" > /etc/apt/sources.list.d/meiva-data-plane.list'
+        sudo sh -c 'echo "deb [signed-by=/usr/share/keyrings/redis-archive-keyring.gpg] https://packages.redis.io/deb $(lsb_release -cs) main" >> /etc/apt/sources.list.d/meiva-data-plane.list'
         sudo gpg --yes --dearmor -o /etc/apt/trusted.gpg.d/pgdg.gpg "${{ github.action_path }}/ACCC4CF8.asc"
         sudo gpg --yes --dearmor -o /usr/share/keyrings/redis-archive-keyring.gpg "${{ github.action_path }}/redis-archive-keyring.asc"
 

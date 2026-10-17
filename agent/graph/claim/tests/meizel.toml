@@ -11,6 +11,6 @@ exports = ["claim_support.py", "cursor_fixture.py"]
 "test_claim_multimodal.py#monkeypatch.setattr base.cluster.machine.gateway_api_base" = 2
 "test_claim_multimodal.py#monkeypatch.setattr base.config.settings.agent.security_scan_enabled" = 1
 "test_claim_multimodal.py#monkeypatch.setattr base.host.net.http_dial.get" = 2
-"test_core.py#monkeypatch.setattr ava.__plugin_installation__" = 7
+"test_core.py#monkeypatch.setattr meiva.__plugin_installation__" = 7
 "test_inbound_findings.py#monkeypatch.setattr agent.graph.node_log.SNAPSHOT_CURSOR" = 1
 "test_inbound_findings.py#monkeypatch.setattr base.config.settings.agent.security_scan_enabled" = 2

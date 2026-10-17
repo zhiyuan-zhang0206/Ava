@@ -36,8 +36,8 @@ scripts/structure/baseline/ shards as `path::rule:name -> site count`. The rule 
   Both require consumer lifecycle proof.
 
 Scope: the governed packages plus `schedules/`. Tests, `__main__.py`, an
-`if __name__ == "__main__":` block and skill scripts (`ava_builtins/skills/**`,
-`ava_builtins/plugins/*/**/skills/**`, which run as programs, not importable
+`if __name__ == "__main__":` block and skill scripts (`meiva_builtins/skills/**`,
+`meiva_builtins/plugins/*/**/skills/**`, which run as programs, not importable
 modules) are outside it. There is no inline exemption.
 
 Like Rules 4-6 the frozen counts must match reality in both directions, and
@@ -73,7 +73,7 @@ LINT = "meizel/state/ambient_state/__init__.py"
 SCOPE = packages("application", "templates")
 Sites = dict[str, list[int]]
 
-_SKILL_SCRIPTS = re.compile(r"^ava_builtins/(skills/|plugins/[^/]+/(.*/)?skills/)")
+_SKILL_SCRIPTS = re.compile(r"^meiva_builtins/(skills/|plugins/[^/]+/(.*/)?skills/)")
 
 _STATE_FIX = (
     "inject what is read to decide: build it in a composition root and hand it to the "
@@ -91,7 +91,7 @@ _FIXES: dict[str, str] = {
     scan.INSTANCE: f"module-level instance — {_STATE_FIX}",
     scan.CONTAINER: f"module-level mutable container — {_STATE_FIX}",
     scan.CONTEXTVAR: (
-        "LangGraph Runtime[AvaContext] already carries graph-run dependencies — "
+        "LangGraph Runtime[MeivaContext] already carries graph-run dependencies — "
         "do not duplicate them with a ContextVar; outside the graph, pass "
         "the caller's context explicitly instead of adding an ambient carrier"
     ),

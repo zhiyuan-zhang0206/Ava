@@ -69,7 +69,7 @@ def pg_shm_args() -> str:
     path passes on the `pg_ctl start` command line: the per-cluster data plane
     (`cli/commands/data_plane/cluster_instance.py`) and the throwaway test/eval clusters
     (`throwaway_postgres`). Command-line `-c` outranks anything a machine's
-    postgresql.conf says, so Ava's instances carry the posture no matter what
+    postgresql.conf says, so Meiva's instances carry the posture no matter what
     the host is configured with. A platform that must not set them yields "" —
     callers splice the return value into their `-o` string, so empty is a no-op.
     """
@@ -99,7 +99,7 @@ def pg_tz_args() -> str:
 # environment, locale init goes through CoreFoundation, which spawns a thread,
 # and the postmaster refuses to run multithreaded: it aborts with "postmaster
 # became multithreaded during startup" (HINT: set LC_ALL to a valid locale).
-# A launchd job and a non-interactive ssh session both start `ava` with no
+# A launchd job and a non-interactive ssh session both start `meiva` with no
 # locale at all — so PG is handed one instead of inheriting the caller's
 # emptiness. Verified 2026-09-17 on macOS against Homebrew postgresql@17
 # (17.11): nothing at all fails, an empty LC_ALL fails, LC_CTYPE alone fails
@@ -122,7 +122,7 @@ def pg_start_env() -> dict[str, str]:
     spawn): pg_ctl hands its environment to the postmaster, and the macOS
     postmaster aborts at startup when that environment has no locale.
 
-    The postmaster outlives the `ava start` that spawns it (it is retained
+    The postmaster outlives the `meiva start` that spawns it (it is retained
     across releases), and that process may hold the delivered gateway login,
     write generation and API token, the human secret and the Redis admin
     password; none of it crosses. Nothing the postmaster runs needs it."""
@@ -134,10 +134,10 @@ def pg_start_env() -> dict[str, str]:
 
 # Prefix of every throwaway instance directory this module creates. Load-bearing:
 # the sweep below reaps ONLY `<a throwaway root>/<this prefix>*` directories.
-THROWAWAY_PREFIX = "ava-pg-"
+THROWAWAY_PREFIX = "meiva-pg-"
 
 # Where throwaway instance dirs live — the platform default (/dev/shm on Linux,
-# else the OS temp dir), the AVA_PG_THROWAWAY_BASE override, and the
+# else the OS temp dir), the MEIVA_PG_THROWAWAY_BASE override, and the
 # capacity-aware pick — is base.cluster.dataplane.pg_throwaway_base, extracted to keep this
 # module under its line ceiling.
 
@@ -145,7 +145,7 @@ THROWAWAY_PREFIX = "ava-pg-"
 def pg_tool(name: str) -> Path:
     """Path to a Postgres client/server binary.
 
-    Resolution: the vendored relocatable Postgres under `~/.ava/runtime/` is
+    Resolution: the vendored relocatable Postgres under `~/.meiva/runtime/` is
     preferred when it actually carries `name` (`base.cluster.dataplane.runtime_binaries`, fetched
     by converge), so a clean machine needs no `brew install postgresql@17`. The
     vendored tree is a minimal server distribution — only `initdb` / `pg_ctl` /
@@ -171,7 +171,7 @@ def pg_tool(name: str) -> Path:
         return Path(found)
     raise RuntimeError(
         f"Cannot locate pg tool {name!r} on {sys.platform} — "
-        "install PostgreSQL 17 or set AVA_PG_* (AVA_PG_BIN etc.) for a custom pg install"
+        "install PostgreSQL 17 or set MEIVA_PG_* (MEIVA_PG_BIN etc.) for a custom pg install"
     )
 
 
@@ -231,7 +231,7 @@ def free_port() -> int:
 # against the shape this module itself creates (`resolved_throwaway_dir`): the name
 # carries `THROWAWAY_PREFIX`, the resolved directory is a direct child of the
 # throwaway root under its own name, and `data` is not a symlink. For a real
-# cluster to be selected its `$AVA_HOME` would have to BE an `ava-pg-*` child of
+# cluster to be selected its `$MEIVA_HOME` would have to BE an `meiva-pg-*` child of
 # the throwaway root and keep its data dir at `data` instead of `pg` — two
 # independent misses — and no symlink can redirect a verified path back out. The
 # only privileged act is `pg_ctl -D <verified data dir> stop`, which takes the pid
@@ -461,7 +461,7 @@ def _port_lock_root() -> Path:
     SAME directory, whatever base its own instances use — a per-base lock would let
     two allocators serialize on different roots and hand out the same port. The
     platform default is settings-independent, so processes that disagree on
-    AVA_PG_THROWAWAY_BASE still rendezvous here."""
+    MEIVA_PG_THROWAWAY_BASE still rendezvous here."""
     return _throwaway_base.default_base()
 
 
@@ -613,7 +613,7 @@ def throwaway_postgres(
 
     Args:
         schema_sql: If given, applied after initdb and PostgresSaver.setup() is
-            run too. If None, yields a bare `ava_citest` database (the caller applies
+            run too. If None, yields a bare `meiva_citest` database (the caller applies
             its own DDL, e.g. the migration smoke replaying migrations/* onto a
             blank DB).
         config: the root-owned override used for creation, sweeping and port registration.
@@ -659,7 +659,7 @@ def throwaway_postgres(
                         "-D",
                         str(data),
                         "-U",
-                        "ava",
+                        "meiva",
                         "-A",
                         "trust",
                         "--no-sync",
@@ -739,19 +739,19 @@ def throwaway_postgres(
             teardown_throwaway(tmp, data, registration, process, foreground=foreground)
             raise
 
-    admin = f"postgresql://ava@127.0.0.1:{port}/postgres"
-    url = f"postgresql://ava@127.0.0.1:{port}/ava_citest"
+    admin = f"postgresql://meiva@127.0.0.1:{port}/postgres"
+    url = f"postgresql://meiva@127.0.0.1:{port}/meiva_citest"
 
     try:
         with psycopg.connect(admin, autocommit=True) as conn, conn.cursor() as cur:
-            # The test db is `ava_citest`, carried in the URL as data (names-as-data:
+            # The test db is `meiva_citest`, carried in the URL as data (names-as-data:
             # Settings re-applies only the password, never rewrites username/db, so a
             # subprocess loading Settings fresh dials exactly this URL). The peer
             # superuser role of the same name is kept for URLs that name it as the
-            # user (trust auth ignores its password). Deliberately not `ava_main`
-            # (the prod-db guard in ava/tests/fixtures/ava_tests.py refuses that name).
-            cur.execute("CREATE ROLE ava_citest LOGIN SUPERUSER")
-            cur.execute("CREATE DATABASE ava_citest")
+            # user (trust auth ignores its password). Deliberately not `meiva_main`
+            # (the prod-db guard in meiva/tests/fixtures/meiva_tests.py refuses that name).
+            cur.execute("CREATE ROLE meiva_citest LOGIN SUPERUSER")
+            cur.execute("CREATE DATABASE meiva_citest")
 
         if schema_sql is not None:
             from langgraph.checkpoint.postgres import PostgresSaver

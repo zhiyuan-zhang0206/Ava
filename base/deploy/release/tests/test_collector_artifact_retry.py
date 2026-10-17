@@ -1,4 +1,4 @@
-# ava:ref base/deploy/release/docs/collector-artifact.ava.okf.md#bounded-download-attempt
+# meiva:ref base/deploy/release/docs/collector-artifact.meiva.okf.md#bounded-download-attempt
 from __future__ import annotations
 
 import http.server
@@ -29,7 +29,7 @@ def test_download_with_retry_preserves_contract(
     retry_waits: list[float],
     failures: int,
 ) -> None:
-    # ava:ref base/deploy/release/docs/collector-artifact.ava.okf.md#download-wait-closure
+    # meiva:ref base/deploy/release/docs/collector-artifact.meiva.okf.md#download-wait-closure
     errors = [OSError(f"reset {i}") for i in range(1, failures + 1)]
     timers = ManualTimers(start=10.0)
     url = "https://example.invalid/t.tar.gz"

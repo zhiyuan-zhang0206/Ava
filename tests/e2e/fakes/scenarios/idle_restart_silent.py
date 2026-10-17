@@ -11,7 +11,7 @@ from tests.e2e.fakes.scripted_model import ScriptedFakeChatModel
 
 _USAGE = {"input_tokens": 10, "output_tokens": 5, "total_tokens": 15}
 
-CWD_WITNESS = str(Path(os.environ["AVA_HOME"]) / "e2e-idle-restart-cwd")
+CWD_WITNESS = str(Path(os.environ["MEIVA_HOME"]) / "e2e-idle-restart-cwd")
 
 PRE_RESTART_SCRIPT: tuple[AIMessage, ...] = (
     AIMessage(
@@ -22,9 +22,9 @@ PRE_RESTART_SCRIPT: tuple[AIMessage, ...] = (
                 "name": "execute_code",
                 "args": {
                     "code": (
-                        "import ava\nimport os\n"
+                        "import meiva\nimport os\n"
                         f"os.makedirs({CWD_WITNESS!r}, exist_ok=True)\n"
-                        f"ava.cwd.set({CWD_WITNESS!r})"
+                        f"meiva.cwd.set({CWD_WITNESS!r})"
                     )
                 },
             }

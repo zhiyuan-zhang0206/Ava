@@ -114,7 +114,7 @@ def test_a_legacy_converging_row_still_blocks_a_cohort_machine(
 ) -> None:
     """The retired updater's `converging` posture is no longer written, but a row
     it left behind is any non-idle posture: it keeps the conservative reading
-    (the machine's checkout may have moved) until that host's `ava start`
+    (the machine's checkout may have moved) until that host's `meiva start`
     returns it to `idle`."""
     _machines(monkeypatch, "macmini")
     monkeypatch.setattr(

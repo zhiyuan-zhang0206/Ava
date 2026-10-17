@@ -29,7 +29,8 @@ def at(seconds: int) -> str:
 
 def inbound(seconds: int) -> HumanMessage:
     return HumanMessage(
-        content="go", additional_kwargs={"ava_msg_type": "inbound", "ava_created_at": at(seconds)}
+        content="go",
+        additional_kwargs={"meiva_msg_type": "inbound", "meiva_created_at": at(seconds)},
     )
 
 
@@ -46,9 +47,9 @@ def turn(
         content.append({"type": "thinking", "thinking": think})
     if text:
         content.append({"type": "text", "text": text})
-    kwargs: dict[str, object] = {"ava_created_at": at(seconds)}
+    kwargs: dict[str, object] = {"meiva_created_at": at(seconds)}
     if reasoning_ms is not None:
-        kwargs["ava_reasoning_ms_by_block"] = {"0": reasoning_ms}
+        kwargs["meiva_reasoning_ms_by_block"] = {"0": reasoning_ms}
     return AIMessage(
         content=content,
         tool_calls=[{"name": "execute_code", "args": {"code": code}, "id": "t"}] if code else [],
@@ -61,9 +62,9 @@ def result(seconds: int) -> ToolMessage:
         content="Code execution output after running for 3s [x]:\n\nfiles",
         tool_call_id="t",
         additional_kwargs={
-            "ava_msg_type": "exec_output",
-            "ava_exec_body_start": len("Code execution output after running for 3s [x]:\n\n"),
-            "ava_created_at": at(seconds),
+            "meiva_msg_type": "exec_output",
+            "meiva_exec_body_start": len("Code execution output after running for 3s [x]:\n\n"),
+            "meiva_created_at": at(seconds),
         },
     )
 
@@ -137,9 +138,9 @@ def test_a_result_without_a_recorded_body_start_is_refused() -> None:
     old = ToolMessage(
         content="Code execution output [x]:\n\nfiles",
         tool_call_id="t",
-        additional_kwargs={"ava_msg_type": "exec_output", "ava_created_at": at(25)},
+        additional_kwargs={"meiva_msg_type": "exec_output", "meiva_created_at": at(25)},
     )
-    with pytest.raises(ValueError, match="ava_exec_body_start"):
+    with pytest.raises(ValueError, match="meiva_exec_body_start"):
         display_blocks_of([inbound(0), turn(10), old])
 
 

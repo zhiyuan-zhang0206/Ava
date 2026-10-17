@@ -71,14 +71,14 @@ _DELETED_FIELDS = (
     "brew_pin_probe_failure_threshold",
 )
 _DELETED_ALIASES = (
-    "AVA_DB_POOL_SLOW_ACQUIRE_WARN_COOLDOWN_SECONDS",
-    "AVA_ALERTS_TRANSITION_WARNING_SECONDS",
-    "AVA_ALERTS_TRANSITION_ERROR_SECONDS",
-    "AVA_ALERTS_INSPECT_METRICS_DEGRADED_COOLDOWN_SECONDS",
-    "AVA_DELIVERY_WATCHDOG_ALERT_GRACE_SECONDS",
-    "AVA_BROWSER_REACH_FAILURE_THRESHOLD",
-    "AVA_VENV_PROBE_FAILURE_THRESHOLD",
-    "AVA_BREW_PIN_PROBE_FAILURE_THRESHOLD",
+    "MEIVA_DB_POOL_SLOW_ACQUIRE_WARN_COOLDOWN_SECONDS",
+    "MEIVA_ALERTS_TRANSITION_WARNING_SECONDS",
+    "MEIVA_ALERTS_TRANSITION_ERROR_SECONDS",
+    "MEIVA_ALERTS_INSPECT_METRICS_DEGRADED_COOLDOWN_SECONDS",
+    "MEIVA_DELIVERY_WATCHDOG_ALERT_GRACE_SECONDS",
+    "MEIVA_BROWSER_REACH_FAILURE_THRESHOLD",
+    "MEIVA_VENV_PROBE_FAILURE_THRESHOLD",
+    "MEIVA_BREW_PIN_PROBE_FAILURE_THRESHOLD",
 )
 _DELETED_MODULES = (
     "agent/graph/exec/_alerts.py",
@@ -90,9 +90,9 @@ _DELETED_MODULES = (
     "cli/commands/cluster/tests/test_deploy_mutex.py",
     "gateway/cluster/tests/test_agents_internals_cluster.py",
     "services/agent_runner/agent_host/boot_defer.py",
-    "services/supervision/ava_root/alerts.py",
-    "services/supervision/ava_root/tests/test_ava_root_alerts.py",
-    "services/supervision/ava_root/tests/test_ava_root_terminal_escalation.py",
+    "services/supervision/meiva_root/alerts.py",
+    "services/supervision/meiva_root/tests/test_meiva_root_alerts.py",
+    "services/supervision/meiva_root/tests/test_meiva_root_terminal_escalation.py",
     "services/wake/delivery_watchdog/tests/test_scan_alert_gates.py",
 )
 _DELETED_SYMBOLS = (

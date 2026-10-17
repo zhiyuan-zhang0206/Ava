@@ -54,9 +54,9 @@ def test_workspace_dir_none_fails_fast(unit_home: Path) -> None:
 
 
 def _home_with_source(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
-    home = tmp_path / ".ava"
+    home = tmp_path / ".meiva"
     (home / "source").mkdir(parents=True)
-    monkeypatch.setenv("AVA_HOME", str(home))
+    monkeypatch.setenv("MEIVA_HOME", str(home))
     return home
 
 
@@ -74,7 +74,7 @@ def test_prod_checkout_guard_refuses_dev_worktree(
     """A worktree (under the home or anywhere else) must never launch a home's
     services: deleting the worktree removes the floor under the running fleet."""
     home = _home_with_source(tmp_path, monkeypatch)
-    for repo in (home / "worktrees" / "ava-2750-dev-wt", home / "source-wt", tmp_path / "Ava"):
+    for repo in (home / "worktrees" / "meiva-2750-dev-wt", home / "source-wt", tmp_path / "Meiva"):
         err = paths.prod_service_checkout_error(repo)
         assert err is not None, repo
         assert str(home / "source") in err
@@ -85,9 +85,9 @@ def test_prod_checkout_guard_allows_a_home_without_source_any_checkout(
 ) -> None:
     """A home with no `source` of its own (a test or scratch home) runs whichever
     checkout's code launches it — the guard is about homes that have an owner."""
-    home = tmp_path / ".ava-dev"
+    home = tmp_path / ".meiva-dev"
     home.mkdir()
-    monkeypatch.setenv("AVA_HOME", str(home))
+    monkeypatch.setenv("MEIVA_HOME", str(home))
     assert paths.prod_service_checkout_error(tmp_path / "worktrees" / "dev-wt") is None
 
 
@@ -100,4 +100,4 @@ def test_file_anchored_roots_resolve_to_the_checkout_root() -> None:
     checkout = Path(__file__).resolve().parents[3]
     assert (checkout / "base" / "__init__.py").is_file()
     assert paths.repo_root() == checkout
-    assert checkout / "ava_builtins" / "plugins" == dashboard_supply.REPO_PLUGINS_DIR
+    assert checkout / "meiva_builtins" / "plugins" == dashboard_supply.REPO_PLUGINS_DIR

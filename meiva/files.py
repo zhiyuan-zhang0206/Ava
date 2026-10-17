@@ -1,0 +1,282 @@
+"""Relative paths use your workspace by default. Coding tools resolve them against
+`meiva.cwd` when available. `~/...` resolves to your home directory."""
+
+__all_for_meiva__ = [
+    "append",
+    "delete",
+    "edit",
+    "glob",
+    "read",
+    "write",
+]
+
+import difflib
+import errno
+import glob as _glob
+import os
+import stat
+import uuid
+from pathlib import Path
+
+from base.log import logger
+from base.paths import workspace_dir
+from meiva.sdk_surface import agent_identity
+from meiva.sdk_surface.validation import coerce_str, coerce_typed
+from meiva.security import scan_content
+
+
+def _home() -> Path:
+    """`$HOME`, the documented pre-bootstrap base for relative paths.
+
+    Read per call, so a changed `$HOME` (test fixture / `meiva.user`-style isolation)
+    takes effect immediately. A container / sandbox without `$HOME` yields
+    `Path("")` or a nonexistent path; raising here beats silently falling back
+    to the process cwd, which would break this module's core contract."""
+    home = Path.home()
+    if not (home.is_absolute() and home.is_dir()):
+        raise RuntimeError(f"$HOME unavailable (Path.home() = {home!r})")
+    return home
+
+
+def resolve(path: str | Path) -> Path:
+    """Resolve a path: expand `~`, then prepend the agent's workspace
+    (`$HOME` before a process identity is bound) if still relative."""
+    # `expanduser` translates `~` / `~user`; if still a relative path,
+    # prepend the per-agent workspace. The workspace is a framework
+    # concept, so it lives here in the SDK core — plugins may layer cwd
+    # *tracking* on top, but the no-plugin baseline must not silently
+    # fall back to `$HOME` (issue #1008). Before a context
+    # carrying an identity is bound (test / dev REPL without a bootstrap) there is
+    # no workspace; `Path.home()` is the documented pre-bootstrap base
+    # (per-call live, so test fixture mock env takes effect immediately).
+    p = Path(path).expanduser()
+    if not p.is_absolute():
+        aid = agent_identity.agent_id()
+        # agent id is typed int but is None until a bootstrap establishes it.
+        base = workspace_dir(aid) if aid is not None else _home()  # pyright: ignore[reportUnnecessaryComparison]
+        p = base / p
+    return p
+
+
+def _record_skill_read(path: Path) -> None:
+    """Best-effort `skill_invoked` attribution for a file that is a loaded
+    skill's SKILL.md (the `.path` + `files.read(SKILL.md)` pattern).
+
+    Reading a skill body through the generic file API is consumption exactly
+    like a `help()` render, but it bypasses the lazy proxy loader that carries
+    the attribution hook — so it used to go unrecorded and the `loaded` signal
+    was under-counted. The resolution happens in the skills module (only a
+    mounted skill's own SKILL.md qualifies); a non-matching file is a no-op.
+
+    Telemetry, never a failure path: any problem (the skills surface disabled
+    by `MEIVA_SDK_DISABLE`, an import hiccup, a scan error) is swallowed with a
+    warning — a file read must never break because attribution could not run."""
+    if path.name != "SKILL.md":
+        return
+    try:
+        from meiva import skills as skills_mod
+
+        skills_mod.record_skill_invoked_by_path(path)
+    except Exception as e:  # best-effort telemetry; never break a read
+        logger.warning("skill attribution skipped for {}: {}", path, e)
+
+
+def _end_from_limit(start: int | None, end: int | None, limit: int | None) -> int | None:
+    """`end` as given, or derived from `limit` lines from `start`; the two are mutually exclusive."""
+    if limit is None:
+        return end
+    if end is not None:
+        raise ValueError("pass either `end` or `limit`, not both")
+    if limit < 1:
+        raise ValueError(f"limit must be >= 1, got {limit}")
+    return (start or 1) + limit - 1
+
+
+def _check_bounds(start: int | None, end: int | None) -> None:
+    if start is not None and start < 1:
+        raise ValueError(f"start must be >= 1, got {start}")
+    if end is not None and end < 1:
+        raise ValueError(f"end must be >= 1, got {end}")
+    if start is not None and end is not None and start > end:
+        raise ValueError(f"start ({start}) must be <= end ({end})")
+
+
+def read(
+    path: str | Path,
+    start: int | None = None,
+    end: int | None = None,
+    *,
+    limit: int | None = None,
+    with_line_numbers: bool = False,
+) -> str:
+    """Read a file, or a 1-indexed inclusive line range.
+
+    `limit` (max lines from `start`) is mutually exclusive with `end`.
+    """
+    path = coerce_str(path, "path", allow_types=(os.PathLike,))
+    start = coerce_typed(start, "start", int, allow_none=True)
+    end = coerce_typed(end, "end", int, allow_none=True)
+    limit = coerce_typed(limit, "limit", int, allow_none=True)
+    with_line_numbers = coerce_typed(with_line_numbers, "with_line_numbers", bool)
+    end = _end_from_limit(start, end, limit)
+
+    # A read is an ingestion surface: file bytes flow straight into the agent's
+    # context, so the returned text is scanned for injection patterns before it
+    # leaves. Clean content is returned byte-for-byte (scan_content is a no-op).
+    source = f"file.read:{path}"
+    p = resolve(path)
+    # A SKILL.md body entering the context is skill consumption — attribute
+    # it even though the generic file API bypasses the lazy proxy hook.
+    _record_skill_read(p)
+    text = p.read_text(encoding="utf-8")
+    if start is None and end is None and not with_line_numbers:
+        return scan_content(text, source=source)
+    _check_bounds(start, end)
+    lines = text.splitlines(keepends=True)
+    lo = (start - 1) if start is not None else 0
+    hi = end if end is not None else len(lines)
+    selected = lines[lo:hi]
+    if with_line_numbers:
+        last_no = lo + len(selected)
+        width = max(1, len(str(last_no)))
+        numbered = "".join(f"{lo + i + 1:>{width}}: {line}" for i, line in enumerate(selected))
+        return scan_content(numbered, source=source)
+    return scan_content("".join(selected), source=source)
+
+
+def _replace_atomically(target: Path, content: str) -> None:
+    """Replace `target` with `content` so a reader sees the old file or the new one, never half.
+
+    The content goes to a temporary file in the same directory (same filesystem, so the rename is
+    atomic), which then replaces the target. A symlink target is written through, as an in-place
+    write would. An existing target keeps its permission bits and must be writable; a new file gets
+    the mode the umask gives any new file. A failure at any point removes the temporary file and
+    leaves the target as it was."""
+    if target.is_symlink():
+        target = target.resolve()
+    existing_mode: int | None = None
+    if target.exists():
+        if not os.access(target, os.W_OK):
+            raise PermissionError(errno.EACCES, os.strerror(errno.EACCES), str(target))
+        existing_mode = stat.S_IMODE(target.stat().st_mode)
+    temporary = target.with_name(f".{target.name}.{uuid.uuid4().hex}.tmp")
+    try:
+        # os.open honors the umask for a new file's mode, as open() does.
+        fd = os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o666)
+        with os.fdopen(fd, "w", encoding="utf-8") as file:
+            file.write(content)
+        if existing_mode is not None:
+            temporary.chmod(existing_mode)
+        temporary.replace(target)
+    except BaseException:
+        temporary.unlink(missing_ok=True)
+        raise
+
+
+def write(path: str | Path, content: str) -> None:
+    """Write, creating parent directories if needed. An existing file is replaced in one step, so
+    a reader never sees a half-written file."""
+    path = coerce_str(path, "path", allow_types=(os.PathLike,))
+    content = coerce_str(content, "content")
+    p = resolve(path)
+    p.parent.mkdir(parents=True, exist_ok=True)
+    _replace_atomically(p, content)
+
+
+def append(path: str | Path, content: str) -> None:
+    """Append to a file, creating it (and parent directories) if absent."""
+    path = coerce_str(path, "path", allow_types=(os.PathLike,))
+    content = coerce_str(content, "content")
+    p = resolve(path)
+    p.parent.mkdir(parents=True, exist_ok=True)
+    with p.open("a", encoding="utf-8") as f:
+        f.write(content)
+
+
+_FUZZY_HINT_THRESHOLD = 0.4
+
+
+def _closest_match_hint(content: str, old: str) -> str:
+    """When `old` isn't in `content` verbatim, locate the most similar
+    contiguous line range and return a one-block unified-diff hint.
+
+    Returns the empty string when no slice is close enough (similarity
+    below `_FUZZY_HINT_THRESHOLD`) or when inputs are degenerate (`old`
+    empty / `content` empty / `old` longer than `content`).
+    """
+    content_lines = content.splitlines(keepends=True)
+    old_lines = old.splitlines(keepends=True)
+    if not old_lines or not content_lines or len(old_lines) > len(content_lines):
+        return ""
+
+    window_size = len(old_lines)
+    best_ratio = 0.0
+    best_start = -1
+    matcher = difflib.SequenceMatcher(a="", b=old, autojunk=False)
+    for i in range(len(content_lines) - window_size + 1):
+        window = "".join(content_lines[i : i + window_size])
+        matcher.set_seq1(window)
+        # `quick_ratio` is an upper bound; skip the expensive call when
+        # we can't possibly beat the running best.
+        if matcher.quick_ratio() < best_ratio:
+            continue
+        ratio = matcher.ratio()
+        if ratio > best_ratio:
+            best_ratio = ratio
+            best_start = i
+
+    if best_start < 0 or best_ratio < _FUZZY_HINT_THRESHOLD:
+        return ""
+
+    s = best_start + 1  # 1-indexed inclusive
+    e = best_start + window_size
+    window_text = "".join(content_lines[best_start : best_start + window_size])
+    diff = "\n".join(
+        difflib.unified_diff(
+            old.splitlines(),
+            window_text.splitlines(),
+            fromfile="your `old`",
+            tofile=f"actual lines {s}-{e}",
+            lineterm="",
+            n=3,
+        )
+    )
+    return f"\n\nClosest match at lines {s}-{e} ({int(best_ratio * 100)}% similar):\n{diff}"
+
+
+def edit(path: str | Path, old: str, new: str, *, replace_all: bool = False) -> None:
+    """`old` must appear exactly once unless `replace_all=True`. When it is
+    not found, the error includes a diff against the closest match in the
+    file.
+    """
+    path = coerce_str(path, "path", allow_types=(os.PathLike,))
+    old = coerce_str(old, "old")
+    new = coerce_str(new, "new")
+    replace_all = coerce_typed(replace_all, "replace_all", bool)
+    p = resolve(path)
+    content = p.read_text(encoding="utf-8")
+    count = content.count(old)
+    if count == 0:
+        hint = _closest_match_hint(content, old)
+        raise ValueError(f"old not found in {path!r}{hint}")
+    if count > 1 and not replace_all:
+        raise ValueError(
+            f"old appears {count} times in {path!r}; pass replace_all=True to replace all"
+        )
+    new_content = content.replace(old, new) if replace_all else content.replace(old, new, 1)
+    p.write_text(new_content, encoding="utf-8")
+
+
+def glob(pattern: str = "*") -> list[Path]:
+    pattern = coerce_str(pattern, "pattern")
+    p = resolve(pattern)
+    # Path.glob in Python 3.12 doesn't accept an absolute pattern, and
+    # `**` spanning multiple levels is cleaner via stdlib
+    # `glob.glob(recursive=True)` than pathlib. Can refactor on 3.13+.
+    return sorted(Path(s) for s in _glob.glob(str(p), recursive=True))  # noqa: PTH207
+
+
+def delete(path: str | Path) -> None:
+    """Delete a file (not a directory)."""
+    path = coerce_str(path, "path", allow_types=(os.PathLike,))
+    resolve(path).unlink()

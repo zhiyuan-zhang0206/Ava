@@ -2,7 +2,7 @@
 
 One protocol (`EmbeddingProvider`), N implementations (Gemini today), one
 switch (`embeddings.factory.get_provider()` receiving
-`AVA_EMBEDDING_BACKEND`). The indexer daemon (document batch path) and the
+`MEIVA_EMBEDDING_BACKEND`). The indexer daemon (document batch path) and the
 gateway search endpoint (async query path) both take their provider from
 the factory; neither imports a concrete provider directly.
 
@@ -29,7 +29,7 @@ class EmbeddingAPIError(RuntimeError):
 
     The indexer daemon records the failure; a follow-up reconcile pass
     retries the remaining dirty paths while keeping liveness beating.
-    `ava.memory.search` wraps this as `IndexerUnavailable` and raises to the caller.
+    `meiva.memory.search` wraps this as `IndexerUnavailable` and raises to the caller.
     """
 
 

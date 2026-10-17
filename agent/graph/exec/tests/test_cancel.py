@@ -47,7 +47,6 @@ from agent.graph.exec.tests.cancel_fixture import (
     make_runtime,
 )
 from agent.state import AgentState
-from ava.tests.fixtures.pin_agent import hosted_resources as hosted_resources
 
 # Most tests here drive exec_node/llm_node with mocked run_in_subprocess / a
 # fake cancel_event, so they are deterministic and run in the parallel pool.
@@ -55,6 +54,7 @@ from base.db import create_agent
 from base.db.code_version_gate import ProcessDbGate
 from base.events.live.projection import EVENT_ADAPTER
 from base.native_process.turn_identity import HostedTurnResources
+from meiva.tests.fixtures.pin_agent import hosted_resources as hosted_resources
 
 _CONFIG: RunnableConfig = {"configurable": {"thread_id": "7"}}
 
@@ -197,9 +197,9 @@ async def test_exec_node_cancel_event_race_normal_completion(
 # ---------------------------------------------------------------------------
 
 
-# A timeout-preserves-ava.shell-partial-output test is deliberately absent: the old test
-# old `ava.shell.bash` feature that manually forwarded subprocess pipe contents to parent
-# stdout on timeout. The new `ava.shell.run` uses stdlib `subprocess.run`, subprocess pipe
+# A timeout-preserves-meiva.shell-partial-output test is deliberately absent: the old test
+# old `meiva.shell.bash` feature that manually forwarded subprocess pipe contents to parent
+# stdout on timeout. The new `meiva.shell.run` uses stdlib `subprocess.run`, subprocess pipe
 # contents are only on `TimeoutExpired.{output,stderr}`, no longer forwarded. Agents wanting
 # partial output can use `subprocess.Popen` + read pipes themselves.
 
@@ -356,7 +356,7 @@ async def test_exec_node_dispatch_system_halt(
 ) -> None:
     """ExecLifecycle(SystemHalt) → halted=True + NO output write-back.
 
-    ava.self.compact commits the compact_summary inbound before raising
+    meiva.self.compact commits the compact_summary inbound before raising
     SystemHalt, and the claim node applies it in the same turn — REMOVE_ALL
     wipes the whole history. Writing the exec output back (ToolMessage +
     ExecOutput SSE) is dead weight: the ToolMessage would be wiped anyway, and
@@ -373,7 +373,7 @@ async def test_exec_node_dispatch_system_halt(
 
     emitter = MagicMock()
     monkeypatch.setattr(node, "run_in_subprocess", _fake)  # pyright: ignore[reportUnknownArgumentType]
-    state = AgentState(messages=[ai_with_code('ava.self.compact("s")')], halted=False)
+    state = AgentState(messages=[ai_with_code('meiva.self.compact("s")')], halted=False)
     runtime = make_runtime(
         hosted_resources=hosted_resources, event_publisher=emitter, database_gate=database_gate
     )
@@ -397,7 +397,7 @@ async def test_exec_node_dispatch_agent_termination(
     database_gate: ProcessDbGate,
 ) -> None:
     """ExecLifecycle(AgentTermination) → halted=True + no envelope marker."""
-    from ava.self import AgentTermination
+    from meiva.self import AgentTermination
 
     async def _fake(
         _db: object, code, agent_id, cancel_event, timeout=60.0, chunk_publisher=None, **kwargs
@@ -405,7 +405,7 @@ async def test_exec_node_dispatch_agent_termination(
         return (ExecLifecycle(output="", exc=AgentTermination()), None)
 
     monkeypatch.setattr(node, "run_in_subprocess", _fake)  # pyright: ignore[reportUnknownArgumentType]
-    state = AgentState(messages=[ai_with_code("ava.self.terminate()")], halted=False)
+    state = AgentState(messages=[ai_with_code("meiva.self.terminate()")], halted=False)
     runtime = make_runtime(hosted_resources=hosted_resources, database_gate=database_gate)
     result = await exec_node(state, runtime, _CONFIG)
 
@@ -424,7 +424,7 @@ async def test_exec_node_dispatch_agent_restart(
 ) -> None:
     """ExecLifecycle(AgentRestart) → halted=True + no envelope marker (symmetric
     with AgentTermination path)."""
-    from ava.self import AgentRestart
+    from meiva.self import AgentRestart
 
     async def _fake(
         _db: object, code, agent_id, cancel_event, timeout=60.0, chunk_publisher=None, **kwargs
@@ -432,7 +432,7 @@ async def test_exec_node_dispatch_agent_restart(
         return (ExecLifecycle(output="", exc=AgentRestart()), None)
 
     monkeypatch.setattr(node, "run_in_subprocess", _fake)  # pyright: ignore[reportUnknownArgumentType]
-    state = AgentState(messages=[ai_with_code("ava.self.restart()")], halted=False)
+    state = AgentState(messages=[ai_with_code("meiva.self.restart()")], halted=False)
     runtime = make_runtime(hosted_resources=hosted_resources, database_gate=database_gate)
     result = await exec_node(state, runtime, _CONFIG)
 

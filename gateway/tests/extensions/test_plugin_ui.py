@@ -21,7 +21,7 @@ def _isolate_plugin_paths(
     user.mkdir()
     monkeypatch.setattr(paths, "repo_plugins_dir", lambda: repo)
     monkeypatch.setattr(paths, "plugins_dir", lambda: user)
-    monkeypatch.setenv("AVA_HOME", str(tmp_path / "ava"))
+    monkeypatch.setenv("MEIVA_HOME", str(tmp_path / "meiva"))
 
 
 def _write_plugin(name: str, *, files: dict[str, str] | None = None) -> Path:
@@ -88,11 +88,11 @@ def test_directory_without_a_trailing_slash_redirects() -> None:
 
 
 def test_dash_spelled_plugin_name_reaches_the_underscore_directory() -> None:
-    _write_plugin("ava_board", files={"index.html": _BOARD})
-    write_local({"plugins": {"ava_board": {"enabled": True}}})
+    _write_plugin("meiva_board", files={"index.html": _BOARD})
+    write_local({"plugins": {"meiva_board": {"enabled": True}}})
 
     with gateway_test_client() as client:
-        r = client.get("/api/plugin-ui/ava-board/")
+        r = client.get("/api/plugin-ui/meiva-board/")
     assert r.status_code == 200, r.text
 
 
@@ -154,13 +154,13 @@ def test_missing_file_is_404() -> None:
 
 def test_nav_declarations_reach_the_console_attributed() -> None:
     directory = _write_plugin("board", files={"board/index.html": _BOARD})
-    (directory / "ava-plugin.json").write_text(
+    (directory / "meiva-plugin.json").write_text(
         json.dumps(
             {
                 "apiVersion": 2,
                 "name": "board",
                 "version": "1.0.0",
-                "engines": {"ava": ">=0.1.0"},
+                "engines": {"meiva": ">=0.1.0"},
                 "contributions": {
                     "ui": {
                         "nav": [

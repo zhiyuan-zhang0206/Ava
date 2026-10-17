@@ -12,7 +12,7 @@ class DuplicateRegistration(PluginConfigError):  # noqa: N818
 
 class SchemaDriftError(PluginConfigError):
     """Disk image field set inconsistent with plugin Config class — run
-    `ava plugins update` to auto-merge (write defaults for new fields, drop removed)."""
+    `meiva plugins update` to auto-merge (write defaults for new fields, drop removed)."""
 
 
 class InvalidConfigData(PluginConfigError):  # noqa: N818 — parent already has Error suffix, subclass describes specific scenario

@@ -102,7 +102,7 @@ def pinned_session_names(monkeypatch: pytest.MonkeyPatch) -> None:
     Patches ``session_name`` directly so ``machine_name()``
     stay untouched (other gateway tests call them via ``set_machine_identity``
     + ``status_snapshot()`` and assert the injected value).
-    Produces names like ``ava-test-agent-host``.
+    Produces names like ``meiva-test-agent-host``.
 
     ``session_name`` is patched at its source (``base.cluster``) because the
     naming scheme is one fact for the whole process — the ``ops`` cluster modules
@@ -110,7 +110,7 @@ def pinned_session_names(monkeypatch: pytest.MonkeyPatch) -> None:
     The pause tests patch ``base.sessions.backend.get_backend`` to a recording
     fake, so the composed names are what the assertions read.
     """
-    monkeypatch.setattr(cluster, "session_name", lambda svc: f"ava-test-{svc}")  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(cluster, "session_name", lambda svc: f"meiva-test-{svc}")  # pyright: ignore[reportUnknownArgumentType]
 
 
 # ─── middleware 503 mode ──────────────────────────────────────────────────────
@@ -308,7 +308,7 @@ class TestPauseAgents:
             assert client.get("/api/agents").status_code == 200
         assert not cluster_pause.is_paused(database, machine_name=machine_identity.name)
         assert pause_backend.killed == []
-        assert pause_backend.has_session("ava-test-agent-host")
+        assert pause_backend.has_session("meiva-test-agent-host")
 
     def test_idempotent_when_session_missing(
         self,
@@ -490,7 +490,7 @@ class TestStatusSnapshot:
         """A start that restarted nothing must not be able to make this node look
         current.
 
-        `ava start` writes `$AVA_HOME/running_sha` from the fresh HEAD one line
+        `meiva start` writes `$MEIVA_HOME/running_sha` from the fresh HEAD one line
         before a launcher that skips already-running sessions, so after a
         no-op start the bookmark and the checkout agree while the live processes
         still hold the old code. Sourcing the snapshot from the bookmark made
@@ -568,11 +568,11 @@ class TestClusterEndpoints:
         )
         with gateway_test_client() as client:
             r = client.post(
-                "/api/cluster/stopping", params={"machine": "runner-a", "home": "~/.ava"}
+                "/api/cluster/stopping", params={"machine": "runner-a", "home": "~/.meiva"}
             )
         assert r.status_code == 200
         assert r.json() == {"machine": "runner-a"}
-        assert marked == [("runner-a", "~/.ava")]
+        assert marked == [("runner-a", "~/.meiva")]
 
 
 # ─── admin events query ──────────────────────────────────────────────────────

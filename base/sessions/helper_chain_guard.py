@@ -9,7 +9,7 @@ import psutil
 
 from base.native_process.child_env import inherited_process_env
 
-_HELPER_PID_ENV = "AVA_PERMISSIONS_HELPER_PID"
+_HELPER_PID_ENV = "MEIVA_PERMISSIONS_HELPER_PID"
 
 _MAX_ANCESTOR_HOPS = 32
 """Upper bound on the ancestor walk (ppid reads, this process excluded).

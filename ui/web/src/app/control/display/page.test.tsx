@@ -352,7 +352,7 @@ describe("DisplaySettingsPage", () => {
     // Attributed, because the two packs share a name.
     const mine = screen.getByLabelText("solarized (skins) — no dark variant") as unknown as HTMLInputElement;
     expect(screen.getByLabelText("solarized (other) — no dark variant")).toBeTruthy();
-    expect((screen.getByLabelText("Default (Ava)") as unknown as HTMLInputElement).checked).toBe(
+    expect((screen.getByLabelText("Default (Meiva)") as unknown as HTMLInputElement).checked).toBe(
       true,
     );
 
@@ -409,7 +409,7 @@ describe("DisplaySettingsPage", () => {
       (screen.getByLabelText("solarized (skins) — no dark variant") as unknown as HTMLInputElement).checked,
     ).toBe(true);
 
-    fireEvent.click(screen.getByLabelText("Default (Ava)"));
+    fireEvent.click(screen.getByLabelText("Default (Meiva)"));
     await waitFor(() => {
       expect(api.putSetting).toHaveBeenCalledWith("display.theme_pack", null);
     });

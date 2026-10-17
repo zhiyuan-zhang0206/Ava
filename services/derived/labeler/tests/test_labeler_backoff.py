@@ -138,7 +138,7 @@ def test_select_unlabeled_treats_empty_label_as_unset(db_conn: psycopg.Connectio
 
 def test_select_unlabeled_prompts_from_task_system_note(db_conn: psycopg.Connection) -> None:
     a = create_agent(db_conn)
-    _seed_task_note(db_conn, a, 'Task #2669 "ava.ui docs gap" is now assigned to you.')
+    _seed_task_note(db_conn, a, 'Task #2669 "meiva.ui docs gap" is now assigned to you.')
     b = create_agent(db_conn)
     with db_conn.cursor() as cur:
         cur.execute(
@@ -150,7 +150,7 @@ def test_select_unlabeled_prompts_from_task_system_note(db_conn: psycopg.Connect
 
     with db_conn.cursor() as cur:
         rows = dict(daemon.select_unlabeled(cur, []))
-    assert rows[a] == 'Task #2669 "ava.ui docs gap" is now assigned to you.'
+    assert rows[a] == 'Task #2669 "meiva.ui docs gap" is now assigned to you.'
     assert b not in rows
 
 

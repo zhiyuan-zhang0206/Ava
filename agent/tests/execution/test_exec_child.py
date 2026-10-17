@@ -12,7 +12,7 @@ from unittest.mock import patch
 import pytest
 from langchain_core.messages import HumanMessage
 
-import ava
+import meiva
 from agent import process_boot
 from agent.graph.exec.protocol import (
     make_request_path,
@@ -20,9 +20,9 @@ from agent.graph.exec.protocol import (
     read_result,
     write_request,
 )
-from ava import boot
-from ava.sdk_surface.installation import Installation
-from ava.tests.fixtures.pin_agent import exec_context
+from meiva import boot
+from meiva.sdk_surface.installation import Installation
+from meiva.tests.fixtures.pin_agent import exec_context
 
 AGENT_ID = 424242
 
@@ -40,18 +40,18 @@ def child_env(
     env.update(launcher_env or {})
     env.update(
         {
-            "AVA_HOME": str(tmp_path / "home"),
-            "AVA_AGENT_ID": str(AGENT_ID),
-            "AVA_PROCESS_PROFILE": "agent",
-            "AVA_EXEC_REQUEST_FILE": str(request_path),
-            "AVA_EXEC_RESULT_FILE": str(result_path),
-            "AVA_EXEC_WATCHDOG_MARGIN_S": "0.5",
+            "MEIVA_HOME": str(tmp_path / "home"),
+            "MEIVA_AGENT_ID": str(AGENT_ID),
+            "MEIVA_PROCESS_PROFILE": "agent",
+            "MEIVA_EXEC_REQUEST_FILE": str(request_path),
+            "MEIVA_EXEC_RESULT_FILE": str(result_path),
+            "MEIVA_EXEC_WATCHDOG_MARGIN_S": "0.5",
         }
     )
     if config_overlay is not None:
-        env["AVA_AGENT_CONFIG_OVERLAY"] = json.dumps(config_overlay, sort_keys=True)
+        env["MEIVA_AGENT_CONFIG_OVERLAY"] = json.dumps(config_overlay, sort_keys=True)
     if birth_config is not None:
-        env["AVA_AGENT_BIRTH_CONFIG"] = json.dumps(birth_config, sort_keys=True)
+        env["MEIVA_AGENT_BIRTH_CONFIG"] = json.dumps(birth_config, sort_keys=True)
     return env
 
 
@@ -113,10 +113,10 @@ def test_child_simple_code_done_envelope(tmp_path: Path) -> None:
 def test_child_context_matches_the_hosts_context(tmp_path: Path) -> None:
     host = exec_context(AGENT_ID, actor="schedule:3")
     code = (
-        "import json\nfrom concurrent.futures import ThreadPoolExecutor\nimport ava\n"
-        "who = ava.context.identity\n"
+        "import json\nfrom concurrent.futures import ThreadPoolExecutor\nimport meiva\n"
+        "who = meiva.context.identity\n"
         "with ThreadPoolExecutor(2) as pool:\n"
-        "    seen = list(pool.map(lambda _: ava.context.identity.agent_id, range(3)))\n"
+        "    seen = list(pool.map(lambda _: meiva.context.identity.agent_id, range(3)))\n"
         "print(json.dumps([who.agent_id, who.owns_loop, who.actor, who.lease is None, seen]))\n"
     )
     proc, _request, result = spawn_real_child(tmp_path, code, context=host.describe())
@@ -130,12 +130,12 @@ def test_child_sdk_call_tally_reports_real_executions(tmp_path: Path) -> None:
     sample = tmp_path / "sample.txt"
     sample.write_text("hello", encoding="utf-8")
     code = f"""
-import ava
-ava.files.read({str(sample)!r})
+import meiva
+meiva.files.read({str(sample)!r})
 for _ in range(3):
-    ava.files.read({str(sample)!r})
+    meiva.files.read({str(sample)!r})
 if False:
-    ava.files.read('/never-executed')
+    meiva.files.read('/never-executed')
 print('tally done')
 """
     proc, _request, result = spawn_real_child(tmp_path, code)
@@ -149,8 +149,8 @@ def test_child_sdk_call_tally_keeps_what_ran_before_a_crash(tmp_path: Path) -> N
     sample = tmp_path / "sample.txt"
     sample.write_text("hello", encoding="utf-8")
     code = f"""
-import ava
-ava.files.read({str(sample)!r})
+import meiva
+meiva.files.read({str(sample)!r})
 raise ValueError('boom')
 """
     proc, _request, result = spawn_real_child(tmp_path, code)
@@ -163,15 +163,15 @@ raise ValueError('boom')
 def test_boot_config_failure_writes_crashed_envelope(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    monkeypatch.delenv("AVA_CONFIG_FETCH", raising=False)
-    monkeypatch.setenv("AVA_CONFIG_BOOT", "eager")
+    monkeypatch.delenv("MEIVA_CONFIG_FETCH", raising=False)
+    monkeypatch.setenv("MEIVA_CONFIG_BOOT", "eager")
     home = tmp_path / "home"
     home.mkdir()
     (home / ".env").write_text(
-        "AVA_DB_URL=postgresql://u@127.0.0.1:1/x\n"
-        "AVA_REDIS_URL=redis://127.0.0.1:1/0\n"
-        "AVA_EXEC_TIMEOUT_SECONDS=1200\n"
-        "AVA_EXEC_NODE_TIMEOUT_SECONDS=300\n",
+        "MEIVA_DB_URL=postgresql://u@127.0.0.1:1/x\n"
+        "MEIVA_REDIS_URL=redis://127.0.0.1:1/0\n"
+        "MEIVA_EXEC_TIMEOUT_SECONDS=1200\n"
+        "MEIVA_EXEC_NODE_TIMEOUT_SECONDS=300\n",
         encoding="utf-8",
     )
 
@@ -179,7 +179,7 @@ def test_boot_config_failure_writes_crashed_envelope(
         tmp_path,
         "pass",
         write_request_file=False,
-        launcher_env={"AVA_DB_URL": "postgresql://ava_runner@127.0.0.1:1/x"},
+        launcher_env={"MEIVA_DB_URL": "postgresql://meiva_runner@127.0.0.1:1/x"},
     )
 
     assert proc.returncode == 0, proc.stderr
@@ -195,14 +195,14 @@ def test_boot_config_failure_writes_crashed_envelope(
 def test_lite_boot_config_failure_writes_crashed_envelope(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    monkeypatch.delenv("AVA_CONFIG_BOOT", raising=False)
-    monkeypatch.delenv("AVA_CONFIG_FETCH", raising=False)
+    monkeypatch.delenv("MEIVA_CONFIG_BOOT", raising=False)
+    monkeypatch.delenv("MEIVA_CONFIG_FETCH", raising=False)
     home = tmp_path / "home"
     home.mkdir()
     (home / ".env").write_text(
-        "AVA_DB_URL=postgresql://u@127.0.0.1:1/x\n"
-        "AVA_REDIS_URL=redis://127.0.0.1:1/0\n"
-        "AVA_TIMEZONE=Bogus/Zone\n",
+        "MEIVA_DB_URL=postgresql://u@127.0.0.1:1/x\n"
+        "MEIVA_REDIS_URL=redis://127.0.0.1:1/0\n"
+        "MEIVA_TIMEZONE=Bogus/Zone\n",
         encoding="utf-8",
     )
 
@@ -250,7 +250,7 @@ def test_crash_envelope_uses_stdlib_fallback_when_protocol_writer_fails(
     assert payload.code_reached is False
 
 
-def test_child_builtin_help_routes_only_ava_targets(tmp_path: Path) -> None:
+def test_child_builtin_help_routes_only_meiva_targets(tmp_path: Path) -> None:
     code = """
 import contextlib
 import builtins
@@ -258,7 +258,7 @@ import io
 import json
 import os
 import sys
-import ava
+import meiva
 
 
 def capture(call, stdin_text=None):
@@ -279,21 +279,21 @@ def capture(call, stdin_text=None):
 outputs = {
     "shim_is_global_builtin": help is builtins.help,
     "global_builtin_type": f"{type(builtins.help).__module__}.{type(builtins.help).__name__}",
-    "ava_files": capture(lambda: help(ava.files)),
-    "agent_status": capture(lambda: help(ava.agents.AgentStatus)),
+    "meiva_files": capture(lambda: help(meiva.files)),
+    "agent_status": capture(lambda: help(meiva.agents.AgentStatus)),
     "str": capture(lambda: help("str")),
     "os_path": capture(lambda: help(os.path)),
     "no_args": capture(lambda: help(), "quit\\n"),
-    "keyword": capture(lambda: help(request=ava.files)),
-    "mixed": capture(lambda: help(ava.files, os.path)),
-    "two_ava": capture(lambda: help(ava.files, ava.agents.AgentStatus)),
-    "expected_ava_files": capture(lambda: ava.help(ava.files)),
-    "expected_agent_status": capture(lambda: ava.help(ava.agents.AgentStatus)),
+    "keyword": capture(lambda: help(request=meiva.files)),
+    "mixed": capture(lambda: help(meiva.files, os.path)),
+    "two_meiva": capture(lambda: help(meiva.files, meiva.agents.AgentStatus)),
+    "expected_meiva_files": capture(lambda: meiva.help(meiva.files)),
+    "expected_agent_status": capture(lambda: meiva.help(meiva.agents.AgentStatus)),
     "expected_str": capture(lambda: builtins.help("str")),
     "expected_os_path": capture(lambda: builtins.help(os.path)),
     "expected_no_args": capture(lambda: builtins.help(), "quit\\n"),
-    "expected_keyword": capture(lambda: builtins.help(request=ava.files)),
-    "expected_two_ava": capture(lambda: ava.help(ava.files, ava.agents.AgentStatus)),
+    "expected_keyword": capture(lambda: builtins.help(request=meiva.files)),
+    "expected_two_meiva": capture(lambda: meiva.help(meiva.files, meiva.agents.AgentStatus)),
 }
 print("__HELP_OUTPUTS__" + json.dumps(outputs, sort_keys=True))
 """
@@ -308,7 +308,7 @@ print("__HELP_OUTPUTS__" + json.dumps(outputs, sort_keys=True))
     outputs = json.loads(output_line.removeprefix("__HELP_OUTPUTS__"))
 
     _assert_help_shim_installed_beside_builtin(outputs)
-    _assert_ava_targets_render_ava_help(outputs)
+    _assert_meiva_targets_render_meiva_help(outputs)
     _assert_foreign_targets_render_builtin_help(outputs)
 
 
@@ -317,10 +317,10 @@ def _assert_help_shim_installed_beside_builtin(outputs: dict[str, Any]) -> None:
     assert outputs["global_builtin_type"] == "_sitebuiltins._Helper"
 
 
-def _assert_ava_targets_render_ava_help(outputs: dict[str, Any]) -> None:
-    assert outputs["ava_files"] == outputs["expected_ava_files"]
+def _assert_meiva_targets_render_meiva_help(outputs: dict[str, Any]) -> None:
+    assert outputs["meiva_files"] == outputs["expected_meiva_files"]
     assert outputs["agent_status"] == outputs["expected_agent_status"]
-    assert outputs["two_ava"] == outputs["expected_two_ava"]
+    assert outputs["two_meiva"] == outputs["expected_two_meiva"]
 
 
 def _assert_foreign_targets_render_builtin_help(outputs: dict[str, Any]) -> None:
@@ -331,15 +331,15 @@ def _assert_foreign_targets_render_builtin_help(outputs: dict[str, Any]) -> None
     assert outputs["keyword"] == outputs["expected_keyword"]
     assert outputs["mixed"] == {
         "error": None,
-        "output": f"{outputs['expected_ava_files']['output']}\n"
+        "output": f"{outputs['expected_meiva_files']['output']}\n"
         f"{outputs['expected_os_path']['output']}",
     }
 
 
-def test_help_is_ava_target_accepts_only_agent_visible_sdk_objects() -> None:
-    from ava.sdk_surface.help import is_ava_target
-    from ava.skills.skill_proxies import Namespace
+def test_help_is_meiva_target_accepts_only_agent_visible_sdk_objects() -> None:
     from base.packages.skills.tree import NS
+    from meiva.sdk_surface.help import is_meiva_target
+    from meiva.skills.skill_proxies import Namespace
 
     def foreign_function() -> None:
         return None
@@ -347,16 +347,16 @@ def test_help_is_ava_target_accepts_only_agent_visible_sdk_objects() -> None:
     foreign_function.__module__ = "__main__"
     skill_namespace = Namespace("example", NS(), lambda _skill: "")
 
-    assert is_ava_target(ava)
-    assert is_ava_target(ava.files)
-    assert is_ava_target(ava.files.read)
-    assert is_ava_target(ava.agents.AgentStatus)
-    assert is_ava_target(skill_namespace)
-    assert not is_ava_target(str)
-    assert not is_ava_target(int)
-    assert not is_ava_target(os.path)
-    assert not is_ava_target(object())
-    assert not is_ava_target(foreign_function)
+    assert is_meiva_target(meiva)
+    assert is_meiva_target(meiva.files)
+    assert is_meiva_target(meiva.files.read)
+    assert is_meiva_target(meiva.agents.AgentStatus)
+    assert is_meiva_target(skill_namespace)
+    assert not is_meiva_target(str)
+    assert not is_meiva_target(int)
+    assert not is_meiva_target(os.path)
+    assert not is_meiva_target(object())
+    assert not is_meiva_target(foreign_function)
 
 
 def test_child_attach_registration_reaches_result_envelope(tmp_path: Path) -> None:
@@ -364,7 +364,7 @@ def test_child_attach_registration_reaches_result_envelope(tmp_path: Path) -> No
     image.write_bytes(b"png")
     proc, _request, result = spawn_real_child(
         tmp_path,
-        f"import ava\nava.self.attach({str(image)!r}, label='render result')",
+        f"import meiva\nmeiva.self.attach({str(image)!r}, label='render result')",
         config_overlay={"llm_model": "claude-sonnet-5"},
         state={"messages": [HumanMessage(content="attach it")], "halted": False},
     )
@@ -378,12 +378,12 @@ def test_child_attach_registration_reaches_result_envelope(tmp_path: Path) -> No
 def test_child_attach_rejected_for_text_only_model(tmp_path: Path) -> None:
     proc, _request, result = spawn_real_child(
         tmp_path,
-        "import ava\nava.self.attach('/tmp/render.png')",
+        "import meiva\nmeiva.self.attach('/tmp/render.png')",
         config_overlay={"llm_model": "glm-5.3"},
     )
 
     assert proc.returncode == 0, proc.stderr
-    assert "ava.self.attach is unavailable" in proc.stdout
+    assert "meiva.self.attach is unavailable" in proc.stdout
     assert "text-only" in proc.stdout
     payload = read_result(result)
     assert payload.kind == "crashed"
@@ -411,12 +411,12 @@ def test_child_state_slot_and_plugin_delta_round_trip(tmp_path: Path) -> None:
     proj.mkdir()
     code = f"""
 from pathlib import Path
-import ava
+import meiva
 process_cwd = Path.cwd()
-print("messages in snapshot:", len(ava.state.messages))
-print("first message:", ava.state.messages[0].content)
-ava.cwd.set({str(proj)!r})
-print("cwd after set:", ava.cwd.get())
+print("messages in snapshot:", len(meiva.state.messages))
+print("first message:", meiva.state.messages[0].content)
+meiva.cwd.set({str(proj)!r})
+print("cwd after set:", meiva.cwd.get())
 print("process cwd stable:", Path.cwd() == process_cwd)
 """
     proc, _request, result = spawn_real_child(tmp_path, code, state=state)
@@ -427,8 +427,8 @@ print("process cwd stable:", Path.cwd() == process_cwd)
     payload = read_result(result)
     assert payload.kind == "done"
     assert payload.state_update is not None
-    assert payload.state_update.get("ava_code__cwd") == str(proj)
-    assert payload.state_update.get("ava_code__cwd_note") is not None
+    assert payload.state_update.get("meiva_code__cwd") == str(proj)
+    assert payload.state_update.get("meiva_code__cwd_note") is not None
 
 
 def test_child_lifecycle_envelope(tmp_path: Path) -> None:
@@ -471,10 +471,10 @@ def test_child_applies_overlay_framework_and_pops_env(tmp_path: Path) -> None:
     proc, _request, result = spawn_real_child(
         tmp_path,
         (
-            "from ava.sdk_surface.settings import agent_setting\n"
+            "from meiva.sdk_surface.settings import agent_setting\n"
             "print(agent_setting('llm_model'))\n"
             "print(agent_setting('llm_stream_ttft_timeout_seconds'))\n"
-            "import os\nprint(os.environ.get('AVA_AGENT_CONFIG_OVERLAY', 'GONE'))\n"
+            "import os\nprint(os.environ.get('MEIVA_AGENT_CONFIG_OVERLAY', 'GONE'))\n"
         ),
         config_overlay={"llm_model": "deepseek-v4-pro"},
         birth_config={
@@ -539,9 +539,9 @@ def test_child_overlay_phases_framework_then_plugin(
         assert all(
             (
                 surface is True,
-                context is ava.context,
-                machine is ava.context.machine,
-                clock_factory is ava.context.clock_factory,
+                context is meiva.context,
+                machine is meiva.context.machine,
+                clock_factory is meiva.context.clock_factory,
                 callable(producer),
             )
         )
@@ -555,7 +555,7 @@ def test_child_overlay_phases_framework_then_plugin(
     monkeypatch.setattr(exec_child, "run_code", fake_run_code)
     monkeypatch.setattr(protocol, "write_result", fake_write_result)
     monkeypatch.setattr(boot, "ensure_plugins_loaded", fake_plugins_loaded)
-    monkeypatch.setattr(ava, "__plugin_installation__", model_installation, raising=False)
+    monkeypatch.setattr(meiva, "__plugin_installation__", model_installation, raising=False)
 
     def fake_apply_scope(
         birth: dict[str, object] | None,
@@ -568,12 +568,12 @@ def test_child_overlay_phases_framework_then_plugin(
         return bool(birth or overlay)
 
     monkeypatch.setattr(exec_child, "apply_overlay_scope", fake_apply_scope)
-    monkeypatch.setenv("AVA_AGENT_CONFIG_OVERLAY", json.dumps({"llm_model": "x"}))
+    monkeypatch.setenv("MEIVA_AGENT_CONFIG_OVERLAY", json.dumps({"llm_model": "x"}))
     monkeypatch.setenv(
-        "AVA_AGENT_BIRTH_CONFIG", json.dumps({"llm_stream_ttft_timeout_seconds": 1.0})
+        "MEIVA_AGENT_BIRTH_CONFIG", json.dumps({"llm_stream_ttft_timeout_seconds": 1.0})
     )
-    monkeypatch.setenv("AVA_EXEC_REQUEST_FILE", str(tmp_path / "req.json"))
-    monkeypatch.setenv("AVA_EXEC_RESULT_FILE", str(tmp_path / "res.json"))
+    monkeypatch.setenv("MEIVA_EXEC_REQUEST_FILE", str(tmp_path / "req.json"))
+    monkeypatch.setenv("MEIVA_EXEC_RESULT_FILE", str(tmp_path / "res.json"))
 
     old_sigint = signal.getsignal(signal.SIGINT)
     old_sigterm = signal.getsignal(signal.SIGTERM)
@@ -602,7 +602,7 @@ def test_child_overlay_phases_framework_then_plugin(
 
 def _declare_machine_name(tmp_path: Path) -> None:
     (tmp_path / "home").mkdir(exist_ok=True)
-    (tmp_path / "home" / ".env").write_text("AVA_MACHINE_NAME=test-host\n", encoding="utf-8")
+    (tmp_path / "home" / ".env").write_text("MEIVA_MACHINE_NAME=test-host\n", encoding="utf-8")
 
 
 def test_child_help_hides_attach_for_text_only_model(
@@ -611,10 +611,10 @@ def test_child_help_hides_attach_for_text_only_model(
     _declare_machine_name(tmp_path)
     proc, _request, _result = spawn_real_child(
         tmp_path,
-        "import ava, io, contextlib\n"
+        "import meiva, io, contextlib\n"
         "buf = io.StringIO()\n"
         "with contextlib.redirect_stdout(buf):\n"
-        "    ava.help(ava.self)\n"
+        "    meiva.help(meiva.self)\n"
         "print('HAS_ATTACH' if 'def attach(' in buf.getvalue() else 'NO_ATTACH')",
         config_overlay={"llm_model": "glm-5.3"},
     )
@@ -629,10 +629,10 @@ def test_child_help_keeps_attach_for_media_capable_model(
     _declare_machine_name(tmp_path)
     proc, _request, _result = spawn_real_child(
         tmp_path,
-        "import ava, io, contextlib\n"
+        "import meiva, io, contextlib\n"
         "buf = io.StringIO()\n"
         "with contextlib.redirect_stdout(buf):\n"
-        "    ava.help(ava.self)\n"
+        "    meiva.help(meiva.self)\n"
         "print('HAS_ATTACH' if 'def attach(' in buf.getvalue() else 'NO_ATTACH')",
         config_overlay={"llm_model": "claude-sonnet-5"},
     )
@@ -647,20 +647,20 @@ def test_child_help_hides_attach_for_withdrawn_model(
     _declare_machine_name(tmp_path)
     proc, _request, _result = spawn_real_child(
         tmp_path,
-        "import ava, io, contextlib\n"
+        "import meiva, io, contextlib\n"
         "from dataclasses import replace\n"
-        "from ava.sdk_surface import process_context\n"
-        "from ava.sdk_surface.settings import model_catalog\n"
+        "from meiva.sdk_surface import process_context\n"
+        "from meiva.sdk_surface.settings import model_catalog\n"
         "catalog = model_catalog()\n"
         "withdrawn = replace(catalog.models['glm-5.3'], "
         "spawnable=False, unavailable_fallback='glm-5.3', "
         "media_types=frozenset({'image'}))\n"
         "fixture = replace(catalog, models={**catalog.models, 'glm-vision-fixture': withdrawn})\n"
-        "ava.__plugin_installation__ = replace(ava.__plugin_installation__, catalog=fixture)\n"
-        "process_context.bind_context(replace(ava.context, catalog=fixture))\n"
+        "meiva.__plugin_installation__ = replace(meiva.__plugin_installation__, catalog=fixture)\n"
+        "process_context.bind_context(replace(meiva.context, catalog=fixture))\n"
         "buf = io.StringIO()\n"
         "with contextlib.redirect_stdout(buf):\n"
-        "    ava.help(ava.self)\n"
+        "    meiva.help(meiva.self)\n"
         "print('HAS_ATTACH' if 'def attach(' in buf.getvalue() else 'NO_ATTACH')",
         config_overlay={"llm_model": "glm-vision-fixture"},
     )

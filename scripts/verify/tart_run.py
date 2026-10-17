@@ -1,22 +1,22 @@
 """Verify one commit of this repository in a fresh Tart macOS VM.
 
     python3 scripts/verify/tart_run.py --ref origin/main
-    python3 scripts/verify/tart_run.py --ref HEAD --golden ava-golden --evidence-root DIR
+    python3 scripts/verify/tart_run.py --ref HEAD --golden meiva-golden --evidence-root DIR
 
-The VM is one Ava machine: production layout (`~/.ava`, source at `~/.ava/source`),
+The VM is one Meiva machine: production layout (`~/.meiva`, source at `~/.meiva/source`),
 native Postgres, Redis and PgBouncer from Homebrew, the signed permissions helper as
-the parent of `ava-root`, and the desktop grants the golden image carries. The run
+the parent of `meiva-root`, and the desktop grants the golden image carries. The run
 resolves the ref to one commit, clones the golden image into a throwaway VM, boots it
 headless with one read-only share (that commit's history, never the host's object
-store), fetches the commit into `~/.ava/source`, makes sure the toolchain is present
+store), fetches the commit into `~/.meiva/source`, makes sure the toolchain is present
 (the repository's own provisioning; a no-op in a golden image that has it), builds the
-Python tree from that commit's lockfile, runs `ava init` and then the first `ava start`
+Python tree from that commit's lockfile, runs `meiva init` and then the first `meiva start`
 (gateway and agent-runner on one box; the frontend dependencies and build are the
 start's own), runs the observer, copies the evidence out, and deletes the VM. The
 model is scripted; no provider key is injected, so nothing secret can reach the VM. The
 design is future/infra/engineering/verification-boundaries.md.
 
-The host's `~/.ava`, launchd, keychain and TCC are never touched: the only host paths
+The host's `~/.meiva`, launchd, keychain and TCC are never touched: the only host paths
 the run writes are its evidence directory and a temporary export of the commit. At
 most two Tart VMs run at once; the run refuses to boot a third. The golden image is
 built once, with a human present, by `tart_golden.py`.
@@ -65,7 +65,7 @@ from scripts.verify.tart_vm import (  # noqa: E402 — standalone script
     guest_script,
 )
 
-GOLDEN = "ava-golden"
+GOLDEN = "meiva-golden"
 WORK = "$HOME/verify"
 
 KEYCHAIN_GUARD = guest_script(
@@ -73,7 +73,7 @@ KEYCHAIN_GUARD = guest_script(
 )
 # The golden image boots its installed helper through launchd. Retire that job
 # through the supported lifecycle before start may replace a stale helper.
-STOP = guest_script(f'cd "{GUEST_SOURCE}" && .venv/bin/ava stop --yes')
+STOP = guest_script(f'cd "{GUEST_SOURCE}" && .venv/bin/meiva stop --yes')
 INIT = guest_script(f'cd "{GUEST_SOURCE}" && {" ".join(init_argv(f"{WORK}/profile.env"))}')
 START = guest_script(f'cd "{GUEST_SOURCE}" && {" ".join(START_ARGV)}')
 OBSERVE = guest_script(
@@ -85,14 +85,14 @@ SNAPSHOT = guest_script(
     """
 echo "== $(date -u +%FT%TZ) $(uptime)"
 echo "== processes"
-ps -axo pid,ppid,user,etime,command | grep -E 'sbin/launchd$|AvaPermissionsHelper|/\\.ava/|postgres -D|redis-server|pgbouncer|next-server' | grep -v grep || true
+ps -axo pid,ppid,user,etime,command | grep -E 'sbin/launchd$|MeivaPermissionsHelper|/\\.meiva/|postgres -D|redis-server|pgbouncer|next-server' | grep -v grep || true
 echo "== disk"; df -h /
 echo "== memory"; sysctl hw.memsize vm.swapusage; memory_pressure | tail -3
 """
 )
 OBSERVER_JSON = guest_script(f"cat {WORK}/observer.json")
 CLUSTER_LOGS = guest_script(
-    'cd "$HOME/.ava" && tar -czf - logs $(ls run/ava-root/root.*.log 2>/dev/null) | base64'
+    'cd "$HOME/.meiva" && tar -czf - logs $(ls run/meiva-root/root.*.log 2>/dev/null) | base64'
 )
 
 # Wall-clock bound of each step, seconds. A timed-out step fails the run.
@@ -190,7 +190,7 @@ def run(ref: str, evidence_root: Path, *, repo: Path, golden: str, tart: Tart) -
     evidence.result["vm"] = vm
     evidence.result["golden"] = golden
     print(f"evidence: {evidence.root}\ncommit: {commit}\nvm: {vm}", flush=True)
-    export = Path(tempfile.mkdtemp(prefix="ava-verify-src-"))
+    export = Path(tempfile.mkdtemp(prefix="meiva-verify-src-"))
     proc: subprocess.Popen[str] | None = None
     failure: BaseException | None = None
     try:
@@ -252,7 +252,7 @@ def main() -> int:
     parser.add_argument(
         "--evidence-root",
         type=Path,
-        default=Path(tempfile.gettempdir()) / "ava-verify",
+        default=Path(tempfile.gettempdir()) / "meiva-verify",
         help="parent directory of the per-run evidence directory",
     )
     args = parser.parse_args()

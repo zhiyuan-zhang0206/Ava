@@ -42,7 +42,7 @@ from base.sessions.pty.tests.pty_shells import (
     wait_for,
 )
 
-_NAME = "ava-agent-1-shell-2"
+_NAME = "meiva-agent-1-shell-2"
 
 
 def _backend() -> PtySessionBackend:
@@ -134,8 +134,8 @@ def test_the_creator_env_reaches_the_shell_in_the_request_not_on_an_argv(
     pty_service: PtyServiceProcess, unit_home: Path
 ) -> None:
     canary = "argv-canary-0042"  # a sentinel to search argv for
-    _new(_NAME, unit_home, env={"AVA_TEST_CANARY": canary})
-    type_line(_NAME, "echo value=$AVA_TEST_CANARY")
+    _new(_NAME, unit_home, env={"MEIVA_TEST_CANARY": canary})
+    type_line(_NAME, "echo value=$MEIVA_TEST_CANARY")
     output_until(_NAME, f"value={canary}")
     service = psutil.Process(pty_service.pid)
     for process in [service, *service.children(recursive=True)]:
@@ -251,20 +251,20 @@ def test_kill_session_of_an_absent_session_is_a_noop_success() -> None:
 def test_kill_session_with_verdict_reports_whether_work_was_cut_short(unit_home: Path) -> None:
     """The verdict comes from the kill itself: an idle shell is not interrupted, a
     shell running a job is."""
-    _new("ava-test-idle-1", unit_home)
-    type_line("ava-test-idle-1", "echo idle-ready")
-    output_until("ava-test-idle-1", "idle-ready")
-    ok, mode, interrupted = _backend().kill_session_with_verdict("ava-test-idle-1")
+    _new("meiva-test-idle-1", unit_home)
+    type_line("meiva-test-idle-1", "echo idle-ready")
+    output_until("meiva-test-idle-1", "idle-ready")
+    ok, mode, interrupted = _backend().kill_session_with_verdict("meiva-test-idle-1")
     assert (ok, mode, interrupted) == (True, "forced", False)
 
-    _new("ava-test-busy-1", unit_home)
-    type_line("ava-test-busy-1", "echo busy-ready")
-    output_until("ava-test-busy-1", "busy-ready")
-    type_line("ava-test-busy-1", "sleep 300")
-    wait_for_job(shell_process("ava-test-busy-1"), ["sleep", "300"])
-    ok, mode, interrupted = _backend().kill_session_with_verdict("ava-test-busy-1")
+    _new("meiva-test-busy-1", unit_home)
+    type_line("meiva-test-busy-1", "echo busy-ready")
+    output_until("meiva-test-busy-1", "busy-ready")
+    type_line("meiva-test-busy-1", "sleep 300")
+    wait_for_job(shell_process("meiva-test-busy-1"), ["sleep", "300"])
+    ok, mode, interrupted = _backend().kill_session_with_verdict("meiva-test-busy-1")
     assert (ok, mode, interrupted) == (True, "forced", True)
-    assert not _backend().has_session("ava-test-busy-1")
+    assert not _backend().has_session("meiva-test-busy-1")
 
 
 # ---------------------------------------------------------------------------
@@ -274,12 +274,16 @@ def test_kill_session_with_verdict_reports_whether_work_was_cut_short(unit_home:
 
 @pytest.mark.usefixtures("pty_service")
 def test_list_sessions_is_sorted_and_filtered_by_prefix(unit_home: Path) -> None:
-    for name in ("ava-agent-1-shell-2", "ava-agent-1-shell-1", "other-1"):
+    for name in ("meiva-agent-1-shell-2", "meiva-agent-1-shell-1", "other-1"):
         _new(name, unit_home)
-    assert _backend().list_sessions() == ["ava-agent-1-shell-1", "ava-agent-1-shell-2", "other-1"]
-    assert _backend().list_sessions(prefix="ava-agent-1") == [
-        "ava-agent-1-shell-1",
-        "ava-agent-1-shell-2",
+    assert _backend().list_sessions() == [
+        "meiva-agent-1-shell-1",
+        "meiva-agent-1-shell-2",
+        "other-1",
+    ]
+    assert _backend().list_sessions(prefix="meiva-agent-1") == [
+        "meiva-agent-1-shell-1",
+        "meiva-agent-1-shell-2",
     ]
     assert _backend().list_sessions(prefix="nothing") == []
 
@@ -287,33 +291,33 @@ def test_list_sessions_is_sorted_and_filtered_by_prefix(unit_home: Path) -> None
 @pytest.mark.usefixtures("pty_service")
 def test_started_ats_answers_every_name_from_the_service_epochs(unit_home: Path) -> None:
     """A live session maps to the epoch the service recorded, an absent one to None."""
-    _new("ava-agent-1-shell-1", unit_home)
+    _new("meiva-agent-1-shell-1", unit_home)
     (info,) = client.list_sessions()
-    epochs = _backend().session_started_ats(["ava-agent-1-shell-1", "ava-agent-1-shell-9"])
-    assert epochs == {"ava-agent-1-shell-1": info.started_at, "ava-agent-1-shell-9": None}
+    epochs = _backend().session_started_ats(["meiva-agent-1-shell-1", "meiva-agent-1-shell-9"])
+    assert epochs == {"meiva-agent-1-shell-1": info.started_at, "meiva-agent-1-shell-9": None}
     assert info.started_at > 0
-    assert _backend().session_started_at("ava-agent-1-shell-1") == info.started_at
-    assert _backend().session_started_at("ava-agent-1-shell-9") is None
+    assert _backend().session_started_at("meiva-agent-1-shell-1") == info.started_at
+    assert _backend().session_started_at("meiva-agent-1-shell-9") is None
     assert _backend().session_started_ats([]) == {}
 
 
 @pytest.mark.usefixtures("pty_service")
 def test_session_generation_is_the_one_the_session_was_admitted_under(unit_home: Path) -> None:
-    _new("ava-agent-1-shell-1", unit_home)
-    assert _backend().session_generation("ava-agent-1-shell-1") is None
+    _new("meiva-agent-1-shell-1", unit_home)
+    assert _backend().session_generation("meiva-agent-1-shell-1") is None
     frozen = allocation_freeze.freeze(
         holder="operator", reason="generation flip", writer=AtomicWriter(SYSTEM_FS)
     )
     assert frozen.generation is not None
     assert allocation_freeze.resume(frozen.generation, writer=AtomicWriter(SYSTEM_FS))
-    _new("ava-agent-1-shell-2", unit_home)
-    assert _backend().session_generation("ava-agent-1-shell-2") == frozen.generation
-    assert _backend().session_generation("ava-agent-1-shell-9") is None
+    _new("meiva-agent-1-shell-2", unit_home)
+    assert _backend().session_generation("meiva-agent-1-shell-2") == frozen.generation
+    assert _backend().session_generation("meiva-agent-1-shell-9") is None
 
 
 @pytest.mark.usefixtures("pty_service")
 def test_session_log_path_is_the_transcript_the_service_writes(unit_home: Path) -> None:
-    """The service writes a byte transcript per session at $AVA_HOME/logs/<name>.out.log."""
+    """The service writes a byte transcript per session at $MEIVA_HOME/logs/<name>.out.log."""
     _new(_NAME, unit_home)
     transcript = _backend().session_log_path(_NAME)
     assert transcript == unit_home / "logs" / f"{_NAME}.out.log"
@@ -369,7 +373,7 @@ def test_a_home_without_a_service_holds_no_sessions(
     backend = PtySessionBackend(config=PtyClientConfig(connect_wait_s=0.0))
     assert backend.has_session(_NAME) is False
     assert backend.list_sessions() == []
-    assert backend.list_sessions(prefix="ava-agent-1") == []
+    assert backend.list_sessions(prefix="meiva-agent-1") == []
     assert backend.session_started_ats([_NAME]) == {_NAME: None}
     assert backend.session_started_at(_NAME) is None
     assert backend.session_generation(_NAME) is None

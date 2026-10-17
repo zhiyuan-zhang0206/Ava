@@ -11,7 +11,7 @@ def ai(
 ) -> AIMessage:
     return AIMessage(
         content="x",
-        additional_kwargs={} if cost is None else {"ava_usage": {"cost_usd": cost}},
+        additional_kwargs={} if cost is None else {"meiva_usage": {"cost_usd": cost}},
         usage_metadata={
             "input_tokens": input_tokens,
             "output_tokens": output_tokens,

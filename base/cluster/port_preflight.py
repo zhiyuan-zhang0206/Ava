@@ -208,7 +208,7 @@ def serves_off_box(*, machine: MachineIdentity) -> bool:
     """Whether this host declares a reachable address other machines can dial.
 
     The single predicate behind every off-box listener decision (data plane,
-    gateway, ops): the operator's declared `AVA_MACHINE_HOST` (`ava init
+    gateway, ops): the operator's declared `MEIVA_MACHINE_HOST` (`meiva init
     --machine-host`) is not a loopback alias. The default `localhost` is the
     single box, which listens on loopback alone.
     """
@@ -220,7 +220,7 @@ def bind_addrs(*, machine: MachineIdentity) -> list[str]:
     when reachable resolves to localhost — the single-box default).
 
     The network posture is the operator's declared reachable address
-    (`AVA_MACHINE_HOST`, `ava init --machine-host`), nothing else: the default
+    (`MEIVA_MACHINE_HOST`, `meiva init --machine-host`), nothing else: the default
     `localhost` keeps every data-plane listener on loopback, and declaring a
     private-network address adds that one address. Postgres and its pooler
     authenticate (SCRAM) whatever they bind. The reachable address is an identity

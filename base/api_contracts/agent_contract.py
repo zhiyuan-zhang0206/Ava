@@ -6,12 +6,12 @@ status / exception / wire-level reason.
 
 - Impl (spawn / resurrection / fork-checkpoint copy) lives in
   `ops/agents/__init__.py`; gateway routes and local ops call it.
-- On the agent process side, the SDK (`ava.agents.*`) uniformly goes
+- On the agent process side, the SDK (`meiva.agents.*`) uniformly goes
   through HTTP to call gateway routes — no longer imports impl from
   this module, only imports types + exceptions to catch.
 
 Error wire protocol:
-- Gateway side catches `AvaAgentError` subclasses -> response body
+- Gateway side catches `MeivaAgentError` subclasses -> response body
   `{"detail": str(exc), "reason": exc.reason}` + `exc.http_status`
 - SDK side parses the response's `reason` field -> looks up
   `EXCEPTION_BY_REASON` to reconstruct the same exception type and
@@ -112,14 +112,14 @@ class ErrorReason(StrEnum):
     The response body's `reason` field uses these values; SDK looks up
     EXCEPTION_BY_REASON to reconstruct the matching exception type and
     raise to the caller. New wire errors must simultaneously add an
-    enum value + an AvaAgentError subclass.
+    enum value + an MeivaAgentError subclass.
 
     **Not all ResurrectError / ForkError subclasses go on the wire** —
     `ResurrectAlreadyAlive` is caught locally by the resurrect
     endpoint and turned into an idempotent 200 + `status='already_alive'`;
     the SDK returns `ResurrectResult.ALREADY_ALIVE` from that status string
     (it never raises the exception) and does not take the reason channel.
-    So it is not an AvaAgentError subclass and is not in this enum.
+    So it is not an MeivaAgentError subclass and is not in this enum.
     """
 
     AGENT_NOT_FOUND = "agent_not_found"
@@ -136,9 +136,9 @@ class ErrorReason(StrEnum):
     FORK_CONFIG_CHANGE_NOT_ALLOWED = "fork_config_change_not_allowed"
 
 
-class AvaAgentError(Exception):
+class MeivaAgentError(Exception):
     """Root of **wire-encoded** agent gateway errors — the
-    gateway uses one `@app.exception_handler(AvaAgentError)` to map to
+    gateway uses one `@app.exception_handler(MeivaAgentError)` to map to
     an HTTP response, and the SDK looks up `EXCEPTION_BY_REASON` to
     reconstruct.
 
@@ -146,7 +146,7 @@ class AvaAgentError(Exception):
     `http_status: ClassVar[int]`. Marker parent classes like
     `ResurrectError` / `ForkError` are not subclasses — they mark
     catch groups and do not carry wire fields (concrete subclasses use
-    multiple inheritance to inherit marker + AvaAgentError together).
+    multiple inheritance to inherit marker + MeivaAgentError together).
 
     `__init_subclass__` enforces ClassVars at class-declaration time; the
     literal `EXCEPTION_BY_REASON` table at the module end lists every
@@ -167,15 +167,15 @@ class AvaAgentError(Exception):
         # being misjudged as already set.
         if "reason" not in cls.__dict__:
             raise TypeError(
-                f"{cls.__name__} inheriting AvaAgentError must set `reason: ClassVar[ErrorReason]`"
+                f"{cls.__name__} inheriting MeivaAgentError must set `reason: ClassVar[ErrorReason]`"
             )
         if "http_status" not in cls.__dict__:
             raise TypeError(
-                f"{cls.__name__} inheriting AvaAgentError must set `http_status: ClassVar[int]`"
+                f"{cls.__name__} inheriting MeivaAgentError must set `http_status: ClassVar[int]`"
             )
 
 
-# Wire note: AgentNotFound is wire-encoded and re-exported as `ava.agents.AgentNotFound`.
+# Wire note: AgentNotFound is wire-encoded and re-exported as `meiva.agents.AgentNotFound`.
 # ResurrectAlreadyAlive is NOT wire-encoded — the resurrect endpoint locally turns
 # it into an idempotent 200 status='already_alive'. The dedicated resurrect endpoint
 # (POST /api/agents/{id}/resurrect) is retained — the frontend button + SDK use it;
@@ -191,16 +191,16 @@ class ForkError(Exception):
     `ForkCheckpointNotFound` (explicit checkpoint id does not exist on
     source) / `ForkConfigChangeNotAllowed` (fork tried to change the
     source's config beyond skill additions). All wire-encoded. The SDK
-    re-exports as `ava.agents.X`.
+    re-exports as `meiva.agents.X`.
     """
 
 
-class AgentNotFound(ResurrectError, AvaAgentError):  # noqa: N818 — style consistent with FileNotFoundError
+class AgentNotFound(ResurrectError, MeivaAgentError):  # noqa: N818 — style consistent with FileNotFoundError
     reason = ErrorReason.AGENT_NOT_FOUND
     http_status = 404
 
 
-# Not an AvaAgentError subclass — the resurrect endpoint catches locally and
+# Not an MeivaAgentError subclass — the resurrect endpoint catches locally and
 # returns 200 {"status":"already_alive"} (idempotent UX); the SDK client maps
 # that string to ResurrectResult.ALREADY_ALIVE (it never raises this exception),
 # so the path never takes the wire reason / handler.
@@ -223,7 +223,7 @@ class ResurrectRefused(ResurrectError):  # noqa: N818 — style consistent with 
         self.reason = reason
 
 
-class ForkSourceEmpty(ForkError, AvaAgentError):  # noqa: N818 — style consistent with ENOENT
+class ForkSourceEmpty(ForkError, MeivaAgentError):  # noqa: N818 — style consistent with ENOENT
     """Source agent has no checkpoint — cannot fork.
 
     Usually the source agent has not run any code yet (after spawn it
@@ -235,7 +235,7 @@ class ForkSourceEmpty(ForkError, AvaAgentError):  # noqa: N818 — style consist
     http_status = 409
 
 
-class ForkCheckpointNotFound(ForkError, AvaAgentError):  # noqa: N818
+class ForkCheckpointNotFound(ForkError, MeivaAgentError):  # noqa: N818
     """The `fork_checkpoint` id does not exist on the source agent —
     typo / already cleaned / crossed agents. The SDK's internal
     resolve-latest does not trigger this; only manual ckpt id does.
@@ -245,7 +245,7 @@ class ForkCheckpointNotFound(ForkError, AvaAgentError):  # noqa: N818
     http_status = 409
 
 
-class ForkConfigChangeNotAllowed(ForkError, AvaAgentError):  # noqa: N818 — state description, same style as AgentNotFound
+class ForkConfigChangeNotAllowed(ForkError, MeivaAgentError):  # noqa: N818 — state description, same style as AgentNotFound
     """A fork may not change the source agent's config.
 
     A fork runs the source agent's effective config so the inherited
@@ -265,7 +265,7 @@ class GatewayUnavailable(Exception):  # noqa: N818 — state description, no Err
     write timeout, connection refused, DNS failure, protocol error,
     etc.).
 
-    Ava is localhost-only; gateway is a hard dependency of the agent
+    Meiva is localhost-only; gateway is a hard dependency of the agent
     gateway and must be up before spawn / resurrect /
     send_message. This does not go into
     `EXCEPTION_BY_REASON` — it never appears in a gateway response
@@ -275,7 +275,7 @@ class GatewayUnavailable(Exception):  # noqa: N818 — state description, no Err
     """
 
 
-class MachineNotRegistered(AvaAgentError):  # noqa: N818 — state description, same style as AgentNotFound
+class MachineNotRegistered(MeivaAgentError):  # noqa: N818 — state description, same style as AgentNotFound
     """During cross-machine spawn the target machine has not registered
     itself yet, or the machine name is misspelled.
 
@@ -288,26 +288,26 @@ class MachineNotRegistered(AvaAgentError):  # noqa: N818 — state description, 
     http_status = 404
 
 
-class SpawnTargetNotAgentRunner(AvaAgentError):  # noqa: N818 — state description, same style as AgentNotFound
+class SpawnTargetNotAgentRunner(MeivaAgentError):  # noqa: N818 — state description, same style as AgentNotFound
     """The spawn target machine is registered but does not carry the
     agent-runner capability, so it cannot run agents (e.g. a gateway-only
     host).
 
-    Pass a machine that runs agents — see `ava.agents.list_machines()`.
+    Pass a machine that runs agents — see `meiva.agents.list_machines()`.
     """
 
     reason = ErrorReason.SPAWN_TARGET_NOT_AGENT_RUNNER
     http_status = 400
 
 
-class MachinePaused(AvaAgentError):  # noqa: N818 — state description, same style as AgentNotFound
+class MachinePaused(MeivaAgentError):  # noqa: N818 — state description, same style as AgentNotFound
     """The spawn target machine is registered but is currently PAUSED
-    (`ava cluster pause` — operator-set latch, migration 20260814T182039):
+    (`meiva cluster pause` — operator-set latch, migration 20260814T182039):
     it is temporarily pulled out of the cluster (e.g. the owner is away for a
     week and disconnected it), so its ops server may be unreachable and its
     agents have been terminated.
 
-    Resume it first (`ava cluster resume <name>` on the gateway), then spawn.
+    Resume it first (`meiva cluster resume <name>` on the gateway), then spawn.
     """
 
     reason = ErrorReason.MACHINE_PAUSED
@@ -320,7 +320,7 @@ class MachinePaused(AvaAgentError):  # noqa: N818 — state description, same st
 # is the gateway *backend* (gemini embedding / memory-search service) being truly unreachable.
 # Kept as a comment, not docstring — the docstring renders into every agent's
 # SDK docs, where this cross-machine routing note would be noise.
-class IndexerUnavailable(AvaAgentError):  # noqa: N818
+class IndexerUnavailable(MeivaAgentError):  # noqa: N818
     """The semantic-search backend is unreachable; the notes themselves
     are still readable as plain files."""
 
@@ -328,7 +328,7 @@ class IndexerUnavailable(AvaAgentError):  # noqa: N818
     http_status = 503
 
 
-class ChannelNotConfigured(AvaAgentError):  # noqa: N818 — state description, no Error suffix, same style as AgentNotFound
+class ChannelNotConfigured(MeivaAgentError):  # noqa: N818 — state description, no Error suffix, same style as AgentNotFound
     """The push channel is not configured or its backend is unavailable.
 
     Decide for yourself whether to fall back to another notification path.
@@ -338,7 +338,7 @@ class ChannelNotConfigured(AvaAgentError):  # noqa: N818 — state description, 
     http_status = 503
 
 
-class CrossMachineGatewayUnavailable(AvaAgentError):  # noqa: N818
+class CrossMachineGatewayUnavailable(MeivaAgentError):  # noqa: N818
     """A cross-machine work-row dispatch could not complete — the target
     machine's runner did not pick up the row within the timeout, or the
     target machine reported an unrecognized failure.
@@ -355,7 +355,7 @@ class CrossMachineGatewayUnavailable(AvaAgentError):  # noqa: N818
     http_status = 502
 
 
-class AgentLaunchFailed(AvaAgentError):  # noqa: N818
+class AgentLaunchFailed(MeivaAgentError):  # noqa: N818
     """A committed agent exists but its runner launch was not acknowledged.
 
     Retry by `agent_id` through `retry_launch_path`; never retry the create POST.
@@ -379,11 +379,11 @@ class AgentLaunchFailed(AvaAgentError):  # noqa: N818
         self.retry_launch_path = retry_launch_path
 
 
-class InvalidModelConfig(AvaAgentError):  # noqa: N818 — state description, same style as AgentNotFound
+class InvalidModelConfig(MeivaAgentError):  # noqa: N818 — state description, same style as AgentNotFound
     """The model config (llm_model) in the spawn request or cluster defaults
     is invalid — model name unknown or its provider's API key is not configured.
 
-    Set the required key in ~/.ava/.env or override llm_model in the spawn
+    Set the required key in ~/.meiva/.env or override llm_model in the spawn
     config to a model whose provider key is available.
     """
 
@@ -393,11 +393,11 @@ class InvalidModelConfig(AvaAgentError):  # noqa: N818 — state description, sa
 
 # Reverse lookup table from wire reason -> exception class; used by
 # SDK `raise_from_response`. A new wire error = add an enum value + an
-# AvaAgentError subclass with the two ClassVars + one row here; the check
+# MeivaAgentError subclass with the two ClassVars + one row here; the check
 # below fails at import time when a row, a subclass or an enum value is missing.
 # gateway/http/middleware/tests/test_agent_error_wire_equivalence.py parametrizes this dict to
 # lock the end-to-end loop.
-EXCEPTION_BY_REASON: dict[ErrorReason, type[AvaAgentError]] = {
+EXCEPTION_BY_REASON: dict[ErrorReason, type[MeivaAgentError]] = {
     ErrorReason.AGENT_NOT_FOUND: AgentNotFound,
     ErrorReason.FORK_SOURCE_EMPTY: ForkSourceEmpty,
     ErrorReason.FORK_CHECKPOINT_NOT_FOUND: ForkCheckpointNotFound,
@@ -413,8 +413,8 @@ EXCEPTION_BY_REASON: dict[ErrorReason, type[AvaAgentError]] = {
 }
 
 
-def _wire_subclasses(root: type[AvaAgentError]) -> set[type[AvaAgentError]]:
-    found: set[type[AvaAgentError]] = set()
+def _wire_subclasses(root: type[MeivaAgentError]) -> set[type[MeivaAgentError]]:
+    found: set[type[MeivaAgentError]] = set()
     for sub in root.__subclasses__():
         found.add(sub)
         found |= _wire_subclasses(sub)
@@ -422,21 +422,21 @@ def _wire_subclasses(root: type[AvaAgentError]) -> set[type[AvaAgentError]]:
 
 
 # Completeness check: the table must cover every ErrorReason and every
-# AvaAgentError subclass, each under its own reason. Otherwise "enum added
+# MeivaAgentError subclass, each under its own reason. Otherwise "enum added
 # but class missing" / "class added but row missing" — wire protocol has a
 # hole; fail at import time. Use raise (not assert) because ruff S101 +
 # python -O strips asserts; this contract check must run in prod too.
 if (
     set(EXCEPTION_BY_REASON) != set(ErrorReason)
     or any(reason is not cls.reason for reason, cls in EXCEPTION_BY_REASON.items())
-    or set(EXCEPTION_BY_REASON.values()) != _wire_subclasses(AvaAgentError)
+    or set(EXCEPTION_BY_REASON.values()) != _wire_subclasses(MeivaAgentError)
 ):
     raise RuntimeError(
-        f"ErrorReason, AvaAgentError subclasses and EXCEPTION_BY_REASON are inconsistent — "
+        f"ErrorReason, MeivaAgentError subclasses and EXCEPTION_BY_REASON are inconsistent — "
         f"reasons without a row: {set(ErrorReason) - set(EXCEPTION_BY_REASON)}; "
         f"rows without a reason: {set(EXCEPTION_BY_REASON) - set(ErrorReason)}; "
         f"subclasses without a row: "
-        f"{_wire_subclasses(AvaAgentError) - set(EXCEPTION_BY_REASON.values())}"
+        f"{_wire_subclasses(MeivaAgentError) - set(EXCEPTION_BY_REASON.values())}"
     )
 
 

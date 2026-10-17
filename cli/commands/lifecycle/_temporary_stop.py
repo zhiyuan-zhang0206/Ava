@@ -71,7 +71,7 @@ def report_incomplete(
     print(
         f"Stop incomplete; services and the data plane were not force-killed: {exc}. "
         f"phases: {timing or 'before the first phase'}. "
-        "Retry the command, or use ava start to resume. "
+        "Retry the command, or use meiva start to resume. "
         f"Status journal: {status_path()}.",
         file=sys.stderr,
     )
@@ -155,17 +155,17 @@ def services_phase_action(
 
 def require_unstarted_initialization() -> bool:
     """Positive first-start evidence that no application could have admitted work."""
-    from base.paths import ava_home, root_manifests_path
+    from base.paths import meiva_home, root_manifests_path
     from cli.commands.lifecycle.root_driver import require_root_absent
     from cli.commands.lifecycle.service_stop import require_no_terminals
     from cli.start_identity import read_intent
 
-    intent = read_intent(ava_home())
+    intent = read_intent(meiva_home())
     if intent is None or intent["phase"] != "configured":
         return False
     if "gateway" not in intent["roles"]:
         return False  # A joined runner may refer to already-existing external work.
-    if start_serving.state_path().exists() or root_manifests_path(ava_home()).exists():
+    if start_serving.state_path().exists() or root_manifests_path(meiva_home()).exists():
         raise RuntimeError("initialization journal conflicts with application launch evidence")
     require_root_absent()
     require_no_terminals()
@@ -222,7 +222,7 @@ def _refuse_hosted_stop() -> None:
         raise RuntimeError(
             "stop cannot run inside execute_code: the call's teardown SIGKILLs its "
             "process group as the call returns, stranding the stop mid-drain; a stop "
-            "closes this unit's persistent terminals too — run it from a shell no ava "
+            "closes this unit's persistent terminals too — run it from a shell no meiva "
             "session hosts (e.g. a plain login shell)"
         )
     if hosting_supervised_session() is not None:
@@ -351,7 +351,7 @@ def stop(
         machine=machine,
     )
     print(
-        "[ava stop] local services; "
+        "[meiva stop] local services; "
         f"terminals={'retained' if SERVICE_UNIT in preserved else 'closed'}; "
         f"data plane={'retained' if keep_infra else 'stopped on gateway'}"
     )
@@ -437,7 +437,7 @@ def announce_stopping(*, machine: MachineIdentity) -> None:
     """Best-effort POST `/api/cluster/stopping` before local teardown.
 
     Stamps the stopping unit's `stopped_at` and recomputes the composed
-    `machines` row so the cluster view distinguishes an intentional `ava stop`
+    `machines` row so the cluster view distinguishes an intentional `meiva stop`
     from a crash. `home` identifies THIS unit (a co-located peer keeps its
     caps). Best-effort by design: if the gateway is unreachable we are stopping
     anyway, so we log and proceed rather than block the teardown.
@@ -445,12 +445,12 @@ def announce_stopping(*, machine: MachineIdentity) -> None:
     from base.cluster.machine import gateway_api_base, gateway_auth_headers
     from base.cluster.machine.ambient import gateway_access_from_settings
     from base.host.net.http_dial import post as dial_post
-    from base.paths import ava_home
+    from base.paths import meiva_home
 
     access = gateway_access_from_settings()  # ambient: C
     try:
         name = machine.name()
-        home = str(ava_home())
+        home = str(meiva_home())
         url = f"{gateway_api_base(access.gateway_url)}/api/cluster/stopping"
         resp = dial_post(
             url,
@@ -459,6 +459,6 @@ def announce_stopping(*, machine: MachineIdentity) -> None:
             headers=gateway_auth_headers(access),
         )
         resp.raise_for_status()
-        print(f"[ava stop] announced intentional shutdown of {name!r} ({home}) to the gateway")
+        print(f"[meiva stop] announced intentional shutdown of {name!r} ({home}) to the gateway")
     except Exception as e:
-        print(f"[ava stop] could not announce shutdown (proceeding anyway): {e}")
+        print(f"[meiva stop] could not announce shutdown (proceeding anyway): {e}")

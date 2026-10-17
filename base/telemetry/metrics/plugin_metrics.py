@@ -3,9 +3,9 @@
 Two output surfaces (user-approved design, 2026-08-04, event-system W13):
 
 - ``grafana``: the ops dashboard
-  (``deploy/lgtm/config/grafana/provisioning/dashboards/ava-ops-main.json``)
+  (``deploy/lgtm/config/grafana/provisioning/dashboards/meiva-ops-main.json``)
   is becoming a render of the registry — ``base.telemetry.metrics.grafana_dashboard`` turns
-  the specs into the dashboard JSON and ``ava lgtm render`` previews / writes
+  the specs into the dashboard JSON and ``meiva lgtm render`` previews / writes
   it (task #3697; slice S3 flips converge onto the render). Until then the
   JSON stays the deployment source, and
   ``tests/components/plugins/test_grafana_dashboard_render.py`` locks the render against

@@ -302,7 +302,7 @@ class TestAgentMachineList:
         self, db_conn, set_machine_identity: MachineIdentitySetter
     ) -> None:  # type: ignore[no-untyped-def]
         """`/api/cluster/roster` returns the full MachineStatus rows (name/role/
-        online/paused), backing the thin `ava cluster status`."""
+        online/paused), backing the thin `meiva cluster status`."""
         machine: MachineIdentity = set_machine_identity(role="gateway", name="test-host")
         with db_conn.cursor() as cur:  # pyright: ignore[reportUnknownMemberType]
             cur.execute("TRUNCATE machines")  # pyright: ignore[reportUnknownMemberType]

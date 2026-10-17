@@ -1,4 +1,4 @@
-"""PR flow exporter — samples the Ava repo's merge flow into OTLP gauges.
+"""PR flow exporter — samples the Meiva repo's merge flow into OTLP gauges.
 
 Runs once a day on macmini (the registered machine that holds the `gh`
 session and `~/.trunk/api-token`), recomputes the trailing window of the
@@ -32,7 +32,7 @@ Metric definitions (cluster-tz days; the fleet timezone is Asia/Shanghai):
 - **flakes**: Trunk's flaky database — tests whose ``quarantined_at`` falls
   on day D, counted over the currently quarantined list.
 
-Persistence (``$AVA_HOME/state/pr-flow/``, survives the prod source-tree
+Persistence (``$MEIVA_HOME/state/pr-flow/``, survives the prod source-tree
 resets that clean untracked files out of the checkout):
 
 - ``cache.json`` — per-PR compact records keyed by number, refreshed only
@@ -85,7 +85,7 @@ if str(_REPO_ROOT) not in sys.path:
 
 from base.host.net.ports import SYSTEM_URL_OPENER, UrlOpener  # noqa: E402 — script path guard
 
-DEFAULT_REPO = "zhiyuan-zhang0206/Ava"
+DEFAULT_REPO = "zhiyuan-zhang0206/Meiva"
 DEFAULT_WINDOW_DAYS = 30
 PROCESS_NAME = "pr-flow"
 TRUNK_TOKEN_PATH = Path.home() / ".trunk" / "api-token"
@@ -639,7 +639,7 @@ def main(argv: list[str] | None = None, *, open_url: UrlOpener) -> int:
         "--state-dir",
         type=Path,
         default=None,
-        help="snapshot/cache directory (default $AVA_HOME/state/pr-flow)",
+        help="snapshot/cache directory (default $MEIVA_HOME/state/pr-flow)",
     )
     parser.add_argument(
         "--dry-run", action="store_true", help="compute + print, no writes, no emit"
@@ -671,9 +671,9 @@ def main(argv: list[str] | None = None, *, open_url: UrlOpener) -> int:
     if args.state_dir is not None:
         state_dir = args.state_dir
     else:
-        from base.paths import ava_home
+        from base.paths import meiva_home
 
-        state_dir = ava_home() / _STATE_DIR_RELATIVE
+        state_dir = meiva_home() / _STATE_DIR_RELATIVE
     cache = load_cache(state_dir / "cache.json")
 
     records = collect_records(prs, days, tz, args.repo, cache, stats)

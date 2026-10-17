@@ -2,15 +2,15 @@
 
 Lives in `base/` because gateway / service daemons / agent host
 all need to call `assert_schema_current()` at their entry points for
-schema sanity; unrelated to the agent SDK (`ava.*`); we do not want
-gateway processes reverse-depending on the `ava` package.
+schema sanity; unrelated to the agent SDK (`meiva.*`); we do not want
+gateway processes reverse-depending on the `meiva` package.
 
 Long-running processes (gateway / agent-host /
 labeler) call `assert_schema_current()` early in startup;
-a fleet update's `ava start` applies pending migrations after the checkout
+a fleet update's `meiva start` applies pending migrations after the checkout
 switches.
 
-Migrations are applied as a step of `ava start`.
+Migrations are applied as a step of `meiva start`.
 
 Identity model (2026-07-19 timestamp-id + re-baseline cutover):
 - File layout: `<repo-root>/migrations/YYYY/MM/DD/HH/YYYYMMDDTHHMMSS_<kebab-name>.sql` — a
@@ -37,7 +37,7 @@ Design points:
   schema belongs to the unit `machine_units` records as gateway-capable, and
   `_assert_migration_authority` refuses any other checkout that reaches the same
   database with pending migrations. Without it, every host sharing a central DB
-  (agent-runners, and worktree processes that inherited `AVA_HOME`) could
+  (agent-runners, and worktree processes that inherited `MEIVA_HOME`) could
   migrate it out from under the gateway — the 2026-07-31 wedge.
 - Each migration runs in one transaction: most PG DDL is transactional; body
   failure rolls back; schema state unchanged.
@@ -109,7 +109,7 @@ from base.deploy.schema.migration_layout import (
     validate_migrations_at_ref as validate_migrations_at_ref,
 )
 from base.log import logger
-from base.paths.home import home_checkout_error, resolve_ava_home
+from base.paths.home import home_checkout_error, resolve_meiva_home
 
 # Fixed key for the Postgres advisory lock that serializes the whole apply loop
 # (see `schema_mutation_lock`). Arbitrary but stable cluster-wide; ASCII "AVMI".
@@ -195,7 +195,7 @@ def check_schema_version(conn: psycopg.Connection) -> None:
     if missing:
         raise SchemaVersionMismatch(
             f"Schema behind code: DB is missing {len(missing)} migration(s): "
-            f"{sorted(missing)}. Run `ava start` (which applies pending migrations) "
+            f"{sorted(missing)}. Run `meiva start` (which applies pending migrations) "
             "to catch up."
         )
 
@@ -235,10 +235,10 @@ def schema_mutation_lock(conn: psycopg.Connection) -> Generator[None]:
     """Hold a Postgres advisory lock for a whole schema-mutation loop.
 
     Serializes *every* path that mutates the schema — a manual / watchdog
-    `ava start` — on one key, so a second mutator blocks
+    `meiva start` — on one key, so a second mutator blocks
     until the first finishes instead of racing and losing on the
     `schema_migrations` primary key. It guards the mutation step itself, so even
-    the bootstrap `ava start` is safe without a wider orchestration lock.
+    the bootstrap `meiva start` is safe without a wider orchestration lock.
 
     Taken on the **writer connection itself** (`pg_advisory_lock`, session-level),
     so the lock's lifetime is exactly the connection doing the writes: it cannot be
@@ -259,10 +259,10 @@ def schema_mutation_lock(conn: psycopg.Connection) -> Generator[None]:
 
 def _gateway_units(conn: psycopg.Connection) -> list[tuple[str, str]]:
     """The `(machine_name, home)` of every unit this DB records as gateway-capable
-    — the cluster's own identity, as written by `register_self` at `ava start`.
+    — the cluster's own identity, as written by `register_self` at `meiva start`.
 
     Empty means the DB carries no identity yet: a fresh birth migrates at
-    `ava start` step 2.5, before step 3 writes machine_units. `to_regclass`
+    `meiva start` step 2.5, before step 3 writes machine_units. `to_regclass`
     rather than a catch: a missing table on a pre-provision DB is an expected
     state, and probing the catalog keeps the surrounding transaction clean.
     """
@@ -284,17 +284,17 @@ def _assert_migration_authority(
     """Refuse unless this checkout is the gateway unit of the cluster it is about
     to migrate. Raises MigrationAuthorityMismatch naming both identities.
 
-    The executing identity is the process's home (`resolve_ava_home()`) together
+    The executing identity is the process's home (`resolve_meiva_home()`) together
     with the rule that a home carrying its own `<home>/source` checkout is
     changed only by that checkout (`home_checkout_error`): a worktree process
-    that inherited `AVA_HOME=~/.ava` has a prod DB URL *and* a prod-looking
-    `ava_home()`, and carries its own `migrations/`, so the checkout rule is what
+    that inherited `MEIVA_HOME=~/.meiva` has a prod DB URL *and* a prod-looking
+    `meiva_home()`, and carries its own `migrations/`, so the checkout rule is what
     distinguishes it.
     """
     units = _gateway_units(conn)
     if not units:
         return
-    home = resolve_ava_home()
+    home = resolve_meiva_home()
     foreign = home_checkout_error(migration_layout.MIGRATIONS_DIR.parent)
     try:
         this_machine = machine_name()
@@ -340,7 +340,7 @@ def apply_pending_migrations(
     than the loser failing on the schema_migrations primary key.
 
     Requires conn to be **non-autocommit** — `conn.transaction()` ctx needs it to
-    manage the transaction. `ava.DB` defaults to autocommit=True; this function's
+    manage the transaction. `meiva.DB` defaults to autocommit=True; this function's
     caller should pass an independent psycopg.connect() conn (autocommit=False,
     default).
 
@@ -366,7 +366,7 @@ def apply_pending_migrations(
         squash = applied - required
 
         # Authority is checked only when there is something to mutate, so an
-        # agent-runner's `ava start` — which legitimately calls this on the
+        # agent-runner's `meiva start` — which legitimately calls this on the
         # cluster's central DB and normally applies nothing — keeps working. The
         # refusal fires exactly when a non-gateway checkout would mutate the
         # schema (a squash is a mutation too).

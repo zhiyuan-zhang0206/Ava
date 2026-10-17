@@ -5,7 +5,7 @@ Covers the four contracts of the feature:
   → no file, no note (the suite's autouse fixture keeps it off for every test
   outside this file);
 - filename: `<start>__<end>.jsonl` — start = the earliest message
-  `ava_created_at` (falls back to the write moment), end = the write moment;
+  `meiva_created_at` (falls back to the write moment), end = the write moment;
 - dump content completeness + replayability: one JSONL line per message, each
   line a LangChain BaseMessage `model_dump(mode="json")` that round-trips
   through `langchain_core.load.loads` with type / content / kwargs intact;
@@ -46,7 +46,7 @@ from agent.graph.hooks.compact import auto_compact_for_llm, compose_summary_mess
 from agent.hooks import history_dump
 from agent.messages import NoteTag, system_note_message
 from agent.state import AgentState
-from base.agents.context import AvaContext
+from base.agents.context import MeivaContext
 from base.agents.tests.units import spawn_agent
 from base.clock import Clock
 from base.cluster.machine import MachineIdentity
@@ -135,7 +135,7 @@ def _sample_messages() -> list[AnyMessage]:
         SystemMessage(content="<sys prompt>"),
         HumanMessage(
             content="User hello",
-            additional_kwargs={"ava_msg_type": "inbound", "ava_source": "user"},
+            additional_kwargs={"meiva_msg_type": "inbound", "meiva_source": "user"},
         ),
         AIMessage(
             content="",
@@ -145,7 +145,7 @@ def _sample_messages() -> list[AnyMessage]:
         ToolMessage(
             content="ran ok",
             tool_call_id="c1",
-            additional_kwargs={"ava_msg_type": "exec_output"},
+            additional_kwargs={"meiva_msg_type": "exec_output"},
         ),
         AIMessage(content="done"),
         system_note_message(
@@ -192,9 +192,9 @@ def _fake_llm(summary_text: str) -> Any:
 _LONG_SUMMARY = "## Requests\nfollow the template. " * 60
 
 
-def _runtime_with_llm(llm: Any, database_gate: ProcessDbGate) -> Runtime[AvaContext]:
+def _runtime_with_llm(llm: Any, database_gate: ProcessDbGate) -> Runtime[MeivaContext]:
     return Runtime(
-        context=AvaContext(
+        context=MeivaContext(
             ops_pool=None,
             llm=llm,
             event_publisher=MagicMock(),
@@ -228,8 +228,8 @@ def _make_runtime(
     ops_pool: AsyncConnectionPool | None = None,
     llm: Any | None = None,
     database_gate: ProcessDbGate,
-) -> Runtime[AvaContext]:
-    ctx = AvaContext(
+) -> Runtime[MeivaContext]:
+    ctx = MeivaContext(
         ops_pool=ops_pool,
         llm=llm if llm is not None else _fake_llm("synthetic summary"),
         event_publisher=MagicMock(),
@@ -294,7 +294,7 @@ def test_dump_enabled_writes_file(monkeypatch: pytest.MonkeyPatch, tmp_path: Any
 
 
 def test_dump_filename_is_start_and_end(monkeypatch: pytest.MonkeyPatch, tmp_path: Any):
-    """The name stamps the round: start = the earliest message `ava_created_at`,
+    """The name stamps the round: start = the earliest message `meiva_created_at`,
     end = the write moment (here the fake clock's first tick)."""
     _FakeClock._counter = 0
     _patch_clock(monkeypatch)
@@ -303,11 +303,11 @@ def test_dump_filename_is_start_and_end(monkeypatch: pytest.MonkeyPatch, tmp_pat
         SystemMessage(content="<sys>"),
         HumanMessage(
             content="later",
-            additional_kwargs={"ava_created_at": "2026-08-13T09:30:00+00:00"},
+            additional_kwargs={"meiva_created_at": "2026-08-13T09:30:00+00:00"},
         ),
         HumanMessage(
             content="earlier",
-            additional_kwargs={"ava_created_at": "2026-08-13T08:15:00+00:00"},
+            additional_kwargs={"meiva_created_at": "2026-08-13T08:15:00+00:00"},
         ),
     ]
     path = _dump(messages)
@@ -324,7 +324,7 @@ def test_dump_filename_falls_back_to_write_moment(monkeypatch: pytest.MonkeyPatc
     _patch_clock(monkeypatch)
     _patch_dump_enabled(monkeypatch, tmp_path)
     messages: list[AnyMessage] = [
-        HumanMessage(content="no stamp", additional_kwargs={"ava_created_at": "not-a-date"}),
+        HumanMessage(content="no stamp", additional_kwargs={"meiva_created_at": "not-a-date"}),
         SystemMessage(content="<sys>"),
     ]
     path = _dump(messages)
@@ -338,7 +338,7 @@ def test_dump_filename_falls_back_to_write_moment(monkeypatch: pytest.MonkeyPatc
 
 def test_dump_is_replayable_jsonl(monkeypatch: pytest.MonkeyPatch, tmp_path: Any):
     """One JSON line per message, each line a raw BaseMessage model_dump that
-    round-trips through langchain load — type, content, and ava_* kwargs all
+    round-trips through langchain load — type, content, and meiva_* kwargs all
     survive, SystemMessage and ToolMessages included (full-history snapshot)."""
     _patch_dump_enabled(monkeypatch, tmp_path)
     messages = _sample_messages()
@@ -428,8 +428,8 @@ async def test_auto_compact_injects_dump_note_after_summary(
     assert len(tail) == 2
     assert tail[0].content == compose_summary_message(_LONG_SUMMARY)  # pyright: ignore[reportUnknownMemberType]
     note = tail[1]
-    assert note.additional_kwargs["ava_msg_type"] == "system_note"  # pyright: ignore[reportUnknownMemberType]
-    assert note.additional_kwargs["ava_note_tag"] == "history_dump"  # pyright: ignore[reportUnknownMemberType]
+    assert note.additional_kwargs["meiva_msg_type"] == "system_note"  # pyright: ignore[reportUnknownMemberType]
+    assert note.additional_kwargs["meiva_note_tag"] == "history_dump"  # pyright: ignore[reportUnknownMemberType]
     # The note names the real, existing dump and advertises the grep recipe.
     (dump_path,) = (ws / "message-history").glob("*.jsonl")
     assert dump_path.name in note.content  # pyright: ignore[reportUnknownMemberType]
@@ -530,8 +530,8 @@ async def test_claim_compact_summary_parks_dump_note_after_summary(
     assert tail[0].content == compose_summary_message("agent-written summary")  # pyright: ignore[reportUnknownMemberType]
     assert len(tail) == 2  # summary + dump note, nothing else
     note = tail[-1]
-    assert note.additional_kwargs["ava_msg_type"] == "system_note"  # pyright: ignore[reportUnknownMemberType]
-    assert note.additional_kwargs["ava_note_tag"] == "history_dump"  # pyright: ignore[reportUnknownMemberType]
+    assert note.additional_kwargs["meiva_msg_type"] == "system_note"  # pyright: ignore[reportUnknownMemberType]
+    assert note.additional_kwargs["meiva_note_tag"] == "history_dump"  # pyright: ignore[reportUnknownMemberType]
     # Fresh-context laydown (init_context): [SystemMessage, *notes, *tail] —
     # the note's neighbors are the summary and the next LLM output, never a
     # tool_use/tool_result pair.

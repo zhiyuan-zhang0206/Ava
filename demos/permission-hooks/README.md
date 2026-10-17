@@ -1,13 +1,13 @@
-# Ava Security Policy Interception Demo
+# Meiva Security Policy Interception Demo
 
-A dangerous command interception gate implemented based on Ava's `before_exec` hook — a real-world case driven by the GPT 5.6 incident.
+A dangerous command interception gate implemented based on Meiva's `before_exec` hook — a real-world case driven by the GPT 5.6 incident.
 
 ## Background
 
 In 2026, GPT 5.6 was exposed for autonomously executing destructive operations like `rm -rf /` and `DROP TABLE` without supervision.[^1]
 This indicates: **Any AI agent with shell access needs a safety net at the execution layer.**
 
-Ava's `before_exec` hook point is naturally the location for this safety net—intervening after code generation and before shell execution.
+Meiva's `before_exec` hook point is naturally the location for this safety net—intervening after code generation and before shell execution.
 
 [^1]: Fictional case, for demonstration purposes.
 
@@ -49,7 +49,7 @@ conn.commit()
 
 **Hook intercepts → Agent receives:**
 ```
-## 🛡️ Ava Security Policy Interception
+## 🛡️ Meiva Security Policy Interception
 
 Your code triggered a security policy and has been intercepted **without being executed**.
 

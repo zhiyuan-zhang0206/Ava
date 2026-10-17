@@ -45,7 +45,7 @@ from services.supervision.roster.service_spec import ServiceSpec, api_access
 from tests.fixtures.gateway_config import create_mcp_client, gateway_test_app, gateway_test_client
 
 _HUMAN = "human-" + "h" * 40
-_ENDPOINT = "postgresql://ava@10.0.0.7:6433/ava"
+_ENDPOINT = "postgresql://meiva@10.0.0.7:6433/meiva"
 
 
 def _tokens(home: Path) -> model.GenerationSecret:
@@ -70,9 +70,9 @@ def gateway(
     seed_write_generation(home)
     # The gateway's bootstrap serves the connection facts its home's `.env` declares.
     (home / ".env").write_text(
-        f"AVA_DB_URL={settings.data_plane.db_url}\nAVA_REDIS_URL={settings.data_plane.redis_url}\n"
+        f"MEIVA_DB_URL={settings.data_plane.db_url}\nMEIVA_REDIS_URL={settings.data_plane.redis_url}\n"
     )
-    monkeypatch.setenv("AVA_HOME", str(home))
+    monkeypatch.setenv("MEIVA_HOME", str(home))
     monkeypatch.setattr(settings.data_plane, "cluster_secret", _HUMAN)
     # This module is about admission: its clients are anonymous until a test gives them a header.
     disable_default_gateway_credentials(monkeypatch)
@@ -170,7 +170,7 @@ def test_bootstrap_serves_a_runner_token_but_never_the_human_secret(
         served = client.get("/api/bootstrap", headers=bearer_header(runner))
         assert served.status_code == 200
         payload = served.json()
-        assert "AVA_CLUSTER_SECRET" not in payload
+        assert "MEIVA_CLUSTER_SECRET" not in payload
         assert _HUMAN not in json.dumps(payload)
         _unadmit(gateway)
         assert client.get("/api/bootstrap", headers=bearer_header(runner)).status_code == 401
@@ -483,7 +483,7 @@ def test_ops_bind_follows_the_declared_reachable_address(
     reachable: str, bind: str, machine_identity: MachineIdentity
 ) -> None:
     """The bearer is required either way; only a declared reachable address
-    (`AVA_MACHINE_HOST`) opens /ops beyond loopback, as it always has for a
+    (`MEIVA_MACHINE_HOST`) opens /ops beyond loopback, as it always has for a
     cluster with a secret."""
     machine_identity.set(host=reachable)
     assert ops_boot.ops_bind_host(machine=machine_identity) == bind
@@ -521,7 +521,7 @@ def runner_home(tmp_path: Path, gateway: Path, monkeypatch: pytest.MonkeyPatch) 
         served_endpoint=_ENDPOINT,
         probe=lambda _dsn: None,
     )
-    monkeypatch.setenv("AVA_HOME", str(home))
+    monkeypatch.setenv("MEIVA_HOME", str(home))
     monkeypatch.setattr(settings.data_plane, "cluster_secret", "")
     return home
 

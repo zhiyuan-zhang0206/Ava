@@ -1,0 +1,32 @@
+{
+  "apiVersion": 2,
+  "name": "meiva_code",
+  "version": "1.0.0",
+  "engines": {
+    "meiva": ">=2026.10.1"
+  },
+  "contributions": {
+    "hooks": [
+      "after_init",
+      "after_exec"
+    ],
+    "sdkNamespaces": [
+      "cwd"
+    ],
+    "sdkWraps": [
+      "files.read",
+      "shell.run",
+      "files.edit",
+      "files.write",
+      "files.append",
+      "files.delete",
+      "files.glob",
+      "understand",
+      "ui.serve"
+    ],
+    "systemPromptSections": [
+      "coding_tools_section",
+      "engineering_workflow_section"
+    ]
+  }
+}

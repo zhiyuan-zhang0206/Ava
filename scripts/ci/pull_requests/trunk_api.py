@@ -13,13 +13,13 @@ from base.host.git.gitenv import git_env
 from base.host.net.ports import UrlOpener
 from base.host.system.hostport import Host
 
-# The Ava checkout root this module ships in — anchors base-freshness git reads
+# The Meiva checkout root this module ships in — anchors base-freshness git reads
 # against THIS repo's origin regardless of the caller's cwd (task #2496).
 _REPO_ROOT = Path(__file__).resolve().parents[3]
 
 API_BASE_URL = "https://api.trunk.io/v1"
 REQUEST_TIMEOUT_SECONDS = 30
-ORG_SLUG = "ava"
+ORG_SLUG = "meiva"
 
 
 def target_payload(repo: str) -> dict[str, object]:

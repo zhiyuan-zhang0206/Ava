@@ -1,7 +1,7 @@
 """The plugin scaffold hook — how a plugin owns its own host-side state.
 
 A plugin opts in by shipping `setup.py` beside `plugin.py` with a required
-`scaffold(*, machine: MachineIdentity)`. The explicit `ava memory init` command runs it for every enabled
+`scaffold(*, machine: MachineIdentity)`. The explicit `meiva memory init` command runs it for every enabled
 plugin, so runtime memory state is never touched by converge or startup.
 
 `setup.py` is loaded on its own, NOT through `plugin.py`: plugin modules import
@@ -74,7 +74,7 @@ def run_plugin_scaffolds(*, machine: MachineIdentity) -> ScaffoldResult:
 def _load_setup_module(name: str, setup_py: Path) -> ModuleType:
     """Import a plugin's `setup.py` by path. Raises on a load failure — the
     caller reports it through the fail-soft contract."""
-    spec = importlib.util.spec_from_file_location(f"ava_plugin_setup_{name}", setup_py)
+    spec = importlib.util.spec_from_file_location(f"meiva_plugin_setup_{name}", setup_py)
     if spec is None or spec.loader is None:
         raise RuntimeError(f"plugin {name!r}: cannot load {setup_py}")
     module = importlib.util.module_from_spec(spec)

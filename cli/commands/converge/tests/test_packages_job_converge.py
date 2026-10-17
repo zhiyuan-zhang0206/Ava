@@ -40,7 +40,7 @@ def test_converge_registers_the_refresh_job(
 
     ctx = ConvergeCtx(
         repo=tmp_path,
-        ava_home=tmp_path,
+        meiva_home=tmp_path,
         roles=None,
         config=command_runtime.config,
         database_factory=operator_database,

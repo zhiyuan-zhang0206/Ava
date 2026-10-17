@@ -10,5 +10,5 @@ import sys
 import agent.execution.domain_owner  # noqa: F401  # pyright: ignore[reportUnusedImport]
 
 assert "agent.graph" not in sys.modules
-assert "ava" not in sys.modules
+assert "meiva" not in sys.modules
 assert "base.config" not in sys.modules

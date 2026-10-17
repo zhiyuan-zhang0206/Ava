@@ -6,7 +6,7 @@ tests, over Redis pub/sub.
 Channel isolation + ACL awareness: the inbound channel is cluster-scoped
 (`<prefix>:inbound:<agent_id>`, `base.cluster.inbound_channel`), and a dev
 cluster's redis ACL user is scoped to `&<prefix>:*`. The `TestAclScopedChannel`
-suite pins both halves against a real ACL user so the "hardcoded `ava:inbound`
+suite pins both halves against a real ACL user so the "hardcoded `meiva:inbound`
 is NOPERM outside `main`" bug is regression-tested at the ACL boundary, and the
 listener's degrade-instead-of-crash response is exercised.
 """
@@ -142,7 +142,7 @@ class TestRedisInboundListener:
 
     async def test_subscribes_to_prefixed_channel(self) -> None:
         """The listener subscribes to `inbound_channel(agent_id)`, not a bare
-        `ava:inbound:*` — the property the per-cluster ACL relies on."""
+        `meiva:inbound:*` — the property the per-cluster ACL relies on."""
         agent_id = 9993
         listener = RedisInboundListener(settings.data_plane.redis_url, agent_id=agent_id)
         try:
@@ -448,12 +448,12 @@ class TestInboundChannelPrefix:
     """`inbound_channel` maps cluster prefix → per-agent wake channel."""
 
     def test_prefix_derivation_main_and_dev(self) -> None:
-        # main cluster: bare `ava` prefix (the historical hardcoded shape)
-        assert redis_channel_prefix("ava:events") == "ava"
-        assert inbound_channel(7, "ava:events") == "ava:inbound:7"
-        # dev cluster: `ava:<cluster>` prefix — the case the hardcode broke
-        assert redis_channel_prefix("ava:mycluster:events") == "ava:mycluster"
-        assert inbound_channel(7, "ava:mycluster:events") == "ava:mycluster:inbound:7"
+        # main cluster: bare `meiva` prefix (the historical hardcoded shape)
+        assert redis_channel_prefix("meiva:events") == "meiva"
+        assert inbound_channel(7, "meiva:events") == "meiva:inbound:7"
+        # dev cluster: `meiva:<cluster>` prefix — the case the hardcode broke
+        assert redis_channel_prefix("meiva:mycluster:events") == "meiva:mycluster"
+        assert inbound_channel(7, "meiva:mycluster:events") == "meiva:mycluster:inbound:7"
 
 
 def _scoped_user_url(user: str) -> str:
@@ -465,7 +465,7 @@ def _scoped_user_url(user: str) -> str:
 
 
 def _make_scoped_user(user: str, channel_grant: str) -> None:
-    """Create/replace an ACL user scoped to `channel_grant` (e.g. `&ava:x:*`) —
+    """Create/replace an ACL user scoped to `channel_grant` (e.g. `&meiva:x:*`) —
     full key + command access, password == username. `resetchannels` clears the
     default channel grant first, so the user reaches ONLY the granted pattern,
     modelling `ensure_cluster_redis_acl`'s `resetchannels &<prefix>:*`."""
@@ -495,20 +495,20 @@ class TestAclScopedChannel:
     async def test_legacy_unprefixed_channel_denied_by_dev_acl(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """A dev cluster's ACL user (`&ava:<cluster>:*`) REJECTS the old hardcoded
-        `ava:inbound:*` yet PERMITS `inbound_channel` — the exact NOPERM boundary
+        """A dev cluster's ACL user (`&meiva:<cluster>:*`) REJECTS the old hardcoded
+        `meiva:inbound:*` yet PERMITS `inbound_channel` — the exact NOPERM boundary
         that crashed dev-cluster agents before the prefix fix.
 
         Redis surfaces the denial lazily: `subscribe` returns, and the
         `NoPermissionError` lands on the first `get_message` (the path the
         listener actually walks), so the assertion is made there."""
-        monkeypatch.setattr(settings.data_plane, "events_channel", "ava:acltest:events")
-        _make_scoped_user("acl_dev", "&ava:acltest:*")
+        monkeypatch.setattr(settings.data_plane, "events_channel", "meiva:acltest:events")
+        _make_scoped_user("acl_dev", "&meiva:acltest:*")
         client = aredis.Redis.from_url(_scoped_user_url("acl_dev"), decode_responses=True)  # pyright: ignore[reportUnknownMemberType]
         try:
-            # Old hardcoded name is outside the &ava:acltest:* grant → NOPERM on read.
+            # Old hardcoded name is outside the &meiva:acltest:* grant → NOPERM on read.
             denied = client.pubsub(ignore_subscribe_messages=True)  # pyright: ignore[reportUnknownMemberType]
-            await denied.subscribe(f"ava:inbound:{5}")
+            await denied.subscribe(f"meiva:inbound:{5}")
             with pytest.raises(NoPermissionError):
                 await denied.get_message(timeout=1.0)
             await denied.aclose()
@@ -522,10 +522,10 @@ class TestAclScopedChannel:
 
     async def test_listener_wakes_under_scoped_acl(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """A listener authenticating as the dev-cluster-scoped ACL user subscribes
-        to `inbound_channel` (inside `&ava:acltest:*`) and wakes on a publish — the
+        to `inbound_channel` (inside `&meiva:acltest:*`) and wakes on a publish — the
         prefix fix makes wake actually work on a dev cluster."""
-        monkeypatch.setattr(settings.data_plane, "events_channel", "ava:acltest:events")
-        _make_scoped_user("acl_dev2", "&ava:acltest:*")
+        monkeypatch.setattr(settings.data_plane, "events_channel", "meiva:acltest:events")
+        _make_scoped_user("acl_dev2", "&meiva:acltest:*")
         agent_id = 8123
         listener = RedisInboundListener(_scoped_user_url("acl_dev2"), agent_id)
         try:
@@ -547,9 +547,9 @@ class TestAclScopedChannel:
         logs once and `wait_one` sleeps out its budget then returns, so
         `wait_for_inbound`'s SELECT recheck still delivers wakes at the normal
         cadence instead of the agent crashing on idle-wait."""
-        monkeypatch.setattr(settings.data_plane, "events_channel", "ava:acltest:events")
-        # Scoped to a DIFFERENT prefix → inbound_channel (ava:acltest:*) is denied.
-        _make_scoped_user("acl_wrong", "&ava:other:*")
+        monkeypatch.setattr(settings.data_plane, "events_channel", "meiva:acltest:events")
+        # Scoped to a DIFFERENT prefix → inbound_channel (meiva:acltest:*) is denied.
+        _make_scoped_user("acl_wrong", "&meiva:other:*")
         listener = RedisInboundListener(_scoped_user_url("acl_wrong"), agent_id=8124)
         try:
             # Must not raise — degrades to a no-op subscribe.

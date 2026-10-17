@@ -3,7 +3,7 @@
 // The "add a package" entry shared by the Skills / Plugins / MCP sections.
 //
 // Describe a capability in natural language -> POST /api/keyed/v1/packages/draft spawns
-// an ava-package-installer agent -> jump to that conversation, where the agent
+// an meiva-package-installer agent -> jump to that conversation, where the agent
 // finds candidates, confirms before installing anything that runs code,
 // installs, verifies with a test agent, and reports whether it is any good.
 //

@@ -29,7 +29,7 @@ def bootstrap_authority(plugin_env: Path) -> ConfigAuthority:
 @pytest.fixture
 def plugin_env() -> Generator[Path, None, None]:
     """Temporarily replace the session test home's provider-key `.env` file."""
-    path = paths.ava_home() / ".env"
+    path = paths.meiva_home() / ".env"
     original = path.read_bytes() if path.exists() else None
     yield path
     if original is None:
@@ -43,9 +43,9 @@ def _write_bootstrap_env(path: Path, contents: str) -> None:
     from base import config
 
     path.write_text(contents)
-    upsert_env(path, {"AVA_RUNNER_DB_PASSWORD": "abc"})
-    if "AVA_DB_URL=" not in contents:
-        upsert_env(path, {"AVA_DB_URL": str(config.settings.data_plane.db_url)})
+    upsert_env(path, {"MEIVA_RUNNER_DB_PASSWORD": "abc"})
+    if "MEIVA_DB_URL=" not in contents:
+        upsert_env(path, {"MEIVA_DB_URL": str(config.settings.data_plane.db_url)})
 
 
 def test_bootstrap_serves_an_enabled_plugin_key_from_the_env_file(
@@ -92,7 +92,7 @@ def test_bootstrap_omits_a_disabled_plugin_key(
 
     provider_plugin()
     _write_bootstrap_env(plugin_env, "TESTP_API_KEY=sk-x\n")
-    (paths.ava_home() / "plugins_config.json").write_text(
+    (paths.meiva_home() / "plugins_config.json").write_text(
         '{"plugins": {"test_provider": {"enabled": false}}}'
     )
 
@@ -131,8 +131,8 @@ def test_bootstrap_keeps_modeled_alias_after_reachable_host_rewrite(
     """A plugin key matching a Settings alias cannot undo its bootstrap transform."""
     from base import config
 
-    provider_plugin(key_env="AVA_DB_URL")
-    _write_bootstrap_env(plugin_env, "AVA_DB_URL=postgresql://ava:pw@127.0.0.1:5433/ava\n")
+    provider_plugin(key_env="MEIVA_DB_URL")
+    _write_bootstrap_env(plugin_env, "MEIVA_DB_URL=postgresql://meiva:pw@127.0.0.1:5433/meiva\n")
     monkeypatch.setattr(config.settings.general, "machine_host", "10.0.0.3")
 
     assert (
@@ -143,7 +143,7 @@ def test_bootstrap_keeps_modeled_alias_after_reachable_host_rewrite(
                     binding.key_env for binding in build_model_catalog().bindings.values()
                 ),
                 plugin_cluster_config=plugin_bootstrap_config(),
-            )["AVA_DB_URL"]
+            )["MEIVA_DB_URL"]
         ).hostname
         == "10.0.0.3"
     )

@@ -16,7 +16,7 @@ that only ends on client disconnect or task cancellation, with ``finally``
 cleanup. The parent holds its client connection open through the whole
 shutdown — closing it would make shutdown pass for the wrong reason.
 
-The drain budget reaches the child through a throwaway `$AVA_HOME/.env`, the
+The drain budget reaches the child through a throwaway `$MEIVA_HOME/.env`, the
 operator's real channel; a bare environment variable is dropped for
 cluster-scope fields before Settings reads it.
 
@@ -58,7 +58,7 @@ from gateway.http.middleware import stopping
 _REPO_ROOT = Path(__file__).resolve().parents[3]
 
 # The production knob under test; the child resolves it through its settings.
-_DRAIN_ENV = "AVA_GATEWAY_GRACEFUL_SHUTDOWN_TIMEOUT_SECONDS"
+_DRAIN_ENV = "MEIVA_GATEWAY_GRACEFUL_SHUTDOWN_TIMEOUT_SECONDS"
 _MARKERS_ENV = "GATEWAY_SHUTDOWN_TEST_MARKERS"
 _PORT_ENV = "GATEWAY_SHUTDOWN_TEST_PORT"
 
@@ -252,14 +252,14 @@ def _spawn_child(tmp_path: Path, *, drain_seconds: float) -> _Child:
     # the operator's real channel (a unit's .env is the single source of truth),
     # and the only one that reaches a cluster-scope field: the env-authority
     # pass drops undeclared cluster-scope keys from the child environment.
-    home = tmp_path / "ava-home"
+    home = tmp_path / "meiva-home"
     home.mkdir()
     (home / ".env").write_text(
-        f"{_DRAIN_ENV}={drain_seconds}\nAVA_GATEWAY_RELOAD=0\n",
+        f"{_DRAIN_ENV}={drain_seconds}\nMEIVA_GATEWAY_RELOAD=0\n",
         encoding="utf-8",
     )
     env = os.environ.copy()
-    env["AVA_HOME"] = str(home)
+    env["MEIVA_HOME"] = str(home)
     env[_MARKERS_ENV] = str(markers_path)
     env[_PORT_ENV] = str(port)
     log_file = log_path.open("wb")

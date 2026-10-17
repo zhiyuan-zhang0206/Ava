@@ -1,4 +1,4 @@
-"""`ava skill update` / `ava skill upgrade` — the R5 explicit-update commands.
+"""`meiva skill update` / `meiva skill upgrade` — the R5 explicit-update commands.
 
 Repo-native skills update via `skill update` (converge only lands missing
 copies); user-installed skills with a recorded git source update via
@@ -43,7 +43,7 @@ def repo(tmp_path: Path) -> Path:
     The .agents skill exists only to prove update does NOT touch it
     (issue #146 — project skills reach agents via the local mount)."""
     r = tmp_path / "repo"
-    _write_skill(r / "ava_builtins" / "skills", "builtin-a")
+    _write_skill(r / "meiva_builtins" / "skills", "builtin-a")
     _write_skill(r / ".agents" / "skills", "project-x")
     return r
 
@@ -106,7 +106,7 @@ def test_update_propagates_source_change(
 ) -> None:
     assert cmd_skill_update(None, config=process_config, repo=repo) == 0
     _set_mode_off("builtin-a")
-    (repo / "ava_builtins" / "skills" / "builtin-a" / "SKILL.md").write_text(
+    (repo / "meiva_builtins" / "skills" / "builtin-a" / "SKILL.md").write_text(
         "---\nname: builtin-a\ndescription: v2\n---\n\n# v2\n", encoding="utf-8"
     )
     assert cmd_skill_update(None, config=process_config, repo=repo) == 0
@@ -121,7 +121,7 @@ def test_update_replaces_a_local_edit_and_reports(
     _set_mode_off("builtin-a")
     copy = unit_home / "skills" / "builtin-a" / "SKILL.md"
     copy.write_text("---\nname: builtin-a\ndescription: MINE\n---\n\nhands off\n", encoding="utf-8")
-    (repo / "ava_builtins" / "skills" / "builtin-a" / "SKILL.md").write_text(
+    (repo / "meiva_builtins" / "skills" / "builtin-a" / "SKILL.md").write_text(
         "---\nname: builtin-a\ndescription: v2\n---\n", encoding="utf-8"
     )
     assert cmd_skill_update(None, config=process_config, repo=repo) == 0
@@ -158,7 +158,7 @@ def test_update_adopts_matching_user_residue(
     builtin, hand-installed from the open-standard mirror. update adopts the
     copy as repo-native when its content matches the source."""
     _write_skill(unit_home / "skills", "builtin-a", body="# from repo\n")
-    (repo / "ava_builtins" / "skills" / "builtin-a" / "SKILL.md").write_text(
+    (repo / "meiva_builtins" / "skills" / "builtin-a" / "SKILL.md").write_text(
         "---\nname: builtin-a\ndescription: d\n---\n\n# from repo\n", encoding="utf-8"
     )
     reg.register(
@@ -214,10 +214,10 @@ def _git(repo: Path, *args: str) -> None:
     # fixture repo (exit 128 otherwise).
     env = {
         **os.environ,
-        "GIT_AUTHOR_NAME": "ava-test",
-        "GIT_AUTHOR_EMAIL": "ava-test@example.com",
-        "GIT_COMMITTER_NAME": "ava-test",
-        "GIT_COMMITTER_EMAIL": "ava-test@example.com",
+        "GIT_AUTHOR_NAME": "meiva-test",
+        "GIT_AUTHOR_EMAIL": "meiva-test@example.com",
+        "GIT_COMMITTER_NAME": "meiva-test",
+        "GIT_COMMITTER_EMAIL": "meiva-test@example.com",
     }
     subprocess.run(["git", "-C", str(repo), *args], check=True, env=env)
 
@@ -288,7 +288,7 @@ def test_upgrade_local_source_is_copied_never_moved(
 ) -> None:
     """A local-path source is read in place (never moved): upgrade must not
     relocate the user's own directory or delete its .git (install's docstring
-    promises 'never moved' — the old upgrade moved it into $AVA_HOME/skills
+    promises 'never moved' — the old upgrade moved it into $MEIVA_HOME/skills
     and rmtree'd the checkout's .git). The installed copy updates; the source
     stays put."""
     src_dir = Path(_skill_git_repo(tmp_path))  # a local dir WITH .git
@@ -347,12 +347,12 @@ def test_update_refuses_worktree_repo_for_default_home(
     monkeypatch: pytest.MonkeyPatch,
     capsys,
 ) -> None:
-    """`ava skill update` from a worktree checkout must not write the prod home
-    (the R5 worktree that synced ava-serious-research into prod)."""
+    """`meiva skill update` from a worktree checkout must not write the prod home
+    (the R5 worktree that synced meiva-serious-research into prod)."""
 
     monkeypatch.setattr(paths_home, "default_home", lambda: unit_home)
-    wt_repo = tmp_path / "repo" / ".worktrees" / "ava-9999-task"
-    _write_skill(wt_repo / "ava_builtins" / "skills", "builtin-a")
+    wt_repo = tmp_path / "repo" / ".worktrees" / "meiva-9999-task"
+    _write_skill(wt_repo / "meiva_builtins" / "skills", "builtin-a")
     assert cmd_skill_update(None, config=process_config, repo=wt_repo) == 1
     err = capsys.readouterr().err  # pyright: ignore[reportUnknownMemberType]
     assert "worktree" in err
@@ -391,26 +391,26 @@ def test_update_unchanged_reanchors_stale_origin_path(
     worktree gets re-anchored to the current source (no-op pass)."""
     cmd_skill_update(None, config=process_config, repo=repo)
     e = _entry("builtin-a")
-    e.origin_path = "/Users/x/Ava/.worktrees/ava-dead/.agents/skills/builtin-a"
+    e.origin_path = "/Users/x/Meiva/.worktrees/meiva-dead/.agents/skills/builtin-a"
     reg.save(reg.load())  # persist
     # after reload, update the entry
     pkg = reg.get("builtin-a")
     assert pkg is not None
-    pkg.origin_path = "/Users/x/Ava/.worktrees/ava-dead/.agents/skills/builtin-a"
+    pkg.origin_path = "/Users/x/Meiva/.worktrees/meiva-dead/.agents/skills/builtin-a"
     reg.save(reg.load())
     assert cmd_skill_update(None, config=process_config, repo=repo) == 0
-    assert _entry("builtin-a").origin_path == str(repo / "ava_builtins" / "skills" / "builtin-a")
+    assert _entry("builtin-a").origin_path == str(repo / "meiva_builtins" / "skills" / "builtin-a")
 
 
 def test_update_skips_channel_managed_packages(
     process_config: ConfigBoot, unit_home: Path, repo: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    """Resolved core-channel rows belong to `ava packages refresh` (design
+    """Resolved core-channel rows belong to `meiva packages refresh` (design
     §5.7-1): `skill update` reports the skip and leaves the copy alone, and an
     explicit `mode=off` opts the package back onto the checkout path."""
     assert cmd_skill_update(None, config=process_config, repo=repo) == 0
     capsys.readouterr()
-    (repo / "ava_builtins" / "skills" / "builtin-a" / "SKILL.md").write_text(
+    (repo / "meiva_builtins" / "skills" / "builtin-a" / "SKILL.md").write_text(
         "---\nname: builtin-a\ndescription: v2\n---\n\n# v2\n", encoding="utf-8"
     )
     assert cmd_skill_update(None, config=process_config, repo=repo) == 0

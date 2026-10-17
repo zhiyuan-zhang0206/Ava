@@ -44,7 +44,7 @@ def test_off_is_a_single_failing_step(tmp_path: Path, monkeypatch: pytest.Monkey
     steps = check.run_check(path_reader=lambda: settings.walg.walg_config_file)
 
     assert _verdicts(steps) == [("configured", False)]
-    assert "AVA_WALG_CONFIG_FILE is not set" in steps[0].detail
+    assert "MEIVA_WALG_CONFIG_FILE is not set" in steps[0].detail
 
 
 def test_a_working_setup_passes_every_step_and_leaves_nothing_in_the_store(
@@ -63,7 +63,7 @@ def test_a_working_setup_passes_every_step_and_leaves_nothing_in_the_store(
     kinds = [call.split()[0:2] for call in sandbox.calls()]
     assert kinds == [["st", "put"], ["st", "ls"], ["st", "get"], ["st", "rm"], ["st", "ls"]]
     put = sandbox.calls()[0].split()
-    assert put[3].startswith("ava-check/") and put[3].endswith(".txt")
+    assert put[3].startswith("meiva-check/") and put[3].endswith(".txt")
     assert sandbox.calls()[2].split()[2] == put[3] + ".lz4", "`st get` takes the stored .lz4 name"
     assert "not pinned yet" in next(s.detail for s in steps if s.name == "configuration")
     assert not any(secret in step.detail for step in steps for secret in SECRETS)
@@ -83,7 +83,7 @@ def test_a_missing_or_edited_binary_stops_at_the_binary(
     steps = check.run_check(path_reader=lambda: settings.walg.walg_config_file)
 
     assert _verdicts(steps) == [("configured", True), ("binary", False)]
-    assert "ava converge installs it" in steps[-1].detail
+    assert "meiva converge installs it" in steps[-1].detail
     assert sandbox.calls() == []
 
 

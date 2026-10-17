@@ -1,8 +1,8 @@
 """A remote unit's join: verify its gateway, install or require its database capability.
 
-Settings-free, shared by `ava init` (the unit's first join) and
-`ava cluster db-authority install-unit` (a fresher capability on an initialized
-unit). `ava start` does neither: a started unit fetches its configuration through
+Settings-free, shared by `meiva init` (the unit's first join) and
+`meiva cluster db-authority install-unit` (a fresher capability on an initialized
+unit). `meiva start` does neither: a started unit fetches its configuration through
 Settings and probes its gateway itself.
 """
 
@@ -26,14 +26,14 @@ def join_gateway(values: dict[str, str], home: Path, capability: str | None) -> 
     from base.host.db_authority.unit import install_bundle
     from base.host.env.bootstrap import fetch_bootstrap_config
 
-    if "AVA_CLUSTER_SECRET" in values:
+    if "MEIVA_CLUSTER_SECRET" in values:
         raise ValueError(
             f"this remote unit's home ({home}) records the human cluster secret; a remote "
             "unit authenticates with its capability's machine API token and never holds "
-            "it. Remove AVA_CLUSTER_SECRET from its .env"
+            "it. Remove MEIVA_CLUSTER_SECRET from its .env"
         )
-    gateway = values["AVA_GATEWAY_URL"]
-    host = values.get("AVA_MACHINE_HOST", "")
+    gateway = values["MEIVA_GATEWAY_URL"]
+    host = values.get("MEIVA_MACHINE_HOST", "")
     remote = not is_loopback_host(urlsplit(gateway).hostname or "")
     if remote and (not host or is_loopback_host(host)):
         raise ValueError("joining a remote gateway requires a reachable --machine-host")
@@ -41,12 +41,15 @@ def join_gateway(values: dict[str, str], home: Path, capability: str | None) -> 
     payload = fetch_bootstrap_config(gateway, bearer=token)
     if remote and any(
         is_loopback_host(urlsplit(payload[key]).hostname or "")
-        for key in ("AVA_DB_URL", "AVA_REDIS_URL")
+        for key in ("MEIVA_DB_URL", "MEIVA_REDIS_URL")
     ):
         raise ValueError("remote gateway returned loopback data-plane URLs")
     if capability is not None and bundle is not None:
         installed = install_bundle(
-            home, bundle, machine=values["AVA_MACHINE_NAME"], served_endpoint=payload["AVA_DB_URL"]
+            home,
+            bundle,
+            machine=values["MEIVA_MACHINE_NAME"],
+            served_endpoint=payload["MEIVA_DB_URL"],
         )
         Path(capability).unlink()
         print(

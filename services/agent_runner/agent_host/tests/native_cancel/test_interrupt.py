@@ -16,8 +16,6 @@ from agent.graph.interrupt import subscribe_interrupt
 from agent.graph.llm.node import llm_node
 from agent.graph.llm_errors import LlmLedger
 from agent.state import AgentState
-from ava.tests.fixtures.pin_agent import exec_context
-from ava.tests.fixtures.pin_agent import hosted_resources as hosted_resources
 from base.agents.inbox.native_cancel import accept_native_cancel
 from base.agents.incarnation.exec_owner_protocol import OwnerClosed
 from base.agents.incarnation.native_work_models import NativeCancelMarker
@@ -27,6 +25,8 @@ from base.events.live.bus import EventBus
 from base.host.env.agent_slices import AgentSlices
 from base.lm.catalog import ModelCatalog
 from base.native_process.turn_identity import HostedTurnResources
+from meiva.tests.fixtures.pin_agent import exec_context
+from meiva.tests.fixtures.pin_agent import hosted_resources as hosted_resources
 from services.agent_runner.agent_host.invocation.native_work import settle_native_invocation
 from services.agent_runner.agent_host.tests.history.test_hosted_compact_failure import (
     prepare_graph,

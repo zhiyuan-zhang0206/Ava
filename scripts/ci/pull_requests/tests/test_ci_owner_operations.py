@@ -143,7 +143,7 @@ def test_trunk_queue_submits_and_reports_merged(
 
     rc = owner_operations.trunk_merge_flow(
         "42",
-        "zhiyuan-zhang0206/Ava",
+        "zhiyuan-zhang0206/Meiva",
         "medium",
         every=1,
         timeout=0,
@@ -159,7 +159,7 @@ def test_trunk_queue_submits_and_reports_merged(
     assert requests[0].get_header("X-api-token") == "trunk-token"
     assert requests[0].data is not None
     assert json.loads(cast(bytes, requests[0].data)) == {
-        "repo": {"host": "github.com", "owner": "zhiyuan-zhang0206", "name": "Ava"},
+        "repo": {"host": "github.com", "owner": "zhiyuan-zhang0206", "name": "Meiva"},
         "pr": {"number": 42},
         "targetBranch": "main",
         "priority": 100,
@@ -168,7 +168,7 @@ def test_trunk_queue_submits_and_reports_merged(
     assert requests[1].full_url == "https://api.trunk.io/v1/getSubmittedPullRequest"
     assert requests[1].data is not None
     assert json.loads(cast(bytes, requests[1].data)) == {
-        "repo": {"host": "github.com", "owner": "zhiyuan-zhang0206", "name": "Ava"},
+        "repo": {"host": "github.com", "owner": "zhiyuan-zhang0206", "name": "Meiva"},
         "pr": {"number": 42},
         "targetBranch": "main",
     }
@@ -184,7 +184,7 @@ def test_trunk_queue_reports_failed_state(
 
     rc = owner_operations.watch_trunk_enqueue(
         "42",
-        "zhiyuan-zhang0206/Ava",
+        "zhiyuan-zhang0206/Meiva",
         every=1,
         deadline=None,
         timeout=0,
@@ -203,7 +203,7 @@ def test_trunk_queue_times_out_while_pending() -> None:
 
     rc = owner_operations.watch_trunk_enqueue(
         "42",
-        "zhiyuan-zhang0206/Ava",
+        "zhiyuan-zhang0206/Meiva",
         every=1,
         deadline=0,
         timeout=1,
@@ -224,7 +224,7 @@ def test_trunk_queue_stops_after_consecutive_status_errors() -> None:
 
     rc = owner_operations.watch_trunk_enqueue(
         "42",
-        "zhiyuan-zhang0206/Ava",
+        "zhiyuan-zhang0206/Meiva",
         every=1,
         deadline=None,
         timeout=0,
@@ -246,7 +246,7 @@ def test_trunk_submit_retries_once_after_an_http_error() -> None:
     assert (
         owner_operations.submit_trunk(
             "42",
-            "zhiyuan-zhang0206/Ava",
+            "zhiyuan-zhang0206/Meiva",
             "medium",
             token="trunk-token",  # noqa: S106 — test fixture
             timers=_make_clock(),
@@ -264,7 +264,7 @@ def test_trunk_submit_returns_enqueue_error_after_second_http_error() -> None:
     assert (
         owner_operations.submit_trunk(
             "42",
-            "zhiyuan-zhang0206/Ava",
+            "zhiyuan-zhang0206/Meiva",
             "medium",
             token="trunk-token",  # noqa: S106 — test fixture
             timers=_make_clock(),
@@ -328,7 +328,7 @@ def test_json_query_includes_trunk_checks(
     assert (
         monitor.query_once(
             "42",
-            "zhiyuan-zhang0206/Ava",
+            "zhiyuan-zhang0206/Meiva",
             as_json=True,
             host=_gh_runner([]),
             clock=_make_clock(),
@@ -411,7 +411,7 @@ def test_trunk_flow_submits_without_reading_pr_labels(
     assert (
         owner_operations.trunk_merge_flow(
             "42",
-            "zhiyuan-zhang0206/Ava",
+            "zhiyuan-zhang0206/Meiva",
             "medium",
             every=1,
             timeout=0,
@@ -431,7 +431,7 @@ def test_trunk_flow_submits_without_reading_pr_labels(
             "view",
             "42",
             "--repo",
-            "zhiyuan-zhang0206/Ava",
+            "zhiyuan-zhang0206/Meiva",
             "--json",
             "baseRefOid",
             "--jq",
@@ -468,7 +468,7 @@ def test_trunk_submit_resumes_watch_on_real_http_409_error(
     assert (
         owner_operations.trunk_merge_flow(
             "42",
-            "zhiyuan-zhang0206/Ava",
+            "zhiyuan-zhang0206/Meiva",
             "medium",
             every=1,
             timeout=0,
@@ -500,7 +500,7 @@ def test_trunk_watch_keeps_polling_through_testing_state() -> None:
     assert (
         owner_operations.watch_trunk_enqueue(
             "42",
-            "zhiyuan-zhang0206/Ava",
+            "zhiyuan-zhang0206/Meiva",
             every=1,
             deadline=None,
             timeout=0,
@@ -527,7 +527,7 @@ def test_trunk_flow_resumes_watch_when_submit_reports_already_queued(
     assert (
         owner_operations.trunk_merge_flow(
             "42",
-            "zhiyuan-zhang0206/Ava",
+            "zhiyuan-zhang0206/Meiva",
             "medium",
             every=1,
             timeout=0,
@@ -569,7 +569,7 @@ def test_trunk_submit_accepts_plain_text_ok_body(
 
     rc = owner_operations.trunk_merge_flow(
         "42",
-        "zhiyuan-zhang0206/Ava",
+        "zhiyuan-zhang0206/Meiva",
         "medium",
         every=1,
         timeout=0,
@@ -621,7 +621,7 @@ def test_trunk_flow_warns_but_submits_when_base_lags_main(
 
     rc = owner_operations.trunk_merge_flow(
         "42",
-        "zhiyuan-zhang0206/Ava",
+        "zhiyuan-zhang0206/Meiva",
         "medium",
         every=1,
         timeout=0,
@@ -651,7 +651,7 @@ def test_trunk_flow_refuses_when_require_fresh_base_and_stale(
 
     rc = owner_operations.trunk_merge_flow(
         "42",
-        "zhiyuan-zhang0206/Ava",
+        "zhiyuan-zhang0206/Meiva",
         "medium",
         every=1,
         timeout=0,
@@ -681,7 +681,7 @@ def test_trunk_flow_skips_warning_when_base_is_current_main(
 
     rc = owner_operations.trunk_merge_flow(
         "42",
-        "zhiyuan-zhang0206/Ava",
+        "zhiyuan-zhang0206/Meiva",
         "medium",
         every=1,
         timeout=0,
@@ -710,7 +710,7 @@ def test_trunk_flow_degrades_when_freshness_reads_fail(
 
     rc = owner_operations.trunk_merge_flow(
         "42",
-        "zhiyuan-zhang0206/Ava",
+        "zhiyuan-zhang0206/Meiva",
         "medium",
         every=1,
         timeout=0,
@@ -739,7 +739,7 @@ def test_trunk_flow_warns_distinctly_when_require_mode_cannot_verify_freshness(
 
     rc = owner_operations.trunk_merge_flow(
         "42",
-        "zhiyuan-zhang0206/Ava",
+        "zhiyuan-zhang0206/Meiva",
         "medium",
         every=1,
         timeout=0,

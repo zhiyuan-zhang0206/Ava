@@ -26,7 +26,7 @@ from agent.graph.hooks.compact import (
 )
 from agent.hooks import Hook
 from agent.state import AgentState, CompactState
-from base.agents.context import AvaContext
+from base.agents.context import MeivaContext
 from base.clock import Clock
 from base.config import settings
 from base.config.tests.configuration import defaults
@@ -99,8 +99,8 @@ def _fake_llm_seq(*summaries: str) -> Any:
     return llm
 
 
-def runtime_with_llm(llm: Any, database_gate: ProcessDbGate) -> Runtime[AvaContext]:
-    ctx = AvaContext(
+def runtime_with_llm(llm: Any, database_gate: ProcessDbGate) -> Runtime[MeivaContext]:
+    ctx = MeivaContext(
         ops_pool=None,
         llm=llm,
         event_publisher=MagicMock(),
@@ -284,7 +284,7 @@ async def test_auto_compact_hook_raises_when_summary_short_every_attempt(
     llm = make_fake_llm("too short")
     state = _over_threshold_state()
     publisher = MagicMock()
-    ctx = AvaContext(
+    ctx = MeivaContext(
         ops_pool=None,
         llm=llm,
         event_publisher=publisher,
@@ -327,7 +327,7 @@ async def test_auto_compact_hook_emits_compact_done_on_success(
     patch_compact_config(monkeypatch, auto_compact_tokens=1)
     publisher = MagicMock()
     llm = make_fake_llm(LONG_SUMMARY)
-    ctx = AvaContext(
+    ctx = MeivaContext(
         ops_pool=None,
         llm=llm,
         event_publisher=publisher,
@@ -354,11 +354,11 @@ async def test_auto_compact_hook_emits_compact_done_on_success(
     assert started["compact_id"] == finished["compact_id"]
     assert started["started_at"] and finished["finished_at"]
     tail = result["context_reset"].tail
-    assert tail[0].additional_kwargs["ava_compact_id"] == started["compact_id"]
+    assert tail[0].additional_kwargs["meiva_compact_id"] == started["compact_id"]
 
 
 @pytest.fixture
-def ava_compact_loaded() -> tuple[type[AgentState], Hook]:
+def meiva_compact_loaded() -> tuple[type[AgentState], Hook]:
     from agent.graph.hooks.compact import compact_reminder
     from agent.state import build_agent_state
 
@@ -366,11 +366,11 @@ def ava_compact_loaded() -> tuple[type[AgentState], Hook]:
 
 
 async def test_compact_reminder_passthrough_none(
-    ava_compact_loaded: tuple[type[AgentState], Hook],
+    meiva_compact_loaded: tuple[type[AgentState], Hook],
     monkeypatch: pytest.MonkeyPatch,
     database_gate: ProcessDbGate,
 ):
-    state_cls, wrap_fn = ava_compact_loaded
+    state_cls, wrap_fn = meiva_compact_loaded
 
     patch_compact_config(monkeypatch, auto_compact_tokens=1_000_000)
     state = state_cls(
@@ -392,11 +392,11 @@ def _over_threshold_messages() -> list[AnyMessage]:
 
 
 async def test_compact_reminder_zero_to_one(
-    ava_compact_loaded: tuple[type[AgentState], object],
+    meiva_compact_loaded: tuple[type[AgentState], object],
     monkeypatch: pytest.MonkeyPatch,
     database_gate: ProcessDbGate,
 ):
-    state_cls, _ = ava_compact_loaded
+    state_cls, _ = meiva_compact_loaded
     wrap_fn = auto_compact_for_llm
 
     patch_compact_config(monkeypatch, auto_compact_tokens=1)
@@ -414,11 +414,11 @@ async def test_compact_reminder_zero_to_one(
 
 
 async def test_compact_reminder_increments_from_existing(
-    ava_compact_loaded: tuple[type[AgentState], object],
+    meiva_compact_loaded: tuple[type[AgentState], object],
     monkeypatch: pytest.MonkeyPatch,
     database_gate: ProcessDbGate,
 ):
-    state_cls, _ = ava_compact_loaded
+    state_cls, _ = meiva_compact_loaded
     wrap_fn = auto_compact_for_llm
 
     patch_compact_config(monkeypatch, auto_compact_tokens=1)
@@ -467,12 +467,12 @@ def make_runtime(
     llm: BaseChatModel | None = None,
     *,
     database_gate: ProcessDbGate,
-) -> Runtime[AvaContext]:
+) -> Runtime[MeivaContext]:
     if ops_pool is None:
         ops_pool = AsyncMock()
     if llm is None:
         llm = AsyncMock()
-    ctx = AvaContext(
+    ctx = MeivaContext(
         ops_pool=ops_pool,
         llm=llm,
         event_publisher=MagicMock(),

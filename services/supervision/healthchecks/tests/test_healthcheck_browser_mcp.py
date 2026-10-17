@@ -1,4 +1,4 @@
-"""ava-browser-mcp healthcheck — a probe returns a bool, never an exception."""
+"""meiva-browser-mcp healthcheck — a probe returns a bool, never an exception."""
 
 import json
 import logging

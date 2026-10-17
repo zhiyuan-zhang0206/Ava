@@ -1,7 +1,7 @@
 """base/packages/plugins/enable_config.py unit tests — schema + load + validation.
 
 Plugin config is per-machine local only: reads and writes go through
-~/.ava/plugins_config.json. No DB involvement.
+~/.meiva/plugins_config.json. No DB involvement.
 """
 
 import json
@@ -26,16 +26,16 @@ from base.packages.plugins.enable_config import (
 
 @pytest.fixture(autouse=True)
 def _isolate_paths(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
-    """All tests use a temporary directory for plugin scanning and ava_home —
-    avoids polluting the real repo / user plugins or ~/.ava."""
+    """All tests use a temporary directory for plugin scanning and meiva_home —
+    avoids polluting the real repo / user plugins or ~/.meiva."""
     repo = tmp_path / "repo_plugins"
     user = tmp_path / "user_plugins"
     repo.mkdir()
     user.mkdir()
     monkeypatch.setattr(paths, "repo_plugins_dir", lambda: repo)
     monkeypatch.setattr(paths, "plugins_dir", lambda: user)
-    monkeypatch.setattr(paths, "ava_home", lambda: tmp_path)
-    monkeypatch.setenv("AVA_HOME", str(tmp_path))
+    monkeypatch.setattr(paths, "meiva_home", lambda: tmp_path)
+    monkeypatch.setenv("MEIVA_HOME", str(tmp_path))
 
 
 def _make_external_plugin(name: str) -> None:

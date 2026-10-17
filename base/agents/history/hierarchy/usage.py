@@ -1,4 +1,4 @@
-# ava:ref base/agents/history/docs/range-read-contracts.ava.okf.md#history-range-inputs
+# meiva:ref base/agents/history/docs/range-read-contracts.meiva.okf.md#history-range-inputs
 from __future__ import annotations
 
 from collections.abc import Sequence
@@ -7,7 +7,7 @@ from itertools import accumulate
 
 from langchain_core.messages import AIMessage, BaseMessage
 
-from base.agents.messages.kwargs import read_ava_kwargs
+from base.agents.messages.kwargs import read_meiva_kwargs
 from base.lm.pricing.cache_writes import cache_write_tokens
 
 
@@ -30,7 +30,7 @@ def _call_usage(msg: BaseMessage) -> Usage:
         return _ZERO
     meta = msg.usage_metadata
     details = meta.get("input_token_details") or {}
-    cost = read_ava_kwargs(msg).get("ava_usage", {}).get("cost_usd")
+    cost = read_meiva_kwargs(msg).get("meiva_usage", {}).get("cost_usd")
     return Usage(
         calls=1,
         input=int(meta.get("input_tokens", 0)),

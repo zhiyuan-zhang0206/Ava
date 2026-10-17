@@ -1,4 +1,4 @@
-"""`ava notices` — operator CLI over the notice queue (Task #949).
+"""`meiva notices` — operator CLI over the notice queue (Task #949).
 
 Monkeypatched base.host.net.http_dial + gateway base; asserts arg plumbing, filters,
 resolve actions and the clear flow.

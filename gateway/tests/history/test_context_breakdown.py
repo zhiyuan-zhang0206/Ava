@@ -155,13 +155,13 @@ def test_bucket_ignores_image_base64_in_multimodal_inbound() -> None:
             {"type": "text", "text": "look at this"},
             {"type": "image", "source": {"type": "base64", "data": huge_b64}},
         ],
-        additional_kwargs={"ava_msg_type": "inbound"},
+        additional_kwargs={"meiva_msg_type": "inbound"},
     )
     assert estimate_message_tokens(msg) < 50
 
 
 def test_inbound_split_by_source() -> None:
-    """Inbound messages are bucketed by their envelope `ava_source`: a peer agent
+    """Inbound messages are bucketed by their envelope `meiva_source`: a peer agent
     (`agent:N`) or a declared external agent (`external_agent:S`) -> agent_messages; machine/framework wakeups & notices
     (`watcher:` / `shell:` / `schedule:` / `system[:*]`) -> automation; a human
     turn (`user` / `ui:page:*`) and a legacy inbound with no source -> user_input."""
@@ -177,8 +177,8 @@ def test_inbound_split_by_source() -> None:
         inbound_message(content="sched", source="schedule:4", inbound_id=6, body_start=0),
         inbound_message(content="sys", source="system", inbound_id=7, body_start=0),
         inbound_message(content="sys sub", source="system:reconcile", inbound_id=8, body_start=0),
-        # legacy inbound with no ava_source -> defaults to user_input.
-        HumanMessage(content="legacy", additional_kwargs={"ava_msg_type": "inbound"}),
+        # legacy inbound with no meiva_source -> defaults to user_input.
+        HumanMessage(content="legacy", additional_kwargs={"meiva_msg_type": "inbound"}),
     ]
     buckets = bucket_messages(msgs, _records(msgs))
     assert len(buckets["user_input"]) == 3

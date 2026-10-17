@@ -72,7 +72,7 @@ def _line(obj: dict[str, Any]) -> bytes:
 
 
 async def test_request_returns_result_on_ok(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("AVA_AGENT_ID", "42")
+    monkeypatch.setenv("MEIVA_AGENT_ID", "42")
     reader = FakeReader([_line({"id": 1, "ok": True, "result": {"x": 1}})])
     writer = FakeWriter()
     link = Link(reader, writer, timeout_reader=lambda: 1.0)  # type: ignore[arg-type]
@@ -82,7 +82,7 @@ async def test_request_returns_result_on_ok(monkeypatch: pytest.MonkeyPatch) -> 
 
 
 async def test_request_without_identity(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.delenv("AVA_AGENT_ID", raising=False)
+    monkeypatch.delenv("MEIVA_AGENT_ID", raising=False)
     reader = FakeReader([_line({"id": 1, "ok": True, "result": None})])
     writer = FakeWriter()
     link = Link(reader, writer, timeout_reader=lambda: 1.0)  # type: ignore[arg-type]
@@ -101,9 +101,9 @@ async def test_agent_identity_is_injected_for_each_request(monkeypatch: pytest.M
     )
     writer = FakeWriter()
     link = Link(reader, writer, timeout_reader=lambda: 1.0)  # type: ignore[arg-type]
-    monkeypatch.setenv("AVA_AGENT_ID", "7")
+    monkeypatch.setenv("MEIVA_AGENT_ID", "7")
     await link.request({"method": "list_tools", "agent_id": 99})
-    monkeypatch.delenv("AVA_AGENT_ID")
+    monkeypatch.delenv("MEIVA_AGENT_ID")
     await link.request({"method": "call_tool", "tool": "click"})
     assert [json.loads(line)["agent_id"] for line in writer.written] == [7, None]
 

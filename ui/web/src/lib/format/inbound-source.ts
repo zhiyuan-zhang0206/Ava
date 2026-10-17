@@ -1,6 +1,6 @@
 // An inbound message's `source` tags who sent it (the envelope model in
 // base/agents/messages/envelope.py). `external_agent:<subject>[:<instance>]` is an
-// agent outside Ava that declared itself, distinct from the user.
+// agent outside Meiva that declared itself, distinct from the user.
 
 export const EXTERNAL_AGENT_PREFIX = "external_agent:";
 

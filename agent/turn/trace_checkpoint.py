@@ -6,7 +6,7 @@ two one-way links that make either direction resolvable, right after the
 turn's ainvoke commits its checkpoint:
 
 - the root span (still current — the caller runs inside `turn_span`)
-  gains `ava.checkpoint_id=<checkpoint_id>`, so any OTel viewer can jump
+  gains `meiva.checkpoint_id=<checkpoint_id>`, so any OTel viewer can jump
   from a trace to its checkpoint (best-effort since #1964: the root is ended
   at turn start, so the attribute only lands while recording — production
   roots are already ended and skip it silently);
@@ -28,13 +28,13 @@ from langchain_core.runnables import RunnableConfig
 from langgraph.graph.state import CompiledStateGraph
 
 from agent.state import BaseAgentState
-from base.agents.context import AvaContext
+from base.agents.context import MeivaContext
 from base.log import logger
 
 
 async def attach_trace_checkpoint_ref(
-    graph: CompiledStateGraph[BaseAgentState, AvaContext, BaseAgentState, BaseAgentState],
-    ctx: AvaContext,
+    graph: CompiledStateGraph[BaseAgentState, MeivaContext, BaseAgentState, BaseAgentState],
+    ctx: MeivaContext,
     agent_id: int,
 ) -> None:
     """Correlate the just-finished turn's OTel trace with the checkpoint it
@@ -69,7 +69,7 @@ async def attach_trace_checkpoint_ref(
     # checkpoints.metadata.trace_id stamp below, read by the gateway trace
     # endpoint — is DB-side and unaffected.
     if span.is_recording():
-        span.set_attribute("ava.checkpoint_id", checkpoint_id)
+        span.set_attribute("meiva.checkpoint_id", checkpoint_id)
     from base.agents.history.checkpoint import attach_trace_to_checkpoint
 
     await attach_trace_to_checkpoint(

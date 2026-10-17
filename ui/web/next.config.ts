@@ -8,9 +8,9 @@ import withBundleAnalyzer from "@next/bundle-analyzer";
 // allowedDevOrigins: Next.js 16 dev mode only allows localhost / 127.0.0.1
 // by default. A cross-origin dev request (a device on the private network hitting the host,
 // phone port-forward, etc.) gets blocked, the JS bundle fails to load and the
-// page becomes static HTML — every onClick is unresponsive. Set AVA_DEV_ORIGINS
+// page becomes static HTML — every onClick is unresponsive. Set MEIVA_DEV_ORIGINS
 // (comma-separated MagicDNS hostnames / IPs) to allowlist them. Only `next dev`
-// reads this; the prod `next start` the ava stack runs ignores it, so it is
+// reads this; the prod `next start` the meiva stack runs ignores it, so it is
 // empty by default.
 
 const nextConfig: NextConfig = {
@@ -31,7 +31,7 @@ const nextConfig: NextConfig = {
   productionBrowserSourceMaps: false,
 
   // -- Dev origin allowlist (env-driven; see note above) --
-  allowedDevOrigins: (process.env.AVA_DEV_ORIGINS ?? "")
+  allowedDevOrigins: (process.env.MEIVA_DEV_ORIGINS ?? "")
     .split(",")
     .map((s) => s.trim())
     .filter(Boolean),

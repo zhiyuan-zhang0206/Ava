@@ -1,7 +1,7 @@
-"""The environment every Ava-initiated `git` call runs under: never prompt,
+"""The environment every Meiva-initiated `git` call runs under: never prompt,
 never hang.
 
-A git subprocess Ava drives has no human behind it, so its two ways of waiting
+A git subprocess Meiva drives has no human behind it, so its two ways of waiting
 forever are both pure liability:
 
 - **credential / passphrase prompts.** `GIT_TERMINAL_PROMPT=0` turns a missing
@@ -32,12 +32,12 @@ _GIT_SSH_COMMAND = "ssh -o BatchMode=yes -o ConnectTimeout=10"
 
 def git_env() -> dict[str, str]:
     """The process environment plus the non-interactive git knobs — pass as
-    `env=` to any git subprocess Ava starts (network or local: a local command
+    `env=` to any git subprocess Meiva starts (network or local: a local command
     has no business prompting either).
 
     A copy, so a caller may add to it. Overrides an inherited
     `GIT_SSH_COMMAND` / `GIT_TERMINAL_PROMPT` rather than deferring to it: this
-    is the posture Ava requires of its own git calls, not a default.
+    is the posture Meiva requires of its own git calls, not a default.
     """
     return os.environ | {
         "GIT_TERMINAL_PROMPT": "0",

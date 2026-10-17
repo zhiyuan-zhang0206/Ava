@@ -147,7 +147,7 @@ def test_incapability_no_chrome(monkeypatch: pytest.MonkeyPatch) -> None:
     host = _desktop_linux(monkeypatch, {"npx": _NPX})
     assert (
         pp.browser_incapability(None, host=host)
-        == "no Chrome (install it or set AVA_CHROME_BINARY)"
+        == "no Chrome (install it or set MEIVA_CHROME_BINARY)"
     )
     assert pp.browser_capable(None, host=host) is False
 

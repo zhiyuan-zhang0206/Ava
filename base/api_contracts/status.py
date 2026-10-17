@@ -4,7 +4,7 @@ renders.
 Downshifted from `gateway/cluster/schemas.py` so both sides of the wire can name
 one type: the gateway registers it on `/api/cluster/roster` + the status panel
 (so it keeps its OpenAPI schema name `MachineStatus`), and `cli` thin clients
-(`ava cluster status`) validate the response against it without importing up
+(`meiva cluster status`) validate the response against it without importing up
 into `gateway`. Gateway-only status models (ClusterPanel, SystemStatus,
 ServiceItem, ...) stay in `gateway.cluster.schemas`.
 """
@@ -75,7 +75,7 @@ class MachineStatus(BaseModel):
     serve_agent_runner: bool
     serve_observability_station: bool = False
     gateway_url: str
-    # When a process owning this machine last announced it was up (`ava start`,
+    # When a process owning this machine last announced it was up (`meiva start`,
     # or the ops daemon at its own boot) — a boot/announce stamp, NOT a
     # heartbeat, which is why it is rendered "up since" and never freshness-tested.
     # Liveness is `online`, a live probe. Called `last_seen_at` until #981.
@@ -88,15 +88,15 @@ class MachineStatus(BaseModel):
     # carries no verdict to decompose (probe failed / abnormal-state row).
     paused_reason: PausedReason | None = None
     description: str | None = None  # free-text machine metadata; NULL when unset
-    # Set when the host announced an intentional `ava stop` (cleared on next
-    # `ava start`). Lets a consumer show offline+stopped_at as "stopped"
+    # Set when the host announced an intentional `meiva stop` (cleared on next
+    # `meiva start`). Lets a consumer show offline+stopped_at as "stopped"
     # (deliberate) vs offline+null as "offline" (crash) — the live probe alone
     # cannot tell them apart.
     stopped_at: datetime | None = None
     # Operator-set staging flag (migration 20260812T000000): a staging host is
     # registered + roster-visible but excluded from the rollout target set
     # (`list_agent_runners` / the fan-out). Read-only on this wire — set via
-    # `ava cluster mark-staging` / `unmark-staging`.
+    # `meiva cluster mark-staging` / `unmark-staging`.
     is_staging: bool = False
     # This node's prod-source HEAD commit (None when the probe failed / could not
     # read it). There is no cluster pin to compare it against.

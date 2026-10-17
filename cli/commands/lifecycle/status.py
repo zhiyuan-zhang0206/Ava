@@ -1,4 +1,4 @@
-"""`ava status` — one-screen view of services, infra, host relays, and cron.
+"""`meiva status` — one-screen view of services, infra, host relays, and cron.
 
 Composed from `print_service_row` (session + probe per spec) +
 `print_data_plane_status` (this cluster's own pg/redis) + `print_redis_bridge_status` (authenticated PING
@@ -7,7 +7,7 @@ snapshot (GET `/api/cluster/status`).
 
 The local session/infra probes are the bootstrap-exemption supplement: they work
 even when the gateway is down (e.g. mid-restart), and the gateway can only see
-itself. So `ava status` shows both — the local view always, the gateway view
+itself. So `meiva status` shows both — the local view always, the gateway view
 additionally — rather than delegating wholesale.
 """
 
@@ -48,8 +48,8 @@ def _status_roster(
 ) -> tuple[tuple[ServiceSpec, str | None], ...]:
     """Explain every service excluded by capabilities or the durable desired set."""
     # Show this host's role roster WITH each gated-out service's reason, so a
-    # service the start path drops (ava-browser with no display) is visible +
-    # explained rather than silently missing — `ava status` is
+    # service the start path drops (meiva-browser with no display) is visible +
+    # explained rather than silently missing — `meiva status` is
     # the first diagnostic command and must not go blind on the broken service.
     # Gateway daemons on a runner-only host stay filtered (not in the role union).
     # Unknown role (None) -> show the full list, ungated (no reasons).
@@ -72,7 +72,9 @@ def cmd_status(
 
     repo = repo_root()
     roles = _repo_commands.roles_or_none(machine=machine)
-    print(f"[ava status] cwd = {repo}  roles = {','.join(sorted(roles)) if roles else 'unknown'}\n")
+    print(
+        f"[meiva status] cwd = {repo}  roles = {','.join(sorted(roles)) if roles else 'unknown'}\n"
+    )
     print_hold_section()
     print()
     services_to_show = _status_roster(roles, machine=machine, host=host)
@@ -99,12 +101,12 @@ def cmd_status(
     # psutil and never from the observability stack — this is precisely the
     # answer that must survive an LGTM backend that is down or was never
     # deployed. The HISTORY lives in Prometheus (issue #46, the Grafana
-    # `ava-ops-main` dashboard, "Host & data plane" section); nothing here retains a series.
+    # `meiva-ops-main` dashboard, "Host & data plane" section); nothing here retains a series.
     print("\nhost (live cpu/memory/disk):")
     _print_host_resources()
 
     # lgtm section: the observability-backend compose stack (deploy/lgtm) —
-    # shown only on the host the operator designated via the $AVA_HOME/lgtm-host
+    # shown only on the host the operator designated via the $MEIVA_HOME/lgtm-host
     # marker (a host singleton, not a per-cluster service, so the marker — not
     # the role — decides).
     from cli.commands.observability.lgtm import is_lgtm_host, print_lgtm_status
@@ -118,7 +120,7 @@ def cmd_status(
         print("\nredis bridge (private-network ingress):")
         print_redis_bridge_status(machine=machine, config=config)
 
-    # any installed host: surface the prod source ($AVA_HOME/source) branch state.
+    # any installed host: surface the prod source ($MEIVA_HOME/source) branch state.
     # A source-run home executes that checkout. Source-mode releases materialize
     # as a detached HEAD at the released commit (fleet_update switches every
     # checkout to `--detach NEW`), so a detached tree is the designed steady
@@ -129,13 +131,13 @@ def cmd_status(
         drift_branch = cluster_drift.prod_source_branch_drift()
         if drift_branch == "HEAD":
             print(
-                "\n· prod source ($AVA_HOME/source) is detached at the released commit "
+                "\n· prod source ($MEIVA_HOME/source) is detached at the released commit "
                 "(source-mode release state — expected; do not `checkout main`, which "
                 "would diverge this host from the fleet release)."
             )
         elif drift_branch is not None:
             print(
-                f"\n⚠ prod source ($AVA_HOME/source) is on branch '{drift_branch}', not "
+                f"\n⚠ prod source ($MEIVA_HOME/source) is on branch '{drift_branch}', not "
                 f"`main`. A source-run home executes this tree; a feature branch here runs "
                 f"un-reviewed code on the next restart.\n"
                 f"   Develop in a worktree, never the prod checkout. Recover: stash / branch "
@@ -163,7 +165,7 @@ def _print_host_resources() -> None:
     """One live reading, or the reason there is none (psutil absent on this host).
 
     A read failure prints and returns: the resource line is one section of
-    `ava status`, and losing it must not cost the operator the service table
+    `meiva status`, and losing it must not cost the operator the service table
     and the data-plane view below it.
     """
     try:
@@ -186,7 +188,7 @@ def print_gateway_cluster_status() -> None:
     GET `/api/cluster/status` — this is the thin-client view (what the gateway
     reports about itself: machine_name / capabilities / paused). A gateway that
     is down / unreachable is itself a status signal here, so we catch the HTTP
-    error and print it inline rather than aborting the whole `ava status` — the
+    error and print it inline rather than aborting the whole `meiva status` — the
     local probes above already ran and are the bootstrap-exemption supplement.
     """
     import httpx

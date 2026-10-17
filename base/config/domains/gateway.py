@@ -18,7 +18,7 @@ _SCHEDULE_RESTART_METADATA: dict[str, JsonValue] = {
 class GatewaySettings(EnvSettings):
     provision_builtin_schedules: bool = Field(
         default=True,
-        alias="AVA_PROVISION_BUILTIN_SCHEDULES",
+        alias="MEIVA_PROVISION_BUILTIN_SCHEDULES",
         description=(
             "Create missing built-in schedules, and resync the script of drifted ones to the "
             "repo template, when the schedule-manager starts. Disable for an unseeded "
@@ -34,7 +34,7 @@ class GatewaySettings(EnvSettings):
 
     gateway_client_max_retries: int = Field(
         default=3,
-        alias="AVA_GATEWAY_MAX_RETRIES",
+        alias="MEIVA_GATEWAY_MAX_RETRIES",
         description="SDK -> Gateway transient-failure retry count (transport errors + HTTP 429/5xx, idempotent requests only). Gateway cold start is ~0.6s; 3 retries are sufficient.",
         json_schema_extra={
             "restart_required": "agent",
@@ -46,7 +46,7 @@ class GatewaySettings(EnvSettings):
 
     gateway_client_retry_delay_seconds: float = Field(
         default=1.0,
-        alias="AVA_GATEWAY_RETRY_DELAY_SECONDS",
+        alias="MEIVA_GATEWAY_RETRY_DELAY_SECONDS",
         description="SDK -> Gateway HTTP retry base interval (seconds); each retry doubles it (bounded exponential backoff, 8s cap) plus a per-agent jitter offset.",
         json_schema_extra={
             "restart_required": "agent",
@@ -58,7 +58,7 @@ class GatewaySettings(EnvSettings):
 
     gateway_client_http_timeout_seconds: float = Field(
         default=20.0,
-        alias="AVA_GATEWAY_HTTP_TIMEOUT_SECONDS",
+        alias="MEIVA_GATEWAY_HTTP_TIMEOUT_SECONDS",
         description="SDK -> Gateway HTTP connect/read timeout (seconds). Wide margin on purpose: spawn is non-idempotent, so a read timeout on a spawn that DID succeed would let the transport retry re-POST it and orphan a second agent.",
         json_schema_extra={
             "restart_required": "agent",
@@ -70,7 +70,7 @@ class GatewaySettings(EnvSettings):
 
     sse_disconnect_poll_seconds: float = Field(
         default=1.0,
-        alias="AVA_SSE_DISCONNECT_POLL_SECONDS",
+        alias="MEIVA_SSE_DISCONNECT_POLL_SECONDS",
         description="Gateway SSE client-disconnect detection poll interval (seconds).",
         json_schema_extra={
             "restart_required": "gateway",
@@ -82,7 +82,7 @@ class GatewaySettings(EnvSettings):
 
     sse_throttle_rate: float = Field(
         default=10.0,
-        alias="AVA_SSE_THROTTLE_RATE",
+        alias="MEIVA_SSE_THROTTLE_RATE",
         description=(
             "Gateway SSE broadcast max pushes per second; each push batches "
             "available Redis events into one frame. Higher = smoother streaming, "
@@ -99,7 +99,7 @@ class GatewaySettings(EnvSettings):
     timeline_compact_history: int = Field(
         default=1,
         ge=-1,
-        alias="AVA_TIMELINE_COMPACT_HISTORY",
+        alias="MEIVA_TIMELINE_COMPACT_HISTORY",
         description=(
             "Number of compact-history segments the timeline may load backward: "
             "0 disables compact history, -1 allows all retained segments, and N "
@@ -116,7 +116,7 @@ class GatewaySettings(EnvSettings):
 
     cluster_rpc_timeout_seconds: float = Field(
         default=30.0,
-        alias="AVA_CLUSTER_RPC_TIMEOUT_SECONDS",
+        alias="MEIVA_CLUSTER_RPC_TIMEOUT_SECONDS",
         description="Default deadline (seconds) for one gateway -> agent-runner cluster op (ops/cluster/rpc.py dispatch_to_machine). Spawn typically finishes in <5s; lifecycle / config / inventory ops are quick. status_probe passes its own shorter timeout (task #698 G8).",
         json_schema_extra={
             "restart_required": "gateway",
@@ -128,7 +128,7 @@ class GatewaySettings(EnvSettings):
 
     status_probe_timeout_seconds: float = Field(
         default=8.0,
-        alias="AVA_STATUS_PROBE_TIMEOUT_SECONDS",
+        alias="MEIVA_STATUS_PROBE_TIMEOUT_SECONDS",
         description=(
             "Deadline (seconds) for one gateway -> agent-runner status_probe op: "
             "the roster panel and the heartbeat liveness pass share this budget "
@@ -150,7 +150,7 @@ class GatewaySettings(EnvSettings):
 
     cluster_rpc_max_retries: int = Field(
         default=3,
-        alias="AVA_CLUSTER_RPC_MAX_RETRIES",
+        alias="MEIVA_CLUSTER_RPC_MAX_RETRIES",
         description="Extra attempts (after the first) for a gateway -> agent-runner cluster op on transient infrastructure failure (transport error / 5xx), with bounded exponential backoff + jitter (task #961). Non-idempotent ops (spawn / lifecycle) retry under an auto-generated idempotency key, so a lost response replays the first run instead of duplicating it. 0 = fail fast, the pre-#961 single-shot behaviour. The roster's status_probe passes retries=1 inside its separate total deadline.",
         json_schema_extra={
             "restart_required": "gateway",
@@ -164,7 +164,7 @@ class GatewaySettings(EnvSettings):
         default=300.0,
         ge=0,
         allow_inf_nan=False,
-        alias="AVA_PAUSE_LIFECYCLE_WAIT_SECONDS",
+        alias="MEIVA_PAUSE_LIFECYCLE_WAIT_SECONDS",
         description=(
             "Bounded wait when preparation meets in-flight work it did not author "
             "(task #3591): an agent lifecycle command (restart / terminate), or "
@@ -186,14 +186,14 @@ class GatewaySettings(EnvSettings):
 
     schedule_stall_timeout_seconds: float = Field(
         default=1200.0,
-        alias="AVA_SCHEDULE_STALL_TIMEOUT_SECONDS",
+        alias="MEIVA_SCHEDULE_STALL_TIMEOUT_SECONDS",
         description="How long a schedule runner may stall in one frame before child cleanup, failure recording (last_error, run row) and hard exit; also the wall-clock bound on a non-.py command. Guards against hung gateway / DB calls. The exit is recorded as terminal process loss; the manager does not relaunch it.",
         json_schema_extra=_SCHEDULE_RESTART_METADATA,
     )
 
     gateway_reload: bool = Field(
         default=False,
-        alias="AVA_GATEWAY_RELOAD",
+        alias="MEIVA_GATEWAY_RELOAD",
         description="Dev-time uvicorn hot-reload switch. Must be false in prod: reload detaches the worker from its session (PPID=1) and zombies hold the port.",
         json_schema_extra={
             "restart_required": "gateway",
@@ -207,7 +207,7 @@ class GatewaySettings(EnvSettings):
         default=30.0,
         gt=0,
         allow_inf_nan=False,
-        alias="AVA_GATEWAY_GRACEFUL_SHUTDOWN_TIMEOUT_SECONDS",
+        alias="MEIVA_GATEWAY_GRACEFUL_SHUTDOWN_TIMEOUT_SECONDS",
         description=(
             "Seconds uvicorn may drain in-flight connections after SIGTERM before it "
             "cancels the remaining request/stream tasks and enters lifespan shutdown. "
@@ -219,7 +219,7 @@ class GatewaySettings(EnvSettings):
             "budget sits near a tenth of it; it also exceeds ordinary slow-request "
             "durations, so a planned restart still lets normal work finish. A stuck "
             "stream costs at most this budget, never the stop. SSE streams end as "
-            "the shutdown begins and cost none of it. ava-root's stop window for the "
+            "the shutdown begins and cost none of it. meiva-root's stop window for the "
             "gateway is derived from this value (plus the lifespan cleanup), so any "
             "value here is one root waits out."
         ),
@@ -233,8 +233,8 @@ class GatewaySettings(EnvSettings):
 
     gateway_port: int = Field(
         default=8000,
-        alias="AVA_GATEWAY_PORT",
-        description="uvicorn bind port for the gateway. Override where 8000 is taken; must match the port in AVA_GATEWAY_URL / AVA_GATEWAY_HEALTH_URL.",
+        alias="MEIVA_GATEWAY_PORT",
+        description="uvicorn bind port for the gateway. Override where 8000 is taken; must match the port in MEIVA_GATEWAY_URL / MEIVA_GATEWAY_HEALTH_URL.",
         json_schema_extra={
             "restart_required": "gateway",
             "writable": False,
@@ -246,7 +246,7 @@ class GatewaySettings(EnvSettings):
 
     gateway_url: str = Field(
         default="",
-        alias="AVA_GATEWAY_URL",
+        alias="MEIVA_GATEWAY_URL",
         description="Gateway base URL on the cluster's private network. Set on "
         "every unit: an agent-runner reaches the gateway here, and on the gateway "
         "it is this host's own URL.",
@@ -261,7 +261,7 @@ class GatewaySettings(EnvSettings):
 
     browser_origin: str = Field(
         default="",
-        alias="AVA_BROWSER_ORIGIN",
+        alias="MEIVA_BROWSER_ORIGIN",
         description=(
             "Optional HTTPS origin serving the frontend and gateway through one reverse proxy. "
             "Only browsers visiting this exact origin use same-origin API/SSE; existing direct "
@@ -291,13 +291,13 @@ class GatewaySettings(EnvSettings):
             or parsed.fragment is not None
         ):
             raise ValueError(
-                "AVA_BROWSER_ORIGIN must be an HTTPS origin without credentials or path"
+                "MEIVA_BROWSER_ORIGIN must be an HTTPS origin without credentials or path"
             )
         return str(parsed).removesuffix("/")
 
     cors_allowed_origins: Annotated[list[str], NoDecode] = Field(
         default_factory=list,
-        alias="AVA_GATEWAY_CORS_ALLOWED_ORIGINS",
+        alias="MEIVA_GATEWAY_CORS_ALLOWED_ORIGINS",
         description=(
             "Comma-separated exact browser origins allowed to call the gateway. "
             "Empty derives the frontend origins from gateway and service settings."
@@ -312,10 +312,10 @@ class GatewaySettings(EnvSettings):
 
     session_cookie_secure: bool | None = Field(
         default=None,
-        alias="AVA_GATEWAY_SESSION_COOKIE_SECURE",
+        alias="MEIVA_GATEWAY_SESSION_COOKIE_SECURE",
         description=(
             "Whether gateway session cookies carry Secure. Unset derives the "
-            "policy from AVA_GATEWAY_URL."
+            "policy from MEIVA_GATEWAY_URL."
         ),
         json_schema_extra={
             "restart_required": "gateway",
@@ -328,7 +328,7 @@ class GatewaySettings(EnvSettings):
     session_ttl_seconds: int = Field(
         default=24 * 3600,
         gt=0,
-        alias="AVA_GATEWAY_SESSION_TTL_SECONDS",
+        alias="MEIVA_GATEWAY_SESSION_TTL_SECONDS",
         description="Lifetime in seconds for opaque, server-side browser sessions.",
         json_schema_extra={
             "restart_required": "gateway",
@@ -341,7 +341,7 @@ class GatewaySettings(EnvSettings):
     login_max_failures: int = Field(
         default=5,
         gt=0,
-        alias="AVA_GATEWAY_LOGIN_MAX_FAILURES",
+        alias="MEIVA_GATEWAY_LOGIN_MAX_FAILURES",
         description=(
             "Consecutive failed logins from one IP before the login endpoint locks "
             "that IP out (429 + Retry-After; while locked the credential is not "
@@ -361,7 +361,7 @@ class GatewaySettings(EnvSettings):
     login_lockout_seconds: int = Field(
         default=900,
         gt=0,
-        alias="AVA_GATEWAY_LOGIN_LOCKOUT_SECONDS",
+        alias="MEIVA_GATEWAY_LOGIN_LOCKOUT_SECONDS",
         description=(
             "How long (seconds) an IP stays locked once it trips login_max_failures "
             "consecutive failures. 900 (15 minutes) makes a sustained single-IP "
@@ -379,7 +379,7 @@ class GatewaySettings(EnvSettings):
 
     grafana_proxy_enabled: bool = Field(
         default=False,
-        alias="AVA_GRAFANA_PROXY_ENABLED",
+        alias="MEIVA_GRAFANA_PROXY_ENABLED",
         description=(
             "Reverse-proxy /grafana/* on the gateway to a co-located Grafana "
             "instance (see grafana_host / grafana_port). Off by default so a "
@@ -399,7 +399,7 @@ class GatewaySettings(EnvSettings):
 
     grafana_host: str = Field(
         default="127.0.0.1",
-        alias="AVA_GRAFANA_HOST",
+        alias="MEIVA_GRAFANA_HOST",
         description=(
             "Host of the co-located Grafana instance the gateway reverse-proxies "
             "to when grafana_proxy_enabled is on. Loopback by default — Grafana "
@@ -417,7 +417,7 @@ class GatewaySettings(EnvSettings):
 
     mcp_endpoint_enabled: bool = Field(
         default=False,
-        alias="AVA_MCP_ENDPOINT_ENABLED",
+        alias="MEIVA_MCP_ENDPOINT_ENABLED",
         description=(
             "Serve the cluster control plane as an MCP server over Streamable "
             "HTTP at /mcp on the gateway (design task #1212, step 1). Off by "
@@ -438,11 +438,11 @@ class GatewaySettings(EnvSettings):
 
     grafana_port: int = Field(
         default=3001,
-        alias="AVA_GRAFANA_PORT",
+        alias="MEIVA_GRAFANA_PORT",
         description=(
             "Port of the co-located Grafana instance the gateway reverse-proxies "
             "to when grafana_proxy_enabled is on. Grafana's default HTTP port is "
-            "3000; Ava reserves 3001 so the proxy default matches a Grafana "
+            "3000; Meiva reserves 3001 so the proxy default matches a Grafana "
             "configured to sit outside the frontend's port."
         ),
         json_schema_extra={

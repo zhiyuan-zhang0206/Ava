@@ -33,23 +33,23 @@ def build_exec_failures(model: str, *, agent_id: int | None) -> RecordingModel:
 def build_files_edges(model: str, *, agent_id: int | None) -> RecordingModel:
     base = sandbox()
     code = f"""
-import ava
+import meiva
 target = {str(base / "edit.txt")!r}
-ava.files.write(target, 'aa bb aa')
+meiva.files.write(target, 'aa bb aa')
 for old in ('zz', 'aa'):
     try:
-        ava.files.edit(target, old, 'XX')
+        meiva.files.edit(target, old, 'XX')
         print('edit-unexpected-ok', old)
     except ValueError as e:
         print('edit-error', old, '|', e)
-ava.files.edit(target, 'aa', 'XX', replace_all=True)
-print('edited', ava.files.read(target))
+meiva.files.edit(target, 'aa', 'XX', replace_all=True)
+print('edited', meiva.files.read(target))
 """
     inject = f"""
-import ava
+import meiva
 bad = {str(base / "inject.txt")!r}
-ava.files.write(bad, {INJECTION!r})
-print('read-back', len(ava.files.read(bad)))
+meiva.files.write(bad, {INJECTION!r})
+print('read-back', len(meiva.files.read(bad)))
 """
     return RecordingModel(
         agent_id=agent_id, script=(exec_call(1, code), exec_call(2, inject), say(FINAL))
@@ -57,15 +57,15 @@ print('read-back', len(ava.files.read(bad)))
 
 
 def build_command(model: str, *, agent_id: int | None) -> RecordingModel:
-    code = "import ava\nprint('commands', [c.name for c in ava.agents.commands()])"
+    code = "import meiva\nprint('commands', [c.name for c in meiva.agents.commands()])"
     return RecordingModel(agent_id=agent_id, script=(exec_call(1, code), say(FINAL)))
 
 
 def build_upload(model: str, *, agent_id: int | None) -> RecordingModel:
     code = (
-        "import ava\n"
+        "import meiva\n"
         "from pathlib import Path\n"
-        "root = Path.home() / 'Downloads' / f'AvaAgent-{ava.self.AGENT_ID}' / '.delivered-v1'\n"
+        "root = Path.home() / 'Downloads' / f'MeivaAgent-{meiva.self.AGENT_ID}' / '.delivered-v1'\n"
         "p = next(q for q in root.glob('*/*') if not q.name.startswith('.'))\n"
         "print('upload-content', p.read_text())"
     )

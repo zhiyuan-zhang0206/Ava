@@ -5,7 +5,7 @@ The 2026-09-10 agent-host incident: a hand-placed external plugin whose
 (the host-boot loader) under a top-level module name, raised
 `ImportError: attempted relative import with no known parent package`, and took
 the whole agent host down on every restart — even with the plugin disabled via
-`ava plugins disable` (the boot loader ignored the enable config).
+`meiva plugins disable` (the boot loader ignored the enable config).
 
 These lock the contract that came out of it (user ruling 2026-09-11):
 
@@ -31,7 +31,7 @@ from base.config.service_read import ConfigAuthority
 from base.packages.plugins.enable_config import write_local
 
 # Every dotted name a plugin module can be registered under.
-_PLUGIN_MODULE_PREFIXES = ("ava_builtins.plugins.", "plugins.")
+_PLUGIN_MODULE_PREFIXES = ("meiva_builtins.plugins.", "plugins.")
 
 
 @pytest.fixture(autouse=True)
@@ -42,8 +42,8 @@ def _isolate_paths(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     user.mkdir()
     monkeypatch.setattr(paths, "repo_plugins_dir", lambda: repo)
     monkeypatch.setattr(paths, "plugins_dir", lambda: user)
-    monkeypatch.setenv("AVA_HOME", str(tmp_path / "ava"))
-    monkeypatch.setattr(paths, "ava_home", lambda: tmp_path)
+    monkeypatch.setenv("MEIVA_HOME", str(tmp_path / "meiva"))
+    monkeypatch.setattr(paths, "meiva_home", lambda: tmp_path)
 
 
 @pytest.fixture(autouse=True)
@@ -68,17 +68,17 @@ def _write_plugin(
     *,
     contributions: dict[str, object] | None = None,
 ) -> None:
-    """A plugin on disk with the `ava-plugin.json` every plugin ships (declaring `contributions`)."""
+    """A plugin on disk with the `meiva-plugin.json` every plugin ships (declaring `contributions`)."""
     plugin_dir = root / name
     plugin_dir.mkdir(parents=True, exist_ok=True)
     (plugin_dir / "plugin.py").write_text(body)
-    (plugin_dir / "ava-plugin.json").write_text(
+    (plugin_dir / "meiva-plugin.json").write_text(
         json.dumps(
             {
                 "apiVersion": 2,
                 "name": name,
                 "version": "1.0.0",
-                "engines": {"ava": ">=0.1.0"},
+                "engines": {"meiva": ">=0.1.0"},
                 "contributions": contributions or {},
             }
         )
@@ -88,7 +88,7 @@ def _write_plugin(
 
 
 def test_boot_loader_never_imports_a_disabled_plugin(loguru_records: list[dict[str, Any]]) -> None:
-    """Issue #2161's first half: `ava plugins disable` did not stop the boot
+    """Issue #2161's first half: `meiva plugins disable` did not stop the boot
     loader — it imported every directory on disk, so the disabled broken plugin
     still crashed startup. Disabled must mean never imported, on both paths."""
     _write_plugin(
@@ -100,7 +100,7 @@ def test_boot_loader_never_imports_a_disabled_plugin(loguru_records: list[dict[s
     _write_plugin(paths.plugins_dir(), "good", "LOADED = True\n")
     write_local({"plugins": {"codex_usage": {"enabled": False}, "good": {"enabled": True}}})
 
-    from ava.sdk_surface.extensions import load_extensions
+    from meiva.sdk_surface.extensions import load_extensions
 
     load_extensions()  # must not raise: the disabled plugin is never imported
 
@@ -128,7 +128,7 @@ def test_boot_loader_contains_broken_plugins_and_keeps_going(
         }
     )
 
-    from ava.sdk_surface.extensions import load_extensions
+    from meiva.sdk_surface.extensions import load_extensions
 
     load_extensions()  # must not raise
 
@@ -154,7 +154,7 @@ def test_a_package_relative_sibling_import_resolves_and_a_reload_keeps_the_modul
     )
     write_local({"plugins": {"codex_usage": {"enabled": True}}})
 
-    from ava.sdk_surface.extensions import load_extensions
+    from meiva.sdk_surface.extensions import load_extensions
 
     load_extensions()
     first = sys.modules["plugins.codex_usage.plugin"]
@@ -174,7 +174,7 @@ def test_host_boot_restart_loop_survives_a_broken_plugin(
     _write_plugin(paths.plugins_dir(), "codex_usage", "from . import refresh\n")
     write_local({"plugins": {"codex_usage": {"enabled": True}}})
 
-    from ava.sdk_surface.extensions import load_extensions
+    from meiva.sdk_surface.extensions import load_extensions
 
     for _ in range(3):
         load_extensions()  # each call stands in for one host boot
@@ -190,8 +190,8 @@ def test_host_boot_restart_loop_survives_a_broken_plugin(
 
 def test_the_loader_binds_the_class_a_config_face_declares(unit_home: Path) -> None:
     """`plugin.py` declares nothing about config; `default_config.py` does, and the install binds it."""
-    from ava.sdk_surface import install, settings
-    from ava.sdk_surface.extensions import load_extensions
+    from meiva.sdk_surface import install, settings
+    from meiva.sdk_surface.extensions import load_extensions
 
     _write_plugin(
         paths.plugins_dir(),
@@ -222,11 +222,11 @@ def test_the_loader_binds_the_class_a_config_face_declares(unit_home: Path) -> N
 
 
 def test_the_loader_retains_the_roots_explicit_owners(config_authority: ConfigAuthority) -> None:
-    from ava.sdk_surface import install, settings
-    from ava.sdk_surface.extensions import load_extensions
-    from ava.sdk_surface.installation import installed
     from base.agents.sdk import call_policy
     from base.lm.catalog import CatalogBuilder
+    from meiva.sdk_surface import install, settings
+    from meiva.sdk_surface.extensions import load_extensions
+    from meiva.sdk_surface.installation import installed
 
     catalog = CatalogBuilder().build()
     _write_plugin(paths.plugins_dir(), "good", "LOADED = True\n")

@@ -211,10 +211,10 @@ def _render(new: str = "deadbeef") -> str:
 def test_the_check_goes_through_the_cli_entry_with_a_throwaway_home() -> None:
     script = _render()
     check = next(line for line in script.splitlines() if line.startswith('cd "$W"'))
-    assert 'AVA_HOME="$T"' in check and "AVA_CONFIG_FETCH=skip" in check
+    assert 'MEIVA_HOME="$T"' in check and "MEIVA_CONFIG_FETCH=skip" in check
     assert "mktemp -d" in script and 'rm -rf "$T"' in script
     assert "cmd_schedules_verify" not in script
-    assert '(umask 077; AVA_HOME="$H"' in script  # the rows file holds every stored script
+    assert '(umask 077; MEIVA_HOME="$H"' in script  # the rows file holds every stored script
     assert 'rm -f "$R"' in script and 'worktree remove --force "$W"' in script
     check_py = fleet_update.check_rows_py()
     assert '"cli.main"' in check_py and '"schedules"' in check_py and '"verify"' in check_py
@@ -238,8 +238,8 @@ def test_the_real_cli_checks_a_rows_file_offline_under_a_throwaway_home(tmp_path
     env = {
         "PATH": os.environ["PATH"],
         "HOME": str(tmp_path),
-        "AVA_HOME": str(home),
-        "AVA_CONFIG_FETCH": "skip",
+        "MEIVA_HOME": str(home),
+        "MEIVA_CONFIG_FETCH": "skip",
     }
     proc = subprocess.run(
         [
@@ -267,7 +267,7 @@ import json, os, sys
 def main():
     rows = json.load(open(sys.argv[sys.argv.index("--rows-file") + 1]))
     print("ARGV " + " ".join(sys.argv[1:]))
-    print("HOME_IS_THROWAWAY " + str(os.environ["AVA_HOME"] != os.environ["REAL_HOME"]))
+    print("HOME_IS_THROWAWAY " + str(os.environ["MEIVA_HOME"] != os.environ["REAL_HOME"]))
     reds = [row for row in rows if "RED" in row[2]]
     for row in reds:
         print(f"RED id={row[0]} name={row[1]} missing=x")
@@ -286,8 +286,8 @@ def _git(repo: Path, *args: str) -> str:
 
 @pytest.fixture
 def host(tmp_path: Path) -> tuple[Path, str]:
-    """A `$HOME/.ava/source` at OLD (stub cli, no `cli.database`) plus a NEW commit with a stub CLI."""
-    source = tmp_path / ".ava" / "source"
+    """A `$HOME/.meiva/source` at OLD (stub cli, no `cli.database`) plus a NEW commit with a stub CLI."""
+    source = tmp_path / ".meiva" / "source"
     source.mkdir(parents=True)
     _git(source, "init", "-q", "--initial-branch=main")
     _tree(source, _OLD_CHECKOUT)
@@ -306,11 +306,11 @@ def host(tmp_path: Path) -> tuple[Path, str]:
 
 def _run_script(home: Path, new: str, *, red: bool) -> subprocess.CompletedProcess[str]:
     rows = [(1, "digest", "RED" if red else "import os\n")]
-    old_py = home / ".ava/source/cli/commands/management/schedules_verify.py"
+    old_py = home / ".meiva/source/cli/commands/management/schedules_verify.py"
     old_py.write_text(f"def _read_schedule_rows():\n    return {rows!r}\n")
     tmp = home / "tmp"
     tmp.mkdir(exist_ok=True)
-    env = {**os.environ, "HOME": str(home), "TMPDIR": str(tmp), "REAL_HOME": str(home / ".ava")}
+    env = {**os.environ, "HOME": str(home), "TMPDIR": str(tmp), "REAL_HOME": str(home / ".meiva")}
     return subprocess.run(
         ["bash", "-c", _render(new)],
         env=env,
@@ -329,8 +329,8 @@ def test_the_script_checks_the_table_through_new_and_cleans_up(host: tuple[Path,
     assert "VERIFY_RC=1" in lines and "RED id=1 name=digest missing=x" in lines
     assert "ARGV schedules verify --rows-file " in proc.stdout and "--no-notify" in proc.stdout
     assert "HOME_IS_THROWAWAY True" in lines
-    assert not (home / ".ava/pre-update-verify").exists()
-    assert not (home / ".ava/pre-update-verify.rows").exists()
+    assert not (home / ".meiva/pre-update-verify").exists()
+    assert not (home / ".meiva/pre-update-verify.rows").exists()
     assert list((home / "tmp").iterdir()) == []
 
 

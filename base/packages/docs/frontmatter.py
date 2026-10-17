@@ -9,7 +9,7 @@ name+description, commands derive the name from the filename), so this module
 only enforces structural well-formedness.
 
 The input is normalized before parsing — a leading UTF-8 BOM is dropped and
-CR / CRLF line endings become LF — because a SKILL.md is a file Ava *receives*
+CR / CRLF line endings become LF — because a SKILL.md is a file Meiva *receives*
 from the Agent Skills ecosystem, not one it authors: a skill written on Windows
 or exported by an editor that emits a BOM is a perfectly valid standard skill,
 and rejecting it would be rejecting the encoding, not the content. Every key

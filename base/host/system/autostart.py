@@ -1,34 +1,34 @@
-"""Boot-time autostart for a cluster's ava-managed services.
+"""Boot-time autostart for a cluster's meiva-managed services.
 
-Registers an OS job that runs `ava start` on boot, so a machine reboot brings
+Registers an OS job that runs `meiva start` on boot, so a machine reboot brings
 the cluster's data plane + gateway / agents / daemons back up without a human
-running `ava start` by hand. Each cluster owns its Postgres+Redis under its
-`$AVA_HOME`, brought up by `ava start` itself (not a box-level brew/systemd
+running `meiva start` by hand. Each cluster owns its Postgres+Redis under its
+`$MEIVA_HOME`, brought up by `meiva start` itself (not a box-level brew/systemd
 service), so this one boot job covers the whole cluster — data plane included.
 
 - macOS: a launchd User LaunchAgent (RunAtLoad) in ~/Library/LaunchAgents/
 - Linux: the enabled distro-level systemd unit (`base.host.system.boot_unit`);
   automatic startup requires systemd
 
-The job **retries, boundedly** — one boot-time `ava start` is not enough, because
+The job **retries, boundedly** — one boot-time `meiva start` is not enough, because
 at boot its dependencies are not all up yet, but an endless loop would hide a
 permanent error. See `base/host/system/boot_policy.py` for the policy and for how
-each mechanism states it: launchd keys plus the cap inside `ava start --boot` on
+each mechanism states it: launchd keys plus the cap inside `meiva start --boot` on
 macOS, systemd restart and start-limit keys on Linux.
 
 Mirrors base/host/system/cron.py (the health-probe registrar) -- same launchd / crontab
 mechanics -- but fires at boot (RunAtLoad / systemd)
-instead of on an interval, and runs `ava start`.
+instead of on an interval, and runs `meiva start`.
 
 Why the macOS path writes the plist but does NOT `launchctl bootstrap` it:
 `bootstrap` on a RunAtLoad job runs it immediately, and this registrar is
-invoked from converge, which runs *inside* `ava start` -- bootstrapping here
-would spawn a second, concurrent `ava start`. launchd loads every plist in
+invoked from converge, which runs *inside* `meiva start` -- bootstrapping here
+would spawn a second, concurrent `meiva start`. launchd loads every plist in
 ~/Library/LaunchAgents/ at login, so dropping the file there is enough for it to
 fire on the next boot (this box auto-logs-in). Enabling it in the current
 session is a one-line manual step printed below, not something converge does.
 
-Only ONE boot-ordering hazard is handled inside `ava start` itself: a routable
+Only ONE boot-ordering hazard is handled inside `meiva start` itself: a routable
 bind address not up yet when this cluster's Postgres, PgBouncer or Linux Redis starts
 (`cli/commands/data_plane/cluster_instance.py` waits for the reachable address before
 binding Postgres; PgBouncer and authenticated Linux Redis use the same wait).
@@ -51,8 +51,8 @@ from base.host.system.boot_policy import BOOT_RETRY_INTERVAL_S
 from base.host.system.boot_unit import install, uninstall
 from base.host.system.cron import (
     LAUNCHD_LABEL_PREFIX,
-    ava_binary_path,
     launchd_env_block,
+    meiva_binary_path,
     os_jobs_enabled,
     owns_os_jobs,
     register_platform_job,
@@ -60,7 +60,7 @@ from base.host.system.cron import (
     unregister_platform_job,
 )
 from base.host.system.hostport import Host
-from base.paths import ava_home
+from base.paths import meiva_home
 
 _LABEL = f"{LAUNCHD_LABEL_PREFIX}.autostart"
 _LAUNCHCTL_TIMEOUT_S = (
@@ -73,7 +73,7 @@ def _autostart_plist_path() -> Path:
 
 
 def autostart_plist_content(*, host: Host) -> str:
-    """The LaunchAgent plist: run `ava start --boot` at load, and keep re-running
+    """The LaunchAgent plist: run `meiva start --boot` at load, and keep re-running
     it while it fails, up to the boot attempt budget.
 
     `KeepAlive` → `SuccessfulExit: false` is launchd's "restart in the inverse
@@ -90,8 +90,8 @@ def autostart_plist_content(*, host: Host) -> str:
     reconciliation preserves healthy units on subsequent boot attempts.
     """
     label = _LABEL
-    ava = ava_binary_path(host=host)
-    log_file = ava_home() / "logs" / "autostart.log"
+    meiva = meiva_binary_path(host=host)
+    log_file = meiva_home() / "logs" / "autostart.log"
     return f"""<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
   "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -101,7 +101,7 @@ def autostart_plist_content(*, host: Host) -> str:
     <string>{label}</string>
     <key>ProgramArguments</key>
     <array>
-        <string>{ava}</string>
+        <string>{meiva}</string>
         <string>start</string>
         <string>--boot</string>
     </array>

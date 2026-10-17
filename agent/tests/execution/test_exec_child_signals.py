@@ -8,7 +8,7 @@ from pathlib import Path
 
 import pytest
 
-import ava
+import meiva
 from agent.graph.exec.protocol import (
     make_request_path,
     make_result_path,
@@ -16,8 +16,8 @@ from agent.graph.exec.protocol import (
     write_request,
 )
 from agent.tests.execution.test_exec_child import AGENT_ID, child_env
-from ava.sdk_surface.installation import Installation
-from ava.tests.fixtures.pin_agent import exec_context
+from meiva.sdk_surface.installation import Installation
+from meiva.tests.fixtures.pin_agent import exec_context
 
 
 def test_child_sigterm_writes_timed_out_envelope(tmp_path: Path) -> None:
@@ -102,10 +102,10 @@ def test_child_installs_signal_handlers_before_reading_request(
         machine: object,
     ) -> None:
         assert surface is True
-        assert context is ava.context
+        assert context is meiva.context
         assert callable(producer)
-        assert ava.context.clock_factory is clock_factory
-        assert ava.context.machine is machine
+        assert meiva.context.clock_factory is clock_factory
+        assert meiva.context.machine is machine
 
     monkeypatch.setattr(exec_child, "line_buffered_output", lambda: None)
     monkeypatch.setattr(protocol, "read_request", fake_read_request)
@@ -114,19 +114,19 @@ def test_child_installs_signal_handlers_before_reading_request(
     monkeypatch.setattr(exec_child, "build_state_slot", fake_build_state_slot)
     monkeypatch.setattr(exec_child, "run_code", fake_run_code)
     monkeypatch.setattr(protocol, "write_result", fake_write_result)
-    monkeypatch.setattr(ava, "ensure_plugins_loaded", fake_ensure_plugins_loaded)
-    monkeypatch.setattr(ava, "__plugin_installation__", model_installation, raising=False)
+    monkeypatch.setattr(meiva, "ensure_plugins_loaded", fake_ensure_plugins_loaded)
+    monkeypatch.setattr(meiva, "__plugin_installation__", model_installation, raising=False)
 
     try:
-        from ava.boot import process_clients
-        from base.agents.context import AvaContext
+        from base.agents.context import MeivaContext
         from base.cluster.machine.boot import machine_from_boot
         from base.config.tests.configuration import snapshot_process_config
+        from meiva.boot import process_clients
 
         config = snapshot_process_config()
         machine = machine_from_boot(config)
         clients = process_clients(config=config, machine=machine)
-        context = AvaContext(clients=clients, machine=machine)
+        context = MeivaContext(clients=clients, machine=machine)
         try:
             exec_child._run("request.json", "result.json", 0.0, config=config, context=context)
         finally:

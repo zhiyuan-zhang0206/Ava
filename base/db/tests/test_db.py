@@ -83,7 +83,7 @@ def test_async_pool_fixes_the_transport_posture(
             "autocommit": True,
             "prepare_threshold": None,
             "sslmode": "require",
-            "application_name": f"ava:{_PROCESS}:v7",
+            "application_name": f"meiva:{_PROCESS}:v7",
             **db.PG_KEEPALIVE_KWARGS,
         },
         "check": captured["check"],
@@ -111,7 +111,7 @@ def _spy_dials(monkeypatch: pytest.MonkeyPatch) -> list[tuple[str, dict[str, Any
 def test_connect_url_owns_the_transport_posture(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(settings.data_plane, "db_sslmode", "require")
     dials = _spy_dials(monkeypatch)
-    url = "postgresql://owner@/ava?host=/tmp/sock&options=-c%20role%3Dava"
+    url = "postgresql://owner@/meiva?host=/tmp/sock&options=-c%20role%3Dmeiva"
     db.connect_url(url, autocommit=True)
     assert dials == [
         (
@@ -120,7 +120,7 @@ def test_connect_url_owns_the_transport_posture(monkeypatch: pytest.MonkeyPatch)
                 "autocommit": True,
                 "prepare_threshold": None,
                 **db.PG_KEEPALIVE_KWARGS,
-                "options": "-c role=ava -c statement_timeout=60000",
+                "options": "-c role=meiva -c statement_timeout=60000",
             },
         )
     ]

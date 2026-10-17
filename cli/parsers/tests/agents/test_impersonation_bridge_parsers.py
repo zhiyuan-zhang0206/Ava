@@ -190,7 +190,7 @@ def test_command_passes_remote_to_steer(
     from cli.commands.agents import impersonation
     from cli.parsers import build_parser
 
-    remote = "unix:///private/tmp/ava-codex.sock"
+    remote = "unix:///private/tmp/meiva-codex.sock"
     args = build_parser().parse_args(
         [
             "impersonate",
@@ -286,12 +286,12 @@ def test_codex_relay_caps_content_and_preserves_inbox_on_steer_failure(
 
     def deliver(_thread_id: str, message: str, *, endpoint: str) -> str | None:
         delivered.append(message)
-        if refuse and "Ava message" in message:
+        if refuse and "Meiva message" in message:
             return "ActiveTurnNotSteerable"
         return None
 
     monkeypatch.setattr(adapters, "live_submit", deliver)
-    args.codex_remote = "unix:///tmp/ava-codex.sock"
+    args.codex_remote = "unix:///tmp/meiva-codex.sock"
     args.runtime = command_runtime
     args.database_factory = operator_database
     assert args.func(args) == (1 if refuse else 0)

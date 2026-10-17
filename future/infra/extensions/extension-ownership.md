@@ -16,7 +16,7 @@
 > **S2 is mostly built.** The `extensions` / `extension_blobs` tables and their
 > constraints (the blob size cap, the repo-rows-carry-no-content iff),
 > `base/packages/extensions/registry.py`, and `base/packages/extensions/materialize.py` all
-> exist and are tested. `ava skill install` writes the cluster row + blob BEFORE
+> exist and are tested. `meiva skill install` writes the cluster row + blob BEFORE
 > touching local disk, and converge lands enabled `kind='skill'` rows onto each
 > machine, refusing to overwrite a locally edited tree.
 >
@@ -26,11 +26,11 @@
 >
 > A prerequisite the slice walked into rather than introduced: the `extensions`
 > migration is the first post-baseline one to CREATE a table, and a cluster's
-> `ava_runner` read grant is a point-in-time loop issued once at install birth.
+> `meiva_runner` read grant is a point-in-time loop issued once at install birth.
 > So on a SPLIT deployment — the only posture where this slice's claim is
 > non-trivial — the materializer hit `permission denied` and reported it as an
 > unreachable registry. Fixed in `base/cluster/provision.py` (standing
-> `ALTER DEFAULT PRIVILEGES` + a re-affirm from `ava start` after a migration
+> `ALTER DEFAULT PRIVILEGES` + a re-affirm from `meiva start` after a migration
 > applies); the two-home fixture cannot see it, because it models two homes
 > sharing one connection identity, not two credentials.
 >
@@ -53,8 +53,8 @@
 ## The problem, in one sentence
 
 Plugins, MCP servers, and installed skills are owned by the **machine**
-(`~/.ava/plugins/<name>/`, `~/.ava/plugins_config.json`, `~/.ava/mcp_enabled.json`,
-per-machine `$AVA_HOME/skills/` installs tracked in `$AVA_HOME/installed.json`),
+(`~/.meiva/plugins/<name>/`, `~/.meiva/plugins_config.json`, `~/.meiva/mcp_enabled.json`,
+per-machine `$MEIVA_HOME/skills/` installs tracked in `$MEIVA_HOME/installed.json`),
 so two agents on two machines of one cluster can silently behave differently,
 a plugin canary on one agent is not expressible, and extension state rides in
 the same per-machine files whose rewrite already ate unrelated keys once
@@ -103,9 +103,9 @@ CREATE TABLE extensions (
     kind            TEXT NOT NULL CHECK (kind IN ('skill', 'plugin', 'mcp')),
     source          TEXT NOT NULL,      -- 'repo' | git URL | 'local:<machine>' (adopted / developed in place)
     source_ref      TEXT,               -- commit/tag as installed, when source is git
-    version         TEXT,               -- ava-plugin.json manifest version, when present
+    version         TEXT,               -- meiva-plugin.json manifest version, when present
     content_hash    TEXT NOT NULL,      -- tree hash of the landed content (install_registry.tree_hash)
-    manifest        JSONB,              -- ava-plugin.json as landed; host requirements live here
+    manifest        JSONB,              -- meiva-plugin.json as landed; host requirements live here
     trust           TEXT NOT NULL DEFAULT 'unreviewed',  -- the skill-supply-chain tier, moved up with the row
     default_enabled BOOLEAN NOT NULL DEFAULT true,
     installed_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
@@ -129,7 +129,7 @@ exists to kill. The blob is the *landed, scanned* tree: the supply-chain scan
 and the manifest gate run once at install, and what was scanned is what every
 machine materializes, byte-identical, verified by `content_hash`.
 
-Repo-shipped content (`ava_builtins/plugins/`, `ava_builtins/skills/`)
+Repo-shipped content (`meiva_builtins/plugins/`, `meiva_builtins/skills/`)
 does **not** move into these tables: it is already cluster-consistent via
 commit-pinned code rollout, and its trust story is the checkout itself. The
 registry owns what arrives by *install*, not by *release*.
@@ -171,7 +171,7 @@ matcher. Candidate initial set:
   a TCC-granted helper): modeled as a capability, never as an install
 
 A machine's capability set = **probed** (os/arch/display/unix-socket/docker are
-computed at `ava start`, the way `ava/mcps/config.py` probes `display` today) ∪
+computed at `meiva start`, the way `meiva/mcps/config.py` probes `display` today) ∪
 **declared** (`login-session:*` and anything unprobeable, set by an operator
 verb and persisted beside the machine's identity files). `register_self`
 publishes the union to a `machine_capabilities` column/table beside
@@ -185,7 +185,7 @@ currently mixes:
 - **host requirements** (`display: required`, `unixSocket: required`, os/arch
   constraints, `login-session:<app>`) — matched against the machine capability
   set by the one matcher. The MCP per-entry `requires` check
-  (`ava/mcps/config.py`) becomes a consumer of the same vocabulary and matcher.
+  (`meiva/mcps/config.py`) becomes a consumer of the same vocabulary and matcher.
 - **resource access declarations** (`db: none|ro|rw`, `network`, `shell`) —
   these are context-model gates on what the extension may *touch*, not on
   where it can run; they stay in S5's context model unchanged.
@@ -219,8 +219,8 @@ with these hard edges instead of silent filtering:
   constraint (that would make one `display`-requiring plugin unschedulable the
   whole fleet onto headless machines); agents on M run without it, and the gap
   is a first-class queryable fact: `runnable(P, M)` is computed and exposed in
-  `ava status`, `ava cluster status`, the inventory view, and the issue #41
-  `ava plugins inspect` catalog as an explicit row — "P on M: not runnable,
+  `meiva status`, `meiva cluster status`, the inventory view, and the issue #41
+  `meiva plugins inspect` catalog as an explicit row — "P on M: not runnable,
   missing `display`" — never an absence you have to infer.
 - **Enabled + runnable but content not materialized** is a fail-fast boot
   error naming the fix, not a skip (see materialization below — boot self-heals
@@ -242,21 +242,21 @@ plugin for one agent. Import failures still have a host-wide fault boundary.
 
 What this deliberately does *not* import from dsh: isolate realms / scoped
 registration machinery. dsh needs them because many sessions share one process
-*with no composition filter*; Ava's answer is the resolved-set filter at the
+*with no composition filter*; Meiva's answer is the resolved-set filter at the
 executor boundary, which is a dict lookup over attribution the `register_*`
 calls already carry (`base/packages/plugins/context.py`), not a runtime realm.
 
 ## Converge, enroll, boot — who materializes what, and offline semantics
 
 **Converge** loses authority, and materialization is invoked BESIDE the converge
-steps rather than as one of them. `ava start` runs converge as step 1, brings
+steps rather than as one of them. `meiva start` runs converge as step 1, brings
 this cluster's Postgres up as step 2 and applies migrations as step 2.5, so a
 `CONVERGE_STEPS` entry would read the registry before the database is up on a
 single box, and before the `extensions` table exists on the rollout that creates
 it (this doc originally described it as a step; #201 shipped it that way and the
 correction is `cli/commands/lifecycle/converge_host.py:materialize_cluster_extensions`, called
-from `ava start` after the schema-current check and from the end of standalone
-`ava converge`). The materializer itself pulls the enabled rows for this machine,
+from `meiva start` after the schema-current check and from the end of standalone
+`meiva converge`). The materializer itself pulls the enabled rows for this machine,
 lands missing/stale trees from blobs (verified against `content_hash`), and
 rewrites the local caches (`plugins_config.json`, `mcp_enabled.json`,
 `installed.json` entries for registry-owned names) as derived state. The
@@ -273,14 +273,14 @@ checkpointer), so this adds no new liveness dependency; if the DB is down,
 agents were not booting anyway.
 
 **Runner first start** binds the gateway URL and secret as identity. Extension
-state remains outside that identity: the same `ava start`
+state remains outside that identity: the same `meiva start`
 probes capabilities, registers them, and materializes exactly what the cluster
 says. A new machine is fungible by construction — no "did we remember to
 install the skills here" step, which is the drift-generator today.
 
 **Staleness is bounded and visible**: between installs and the next converge on
 a machine, its materialized set can lag the registry. The lag is detectable
-(`content_hash` comparison, surfaced in the inventory view and `ava cluster
+(`content_hash` comparison, surfaced in the inventory view and `meiva cluster
 status`) and self-heals at the next process start on that machine. The S2 sync
 event doubles as the issue #42 L2 broadcast carrier ("skill catalog changed"),
 so live agents learn of new skills without waiting for a prompt rebuild.
@@ -297,7 +297,7 @@ Adoption, not flag-day:
    the cluster default, and reports the disagreement it found — turning silent
    drift into a visible, reviewable diff at upgrade time.
 2. **User-origin installs** (`origin="user"` rows in each machine's
-   `installed.json`, external plugins in `~/.ava/plugins/`, `type="mcp"`
+   `installed.json`, external plugins in `~/.meiva/plugins/`, `type="mcp"`
    packages): the first converge after upgrade uploads each unclaimed name
    (tree → blob, row with `source='local:<machine>'`). A name claimed by two
    machines with **identical** hashes merges silently; **differing** hashes
@@ -307,7 +307,7 @@ Adoption, not flag-day:
    machine, so adoption is trivially total.
 3. **Local files demote to caches.** `plugins_config.json` and
    `mcp_enabled.json` stop being authorities and are rewritten by converge;
-   `ava plugins enable/disable` / `ava mcp enable/disable` / the `PUT
+   `meiva plugins enable/disable` / `meiva mcp enable/disable` / the `PUT
    /api/inventory` write path retarget to the cluster row (`default_enabled`),
    turning today's cross-machine inventory UI from a per-machine toggle panel
    into a cluster-policy panel with a per-machine *runnability* column.
@@ -358,10 +358,10 @@ Adoption, not flag-day:
 
 ## Related work — must stay coherent with
 
-- **Issue #41 (`ava plugins inspect`)**: the catalog's "what exists / what's
+- **Issue #41 (`meiva plugins inspect`)**: the catalog's "what exists / what's
   enabled" half reads these cluster rows; its "what registered" half stays
   registration facts. The not-runnable row defined here is an inspect output.
-- **Issue #42 (four-layer model)**: L3 ava-guide.plugins.develop installs into this
+- **Issue #42 (four-layer model)**: L3 meiva-guide.plugins.develop installs into this
   registry and canaries on the author agent via `extension_overlay`; the S2
   sync event is L2's broadcast carrier; self-evolution's change detection
   extends to registry version changes.
@@ -387,7 +387,7 @@ Adoption, not flag-day:
 | Slice | What lands | Test locks |
 |---|---|---|
 | **S1 — decision + spec** (landed) | `docs/decisions/extensions/plugins/2026-08-21-extension-ownership-three-tiers.md` (three tiers; machine demoted to derived constraint; version-canary non-goal) + the plugin-spec-v2 S5 revision above, incl. the `hostCapabilities` split. No code. | — |
-| **S2 — skills first** (tables + install-write + materialization landed, cross-machine chain locked; boot materialization, adoption sweep and sync event pending) | `extensions`/`extension_blobs` migrations; `ava skill install` writes row + blob; converge + boot materialization for `kind='skill'`; adoption sweep; the sync event. Skills are pure text, no runtime, no requirements — validates the whole chain at minimum risk. | install on home A materializes on home B (two homes, one PG); adoption conflict refused with both machines named; user-edit hash guard survives the source change |
-| **S3 — per-agent activation** | `agents_meta.extension_overlay` migration; spawn API + `ava.agents.spawn` field; resolution in `load_extensions()` (or the turn boundary, per PR #49 ordering); event-trail recording. | overlay survives restart; overlay-disabled plugin is absent from the agent turn composition; unknown name refused at spawn |
+| **S2 — skills first** (tables + install-write + materialization landed, cross-machine chain locked; boot materialization, adoption sweep and sync event pending) | `extensions`/`extension_blobs` migrations; `meiva skill install` writes row + blob; converge + boot materialization for `kind='skill'`; adoption sweep; the sync event. Skills are pure text, no runtime, no requirements — validates the whole chain at minimum risk. | install on home A materializes on home B (two homes, one PG); adoption conflict refused with both machines named; user-edit hash guard survives the source change |
+| **S3 — per-agent activation** | `agents_meta.extension_overlay` migration; spawn API + `meiva.agents.spawn` field; resolution in `load_extensions()` (or the turn boundary, per PR #49 ordering); event-trail recording. | overlay survives restart; overlay-disabled plugin is absent from the agent turn composition; unknown name refused at spawn |
 | **S4 — plugins + capability matching** | plugin rows to the registry; `base/capabilities.py` + probes + `machine_capabilities` registration; the matcher; placement constraint + boot re-check; `plugins_config.json` demoted to cache; not-runnable rows in status/inventory/inspect. | requirement-missing machine is refused as placement for a requiring agent; a default-enabled-but-not-runnable pair is queryable, not silent; cache rewrite is idempotent |
 | **S5 — MCP** | `kind='mcp'` rows + `requires` → vocabulary unification; `mcp_enabled.json` demoted. Routing endgame stays #1212. | machine-singleton browser server expressed via requirements matches only the capable machine |

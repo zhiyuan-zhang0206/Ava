@@ -16,7 +16,7 @@ def test_missing_canonical_socket_does_not_discover_same_port_elsewhere(
 ) -> None:
     canonical = tmp_path / "canonical"
     canonical.mkdir()
-    foreign = tmp_path / "ava-pg-foreign"
+    foreign = tmp_path / "meiva-pg-foreign"
     foreign.mkdir()
     (foreign / ".s.PGSQL.5433").write_text("")
     monkeypatch.setattr(pg_admin, "pg_socket_dir", lambda: canonical)
@@ -35,7 +35,7 @@ def test_pgbouncer_ini_uses_only_canonical_socket(
     ini = pooler.render_ini(
         pg_port=5433,
         listen_port=6433,
-        db_name="ava",
+        db_name="meiva",
         machine=command_machine,
     )
     assert f"host={canonical} port=5433" in ini
@@ -44,12 +44,12 @@ def test_pgbouncer_ini_uses_only_canonical_socket(
 def _pg_socket_path(root: Path, home: Path) -> Path:
     from base.cluster import home_slug
 
-    return root / f"ava-pg-{home_slug(home)}"
+    return root / f"meiva-pg-{home_slug(home)}"
 
 
 def test_pg_socket_dir_rejects_symlink(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     home = tmp_path / "home"
-    monkeypatch.setattr(_ci, "ava_home", lambda: home)
+    monkeypatch.setattr(_ci, "meiva_home", lambda: home)
     socket_dir = _pg_socket_path(tmp_path, home)
     socket_dir.symlink_to(tmp_path / "elsewhere", target_is_directory=True)
 
@@ -61,7 +61,7 @@ def test_pg_socket_dir_rejects_foreign_owner(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     home = tmp_path / "home"
-    monkeypatch.setattr(_ci, "ava_home", lambda: home)
+    monkeypatch.setattr(_ci, "meiva_home", lambda: home)
     socket_dir = _pg_socket_path(tmp_path, home)
     socket_dir.mkdir()
     owner = os.geteuid()
@@ -73,7 +73,7 @@ def test_pg_socket_dir_rejects_foreign_owner(
 
 def test_pg_socket_dir_repairs_mode_drift(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     home = tmp_path / "home"
-    monkeypatch.setattr(_ci, "ava_home", lambda: home)
+    monkeypatch.setattr(_ci, "meiva_home", lambda: home)
     socket_dir = _pg_socket_path(tmp_path, home)
     socket_dir.mkdir()
     socket_dir.chmod(0o755)

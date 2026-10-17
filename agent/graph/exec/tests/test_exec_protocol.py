@@ -38,11 +38,11 @@ from agent.graph.exec.protocol import (
     write_request,
     write_result,
 )
-from ava.tests.fixtures.pin_agent import exec_context
 from base.cluster.machine import MachineIdentity
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from base.db import Database
-from base.paths import ava_home
+from base.paths import meiva_home
+from meiva.tests.fixtures.pin_agent import exec_context
 
 _ENVELOPE_CRASH_CHILD = Path(__file__).parent / "resources" / "_envelope_crash_child.py"
 
@@ -93,11 +93,11 @@ def test_typed_blob_aimessage_exact_round_trip() -> None:
 
 
 def test_typed_blob_tool_and_human_messages_exact_round_trip() -> None:
-    """ToolMessage additional_kwargs (ava_msg_type) and a plain HumanMessage
+    """ToolMessage additional_kwargs (meiva_msg_type) and a plain HumanMessage
     survive unchanged."""
     msgs = [
         ToolMessage(
-            content="out", tool_call_id="tc-1", additional_kwargs={"ava_msg_type": "exec_output"}
+            content="out", tool_call_id="tc-1", additional_kwargs={"meiva_msg_type": "exec_output"}
         ),
         HumanMessage(content="hi"),
     ]
@@ -161,7 +161,7 @@ def test_request_envelope_transfers_emit_size_and_serialize_time(
 
     events_before = len(_exec_envelope_events())
     pipeline = telemetry.build_pipeline(
-        database=lambda: database, machine=machine_identity, home=ava_home()
+        database=lambda: database, machine=machine_identity, home=meiva_home()
     )
     sink_id = add_event_sink(
         process="test-exec-envelope",

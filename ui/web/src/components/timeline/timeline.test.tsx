@@ -273,7 +273,7 @@ describe("timeline document work", () => {
     const code = makeItem({
       item_id: "1.0",
       kind: "agent_code",
-      payload: "ava.files.read('first')",
+      payload: "meiva.files.read('first')",
       sdk_calls: [{ method: "files.read", count: 1 }],
     });
     // Reading committed SDK calls is part of deriving the turn summary.
@@ -293,13 +293,13 @@ describe("timeline document work", () => {
 
     const next = makeItem({
       ...code,
-      payload: "ava.files.read('updated')",
+      payload: "meiva.files.read('updated')",
       sdk_calls: [{ method: "files.read", count: 2 }],
     });
     rerender(<TimelineView items={[next]} threadKey="first" />);
     expect(screen.getByTestId("turn-toggle").textContent).toContain("files.read × 2");
     fireEvent.click(screen.getByTestId("turn-toggle"));
-    expect(screen.getByTestId("python-code").textContent).toBe("ava.files.read('updated')");
+    expect(screen.getByTestId("python-code").textContent).toBe("meiva.files.read('updated')");
 
     rerender(
       <TimelineView
@@ -596,7 +596,7 @@ describe("ItemView: agent_code + agent_reasoning", () => {
       />,
     );
     expect(screen.getByTestId("python-code").textContent).toBe("print(1)");
-    // no ava.* calls → chip falls back to the line count
+    // no meiva.* calls → chip falls back to the line count
     expect(screen.getByText(/1 line of code/)).toBeTruthy();
   });
 
@@ -633,7 +633,7 @@ describe("ItemView: agent_code + agent_reasoning", () => {
 });
 
 describe("ItemView: system_prompt", () => {
-  const PROMPT = "You are Ava.\nAct via execute_code.\nThird line.";
+  const PROMPT = "You are Meiva.\nAct via execute_code.\nThird line.";
 
   it("collapsed by default in 'none' mode: turn wraps the prompt unlabeled, body is hidden", () => {
     setToggleState({ detailsMode: "none" });
@@ -773,7 +773,7 @@ describe("toggle chip: summary on expanded items", () => {
         items={[
           makeItem({
             kind: "agent_code",
-            payload: "ava.files.read('a')\nava.files.read('b')\nava.shell.run()",
+            payload: "meiva.files.read('a')\nmeiva.files.read('b')\nmeiva.shell.run()",
             sdk_calls: [
               { method: "files.read", count: 2 },
               { method: "shell.run", count: 1 },
@@ -1189,7 +1189,7 @@ describe("ItemView: system_marker → system_note chip", () => {
           makeItem({
             kind: "system_marker",
             source: "sdk_hint",
-            payload: "[system] use ava.agents.send_message",
+            payload: "[system] use meiva.agents.send_message",
           }),
         ]}
       />,
@@ -1200,7 +1200,7 @@ describe("ItemView: system_marker → system_note chip", () => {
     revealCollapsedCards();
     expect(screen.getByText("Note")).toBeTruthy();
     expect(
-      screen.getByText(/use ava\.agents\.send_message/),
+      screen.getByText(/use meiva\.agents\.send_message/),
     ).toBeTruthy();
     expect(screen.queryByText(/Unrecognized system_marker/)).toBeNull();
   });
@@ -1353,7 +1353,7 @@ describe("ItemView: system_marker → system_note chip", () => {
 describe("ItemView: inbound_compact_*", () => {
   // Task #1017 regression lock: compact items must render as their Compact
   // envelope, never as the red UNRECOGNIZED SYSTEM_MARKER alarm. The alarm is
-  // what a compact summary message WITHOUT an ava_msg_type stamp produced
+  // what a compact summary message WITHOUT an meiva_msg_type stamp produced
   // (the backend catch-all classified it as system_marker source=null) —
   // both compact paths now stamp their summary messages identically.
   function expectNoUnrecognizedAlarm() {
@@ -1710,7 +1710,7 @@ describe("deep history DOM window", () => {
   });
 
   it("uses configured activation and child-window row thresholds", () => {
-    displayLimits.set("AVA_TIMELINE_WINDOW_ACTIVATION_ROWS", 20);
+    displayLimits.set("MEIVA_TIMELINE_WINDOW_ACTIVATION_ROWS", 20);
     const chats = Array.from({ length: 60 }, (_, index) => makeItem({
       item_id: `${index + 1}.0`, kind: "agent_chat", payload: `Reply ${index + 1}`,
     }));
@@ -1720,7 +1720,7 @@ describe("deep history DOM window", () => {
     expect(viewport.querySelector('[data-timeline-spacer="before"]')).not.toBeNull();
     unmount();
 
-    displayLimits.set("AVA_TIMELINE_WINDOW_TURN_ROWS", 20);
+    displayLimits.set("MEIVA_TIMELINE_WINDOW_TURN_ROWS", 20);
     const reasoning = Array.from({ length: 60 }, (_, index) => makeItem({
       item_id: `${index + 1}.0`, kind: "agent_reasoning", payload: `Thought ${index + 1}`,
     }));
@@ -1731,8 +1731,8 @@ describe("deep history DOM window", () => {
   });
 
   it("starts measuring at the configured row count before activation", () => {
-    displayLimits.set("AVA_TIMELINE_WINDOW_ACTIVATION_ROWS", 50);
-    displayLimits.set("AVA_TIMELINE_WINDOW_MEASURE_ROWS", 10);
+    displayLimits.set("MEIVA_TIMELINE_WINDOW_ACTIVATION_ROWS", 50);
+    displayLimits.set("MEIVA_TIMELINE_WINDOW_MEASURE_ROWS", 10);
     const observed: Element[] = [];
     vi.stubGlobal("ResizeObserver", class {
       observe(target: Element) { observed.push(target); }
@@ -1761,7 +1761,7 @@ describe("deep history DOM window", () => {
     const viewport = screen.getByTestId("scroll-viewport");
     expect(viewport.querySelectorAll(".timeline-item").length).toBe(60);
 
-    displayLimits.set("AVA_TIMELINE_WINDOW_ACTIVATION_ROWS", 20);
+    displayLimits.set("MEIVA_TIMELINE_WINDOW_ACTIVATION_ROWS", 20);
     rerender(<TimelineView items={chats} threadKey="late-config" />);
     expect(observed.filter((node) => node.hasAttribute("data-virtual-group")).length).toBeGreaterThanOrEqual(60);
     expect(viewport.querySelectorAll(".timeline-item").length).toBeLessThan(60);
@@ -3596,27 +3596,27 @@ describe("LifecycleChip payload render", () => {
 // digits + spacing from the label. No title attribute (no hover tooltip) —
 // see the "ItemTimestamp" describe block above for that assertion.
 describe("ItemTimestamp label content", () => {
-  it("ChatMarkdown label 'Ava ▸' appears (pins label JSX against deletion)", () => {
+  it("ChatMarkdown label 'Meiva ▸' appears (pins label JSX against deletion)", () => {
     render(
       <TimelineView
         items={[makeItem({ kind: "agent_chat", payload: "x" })]}
       />,
     );
-    expect(screen.getByText(/Ava ▸/)).toBeTruthy();
+    expect(screen.getByText(/Meiva ▸/)).toBeTruthy();
   });
 
-  it("plain agent_chat label is exactly 'Ava ▸' — no i18n key leak (Task #816)", () => {
+  it("plain agent_chat label is exactly 'Meiva ▸' — no i18n key leak (Task #816)", () => {
     render(
       <TimelineView
         items={[makeItem({ kind: "agent_chat", payload: "x" })]}
       />,
     );
     // Exact-match the whole label: cardTitle must pass suffix:"" so next-intl
-    // compiles "Ava ▸{suffix}" → "Ava ▸". A missing interpolation variable
+    // compiles "Meiva ▸{suffix}" → "Meiva ▸". A missing interpolation variable
     // makes real next-intl fall back to the raw key ("timeline.agentChat"),
     // which leaked to users (Task #816); leftover "{suffix}" would mean the
     // value never reached the message.
-    expect(screen.getByText(/^Ava ▸$/)).toBeTruthy();
+    expect(screen.getByText(/^Meiva ▸$/)).toBeTruthy();
     expect(screen.queryByText(/timeline\.agentChat/)).toBeNull();
     expect(screen.queryByText(/\{suffix\}/)).toBeNull();
   });

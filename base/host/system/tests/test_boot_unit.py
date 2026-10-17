@@ -44,8 +44,8 @@ def _context(tmp_path: Path) -> BootUnitContext:
     return BootUnitContext(
         home=tmp_path / "home",
         repo=tmp_path / "repo",
-        user="ava-user",
-        group="ava-group",
+        user="meiva-user",
+        group="meiva-group",
         home_dir=tmp_path / "user-home",
     )
 
@@ -77,8 +77,8 @@ def test_render_unit_binds_home_and_checkout(ctx: BootUnitContext) -> None:
     assert f"User={ctx.user}" in unit and f"Group={ctx.group}" in unit
     assert f"WorkingDirectory={ctx.repo}" in unit
     assert f'WorkingDirectory="{ctx.repo}"' not in unit
-    assert f'Environment="AVA_HOME={ctx.home}"' in unit
-    assert "AVA_HOST_STATE_DIR" not in unit
+    assert f'Environment="MEIVA_HOME={ctx.home}"' in unit
+    assert "MEIVA_HOST_STATE_DIR" not in unit
     assert f'Environment="HOME={ctx.home_dir}"' in unit
     assert f'Environment="PATH={ctx.repo}/.venv/bin:/usr/local/bin:/usr/bin:/bin"' in unit
     assert f'ExecStart=:"{ctx.repo}/.venv/bin/python" "-m" "cli.main" "start"' in unit
@@ -88,7 +88,7 @@ def test_render_unit_quotes_without_shell_expansion(ctx: BootUnitContext) -> Non
     odd = BootUnitContext(ctx.home, Path('/repo "odd" % $x'), ctx.user, ctx.group, ctx.home_dir)
     unit = render_unit(odd)
     assert 'ExecStart=:"/repo \\"odd\\" %% $x/.venv/bin/python" "-m" "cli.main" "start"' in unit
-    assert "AVA_BOOT_PROXY_WAIT" not in unit
+    assert "MEIVA_BOOT_PROXY_WAIT" not in unit
 
 
 def test_render_unit_refuses_control_characters(ctx: BootUnitContext) -> None:
@@ -120,7 +120,7 @@ def test_unit_enabled_reads_the_one_systemctl_seam(monkeypatch: pytest.MonkeyPat
     commands.on(["systemctl", "is-enabled"], Reply("enabled\n"), Reply("disabled\n"))
     host = fake_host(commands, platform=LINUX_X86)
     assert unit_enabled(host=host) is True
-    assert commands.argvs == [("systemctl", "is-enabled", "ava-boot.service")]
+    assert commands.argvs == [("systemctl", "is-enabled", "meiva-boot.service")]
 
     assert unit_enabled(host=host) is False
     monkeypatch.setattr(boot_unit, "systemd_running", _systemd_down)
@@ -184,18 +184,18 @@ def test_uninstall_removes_only_the_boot_units_paths(
 
     monkeypatch.setattr(boot_unit, "privileged", fake_privileged)
 
-    unit = units / "ava-boot.service"
+    unit = units / "meiva-boot.service"
     unit.write_text(render_unit(ctx))
     foreign = units / "unrelated.service"
     foreign.write_text("y")
-    template = units / "ava-gateway-egress@.service"
+    template = units / "meiva-gateway-egress@.service"
     template.write_text("z")
     steps = uninstall(host=_linux())
 
-    assert ["systemctl", "disable", "--now", "ava-boot.service"] in recorded
+    assert ["systemctl", "disable", "--now", "meiva-boot.service"] in recorded
     assert ["rm", "-f", str(unit)] in recorded
     assert ["systemctl", "daemon-reload"] in recorded
-    assert str(foreign) not in str(recorded) and "ava-gateway-egress" not in str(recorded)
+    assert str(foreign) not in str(recorded) and "meiva-gateway-egress" not in str(recorded)
     assert foreign.exists() and template.exists()
     assert steps == [f"removed {unit}"]
 
@@ -243,7 +243,7 @@ def test_uninstall_leaves_no_failed_record_behind(
     ctx: BootUnitContext, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     units, recorded = _manager_reports(monkeypatch, tmp_path, "failed")
-    name = "ava-boot.service"
+    name = "meiva-boot.service"
     (units / name).write_text(render_unit(ctx))
 
     steps = uninstall(host=_linux())
@@ -283,8 +283,8 @@ def test_privileged_runs_a_root_command_directly_and_others_through_sudo() -> No
 
 
 def test_the_boot_unit_carries_no_home() -> None:
-    assert boot_unit.UNIT_NAME == "ava-boot.service"
-    assert boot_unit.unit_path() == boot_unit.SYSTEM_UNIT_DIR / "ava-boot.service"
+    assert boot_unit.UNIT_NAME == "meiva-boot.service"
+    assert boot_unit.unit_path() == boot_unit.SYSTEM_UNIT_DIR / "meiva-boot.service"
 
 
 def test_interactive_start_never_publishes(
@@ -310,7 +310,7 @@ def test_root_publication_binds_native_custody(
     from base.native_process.ownership import OwnedProcess
 
     owner = OwnedProcess(123, 1.0, 1)
-    expected = "/system.slice/ava-boot.service"
+    expected = "/system.slice/meiva-boot.service"
 
     def in_unit(*, host: Host) -> bool:
         return True
@@ -369,7 +369,7 @@ def test_uninstall_failed_stop_preserves_unit(
     with pytest.raises(RuntimeError, match="stop failed"):
         uninstall(host=_linux())
     assert target.exists()
-    assert calls == [["systemctl", "disable", "--now", "ava-boot.service"]]
+    assert calls == [["systemctl", "disable", "--now", "meiva-boot.service"]]
 
 
 def test_install_enables_native_unit_without_recursively_starting(
@@ -378,10 +378,10 @@ def test_install_enables_native_unit_without_recursively_starting(
     recorded, installed = _install_seams(monkeypatch, tmp_path, enabled=False)
     steps = install(context=ctx, host=_linux())
     assert installed["content"] == render_unit(ctx)
-    assert ["systemctl", "enable", "ava-boot.service"] in recorded
-    assert ["systemctl", "start", "ava-boot.service"] not in recorded
+    assert ["systemctl", "enable", "meiva-boot.service"] in recorded
+    assert ["systemctl", "start", "meiva-boot.service"] not in recorded
     assert not any("crontab" in arg for call in recorded for arg in call)
-    assert "enabled ava-boot.service" in steps
+    assert "enabled meiva-boot.service" in steps
 
 
 def test_unchanged_enabled_unit_never_restarts_or_rewrites(

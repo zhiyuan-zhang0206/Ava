@@ -24,7 +24,6 @@ from agent.tests.impersonation.handoff_inputs import (
     relay_ready,
 )
 from agent.tests.impersonation.handoff_inputs import handoff_clients as handoff_clients
-from ava.tests.fixtures.pin_agent import hosted_resources as hosted_resources
 from base.agents import impersonation as leases
 from base.agents.context.clients import ClientSet
 from base.agents.inbox.insert import insert_inbound_message
@@ -34,6 +33,7 @@ from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
 from base.events.live.bus import EventBus
 from base.native_process.turn_identity import HostedTurnResources
+from meiva.tests.fixtures.pin_agent import hosted_resources as hosted_resources
 
 
 @pytest.mark.parametrize("finish", ["release", "expire"])
@@ -54,7 +54,7 @@ async def test_consent_exec_inbox_release_and_resume(
 ) -> None:
     scope = hosted_resources
     config_authority.env_path.write_text(
-        f"AVA_MACHINE_NAME={machine_identity.name()}\n", encoding="utf-8"
+        f"MEIVA_MACHINE_NAME={machine_identity.name()}\n", encoding="utf-8"
     )
     graph, saver, ctx, config, reset, owner, requested, model_calls = await prepare_graph(
         db_conn,

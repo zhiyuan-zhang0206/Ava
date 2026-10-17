@@ -84,7 +84,7 @@ def test_a_docs_twin_does_not_change_a_clean_module_owner(
     _write(_repo, "base/db.py", "def _restore(): ...\n")
     _write(_repo, "base/user.py", "from base.db import _restore\n")
     assert lcs.main([], repo_root=_repo, parse_ast=ast.parse) == 0
-    _write(_repo, "base/db/db.ava.okf.md", "# docs\n")
+    _write(_repo, "base/db/db.meiva.okf.md", "# docs\n")
     assert lcs.main([], repo_root=_repo, parse_ast=ast.parse) == 0
     assert capsys.readouterr().out == ""
 

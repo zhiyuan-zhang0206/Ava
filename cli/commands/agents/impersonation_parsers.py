@@ -92,7 +92,7 @@ def _h_impersonate(args: argparse.Namespace) -> int:
             allow_env_thread_id=True,
         )
     if problem is not None:
-        print(f"ava: {problem}", file=sys.stderr)
+        print(f"meiva: {problem}", file=sys.stderr)
         return 2
     return cmd_impersonate(args, database_factory=args.database_factory)
 
@@ -102,7 +102,7 @@ def _h_impersonate_relay(args: argparse.Namespace) -> int:
 
     problem = _relay_spec_problem(args.provider, args.thread_id, args.codex_remote)
     if problem is not None:
-        print(f"ava: {problem}", file=sys.stderr)
+        print(f"meiva: {problem}", file=sys.stderr)
         return 2
     return cmd_relay(args, database_factory=args.database_factory, machine=args.runtime.machine)
 
@@ -124,7 +124,7 @@ def _add_send_parser(commands: argparse._SubParsersAction[argparse.ArgumentParse
         dest="agent_id",
         required=True,
         type=int,
-        help="the Ava agent this lease replaces (the delivered identity)",
+        help="the Meiva agent this lease replaces (the delivered identity)",
     )
     sender.add_argument(
         "--to", dest="target_agent_id", required=True, type=int, help="target agent id"

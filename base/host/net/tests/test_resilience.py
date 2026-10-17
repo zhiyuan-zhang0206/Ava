@@ -251,7 +251,7 @@ class TestWaitHooks:
         assert seen == [1.0, 2.0]
 
     def test_retry_uses_the_callers_own_wait(self, retry_waits: list[float]) -> None:
-        # ava:ref base/host/docs/host.ava.okf.md#retry-caller-wait
+        # meiva:ref base/host/docs/host.meiva.okf.md#retry-caller-wait
         seen: list[float] = []
         run = retry(
             Policy(max_attempts=3, backoff=ExponentialBackoff(1.0, 2.0, 8.0), jitter="none"),
@@ -499,5 +499,5 @@ def test_transport_phase_uses_process_not_env_identity(monkeypatch: pytest.Monke
 
     expected = 10.0 * (os.getpid() % 1000) / 1000.0
     for agent_id in (7, 42):
-        monkeypatch.setenv("AVA_AGENT_ID", str(agent_id))
+        monkeypatch.setenv("MEIVA_AGENT_ID", str(agent_id))
         assert jittered(0.0, span=10.0, mode="phase") == expected

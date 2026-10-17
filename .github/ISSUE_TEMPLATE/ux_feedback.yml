@@ -24,4 +24,4 @@ body:
     attributes:
       label: Where
       description: Which page / command / surface this is about.
-      placeholder: e.g. Control > Schedules, `ava config`, spawn dialog
+      placeholder: e.g. Control > Schedules, `meiva config`, spawn dialog

@@ -25,7 +25,7 @@ def test_sequential_note_defaults_to_off() -> None:
     assert settings.agent.prompt_sequential_tool_calls_enabled is False
     prompt = _prompt()
     assert _SENTENCE not in prompt
-    assert "tool calls.\n\nBefore using any `ava.*` function" in prompt
+    assert "tool calls.\n\nBefore using any `meiva.*` function" in prompt
 
 
 @pytest.mark.parametrize("sdk_overview", [True, False])

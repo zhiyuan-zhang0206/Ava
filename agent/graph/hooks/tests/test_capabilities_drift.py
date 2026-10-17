@@ -1,7 +1,7 @@
 """The `# Capabilities` index is a snapshot; the skill catalog under it is not.
 
 `init_context` renders the index into the SystemMessage once per context window,
-while `ava.skills.names()` re-scans the filesystem on every call. These pin the
+while `meiva.skills.names()` re-scans the filesystem on every call. These pin the
 mechanism that keeps the two from drifting apart without waiting for a
 compaction: the membership snapshot recorded at build time, the diff against it,
 and the one note that names what appeared.
@@ -31,7 +31,7 @@ from agent.graph.prompt.capabilities import (
 )
 from agent.state import AgentState, CapabilitiesState
 from base import paths
-from base.agents.context import AvaContext
+from base.agents.context import MeivaContext
 from base.agents.messages.kwargs import NoteTag
 from base.clock import Clock
 from base.config import settings
@@ -46,11 +46,11 @@ from base.packages.plugin_providers import build_model_catalog
 _CONFIG: RunnableConfig = {"configurable": {"thread_id": "1042"}}
 
 
-def _runtime(*, container: bool = False, database_gate: ProcessDbGate) -> Runtime[AvaContext]:
+def _runtime(*, container: bool = False, database_gate: ProcessDbGate) -> Runtime[MeivaContext]:
     """The hook reads only `ops_pool` off the runtime: `None` is the
     container/eval signal, anything else is a real agent."""
     return Runtime(
-        context=AvaContext(
+        context=MeivaContext(
             ops_pool=None if container else MagicMock(),
             llm=MagicMock(),
             event_publisher=MagicMock(),
@@ -67,7 +67,7 @@ def _runtime(*, container: bool = False, database_gate: ProcessDbGate) -> Runtim
 
 @pytest.fixture
 def skills_dir(unit_home: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
-    d = paths.skills_dir(paths.ava_home())
+    d = paths.skills_dir(paths.meiva_home())
     d.mkdir()
     monkeypatch.setattr(
         install_registry,
@@ -179,7 +179,7 @@ async def test_hook_names_the_new_skill_in_the_index_line_shape(
     skills_dir: Path, database_gate: ProcessDbGate
 ) -> None:
     """The note has to read as more of the `# Capabilities` listing, so it uses
-    the same `- \\`ava.skills.<path>\\` — description` line the index does."""
+    the same `- \\`meiva.skills.<path>\\` — description` line the index does."""
     _install(skills_dir, "alpha", "Alpha desc")
     snapshot = indexed_skill_identifiers(
         AgentSlices.resolve(
@@ -192,8 +192,8 @@ async def test_hook_names_the_new_skill_in_the_index_line_shape(
 
     assert update is not None
     (note,) = update["messages"]
-    assert note.additional_kwargs["ava_note_tag"] == NoteTag.NEW_SKILLS.value  # pyright: ignore[reportUnknownMemberType]
-    assert "- `ava.skills.beta` — Beta desc" in note.content  # pyright: ignore[reportUnknownMemberType]
+    assert note.additional_kwargs["meiva_note_tag"] == NoteTag.NEW_SKILLS.value  # pyright: ignore[reportUnknownMemberType]
+    assert "- `meiva.skills.beta` — Beta desc" in note.content  # pyright: ignore[reportUnknownMemberType]
     assert "alpha" not in note.content  # pyright: ignore[reportUnknownMemberType]
 
 
@@ -268,7 +268,7 @@ async def test_a_bulk_install_is_capped_with_a_counted_tail(
         len(lines) == NEW_SKILLS_MAX_ENTRIES + 1  # pyright: ignore[reportUnknownArgumentType]
     )  # the cap, plus the tail  # pyright: ignore[reportUnknownArgumentType]
     assert lines[-1].startswith(f"- … and {extra} more")  # pyright: ignore[reportUnknownMemberType]
-    assert "ava.help(ava.skills)" in lines[-1]
+    assert "meiva.help(meiva.skills)" in lines[-1]
     # The snapshot still covers every one of them, so the ones the note left out
     # are never named later — the tail's pointer is what covers them.
     assert len(update["capabilities"].indexed) == NEW_SKILLS_MAX_ENTRIES + extra  # pyright: ignore[reportUnknownArgumentType, reportUnknownMemberType]
@@ -328,7 +328,7 @@ async def test_hook_defers_when_a_compaction_will_replace_the_window(
     _pin_compact_ceiling(monkeypatch, hard_tokens=10_000_000)
     update = await newly_installed_skills(state, _runtime(database_gate=database_gate), _CONFIG)  # type: ignore[arg-type]
     assert update is not None
-    assert "ava.skills.beta" in update["messages"][0].content  # pyright: ignore[reportUnknownMemberType]
+    assert "meiva.skills.beta" in update["messages"][0].content  # pyright: ignore[reportUnknownMemberType]
 
 
 async def test_container_mode_writes_nothing(
@@ -379,7 +379,7 @@ async def test_narrowing_holds_and_a_configured_name_that_arrives_late_drifts_in
 
     assert update is not None
     (note,) = update["messages"]
-    assert "ava.skills.beta" in note.content  # pyright: ignore[reportUnknownMemberType]
+    assert "meiva.skills.beta" in note.content  # pyright: ignore[reportUnknownMemberType]
     assert "gamma" not in note.content  # pyright: ignore[reportUnknownMemberType]
     assert update["capabilities"].indexed == {"beta"}  # pyright: ignore[reportUnknownMemberType]
 
@@ -387,7 +387,7 @@ async def test_narrowing_holds_and_a_configured_name_that_arrives_late_drifts_in
 async def test_sdk_disabled_skills_never_drift(
     skills_dir: Path, monkeypatch: pytest.MonkeyPatch, database_gate: ProcessDbGate
 ) -> None:
-    """`AVA_SDK_DISABLE=skills` removed the surface on purpose; an install must
+    """`MEIVA_SDK_DISABLE=skills` removed the surface on purpose; an install must
     not put it back through the note."""
     monkeypatch.setattr(settings.agent, "sdk_disable", ["skills"])
     _install(skills_dir, "alpha", "Alpha desc")

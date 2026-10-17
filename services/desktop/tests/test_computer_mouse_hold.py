@@ -143,14 +143,16 @@ async def test_old_helper_cannot_silently_ignore_the_hold(desktop: Desktop, tool
 
 async def test_helper_refusals_reach_the_model_and_the_audit(desktop: Desktop) -> None:
     desktop.refusals["mouse_up"] = (
-        "mouse button left is not held by Ava; mouse_up needs a mouse_down"
+        "mouse button left is not held by Meiva; mouse_up needs a mouse_down"
     )
     response = await desktop.call("mouse_up", {})
-    assert response["ok"] is False and "not held by Ava" in response["error"]
+    assert response["ok"] is False and "not held by Meiva" in response["error"]
     action = next(e for e in desktop.events if e.event_name == "computer_action")
     assert action.attributes["outcome"] == "error"
     desktop.refusals.clear()
-    desktop.refusals["mouse_down"] = "mouse button left is already held by Ava; call mouse_up first"
+    desktop.refusals["mouse_down"] = (
+        "mouse button left is already held by Meiva; call mouse_up first"
+    )
     response = await desktop.call("mouse_down", {})
     assert response["ok"] is False and "already held" in response["error"]
 

@@ -2,28 +2,28 @@
 
 Current delivery, retention and failure contracts belong to their component owners:
 
-- [Native LGTM lifecycle](lgtm.ava.okf.md)
+- [Native LGTM lifecycle](lgtm.meiva.okf.md)
   and [backend configuration](../../../../deploy/lgtm/README.md).
-- [OTLP producer export](../../../../base/telemetry/otlp/docs/telemetry-otlp/telemetry-otlp.ava.okf.md),
-  [delivery topology and recovery mirror](../../../../base/telemetry/otlp/docs/telemetry-otlp/trace-mirror.ava.okf.md),
-  [bounded queues and loss](../../../../base/telemetry/otlp/docs/telemetry-otlp/export-backpressure.ava.okf.md).
-- [Infrastructure metrics](../../../../base/telemetry/otlp/docs/telemetry-otlp/infra-metrics.ava.okf.md)
-  and [event labels](../../../../base/telemetry/otlp/docs/telemetry-otlp/event-resource-labels.ava.okf.md).
+- [OTLP producer export](../../../../base/telemetry/otlp/docs/telemetry-otlp/telemetry-otlp.meiva.okf.md),
+  [delivery topology and recovery mirror](../../../../base/telemetry/otlp/docs/telemetry-otlp/trace-mirror.meiva.okf.md),
+  [bounded queues and loss](../../../../base/telemetry/otlp/docs/telemetry-otlp/export-backpressure.meiva.okf.md).
+- [Infrastructure metrics](../../../../base/telemetry/otlp/docs/telemetry-otlp/infra-metrics.meiva.okf.md)
+  and [event labels](../../../../base/telemetry/otlp/docs/telemetry-otlp/event-resource-labels.meiva.okf.md).
 
 ## Change backend selection
 
-On the observability station, `ava lgtm status` and `ava status` report root-owned
+On the observability station, `meiva lgtm status` and `meiva status` report root-owned
 readiness. Configuration or service-selection changes require a normal stop
-before start; stored observation data survives. `ava lgtm on` and `ava lgtm off`
+before start; stored observation data survives. `meiva lgtm on` and `meiva lgtm off`
 change only the three backend selections and preserve the other service choices.
 Inspect the rendered configuration and pinned versions through the backend owner
 above. Disabling the backend also removes the live data source for its consumers;
 check those consumers before choosing an outage window.
 
-`AVA_TELEMETRY_OTLP_ENABLED=false` disables producer export and trace shipping;
+`MEIVA_TELEMETRY_OTLP_ENABLED=false` disables producer export and trace shipping;
 changing this startup-applied setting requires restarting the affected processes.
 The collector's own infrastructure scrapes have an independent role gate. To
-stop that service, use `ava start --disable-service otel-collector` through normal
+stop that service, use `meiva start --disable-service otel-collector` through normal
 service-selection lifecycle, rather than treating the producer switch as a
 collector stop.
 
@@ -71,17 +71,17 @@ newly emitted rows, since indexed-era data from before the rollout is immutable.
 
 ## Replay a trace mirror
 
-**Ship** — `ava trace ship` (`cli/commands/observability/trace.py`). Recovery replay reads
+**Ship** — `meiva trace ship` (`cli/commands/observability/trace.py`). Recovery replay reads
 the mirror and bypasses the LOCAL sidecar, because replaying through it would
 write the replayed lines back into the mirror (watermark loop). A gateway or
 single-box unit POSTs straight to loopback
-`{AVA_TELEMETRY_TEMPO_ENDPOINT}/v1/traces` without auth; a pure runner POSTs
+`{MEIVA_TELEMETRY_TEMPO_ENDPOINT}/v1/traces` without auth; a pure runner POSTs
 to the gateway collector's configured private OTLP port with its telemetry token. The
 remote trace pipeline writes Tempo only and never the gateway mirror, avoiding
 a second copy and replay ambiguity. Needed only for gaps the in-memory queue
 could not hold (backend down longer than the queue, a collector restart, offline
 machines, past windows). It is run by an operator; no schedule ships it.
-Gated by `AVA_TELEMETRY_OTLP_ENABLED` (refuses while off — one kill switch
+Gated by `MEIVA_TELEMETRY_OTLP_ENABLED` (refuses while off — one kill switch
 for the whole OTLP surface).
 - **incremental** (no args): a per-file byte-offset watermark
   (`traces/.ship-watermark.json`) advances per POSTed line, so re-running ships

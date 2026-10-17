@@ -1,0 +1,73 @@
+---
+type: doc
+title: "Scripts"
+description: "Engineering tools for setup, audits, linting, CI, code generation and deployment."
+tags:
+  - tool
+  - ops
+  - ci
+---
+
+# Scripts
+
+## What is it
+
+`scripts/` contains Python and shell engineering tools invoked by developers, git hooks, CI, and the CLI for installation, validation, and release. Purpose subdirectories and their own children each obey the 20-direct-entry structure budget; every nested directory counts as one direct entry in its parent.
+
+## Script Categories
+
+### Lint (`lint_*.py` + `check_*.py`)
+Split by kind: code/AST/Python-convention guards in [[scripts/lint/docs/lint.meiva.okf.md]]; document/OKF/skill/migration-format guards in [[scripts/content_lint/docs/content_lint.meiva.okf.md]].
+
+### `audit/` — read-only drift audits
+`branch_protection.py` compares live GitHub protection with `.trunk/trunk.yaml`.
+Before changes, `where_used.py` groups importers, tests, strings, docs and baseline
+entries of symbols/modules/paths (`--json`); `where_used_scan.py` owns matching.
+After moves, `module_moves.py` rejects remaining old references and missing names.
+Both CLI owners expose `main(argv, *, repo_root=None)` with shared diagnostics and
+exit codes, defaulting to their checkout. Move imports use the caller's Python
+environment; validation algorithms stay local.
+
+### `codegen/` — derived-artifact generation and OKF tooling
+Tool and artifact owners: [[scripts/codegen/docs/codegen.meiva.okf.md]].
+
+### `ci/` — CI job / test infrastructure
+Collection before sharding has an opt-in, collect-only proof tool:
+[[scripts/ci/docs/file-shard-shadow/file-shard-shadow.meiva.okf.md]]. Required backend
+shards build fresh per-runner plans and validate whole-file groups before execution.
+
+The weekly dependency report and its single tracked issue are owned by
+`dependency_audit.py`: [[scripts/ci/docs/dependency-audit.meiva.okf.md]].
+
+`pull_requests/` holds `accounting.py`, `job_rerun.py`, `runs_export.py` — CI-minute attribution and job/workflow tooling; `status.py` owns reusable GitHub CI verdicts; `monitor.py` queries and waits without queue actions; `commands.py` routes the existing CLI; `owner_operations.py` owns optional authenticated queue submission/eviction and GitHub job re-runs. `scripts/ci/cli.py` preserves the CLI and the public `check_ci`, `CIResult`, `CIStatus` imports. Pending or missing workflow execution stays non-green, including aged zero-job queued runs; no status override exists. Cancelled unexpanded matrix-template names are discarded; concrete-named cancellations remain evidence unless replaced by a newer completed result for the same name; normal conclusion and workflow gates then apply. `pull_requests/trunk_api.py` — the Trunk merge-queue HTTP calls and PR base-freshness read shared by owner tools and `pr_flow_export.py`; `pull_requests/diagnose.py` — the `scripts/ci/cli.py --diagnose` failure classifier; `coverage_gates.py` — backend coverage gates; `test_selector.py` — PR test selection feeding `ci.yml` (shared runtime facts through `test_impact.py`: transitive consumers, fixture scopes and base/head impact, plus package owners; incomplete dynamic inputs explicitly keep FULL and parser failures remain gating; `classify_path` gives every tracked path a class), with test hosts owned by pytest `testpaths`; `refresh_test_durations.py` — complete duration measurement/merge ([how CI gets the timings](../ci/docs/duration-refresh.md)); `shard_counts.py` — the executed-test counts (per shard and directory, and the total against the previous queue run) that the backend shards and the `backend test counts (all shards)` job print, plus the root leak guard's findings from the JUnit properties (one annotation and an artifact; a shard that left no JUnit report or ran no test fails there: [[../../.github/test-gate.meiva.okf.md]]); `migration_smoke.py`, `pgvector_runtime_smoke.py`, `helper_smoke/` (the macOS permissions-helper lane: the signing smoke and the two-section chain smoke) — smoke/verification gates.
+
+CI entry points supply required host, clock and URL ports; timeouts preserve
+failed-read and unconfirmed-write outcomes. Stdlib-only tools stay dependency-free.
+Visual baseline refresh uses the workflow's 45-minute child budget and restores
+moved references on failure. Demo and deployment probes share the passed opener.
+
+Runtime impact propagates consumer bitsets per build, preserving cycles,
+input-to-test sets and reachable unknowns without a persistent graph cache.
+
+### `verify/` — the verification boundaries (Linux container, Tart macOS VM)
+Host side, stdlib only: `boundary.py` (what both recipes share: the start profile, the `meiva init` and `meiva start` argv, the refusal to let host state in, the commit resolution, the evidence directory and bounded logged steps), `container.py` (builds the image on input change, starts one container per commit, clones the commit into `~/.meiva/source`, runs `meiva init` and the first `meiva start`, copies the evidence out, removes the container) over `Dockerfile` (the image: the repository's own provisioning scripts, an ordinary user, no source or secret), and `tart_run.py` (clones the golden Tart image into a throwaway VM, fetches the commit from a read-only export, provisions the toolchain, runs `meiva init`, retires the golden image's loaded helper with guest-local `meiva stop` before the first `meiva start`, observes, copies the evidence out, deletes the VM) over `tart_vm.py` (the Tart driver: the two-VM ceiling, the one read-only share, deletion limited to run VMs) and `tart_golden.py` (builds the golden image once, with a person for the two desktop grants). `observe.py` runs inside either boundary: toolchain, service identity probes, frontend, CORS and a scripted agent executing `print(1 + 2)`, plus on macOS the signed helper chain (launchd, helper, root, every unit) and its desktop grants. Design and claims: [verification boundaries](../../future/infra/engineering/verification-boundaries.md).
+
+Golden-build unit tests use a nonexistent Tart binary to check dry-run step
+rendering and absence of an evidence directory, then synthetic guest records to
+check grant verdicts. They do not build a VM or establish real desktop grants.
+Dry-run still resolves the commit through a read-only Git query.
+
+### Startup / Deployment / Multi-host
+- `entrypoints/agent.py` (spawns a root agent through gateway `POST /api/keyed/v1/agents`; the gateway must already be up), `entrypoints/gateway.py` (directly starts the gateway FastAPI body, ≈ `.venv/bin/python -m gateway`) — **the latter does not spawn an agent**
+- `data_plane_ops/rotate_cluster_secret.py` — the human-bearer `MEIVA_CLUSTER_SECRET` rotation on the gateway (`advance`): journaled as fingerprints, it verifies the pinned logical-backup passphrase (pinning `sha256(secret)` only on a home without a pin) before writing the new secret; default dry run (`--execute` performs it); it does not change the data plane
+- `data_plane_ops/rotate_data_plane_secrets.py` — gateway-host rotation of the Redis credentials (`--scope admin` for the `requirepass` password, `runner` for the runtime ACL password, `both` by default); default dry run (`--execute` performs it), resumable from a 0600 state file; PostgreSQL has no rotatable password here
+
+## Key Dependencies
+
+- [[../../cli/docs/cli.meiva.okf.md]] — `meiva start` owns cluster identity and service readiness; `lifecycle/converge_host.py` applies host wiring and plugin scaffolds.
+- [[../../tests/docs/tests.meiva.okf.md]] — many lint scripts have corresponding `tests/test_lint_*.py`
+
+## Notes
+
+- `hooks/prepush-base.sh` owns the contribution range for branch lint, pyright, input gating, artifact freshness and `provision/prepush_frontend.py`; missing base fails. Frontend selection includes known filesystem consumers and reports global/deletion closure as CI-only.
+- Hooks run lints, codegen, types and frontend checks. Full pytest and migration smoke stay in CI; local tests are targeted.

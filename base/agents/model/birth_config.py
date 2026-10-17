@@ -38,12 +38,12 @@ model. Its resolution is shared by the default-model API, model picker and
 spawn validation through `resolve_default_model`. At birth, the resolved model
 is frozen as `llm_model` — a running process still reads `settings.lm.llm_model` for its own
 live purposes. When the row's value is NULL the resolution falls through to the
-ordinary config chain (`.env` `AVA_MODEL`, then the code default), so a cluster
+ordinary config chain (`.env` `MEIVA_MODEL`, then the code default), so a cluster
 that never touched the control panel behaves exactly as before.
 
 When the row IS set it wins over `.env`: the DB row is the cluster's deliberate
 choice, made through `PUT /api/config/default-model`, and it must not be
-silently dead on the (normal) cluster whose `.env` also carries an `AVA_MODEL`
+silently dead on the (normal) cluster whose `.env` also carries an `MEIVA_MODEL`
 line from install.
 """
 

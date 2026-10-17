@@ -1,6 +1,6 @@
 """The pre-stop start-readiness gate (task #3156; restart caller #3165).
 
-`ava start`'s read-only local checks are moved in front of the stop: a failure
+`meiva start`'s read-only local checks are moved in front of the stop: a failure
 HERE refuses the stop while the host still serves, instead of failing on a
 stopped host. These tests pin each check family's disposition — fatal (refuse)
 vs observation (report, proceed) — plus the caller-shaped knob for the
@@ -55,7 +55,7 @@ def home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     home = tmp_path / "home"
     for name in ("logs", "workspaces", "memory"):
         (home / name).mkdir(parents=True)
-    monkeypatch.setattr(paths, "ava_home", lambda: home)
+    monkeypatch.setattr(paths, "meiva_home", lambda: home)
     monkeypatch.setattr(commands_repo, "roles_or_none", read_roles)
     monkeypatch.setattr(
         root_driver,
@@ -71,14 +71,14 @@ def _venv(
     *,
     python: bool = True,
     python_executable: bool = True,
-    ava: bool = False,
-    ava_executable: bool = True,
+    meiva: bool = False,
+    meiva_executable: bool = True,
 ) -> Path:
     """A checkout carrying the requested entry-point layout under `.venv/bin/`."""
     repo = tmp_path / "repo"
     for name, present, executable in (
         ("python", python, python_executable),
-        ("ava", ava, ava_executable),
+        ("meiva", meiva, meiva_executable),
     ):
         if not present:
             continue
@@ -134,7 +134,7 @@ def test_prod_checkout_violation_is_fatal(
     *,
     command_runtime: CommandRuntime,
 ) -> None:
-    """`ava start` refuses a prod home launched from a dev checkout; that refusal
+    """`meiva start` refuses a prod home launched from a dev checkout; that refusal
     must be reachable before the stop."""
     monkeypatch.setattr(
         paths,
@@ -154,17 +154,17 @@ def test_health_port_occupancy_is_fatal(
     *,
     command_runtime: CommandRuntime,
 ) -> None:
-    """A terminal occupant on a daemon health port refuses `ava start` (#977);
+    """A terminal occupant on a daemon health port refuses `meiva start` (#977);
     the same verdict must refuse the stop."""
     occupied = SimpleNamespace(
-        spec=SimpleNamespace(session="ava-gateway"),
-        detail="answered by $AVA_HOME=/other-unit (http://127.0.0.1:8123/healthz)",
+        spec=SimpleNamespace(session="meiva-gateway"),
+        detail="answered by $MEIVA_HOME=/other-unit (http://127.0.0.1:8123/healthz)",
     )
     monkeypatch.setattr(probe, "occupied_health_ports", lambda _roster: (occupied,))  # pyright: ignore[reportUnknownArgumentType]
 
     assert _run(repo, command_runtime=command_runtime) == 1
     err = capsys.readouterr().err
-    assert "ava-gateway" in err
+    assert "meiva-gateway" in err
     assert "other-unit" in err
     assert "#977" in err
 
@@ -260,7 +260,7 @@ def test_migration_readability_is_fatal(
     command_runtime: CommandRuntime,
 ) -> None:
     """The apply-side vet: a tracked migration the applier cannot open would fail
-    `ava start`'s apply on the stopped host."""
+    `meiva start`'s apply on the stopped host."""
     monkeypatch.setattr(
         migrations,
         "unreadable_migration_files",
@@ -354,19 +354,19 @@ def test_venv_interpreter_without_exec_bit_is_fatal(
     assert "is not executable" in capsys.readouterr().err
 
 
-def test_launcher_check_covers_the_ava_entry_point_only_for_the_update_leg(
+def test_launcher_check_covers_the_meiva_entry_point_only_for_the_update_leg(
     home: Path,
     tmp_path: Path,
     capsys: pytest.CaptureFixture[str],
     *,
     command_runtime: CommandRuntime,
 ) -> None:
-    """The `.venv/bin/ava` exec bit is checked when the caller's start execs it
-    (the update leg) and skipped for an in-process start (`ava restart`), whose
+    """The `.venv/bin/meiva` exec bit is checked when the caller's start execs it
+    (the update leg) and skipped for an in-process start (`meiva restart`), whose
     sessions never touch it — refusing a bounce over an entry point it does not
     use would block a viable restart."""
-    repo = _venv(tmp_path, ava=True, ava_executable=False)
-    launcher = repo / ".venv" / "bin" / "ava"
+    repo = _venv(tmp_path, meiva=True, meiva_executable=False)
+    launcher = repo / ".venv" / "bin" / "meiva"
 
     assert _run(repo, command_runtime=command_runtime) == 1
     assert "not executable" in capsys.readouterr().err
@@ -384,9 +384,9 @@ def test_missing_interpreter_still_refuses_an_in_process_start(
     *,
     command_runtime: CommandRuntime,
 ) -> None:
-    """`check_launcher=False` only drops the `ava` entry point: the interpreter
+    """`check_launcher=False` only drops the `meiva` entry point: the interpreter
     every session launches through is checked for both callers."""
-    repo = _venv(tmp_path, python=False, ava=True)
+    repo = _venv(tmp_path, python=False, meiva=True)
 
     assert _run(repo, check_launcher=False, command_runtime=command_runtime) == 1
     assert "is missing" in capsys.readouterr().err

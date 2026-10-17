@@ -18,7 +18,7 @@ import time
 repo_root, home, name, marker_arg, role, hold_arg = sys.argv[1:7]
 marker = pathlib.Path(marker_arg)
 sys.path.insert(0, repo_root)
-os.environ["AVA_HOME"] = home
+os.environ["MEIVA_HOME"] = home
 
 if role == "slow":
     _real_replace = os.replace

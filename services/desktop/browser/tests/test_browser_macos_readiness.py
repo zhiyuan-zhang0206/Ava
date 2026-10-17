@@ -20,14 +20,14 @@ def _macos_probes(
     monkeypatch.setattr(readiness.os, "getuid", lambda: 501)
 
     def _account() -> tuple[str, Path]:
-        return "ava", home
+        return "meiva", home
 
     monkeypatch.setattr(readiness, "current_account", _account)
 
     def _run(argv: list[str]) -> readiness.ProbeResult:
         calls.append(argv)
         if argv[0] == "/usr/bin/stat":
-            return readiness.ProbeResult(0, "ava\n", "")
+            return readiness.ProbeResult(0, "meiva\n", "")
         if argv[1:2] == ["managername"]:
             return readiness.ProbeResult(managername_code, managername, "")
         if argv[0] == "/bin/launchctl":
@@ -106,7 +106,7 @@ def test_macos_domain_probe_failure_falls_through_to_keychain(
 def test_wait_loop_returns_when_ready_and_records_no_state(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    monkeypatch.setenv("AVA_HOME", str(tmp_path))
+    monkeypatch.setenv("MEIVA_HOME", str(tmp_path))
     states = iter(
         [
             readiness.StartupReadiness(False, "no GUI login session"),

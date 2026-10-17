@@ -142,7 +142,7 @@ def test_start_missing_capability_reports_serve_flags_only(
     command_runtime.config.set_field("gateway_url", "")
     from base import paths
 
-    monkeypatch.setattr(paths, "ava_home", lambda: tmp_path / "unconfigured")
+    monkeypatch.setattr(paths, "meiva_home", lambda: tmp_path / "unconfigured")
     monkeypatch.setattr(_setup_commands, "collect_setup_values", _real_collect_setup_values)
 
     rc = _start_commands.cmd_start(
@@ -154,12 +154,12 @@ def test_start_missing_capability_reports_serve_flags_only(
     assert rc == 1
     err = capsys.readouterr().err  # pyright: ignore[reportUnknownMemberType]
     assert "recorded setup is incomplete" in err
-    assert "AVA_MACHINE_SERVE_GATEWAY" in err
-    assert "AVA_MACHINE_SERVE_AGENT_RUNNER" in err
-    assert "AVA_MACHINE_NAME" not in err  # no capability, so no value field is judged
+    assert "MEIVA_MACHINE_SERVE_GATEWAY" in err
+    assert "MEIVA_MACHINE_SERVE_AGENT_RUNNER" in err
+    assert "MEIVA_MACHINE_NAME" not in err  # no capability, so no value field is judged
     assert command_runtime.machine.name() == "before-failed-setup"
-    # A start never takes identity input: a home with none declared needs `ava init`.
-    assert "`ava init`" in err
+    # A start never takes identity input: a home with none declared needs `meiva init`.
+    assert "`meiva init`" in err
 
 
 def test_start_missing_agent_runner_fields_reports_agent_runner_flags(
@@ -180,7 +180,7 @@ def test_start_missing_agent_runner_fields_reports_agent_runner_flags(
     command_runtime.config.set_field("gateway_url", "")
     from base import paths
 
-    monkeypatch.setattr(paths, "ava_home", lambda: tmp_path / "unconfigured")
+    monkeypatch.setattr(paths, "meiva_home", lambda: tmp_path / "unconfigured")
     monkeypatch.setattr(_setup_commands, "collect_setup_values", _real_collect_setup_values)
 
     rc = _start_commands.cmd_start(
@@ -191,8 +191,8 @@ def test_start_missing_agent_runner_fields_reports_agent_runner_flags(
     )
     assert rc == 1
     err = capsys.readouterr().err  # pyright: ignore[reportUnknownMemberType]
-    assert "AVA_MACHINE_NAME" in err
-    assert "AVA_GATEWAY_URL" in err
+    assert "MEIVA_MACHINE_NAME" in err
+    assert "MEIVA_GATEWAY_URL" in err
 
 
 def test_start_missing_gateway_fields_reports_gateway_flags(
@@ -214,7 +214,7 @@ def test_start_missing_gateway_fields_reports_gateway_flags(
     command_runtime.config.set_field("gateway_url", "")
     from base import paths
 
-    monkeypatch.setattr(paths, "ava_home", lambda: tmp_path / "unconfigured")
+    monkeypatch.setattr(paths, "meiva_home", lambda: tmp_path / "unconfigured")
     monkeypatch.setattr(_setup_commands, "collect_setup_values", _real_collect_setup_values)
 
     rc = _start_commands.cmd_start(
@@ -225,8 +225,8 @@ def test_start_missing_gateway_fields_reports_gateway_flags(
     )
     assert rc == 1
     err = capsys.readouterr().err  # pyright: ignore[reportUnknownMemberType]
-    assert "AVA_MACHINE_NAME" in err
-    assert "AVA_GATEWAY_URL" in err
+    assert "MEIVA_MACHINE_NAME" in err
+    assert "MEIVA_GATEWAY_URL" in err
 
 
 def test_setup_field_resolves_from_settings_only_and_writes_nothing(
@@ -236,17 +236,17 @@ def test_setup_field_resolves_from_settings_only_and_writes_nothing(
     command_runtime: CommandRuntime,
 ) -> None:
     """The settings value (the home's `.env`); a validator gates it, a legacy
-    `machine_name` file is not read, and resolution never writes the home (`ava init`
+    `machine_name` file is not read, and resolution never writes the home (`meiva init`
     owns its identity)."""
     from base import paths
 
     home = tmp_path / "home"
     home.mkdir()
-    monkeypatch.setattr(paths, "ava_home", lambda: home)
+    monkeypatch.setattr(paths, "meiva_home", lambda: home)
     checked: list[str] = []
     field = _setup_commands.SetupField(
         name="machine_name",
-        env_var="AVA_MACHINE_NAME",
+        env_var="MEIVA_MACHINE_NAME",
         hint="<name>",
         validator=checked.append,
     )
@@ -281,10 +281,10 @@ def test_start_refuses_capabilities_that_differ_from_the_ones_init_recorded(
             home,
             tmp_path,
             frozenset({"agent-runner"}),
-            {"AVA_MACHINE_NAME": "t", "AVA_GATEWAY_URL": "http://127.0.0.1:1"},
+            {"MEIVA_MACHINE_NAME": "t", "MEIVA_GATEWAY_URL": "http://127.0.0.1:1"},
         )
     )
-    monkeypatch.setattr(paths, "ava_home", lambda: home)
+    monkeypatch.setattr(paths, "meiva_home", lambda: home)
     launch = MagicMock()
     monkeypatch.setattr(_root_driver_commands, "launch_service_tree", launch)
 
@@ -299,7 +299,7 @@ def test_start_refuses_capabilities_that_differ_from_the_ones_init_recorded(
         == 1
     )
     err = capsys.readouterr().err
-    assert "differ from the ones `ava init` recorded" in err
+    assert "differ from the ones `meiva init` recorded" in err
     launch.assert_not_called()
 
 

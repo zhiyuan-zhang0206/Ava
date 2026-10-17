@@ -5,7 +5,7 @@ exports = ["fake_url_opener.py", "retry_waits.py"]
 "test_ports.py" = ["fake_url_opener.py"]
 
 [debt.env-patch]
-"test_resilience.py#monkeypatch.setenv os.environ.AVA_AGENT_ID" = 1
+"test_resilience.py#monkeypatch.setenv os.environ.MEIVA_AGENT_ID" = 1
 
 [debt.first-party-patch]
 "retry_waits.py#monkeypatch.setattr base.host.net.resilience.retry_asleep" = 1

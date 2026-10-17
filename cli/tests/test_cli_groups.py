@@ -42,7 +42,7 @@ def test_cluster_destroy_acts_on_this_home_and_takes_no_path(tmp_path: Path) -> 
     assert p.parse_args(["cluster", "destroy"]).drop_db is False
     assert p.parse_args(["cluster", "destroy", "--drop-db"]).drop_db is True
     with pytest.raises(SystemExit):
-        p.parse_args(["cluster", "destroy", "--path", str(tmp_path / ".ava-t")])
+        p.parse_args(["cluster", "destroy", "--path", str(tmp_path / ".meiva-t")])
 
 
 def test_cluster_destroy_has_no_flag_that_skips_its_confirmation() -> None:
@@ -53,8 +53,8 @@ def test_cluster_destroy_has_no_flag_that_skips_its_confirmation() -> None:
 
 
 def test_help_builds_parser_config_free(tmp_path: Path) -> None:
-    env = {k: v for k, v in os.environ.items() if not k.startswith("AVA_")}
-    env["AVA_HOME"] = str(tmp_path)
+    env = {k: v for k, v in os.environ.items() if not k.startswith("MEIVA_")}
+    env["MEIVA_HOME"] = str(tmp_path)
     proc = subprocess.run(
         [sys.executable, "-m", "cli.main", "--help"],
         cwd=Path(__file__).resolve().parents[2],
@@ -63,5 +63,5 @@ def test_help_builds_parser_config_free(tmp_path: Path) -> None:
         text=True,
         check=False,
     )
-    assert proc.returncode == 0, f"`ava --help` failed config-free:\n{proc.stderr}"
-    assert proc.stdout.startswith("usage: ava")
+    assert proc.returncode == 0, f"`meiva --help` failed config-free:\n{proc.stderr}"
+    assert proc.stdout.startswith("usage: meiva")

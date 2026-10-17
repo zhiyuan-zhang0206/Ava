@@ -1,9 +1,9 @@
-"""Durable unit identity for `ava init` and `ava start`; no runtime settings or effects.
+"""Durable unit identity for `meiva init` and `meiva start`; no runtime settings or effects.
 
 The private intent precedes `.env` publication and is the home's record of itself:
 a gateway unit's ports (the fixed table) and data-plane host live in its `record`
-(`base.cluster.record`), and no other file on the host lists this cluster. `ava init`
-writes it once (`prepare_identity`, `resume_claim`); `ava start` only admits a home
+(`base.cluster.record`), and no other file on the host lists this cluster. `meiva init`
+writes it once (`prepare_identity`, `resume_claim`); `meiva start` only admits a home
 that carries it (`require_initialized`). A home without an intent that already
 holds a data plane cannot be born again over it; explicit reattachment is required.
 """
@@ -31,7 +31,7 @@ _CAPS = ("gateway", "agent-runner", "observability-station")
 _PHASES = ("claiming", "configured", "provisioned", "ready")
 _DESTROY_INTENT = "destroy-intent.json"
 # The capability flag each capability is declared with, and the identity fields a
-# home records beside it: `ava init`'s inputs, and what a home declares for itself.
+# home records beside it: `meiva init`'s inputs, and what a home declares for itself.
 CAP_ARGS = {
     "gateway": "serve_gateway",
     "agent-runner": "serve_agent_runner",
@@ -160,7 +160,7 @@ def _new_record(inputs: IdentityInput) -> cluster.ClusterRecord:
         ports=ports,
         gateway_home=str(inputs.home),
         created_at=datetime.now(UTC).isoformat(),
-        data_plane_host=inputs.values.get("AVA_DATA_PLANE_HOST", ""),
+        data_plane_host=inputs.values.get("MEIVA_DATA_PLANE_HOST", ""),
     )
 
 
@@ -168,7 +168,7 @@ def gateway_values(rec: cluster.ClusterRecord, inputs: IdentityInput) -> dict[st
     vals = inputs.values
     # Every cluster is born with a human secret: an explicit input wins, else one
     # is minted. The API is always authenticated.
-    secret = vals.get("AVA_CLUSTER_SECRET") or secrets.token_urlsafe(32)
+    secret = vals.get("MEIVA_CLUSTER_SECRET") or secrets.token_urlsafe(32)
     db, redis = cluster.per_cluster_base_urls(rec)
     derived = cluster.derive_env(
         rec,
@@ -181,16 +181,16 @@ def gateway_values(rec: cluster.ClusterRecord, inputs: IdentityInput) -> dict[st
         # mints write generation 0 into the home's database authority store.
         redis_admin_password=secrets.token_urlsafe(32),
         redis_password=secrets.token_urlsafe(32),
-        pgbouncer_enabled=vals.get("AVA_PGBOUNCER_ENABLED", "true").lower()
+        pgbouncer_enabled=vals.get("MEIVA_PGBOUNCER_ENABLED", "true").lower()
         in {"1", "true", "yes", "on"},
     )
-    if "AVA_DB_URL" in vals:
+    if "MEIVA_DB_URL" in vals:
         # Provider credentials are explicit inputs, never locally fabricated.
-        for key in ("AVA_REDIS_ADMIN_PASSWORD", "AVA_REDIS_PASSWORD"):
+        for key in ("MEIVA_REDIS_ADMIN_PASSWORD", "MEIVA_REDIS_PASSWORD"):
             derived.pop(key)
     # Explicit remote-managed URLs are never rewritten into local URLs.
     derived.update(vals)
-    derived["AVA_CLUSTER_SECRET"] = secret
+    derived["MEIVA_CLUSTER_SECRET"] = secret
     return derived
 
 
@@ -218,7 +218,7 @@ def _refuse_detached(home: Path) -> None:
 def pending_claim(home: Path) -> dict[str, Any] | None:
     """The home's interrupted claim; None for a home with no intent.
 
-    Refuses a detached home and a home `ava init` already finished: initialization
+    Refuses a detached home and a home `meiva init` already finished: initialization
     runs once, and changing an identity means destroying the cluster first.
     """
     _refuse_detached(home)
@@ -227,9 +227,9 @@ def pending_claim(home: Path) -> dict[str, Any] | None:
         _require_unclaimed_state(home)
     elif data["phase"] != "claiming":
         raise RuntimeError(
-            f"home {home} is already initialized (phase {data['phase']}); `ava init` runs "
-            "once per home. Use `ava start`; to change this home's identity, run "
-            "`ava cluster destroy` first"
+            f"home {home} is already initialized (phase {data['phase']}); `meiva init` runs "
+            "once per home. Use `meiva start`; to change this home's identity, run "
+            "`meiva cluster destroy` first"
         )
     return data
 
@@ -237,7 +237,7 @@ def pending_claim(home: Path) -> dict[str, Any] | None:
 def _require_unclaimed_state(home: Path) -> None:
     """A home without an intent may carry nothing that says whose it is."""
     env = dotenv_values(home / ".env")
-    if env.get("AVA_DB_URL") or env.get("AVA_GATEWAY_URL"):
+    if env.get("MEIVA_DB_URL") or env.get("MEIVA_GATEWAY_URL"):
         raise RuntimeError(
             "existing home has no recorded identity (start-intent.json) or is incomplete; "
             "explicit reattachment is required"
@@ -271,7 +271,7 @@ def prepare_identity(inputs: IdentityInput) -> None:
     ensure_private_dir(inputs.home)
     if pending_claim(inputs.home) is not None:
         raise RuntimeError(
-            "an interrupted claim exists; re-run `ava init` without flags to finish it"
+            "an interrupted claim exists; re-run `meiva init` without flags to finish it"
         )
     _create_claim(inputs)
 
@@ -292,7 +292,7 @@ def _holds_resources(home: Path) -> bool:
 def _create_claim(inputs: IdentityInput) -> None:
     values = dict(inputs.values)
     for cap in _CAPS:
-        values["AVA_MACHINE_SERVE_" + cap.upper().replace("-", "_")] = str(
+        values["MEIVA_MACHINE_SERVE_" + cap.upper().replace("-", "_")] = str(
             cap in inputs.roles
         ).lower()
     rec = _new_record(inputs) if "gateway" in inputs.roles else None
@@ -314,7 +314,7 @@ def _create_claim(inputs: IdentityInput) -> None:
     _publish_claim(inputs.home, data)
 
 
-# --- what a home declares for itself, and the admission `ava start` gives it -------------
+# --- what a home declares for itself, and the admission `meiva start` gives it -------------
 
 
 def stored_values(home: Path) -> dict[str, str]:
@@ -324,7 +324,7 @@ def stored_values(home: Path) -> dict[str, str]:
 
 
 def capability_value(cap: str, stored: dict[str, str], *, explicit: bool | None) -> bool | None:
-    key = "AVA_MACHINE_" + CAP_ARGS[cap].upper()
+    key = "MEIVA_MACHINE_" + CAP_ARGS[cap].upper()
     raw = stored.get(key)
     if raw is not None and raw.lower() not in {"true", "false", "1", "0", "yes", "no", "on", "off"}:
         raise ValueError(f"invalid capability value {key}")
@@ -337,13 +337,13 @@ def capability_value(cap: str, stored: dict[str, str], *, explicit: bool | None)
 def capability_roles(stored: dict[str, str], explicit: dict[str, bool | None]) -> frozenset[str]:
     """The capability set the stored declarations and the explicit flags give.
 
-    `explicit` maps a capability name to the flag `ava init` was given for it; a
+    `explicit` maps a capability name to the flag `meiva init` was given for it; a
     capability it omits was not given one.
     """
     roles = {cap for cap in CAP_ARGS if capability_value(cap, stored, explicit=explicit.get(cap))}
     if not roles:
         raise ValueError(
-            "no capability declared: `ava init` takes --serve-gateway, --serve-agent-runner "
+            "no capability declared: `meiva init` takes --serve-gateway, --serve-agent-runner "
             "and/or --serve-observability-station"
         )
     return frozenset(roles)
@@ -351,41 +351,41 @@ def capability_roles(stored: dict[str, str], explicit: dict[str, bool | None]) -
 
 @dataclass(frozen=True)
 class InitializedHome:
-    """What `ava start` admitted: the capability set and the intent it comes from."""
+    """What `meiva start` admitted: the capability set and the intent it comes from."""
 
     roles: frozenset[str]
     intent: dict[str, Any]
 
 
 def require_initialized(home: Path) -> InitializedHome:
-    """Admit `home` for `ava start`, or raise why it cannot start. No side effects.
+    """Admit `home` for `meiva start`, or raise why it cannot start. No side effects.
 
     Settings-free. The checks are those a start has always made of an existing
-    home; the first-start inputs are no longer among them (`ava init` takes them).
+    home; the first-start inputs are no longer among them (`meiva init` takes them).
     """
     _refuse_detached(home)
     intent = read_intent(home)
     if intent is None:
         _require_unclaimed_state(home)
         raise RuntimeError(
-            f"home {home} is not initialized: run `ava init` first (it takes the machine name, "
-            "the capabilities and, for a runner, the gateway; see `ava init --help`)"
+            f"home {home} is not initialized: run `meiva init` first (it takes the machine name, "
+            "the capabilities and, for a runner, the gateway; see `meiva init --help`)"
         )
     env = dotenv_values(home / ".env")
     if intent["phase"] == "claiming":
         raise RuntimeError(
-            f"home {home} was only partly initialized: an earlier `ava init` was interrupted "
-            "before it published this home's configuration. Re-run `ava init` (no flags) to finish it"
+            f"home {home} was only partly initialized: an earlier `meiva init` was interrupted "
+            "before it published this home's configuration. Re-run `meiva init` (no flags) to finish it"
         )
     roles = frozenset(intent["roles"])
     if "gateway" in roles:
-        if not env.get("AVA_DB_URL") or not env.get("AVA_REDIS_URL"):
+        if not env.get("MEIVA_DB_URL") or not env.get("MEIVA_REDIS_URL"):
             raise RuntimeError(
                 "existing home has no recorded identity or is incomplete; "
                 "explicit reattachment is required"
             )
-        require_cluster_secret(env.get("AVA_CLUSTER_SECRET") or "", where=f"home {home}")
-    elif not env.get("AVA_GATEWAY_URL"):
+        require_cluster_secret(env.get("MEIVA_CLUSTER_SECRET") or "", where=f"home {home}")
+    elif not env.get("MEIVA_GATEWAY_URL"):
         raise RuntimeError("existing remote unit has no gateway identity")
     _require_host_declarations(home, roles, env)
     return InitializedHome(roles, intent)
@@ -396,13 +396,13 @@ def _require_host_declarations(
 ) -> None:
     from base.sessions.env_forwarding import admit_service_path
 
-    if "gateway" not in roles and env.get("AVA_CLUSTER_SECRET") is not None:
+    if "gateway" not in roles and env.get("MEIVA_CLUSTER_SECRET") is not None:
         raise RuntimeError(
             f"this remote unit's home ({home}) records the human cluster secret; a remote "
             "unit authenticates with its capability's machine API token and never holds "
-            "it. Remove AVA_CLUSTER_SECRET from its .env"
+            "it. Remove MEIVA_CLUSTER_SECRET from its .env"
         )
-    declared = env.get("AVA_SERVICE_PATH")
+    declared = env.get("MEIVA_SERVICE_PATH")
     if declared is None:
-        raise RuntimeError("existing home requires an explicit AVA_SERVICE_PATH declaration")
+        raise RuntimeError("existing home requires an explicit MEIVA_SERVICE_PATH declaration")
     admit_service_path(declared)

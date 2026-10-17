@@ -96,7 +96,7 @@ def test_issue_needs_an_active_generation(tmp_path: Path, runner_home: Path) -> 
 
 def test_issue_names_only_the_credential_free_endpoint(gateway: Path, runner_home: Path) -> None:
     with pytest.raises(unit.UnitCapabilityError, match="credential-free"):
-        issue(gateway, runner_home, endpoint="postgresql://ava:pw@10.0.0.7:6433/ava")
+        issue(gateway, runner_home, endpoint="postgresql://meiva:pw@10.0.0.7:6433/meiva")
 
 
 def test_install_binds_the_unit_and_the_served_endpoint(
@@ -115,11 +115,11 @@ def test_install_binds_the_unit_and_the_served_endpoint(
             elsewhere, bundle, machine=MACHINE, served_endpoint=ENDPOINT, probe=no_probe
         )
     with pytest.raises(unit.UnitCapabilityError, match="another database endpoint"):
-        install(runner_home, issued, served_endpoint="postgresql://ava@10.0.0.8:6433/ava")
+        install(runner_home, issued, served_endpoint="postgresql://meiva@10.0.0.8:6433/meiva")
     assert unit.load_unit_capability(runner_home) is None
 
     installed = install(runner_home, issued)
     assert unit.unit_capability_path(runner_home).stat().st_mode & 0o777 == 0o600
     assert (unit.unit_capability_path(runner_home).parent.stat().st_mode & 0o777) == 0o700
     assert installed == unit.require_unit_capability(runner_home)
-    assert installed.role == "ava_g0_runner"
+    assert installed.role == "meiva_g0_runner"

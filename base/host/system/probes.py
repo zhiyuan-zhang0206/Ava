@@ -77,7 +77,7 @@ def browser_incapability(configured_chrome: str | None, *, host: Host) -> str | 
 
     The single source of truth for the three-prong capability check (display +
     Chrome binary + npx), evaluated in that order. The returned string is
-    operator-facing -- it surfaces in ``ava status``, the ``ava start`` /
+    operator-facing -- it surfaces in ``meiva status``, the ``meiva start`` /
     watchdog / warmup skip logs, and the RuntimeError the browser daemon raises
     at launch -- so each reason names the fix, not just the missing prong.
 
@@ -88,7 +88,7 @@ def browser_incapability(configured_chrome: str | None, *, host: Host) -> str | 
     if not display_available(host=host):
         return "no display (headless server)"
     if resolve_chrome_binary(configured_chrome, host=host) is None:
-        return "no Chrome (install it or set AVA_CHROME_BINARY)"
+        return "no Chrome (install it or set MEIVA_CHROME_BINARY)"
     if host.which("npx") is None:
         return NPX_INCAPABILITY_REASON
     return None

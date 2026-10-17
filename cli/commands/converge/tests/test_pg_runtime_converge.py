@@ -109,7 +109,7 @@ def test_remote_managed_gateway_does_not_require_local_server_or_extension(
         pytest.fail("Remote-managed storage must not prepare a local server runtime")
 
     config = command_runtime.config
-    config.set_field("db_url", "postgresql://test:test@192.0.2.10:5433/ava")
+    config.set_field("db_url", "postgresql://test:test@192.0.2.10:5433/meiva")
     config.set_field("redis_url", "redis://127.0.0.1:6380/0")
     monkeypatch.setattr(pg_runtime, "ensure_pg_runtime", forbidden)
     ensure_pg_binaries_step(
@@ -143,7 +143,7 @@ def test_pg_admission_uses_each_owners_live_remote_verdict(
     local, remote = ConfigBoot(), ConfigBoot()
     contexts: list[ConvergeCtx] = []
     for config, host in ((local, "127.0.0.1"), (remote, "192.0.2.10")):
-        config.set_field("db_url", f"postgresql://test:test@{host}:5433/ava")
+        config.set_field("db_url", f"postgresql://test:test@{host}:5433/meiva")
         config.set_field("redis_url", "redis://127.0.0.1:6380/0")
         contexts.append(
             ConvergeCtx(
@@ -164,8 +164,8 @@ def test_pg_admission_uses_each_owners_live_remote_verdict(
     ensure_pg_binaries_step(contexts[1])
     assert calls == ["local"]
 
-    local.set_field("db_url", "postgresql://test:test@192.0.2.10:5433/ava")
-    remote.set_field("db_url", "postgresql://test:test@127.0.0.1:5433/ava")
+    local.set_field("db_url", "postgresql://test:test@192.0.2.10:5433/meiva")
+    remote.set_field("db_url", "postgresql://test:test@127.0.0.1:5433/meiva")
     ensure_pg_binaries_step(contexts[0])
     ensure_pg_binaries_step(contexts[1])
     assert calls == ["local", "local"]

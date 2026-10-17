@@ -10,7 +10,7 @@ from psycopg_pool import AsyncConnectionPool
 from agent import db
 from agent.graph.llm_errors import FatalProviderError
 from agent.turn.runloop import _handle_fatal_llm_error
-from base.agents.context import AvaContext
+from base.agents.context import MeivaContext
 from base.agents.recovery import breaker
 from base.agents.tests.units import spawn_agent
 from base.cluster.machine import MachineIdentity
@@ -34,8 +34,8 @@ def _permanent_rejection() -> FatalProviderError:
     )
 
 
-def _context(pool: AsyncConnectionPool, *, database_gate: ProcessDbGate) -> AvaContext:
-    return AvaContext(
+def _context(pool: AsyncConnectionPool, *, database_gate: ProcessDbGate) -> MeivaContext:
+    return MeivaContext(
         ops_pool=pool,
         llm=MagicMock(),
         event_publisher=MagicMock(),

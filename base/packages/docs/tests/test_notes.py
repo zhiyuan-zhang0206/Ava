@@ -75,8 +75,8 @@ class TestNormalizeTags:
 class TestParseNote:
     def test_maps_all_fields(self) -> None:
         note = parse_note(
-            "---\ntitle: Alpha\ndescription: A note\ntags: [ava-internal]\n"
-            "timestamp: 2026-01-02 03:04:05\nava_agent: '1609'\nava_machine: gateway-host\n"
+            "---\ntitle: Alpha\ndescription: A note\ntags: [meiva-internal]\n"
+            "timestamp: 2026-01-02 03:04:05\nmeiva_agent: '1609'\nmeiva_machine: gateway-host\n"
             "---\n\n# Alpha\n",
             "health/alpha",
         )
@@ -84,10 +84,10 @@ class TestParseNote:
         assert note.rel == "health/alpha"
         assert note.title == "Alpha"
         assert note.description == "A note"
-        assert note.tags == ("ava-internal",)
+        assert note.tags == ("meiva-internal",)
         assert note.timestamp is not None  # datetime → str()
-        assert note.ava_agent == "1609"
-        assert note.ava_machine == "gateway-host"
+        assert note.meiva_agent == "1609"
+        assert note.meiva_machine == "gateway-host"
         assert note.body == "\n# Alpha\n"
 
     def test_missing_optional_fields_are_none(self) -> None:
@@ -97,8 +97,8 @@ class TestParseNote:
         assert note.description is None
         assert note.tags == ()
         assert note.timestamp is None
-        assert note.ava_agent is None
-        assert note.ava_machine is None
+        assert note.meiva_agent is None
+        assert note.meiva_machine is None
 
     def test_title_falls_back_to_rel(self) -> None:
         note = parse_note("---\ntags: [x]\n---\n\nb\n", "sub/note")

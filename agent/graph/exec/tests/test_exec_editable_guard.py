@@ -11,10 +11,10 @@ import pytest
 from agent.graph.exec import _child_boundary
 from agent.graph.exec._result import ExecChildError, ExecCrashed, ExecDone
 from agent.graph.exec._subprocess import run_in_subprocess
-from ava.tests.fixtures.pin_agent import exec_context
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
 from base.deploy.release import editable_install
+from meiva.tests.fixtures.pin_agent import exec_context
 
 _AGENT_ID = 424242
 
@@ -48,7 +48,7 @@ async def test_poisoned_editable_install_refuses_without_request_file(
         / "lib"
         / "python3.12"
         / "site-packages"
-        / "_editable_impl_ava.pth"
+        / "_editable_impl_meiva.pth"
     )
     deleted_worktree = tmp_path / "deleted-worktree"
     violation = f"{poisoned_pth} names {str(deleted_worktree)!r}"
@@ -139,7 +139,7 @@ async def test_default_guard_refuses_real_poison_without_repairing_files(
     packages.mkdir(parents=True)
     pointer = packages / editable_install.EDITABLE_PTH_NAME
     pointer.write_text(str(tmp_path / "removed-checkout"))
-    metadata = packages / "ava-0.1.5.dist-info" / "direct_url.json"
+    metadata = packages / "meiva-0.1.5.dist-info" / "direct_url.json"
     metadata.parent.mkdir()
     metadata.write_text(
         json.dumps(

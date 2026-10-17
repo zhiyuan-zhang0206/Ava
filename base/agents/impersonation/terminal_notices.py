@@ -19,7 +19,7 @@ def notice_text(snapshot: dict[str, Any]) -> str:
         else "Native authority is restored; its durable handoff may still be restoring. "
     )
     return (
-        f"Ava impersonation lease {snapshot['session_id']} ({snapshot['lease_id']}) "
+        f"Meiva impersonation lease {snapshot['session_id']} ({snapshot['lease_id']}) "
         f"for agent {snapshot['agent_id']} ended: {snapshot['status']}. "
         f"Reason: {snapshot['reason'] or snapshot['status']}. Ended at: {snapshot['ended_at']}. "
         "That lease no longer grants external control. " + native + "This notice concerns only "

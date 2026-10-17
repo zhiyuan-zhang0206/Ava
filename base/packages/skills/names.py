@@ -3,25 +3,25 @@
 **Dash is canonical** at every human-facing surface: on-disk skill directory
 names, SKILL.md frontmatter `name:`, CLI arguments, gateway API fields, the
 agent-config skill lists, the frontend. That is the Agent Skills / Claude Code
-ecosystem spelling, so a skill directory authored for Ava is a skill directory
+ecosystem spelling, so a skill directory authored for Meiva is a skill directory
 anywhere else and vice versa.
 
 **Underscore is the Python projection and nothing else.** `-` is not an
 identifier character, so the CodeAct namespace reaches the
-`write-a-pr-description/` directory as `ava.skills.write_a_pr_description`.
-`ava.skills.target()` renders that projection outward; this module is the
+`write-a-pr-description/` directory as `meiva.skills.write_a_pr_description`.
+`meiva.skills.target()` renders that projection outward; this module is the
 inbound half — the single place a name arriving from a human, a preset row, an
 API body, or a legacy underscore directory is folded to a comparison key.
 
 `.` separates namespace segments in the loadable Python projection (the skill
 tree's shape *is* the folder shape, so a plugin's contribution is a folder like
 any other). The display identifier renders the same tree with `:` between
-segments (`ava.skills.web-ai:deep-research`); `match_key` folds an inbound
+segments (`meiva.skills.web-ai:deep-research`); `match_key` folds an inbound
 ecosystem-style `plugin:skill` reference (or dotted input) onto that same key,
 so every spelling resolves to one skill.
 
 **Never build a filesystem path out of `match_key` output.** A few surfaces use
-a name as a path segment (`ava skill register <name>`, `PUT /api/skills`), and
+a name as a path segment (`meiva skill register <name>`, `PUT /api/skills`), and
 the directory on disk may legitimately be spelled either way. Use `find` to map
 the inbound spelling onto the real on-disk / registry spelling, then use that.
 """
@@ -36,7 +36,7 @@ def match_key(name: str) -> str:
 
     Two names denote the same skill iff their keys are equal, so call this on
     BOTH sides of every comparison. It doubles as the attribute-form renderer
-    for a single segment (`ava.skills.<seg>`), which is the same fold.
+    for a single segment (`meiva.skills.<seg>`), which is the same fold.
     """
     return name.replace("-", "_").replace(":", ".")
 
@@ -44,7 +44,7 @@ def match_key(name: str) -> str:
 def display_name(name: str) -> str:
     """Render a name in canonical display form: `_` -> `-`.
 
-    Applied on the way out (`ava.skills.identifier`, CLI listings, API
+    Applied on the way out (`meiva.skills.identifier`, CLI listings, API
     responses) so even a legacy underscore directory presents the canonical
     spelling. Namespace `.` separators are left alone.
     """
@@ -56,7 +56,7 @@ def find(name: str, candidates: Iterable[str]) -> str | None:
 
     An exact hit wins; otherwise the *unique* candidate sharing its
     `match_key`. Ambiguity reads as "not found" — the loader refuses a
-    post-normalization duplicate outright (`ava.skills.SkillNameCollision`), so
+    post-normalization duplicate outright (`meiva.skills.SkillNameCollision`), so
     there is no correct pick to make here.
 
     This is the bridge for every surface where an inbound name has to become a

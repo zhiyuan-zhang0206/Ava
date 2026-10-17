@@ -16,7 +16,7 @@ from base.cluster.dataplane.pg_tools import is_macos
 from base.cluster.machine import MachineIdentity
 from base.host.brew_pin import brew_prefix
 from base.host.db_authority.delivery import POOLER_ADMIN
-from base.paths import ava_home
+from base.paths import meiva_home
 
 
 def pgbouncer_bin() -> str:
@@ -35,7 +35,7 @@ def pgbouncer_bin() -> str:
 
 
 def pooler_dir() -> Path:
-    d = ava_home() / "pgbouncer"
+    d = meiva_home() / "pgbouncer"
     d.mkdir(parents=True, exist_ok=True)
     return d
 
@@ -80,7 +80,7 @@ def pgbouncer_public_listener_reachable(
     `listen_addr` includes the reachable address but failed to bind it
     keeps running on loopback alone — pgbouncer treats a failed bind as a WARNING,
     not an error — and a loopback-only probe cannot tell the difference, so
-    `AVA_DB_URL`'s public path stays silently dead for every enrolled agent-runner
+    `MEIVA_DB_URL`'s public path stays silently dead for every enrolled agent-runner
     (task #1288: 2026-08-16 a boot-time address race left the pooler loopback-only
     for two days).
 

@@ -10,7 +10,7 @@ import type { BackendTimelineItem, SystemEvent } from "../contracts/types";
 /**
  * The timeline kinds that mark a history rewrite — the compact envelope rows
  * (`inbound_compact_request` = UI-triggered force compact,
- * `inbound_compact_summary` = agent-initiated `ava.self.compact`).
+ * `inbound_compact_summary` = agent-initiated `meiva.self.compact`).
  */
 const COMPACT_ENVELOPE_KINDS: ReadonlySet<string> = new Set([
   "inbound_compact_request",

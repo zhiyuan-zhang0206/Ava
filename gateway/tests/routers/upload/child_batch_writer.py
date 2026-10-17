@@ -9,8 +9,8 @@ from psycopg_pool import ConnectionPool
 
 def main() -> None:
     config = json.load(sys.stdin)
-    os.environ["AVA_HOME"] = config["home"]
-    os.environ["AVA_CONFIG_FETCH"] = "skip"
+    os.environ["MEIVA_HOME"] = config["home"]
+    os.environ["MEIVA_CONFIG_FETCH"] = "skip"
     from gateway.routers.upload import batches as owner
 
     directory = Path(config["directory"])

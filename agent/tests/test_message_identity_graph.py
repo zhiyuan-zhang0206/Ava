@@ -62,7 +62,7 @@ def test_graph_input_node_and_working_copy_output_have_persisted_ids(
     second = app.get_state(config).values["messages"]
     assert len(first) == 5
     assert len({m.id for m in first}) == 5
-    assert all(m.id and not m.additional_kwargs.get("ava_ephemeral_message_id") for m in first)
+    assert all(m.id and not m.additional_kwargs.get("meiva_ephemeral_message_id") for m in first)
     assert [m.id for m in first] == [m.id for m in second]
     items, _ = build_timeline_items(first, inputs=_TIMELINE_INPUTS)
     assert [i.source_message_id for i in items] == [m.id for m in first]
@@ -76,4 +76,4 @@ def test_legacy_read_marker_precedes_working_merge_and_survives_reducer() -> Non
     replayed = guarded_delta_reducer([], [stored])
     item = build_timeline_items(replayed, inputs=_TIMELINE_INPUTS)[0][0]
     assert item.source_message_id is None
-    assert raw.additional_kwargs["ava_ephemeral_message_id"] is True
+    assert raw.additional_kwargs["meiva_ephemeral_message_id"] is True

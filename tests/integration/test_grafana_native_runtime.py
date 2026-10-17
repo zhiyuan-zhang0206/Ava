@@ -2,7 +2,7 @@
 
 The regular test shards skip this module because the repository does not vendor
 Grafana.  CI downloads the checksum-pinned 13.2.3 release and points the two
-``AVA_TEST_GRAFANA_*`` variables at it.  No Docker daemon is involved.
+``MEIVA_TEST_GRAFANA_*`` variables at it.  No Docker daemon is involved.
 """
 
 from __future__ import annotations
@@ -34,11 +34,11 @@ TRACE_ID = "70d53b9c44efa6d116f9b26a950e3309"
 
 
 def _grafana_distribution() -> tuple[Path, Path]:
-    binary = os.environ.get("AVA_TEST_GRAFANA_BIN")
-    home = os.environ.get("AVA_TEST_GRAFANA_HOME")
+    binary = os.environ.get("MEIVA_TEST_GRAFANA_BIN")
+    home = os.environ.get("MEIVA_TEST_GRAFANA_HOME")
     if binary is None or home is None:
         pytest.skip(
-            "set AVA_TEST_GRAFANA_BIN and AVA_TEST_GRAFANA_HOME to run the native Grafana contract"
+            "set MEIVA_TEST_GRAFANA_BIN and MEIVA_TEST_GRAFANA_HOME to run the native Grafana contract"
         )
     assert binary is not None and home is not None
     return Path(binary), Path(home)
@@ -56,14 +56,14 @@ _NATIVE_ENVIRONMENT = {
     "GF_SERVER_SERVE_FROM_SUB_PATH": "true",
     "GF_ANALYTICS_REPORTING_ENABLED": "false",
     "GF_ANALYTICS_CHECK_FOR_UPDATES": "false",
-    "AVA_ALERTS_WEBHOOK_TOKEN": "",
-    "AVA_ALERTS_TELEGRAM_BOT_TOKEN": "unconfigured",
-    "AVA_ALERTS_TELEGRAM_CHAT_ID": "0",
+    "MEIVA_ALERTS_WEBHOOK_TOKEN": "",
+    "MEIVA_ALERTS_TELEGRAM_BOT_TOKEN": "unconfigured",
+    "MEIVA_ALERTS_TELEGRAM_CHAT_ID": "0",
     "GRAFANA_PG_PASSWORD": "",
 }
 _RUNTIME_ENV_PLACEHOLDERS = {
     "GRAFANA_PROVISIONING_PATH": "/etc/grafana/provisioning/dashboards",
-    "AVA_TEMPO_QUERY_URL": "http://127.0.0.1:3200",
+    "MEIVA_TEMPO_QUERY_URL": "http://127.0.0.1:3200",
     "LOKI_URL": "http://127.0.0.1:3100",
     "PROMETHEUS_URL": "http://127.0.0.1:9090",
     "PG_URL": "127.0.0.1:5433",
@@ -232,7 +232,7 @@ def _import_shipped_dashboards_and_open_as_viewer(
     # Import the one user-facing shipped dashboard into this disposable
     # instance (2026-08-23 merge: ops-main is the only shipped dashboard —
     # the URL that prompted this incident).
-    for dashboard, route in ((_dashboard("ava-ops-main.json"), "/d/ava-ops-main/ava-ops"),):
+    for dashboard, route in ((_dashboard("meiva-ops-main.json"), "/d/meiva-ops-main/meiva-ops"),):
         import_status, _, import_body = _request(
             f"{base_url}/api/dashboards/db",
             data=json.dumps({"dashboard": dashboard, "overwrite": True}).encode(),
@@ -284,11 +284,11 @@ def test_shipped_grafana_runtime_contract() -> None:
 
 
 def test_default_dashboard_refresh_is_load_bounded() -> None:
-    """The merged Ava Ops dashboard (2026-08-23: the four dashboards collapsed
+    """The merged Meiva Ops dashboard (2026-08-23: the four dashboards collapsed
     into one) keeps the user-approved refresh: 10m; the default window is
     now-24h (user request 2026-09-14; it was now-6h under task #1399 to bound
     Loki query weight)."""
-    for path in DASHBOARD_DIR.glob("ava-*.json"):
+    for path in DASHBOARD_DIR.glob("meiva-*.json"):
         dashboard = json.loads(path.read_text(encoding="utf-8"))
         assert dashboard["refresh"] == "10m"
         assert dashboard["time"] == {"from": "now-24h", "to": "now"}
@@ -359,12 +359,12 @@ def test_anonymous_viewer_can_open_tempo_trace_in_explore(tmp_path: Path) -> Non
         _import_shipped_dashboards_and_open_as_viewer(base_url, admin_headers)
 
         # No shipped dashboard links to Tempo since the 2026-08-23 merge
-        # (the Recent traces panel left with ava-overview; Tempo returns in a
+        # (the Recent traces panel left with meiva-overview; Tempo returns in a
         # later phase) — the Viewer-can-Explore contract is kept by building
         # the trace target a Tempo panel would carry.
         trace_target: dict[str, Any] = {
             "datasource": {"type": "tempo", "uid": "tempo"},
-            "query": '{resource.service.name="ava"}',
+            "query": '{resource.service.name="meiva"}',
             "queryType": "traceql",
             "refId": "A",
         }

@@ -194,7 +194,7 @@ def close_terminals(
     database_factory: DatabaseFactory,
     local_machine: MachineIdentity,
 ) -> None:
-    """Close this unit's terminals at `ava stop`: HUP/TERM, a bounded grace, then SIGKILL.
+    """Close this unit's terminals at `meiva stop`: HUP/TERM, a bounded grace, then SIGKILL.
 
     The grace is `_TERMINAL_STOP_GRACE_S`, capped by the stop's `deadline`;
     the SIGKILL leg is bounded by `TERMINAL_KILL_WAIT_S` and runs even when
@@ -230,7 +230,7 @@ def close_terminals(
 
 
 def force_close_terminals() -> None:
-    """Close this unit's terminals at `ava stop --force`: no grace, no notices.
+    """Close this unit's terminals at `meiva stop --force`: no grace, no notices.
 
     Force skips owner notices and drain guarantees. A surviving shell still
     fails it; known job leftovers remain diagnostics.

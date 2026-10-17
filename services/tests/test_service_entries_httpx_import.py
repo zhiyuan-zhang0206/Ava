@@ -17,7 +17,7 @@ import pytest
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 
-# name -> AVA_PROCESS_PROFILE the roster sets; `child_httpx_probe.py` owns the modules each
+# name -> MEIVA_PROCESS_PROFILE the roster sets; `child_httpx_probe.py` owns the modules each
 # entry imports.
 ENTRIES: dict[str, str] = {
     "heartbeat": "gateway",
@@ -35,11 +35,11 @@ def test_service_entry_imports_httpx_in_a_fresh_process(entry: str, tmp_path: Pa
     profile = ENTRIES[entry]
     home = tmp_path / "home"
     home.mkdir()
-    env = {key: value for key, value in os.environ.items() if not key.startswith("AVA_")}
+    env = {key: value for key, value in os.environ.items() if not key.startswith("MEIVA_")}
     env.update(
-        AVA_HOME=str(home),
-        AVA_CONFIG_FETCH="skip",
-        AVA_PROCESS_PROFILE=profile,
+        MEIVA_HOME=str(home),
+        MEIVA_CONFIG_FETCH="skip",
+        MEIVA_PROCESS_PROFILE=profile,
     )
     proc = subprocess.run(  # noqa: S603 — fixed argv, sys.executable is trusted
         [sys.executable, "-X", "utf8", str(_PROBE), entry],

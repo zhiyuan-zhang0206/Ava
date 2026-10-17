@@ -83,7 +83,7 @@ That is the general trade this repo bets on: orchestration runtimes that
 expose a constrained workflow vocabulary make the common shapes cheap but the
 uncommon ones impossible without an escape hatch; code-as-action makes every
 shape the same price — a few lines of Python. The checkpoint protocol
-(`skills/ava-dynamic-workflow/`) is deliberately small because the language
+(`skills/meiva-dynamic-workflow/`) is deliberately small because the language
 underneath it is already the full one.
 
 One honesty note: this case study demonstrates *orchestration mechanics* —
@@ -91,7 +91,7 @@ wake-up economics, failure recovery, budget discipline. The *content quality*
 of the resulting report depends mostly on the underlying models, which is why
 we publish no head-to-head output-quality comparisons here.
 
-The report this run produced, served by the agent's own `ava.ui` at delivery
+The report this run produced, served by the agent's own `meiva.ui` at delivery
 time (in Chinese — the language the operator asked in):
 
 ![The report the run produced](landscape-run-output.png)

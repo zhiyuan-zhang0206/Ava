@@ -6,7 +6,7 @@ Each of these is a regression test for something the rollout did silently:
 - the roster showed that same host `online` throughout, so the two sources of
   truth disagreed with nothing to see;
 - the updater's recovery branch could only fire on a checkout/sync failure, so a
-  failed `ava restart` reached no fallback at all.
+  failed `meiva restart` reached no fallback at all.
 
 No cluster is required: the `machines` reads and the ops probe are stubbed.
 """
@@ -80,7 +80,7 @@ def test_declined_restart_reports_its_own_exit_code(
 ) -> None:
     """A preflight refusal stops nothing, so the host is still serving. It must be
     distinguishable from a failure after the stop — the updater shell branches on
-    exactly this code to decide whether to run `ava start`."""
+    exactly this code to decide whether to run `meiva start`."""
 
     stopped: list[bool] = []
 
@@ -180,7 +180,7 @@ def test_declined_restart_releases_a_pause_nothing_else_owns(
     *,
     command_runtime: CommandRuntime,
 ) -> None:
-    """A locally spawned self-heal pauses this host before running `ava restart`. If
+    """A locally spawned self-heal pauses this host before running `meiva restart`. If
     that restart declines, nothing else clears the pause — so a healthy host would
     sit with its restarter killed until an operator noticed."""
 
@@ -209,7 +209,7 @@ def test_declined_restart_leaves_a_stop_holds_pause_alone(
     command_runtime: CommandRuntime,
 ) -> None:
     """A maintenance hold that has entered its stop window owns this pause and
-    `ava start` releases it after readiness; unpausing now would reopen the host
+    `meiva start` releases it after readiness; unpausing now would reopen the host
     while its services are half stopped."""
     from base.deploy.maintenance.pause_owner import PauseOwnerSnapshot
     from base.deploy.maintenance.state import MaintenanceHold, MaintenancePhase
@@ -268,7 +268,7 @@ def test_failed_restart_before_any_service_stops_releases_its_own_hold(
 ) -> None:
     """The drain-stage failure leaves the hold this restart took (cohort empty or
     half drained), which gates every wake on the machine until someone runs
-    `ava start`. Nothing was stopped, so the restart lets go of it: no compensating
+    `meiva start`. Nothing was stopped, so the restart lets go of it: no compensating
     start, no retry."""
     from base.deploy.maintenance import admission, pause_owner
     from base.deploy.maintenance.state import MaintenanceHold
@@ -321,7 +321,7 @@ async def test_a_drain_failure_in_restart_leaves_the_host_wakeable(
     *,
     command_runtime: CommandRuntime,
 ) -> None:
-    """Through `ava restart` itself: the stop leg takes the hold and fails in its
+    """Through `meiva restart` itself: the stop leg takes the hold and fails in its
     drain; the command reports the failure and the hold is gone."""
     from base.deploy.maintenance import admission, pause_owner
 

@@ -157,7 +157,7 @@ async def test_scheduled_commit_runs_off_the_event_loop(
 ) -> None:
     from services.backup.scheduler import worker
 
-    name = "ava-20260926T000000Z.dump.enc"
+    name = "meiva-20260926T000000Z.dump.enc"
     stub_worker(
         tmp_path,
         monkeypatch,
@@ -165,7 +165,7 @@ async def test_scheduled_commit_runs_off_the_event_loop(
         "artifact.parent.mkdir();artifact.write_bytes(b'encrypted')\n"
         "Path(sys.argv[2]).write_text(json.dumps(dict(artifact=artifact.name,sha256='d')))\n",
     )
-    monkeypatch.setattr(worker, "ava_home", lambda: tmp_path)
+    monkeypatch.setattr(worker, "meiva_home", lambda: tmp_path)
     ticks = 0
     during: list[int] = []
 
@@ -226,7 +226,7 @@ async def test_worker_secrets_and_progress_never_touch_retained_files(
         "Path(sys.argv[2]).write_text(json.dumps({'seen':seen}))\n",
     )
     lines: list[str] = []
-    secret = "postgresql://ava:s3cret@127.0.0.1:5433/ava"  # noqa: S105 -- fixture
+    secret = "postgresql://meiva:s3cret@127.0.0.1:5433/meiva"  # noqa: S105 -- fixture
     completed = await worker_process.run_operation(
         "m",
         {"chain": "c"},

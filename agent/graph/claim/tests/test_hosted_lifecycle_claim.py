@@ -2,7 +2,7 @@ from langchain_core.messages import HumanMessage
 
 from agent.db import ClaimedInbound
 from agent.graph.claim._dispatch import BatchState, handle_restart
-from base.agents.context import AvaContext
+from base.agents.context import MeivaContext
 from base.clock import Clock
 from base.config.tests.configuration import defaults
 from base.host.env.agent_slices import AgentSlices
@@ -12,7 +12,7 @@ from base.packages.plugin_providers import build_model_catalog
 async def test_hosted_restart_marker_does_not_claim_completion() -> None:
     state = BatchState()
     await handle_restart(
-        AvaContext(
+        MeivaContext(
             agent=AgentSlices.resolve(default_reader=defaults()),
             catalog=build_model_catalog(),
             clock_factory=Clock.from_settings,
@@ -24,7 +24,7 @@ async def test_hosted_restart_marker_does_not_claim_completion() -> None:
     assert state.restart_requested
     assert isinstance(state.new_msgs[0], HumanMessage)
     assert (
-        state.new_msgs[0].model_dump()["additional_kwargs"]["ava_note_tag"] == "lifecycle_restart"
+        state.new_msgs[0].model_dump()["additional_kwargs"]["meiva_note_tag"] == "lifecycle_restart"
     )
     content = state.new_msgs[0].model_dump()["content"]
     assert isinstance(content, str)

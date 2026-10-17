@@ -39,7 +39,7 @@ def _adapter(core: _FakeCore, handler: Any, **config: Any) -> TelegramAdapter:
 
 
 def _settings(monkeypatch: pytest.MonkeyPatch, tmp_path: Any) -> None:
-    monkeypatch.setenv("AVA_HOME", str(tmp_path))
+    monkeypatch.setenv("MEIVA_HOME", str(tmp_path))
 
 
 def test_get_updates_requests_callback_query(
@@ -67,7 +67,7 @@ def test_get_updates_requests_callback_query(
 def test_get_updates_uses_configured_poll_timeout(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Any
 ) -> None:
-    """The long-poll window rides AVA_TELEGRAM_POLL_TIMEOUT_SECONDS (task
+    """The long-poll window rides MEIVA_TELEGRAM_POLL_TIMEOUT_SECONDS (task
     #698 G8), and the HTTP read timeout stays 10s above it."""
     _settings(monkeypatch, tmp_path)
     seen: dict[str, Any] = {}

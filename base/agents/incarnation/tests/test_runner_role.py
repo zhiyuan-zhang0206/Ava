@@ -1,7 +1,7 @@
-"""Contract tests for the `ava_runner` capability group's matrix (Task #1236).
+"""Contract tests for the `meiva_runner` capability group's matrix (Task #1236).
 
 Prove the design's grant matrix on a throwaway Postgres, exercised through a
-write-generation-shaped runner login that inherits the NOLOGIN `ava_runner`
+write-generation-shaped runner login that inherits the NOLOGIN `meiva_runner`
 group: it can write exactly its audited surface — checkpoint tables (full
 CRUD), inbound claim (SELECT/UPDATE), agents_meta status (SELECT/UPDATE),
 machine_units (INSERT/UPDATE/SELECT), the compact-boundary enqueue, and SELECT
@@ -39,9 +39,9 @@ from base.host.net.url_secret import url_with_userinfo
 from base.telemetry.metrics.observed_metrics import MetricObservation, write_observations
 
 _RUNNER_PW = "runner-pw-fixture"
-_RUNNER_LOGIN = "ava_g0_runner"
+_RUNNER_LOGIN = "meiva_g0_runner"
 _CLUSTER_SECRET = "cluster-secret-x"  # noqa: S105 — test fixture, not a real credential
-_IDENTITY = "ava_citest"  # the throwaway db/role the fixture births
+_IDENTITY = "meiva_citest"  # the throwaway db/role the fixture births
 
 
 def _schema_sql() -> str:
@@ -90,7 +90,7 @@ def grant_runner(url: str, identity: str = _IDENTITY) -> None:
 def test_runner_group_is_a_nologin_capability_and_the_refresh_is_idempotent(
     runner_db: str,
 ) -> None:
-    """The refresh creates `ava_runner` as a NOLOGIN group; running it again is
+    """The refresh creates `meiva_runner` as a NOLOGIN group; running it again is
     a no-op, not an error, and the login's privileges are the group's."""
     grant_runner(runner_db)
     grant_runner(runner_db)
@@ -98,9 +98,9 @@ def test_runner_group_is_a_nologin_capability_and_the_refresh_is_idempotent(
     with psycopg.connect(_admin_url(runner_db), autocommit=True) as conn:
         attrs = conn.execute(
             "SELECT rolcanlogin, rolsuper, rolcreatedb, rolcreaterole"
-            " FROM pg_roles WHERE rolname = 'ava_runner'"
+            " FROM pg_roles WHERE rolname = 'meiva_runner'"
         ).fetchone()
-    assert attrs == (False, False, False, False), "ava_runner is a NOLOGIN capability group"
+    assert attrs == (False, False, False, False), "meiva_runner is a NOLOGIN capability group"
 
 
 def test_runner_projects_observations_and_records_actual_lifecycle(runner_db: str) -> None:
@@ -140,10 +140,10 @@ def test_ensure_checkpoint_schema_creates_tables_owned_by_identity(runner_db: st
     (so the main role keeps its gateway-side checkpoint reads), and the runner
     grants then target existing tables — the fresh-birth order."""
     admin = _admin_url(runner_db)
-    identity = "ava_runner_ct2"
+    identity = "meiva_runner_ct2"
     with psycopg.connect(admin, autocommit=True) as conn:
-        conn.execute("CREATE ROLE ava_runner_ct2 LOGIN")
-        conn.execute("CREATE DATABASE ava_runner_ct2 OWNER ava_runner_ct2")
+        conn.execute("CREATE ROLE meiva_runner_ct2 LOGIN")
+        conn.execute("CREATE DATABASE meiva_runner_ct2 OWNER meiva_runner_ct2")
     try:
         # Mirror the birth order: schema.sql applied AS the cluster role first
         # (provision_database does exactly this), then the checkpoint-schema
@@ -194,10 +194,10 @@ def test_ensure_checkpoint_schema_creates_tables_owned_by_identity(runner_db: st
         with psycopg.connect(admin, autocommit=True) as conn:
             conn.execute(
                 "SELECT pg_terminate_backend(pid) FROM pg_stat_activity"
-                " WHERE datname = 'ava_runner_ct2' AND pid <> pg_backend_pid()"
+                " WHERE datname = 'meiva_runner_ct2' AND pid <> pg_backend_pid()"
             )
-            conn.execute("DROP DATABASE IF EXISTS ava_runner_ct2")
-            conn.execute("DROP ROLE IF EXISTS ava_runner_ct2")
+            conn.execute("DROP DATABASE IF EXISTS meiva_runner_ct2")
+            conn.execute("DROP ROLE IF EXISTS meiva_runner_ct2")
 
 
 def test_fresh_install_dependency_drift_precedes_checkpoint_setup(
@@ -207,19 +207,19 @@ def test_fresh_install_dependency_drift_precedes_checkpoint_setup(
     from base.cluster.provision import CheckpointDependencyDriftError
 
     admin = _admin_url(runner_db)
-    identity = "ava_runner_ct3"
+    identity = "meiva_runner_ct3"
     db_url = url_with_userinfo(
         runner_db.rsplit("/", 1)[0] + "/" + identity, identity, _CLUSTER_SECRET
     )
     with psycopg.connect(admin, autocommit=True) as conn:
-        conn.execute("CREATE ROLE ava_runner_ct3 LOGIN")
-        conn.execute("CREATE DATABASE ava_runner_ct3 OWNER ava_runner_ct3")
+        conn.execute("CREATE ROLE meiva_runner_ct3 LOGIN")
+        conn.execute("CREATE DATABASE meiva_runner_ct3 OWNER meiva_runner_ct3")
     try:
         with psycopg.connect(db_url, autocommit=True) as conn:
             conn.execute(_schema_sql())  # type: ignore[arg-type]
 
         monkeypatch.setattr(PostgresSaver, "MIGRATIONS", [*PostgresSaver.MIGRATIONS, "SELECT 1"])
-        with pytest.raises(CheckpointDependencyDriftError, match="Ava timestamp migration"):
+        with pytest.raises(CheckpointDependencyDriftError, match="Meiva timestamp migration"):
             ensure_checkpoint_schema(identity, base_admin_url=admin)
 
         with psycopg.connect(db_url, autocommit=True) as conn:
@@ -229,10 +229,10 @@ def test_fresh_install_dependency_drift_precedes_checkpoint_setup(
         with psycopg.connect(admin, autocommit=True) as conn:
             conn.execute(
                 "SELECT pg_terminate_backend(pid) FROM pg_stat_activity"
-                " WHERE datname = 'ava_runner_ct3' AND pid <> pg_backend_pid()"
+                " WHERE datname = 'meiva_runner_ct3' AND pid <> pg_backend_pid()"
             )
-            conn.execute("DROP DATABASE IF EXISTS ava_runner_ct3")
-            conn.execute("DROP ROLE IF EXISTS ava_runner_ct3")
+            conn.execute("DROP DATABASE IF EXISTS meiva_runner_ct3")
+            conn.execute("DROP ROLE IF EXISTS meiva_runner_ct3")
 
 
 def test_default_missing_schema_refuses_setup(
@@ -261,7 +261,7 @@ def test_new_database_setup_failure_is_dropped_then_retry_converges(
 ) -> None:
     """Real PG: caught autocommit setup failure leaves no half-born database."""
     admin = _admin_url(runner_db)
-    identity = "ava_runner_ct4"
+    identity = "meiva_runner_ct4"
     # The provisioned owner is NOLOGIN: the administrator acts as it.
     db_url = owner_conninfo(admin, database=identity, owner=identity)
     original_setup = PostgresSaver.setup
@@ -357,7 +357,7 @@ def test_existing_behind_schema_never_falls_back_to_setup(
         conn.execute("DELETE FROM checkpoint_migrations WHERE v = 9")
 
     def setup_must_not_run(_self: PostgresSaver) -> None:
-        raise AssertionError("existing schemas must use Ava migrations")
+        raise AssertionError("existing schemas must use Meiva migrations")
 
     monkeypatch.setattr(PostgresSaver, "setup", setup_must_not_run)
     with pytest.raises(CheckpointSchemaMismatchError):
@@ -423,7 +423,7 @@ def test_birth_retry_refuses_non_prefix_checkpoint_state(
 
 
 def exercise_pause_grants(conn: psycopg.Connection, agent_id: int) -> None:
-    """The pause-trail surface ava.self.pause_heartbeat writes from the runner
+    """The pause-trail surface meiva.self.pause_heartbeat writes from the runner
     process: SELECT the previous window (the backoff-reminder lookup) and
     INSERT the new row; the BIGSERIAL id draws from the owning sequence.
     Regression for task #1932: the table shipped without a runner grant and
@@ -476,7 +476,7 @@ def exercise_impersonation_entry_grants(conn: psycopg.Connection, agent_id: int)
 
 def exercise_task_receipt_grants(conn: psycopg.Connection, agent_id: int) -> None:
     """The task-receipt tombstones the SDK task mutations write from the
-    runner process: ava.tasks.update/log and ava.tasks.create retain one row
+    runner process: meiva.tasks.update/log and meiva.tasks.create retain one row
     per accepted operation (idempotency admission + replay).
     Regression for the 2026-10-10 fleet-wide task-write outage: the two tables
     shipped with the 2026-10-07 migrations without a runner grant and every
@@ -593,9 +593,9 @@ def assert_alert_writes_denied(conn: psycopg.Connection) -> None:
 
 def identity_url(url: str) -> str:
     """The cluster's MAIN identity — the role migrations actually run as.
-    `AVA_DB_URL` names role and database with one identifier on a live cluster
+    `MEIVA_DB_URL` names role and database with one identifier on a live cluster
     (`identity_from_url`); the fixture dials the initdb superuser instead,
     making a default-privileges test pass for the wrong reason — default
     privileges key on the role that CREATES the object.
     """
-    return url.replace("://ava@", f"://{_IDENTITY}@", 1)
+    return url.replace("://meiva@", f"://{_IDENTITY}@", 1)

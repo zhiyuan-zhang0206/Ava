@@ -21,17 +21,17 @@ from cli.database.tests.command_inputs import command_runtime as command_runtime
 from tests.path_scoped.cli_tests import operator_database as operator_database
 from tests.path_scoped.cli_tests import operator_pipeline as operator_pipeline
 
-SKILL_NAME = "operating-ava-cluster"
+SKILL_NAME = "operating-meiva-cluster"
 
 
 @pytest.fixture(autouse=True)
 def single_operator_skill(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(
-        external_skills_module, "_SKILL_NAMES", ("operating-ava-cluster",), raising=False
+        external_skills_module, "_SKILL_NAMES", ("operating-meiva-cluster",), raising=False
     )
 
 
-MARKER_NAME = ".ava-managed.json"
+MARKER_NAME = ".meiva-managed.json"
 
 
 @pytest.fixture
@@ -51,7 +51,7 @@ def _filesystem_module():
 
 
 def _write_source(repo: Path, *, body: str = "operator v1\n") -> Path:
-    source = repo / "ava_builtins" / "skills" / "platform" / SKILL_NAME
+    source = repo / "meiva_builtins" / "skills" / "platform" / SKILL_NAME
     (source / "references").mkdir(parents=True)
     (source / "SKILL.md").write_text(body)
     (source / "references" / "recovery.md").write_text("recover safely\n")
@@ -67,11 +67,11 @@ def _ctx(
     command_config_machine: tuple[ConfigBoot, MachineIdentity],
 ) -> converge_host.ConvergeCtx:
     config, machine = command_config_machine
-    ava_home = home / ".ava"
-    (ava_home / "configs").mkdir(parents=True, exist_ok=True)
+    meiva_home = home / ".meiva"
+    (meiva_home / "configs").mkdir(parents=True, exist_ok=True)
     return converge_host.ConvergeCtx(
         repo=repo,
-        ava_home=ava_home,
+        meiva_home=meiva_home,
         roles=None,
         config=config,
         database_factory=operator_database,
@@ -122,7 +122,7 @@ def _tree_snapshot(root: Path) -> dict[str, tuple[str, bytes]]:
 
 
 def _temp_entries(skills_root: Path) -> list[Path]:
-    return list(skills_root.glob(f".{SKILL_NAME}.ava-*"))
+    return list(skills_root.glob(f".{SKILL_NAME}.meiva-*"))
 
 
 def test_absent_client_homes_are_not_created(
@@ -178,7 +178,7 @@ def test_present_codex_and_claude_homes_receive_complete_managed_copy(
             source / "references" / "recovery.md"
         ).read_bytes()
         marker = json.loads((target / MARKER_NAME).read_text())
-        assert marker["owner"] == "ava"
+        assert marker["owner"] == "meiva"
         assert marker["skill"] == SKILL_NAME
         assert marker["format"] == 6
         assert len(marker["source_digest"]) == 64
@@ -391,7 +391,7 @@ def test_failed_update_restores_previous_copy_and_cleans_only_its_staging_dir(
     original_rename = module.rename_no_replace
 
     def fail_staged_activation(path: Path, destination: Path) -> None:
-        if path.name.startswith(f".{SKILL_NAME}.ava-stage-") and destination == target:
+        if path.name.startswith(f".{SKILL_NAME}.meiva-stage-") and destination == target:
             raise OSError("injected activation failure")
         original_rename(path, destination)
 
@@ -425,11 +425,11 @@ def test_failed_update_restores_previous_copy_and_cleans_only_its_staging_dir(
     assert _temp_entries(client_home / "skills") == []
 
 
-_DISTRIBUTED_SKILLS = ("operating-ava-cluster", "deploy-ava-cluster")
+_DISTRIBUTED_SKILLS = ("operating-meiva-cluster", "deploy-meiva-cluster")
 
 
 def _write_deploy_source(repo: Path) -> Path:
-    source = repo / "ava_builtins" / "skills" / "platform" / "deploy-ava-cluster"
+    source = repo / "meiva_builtins" / "skills" / "platform" / "deploy-meiva-cluster"
     source.mkdir(parents=True)
     (source / "SKILL.md").write_text("deployment v1\n")
     legacy = repo / ".agents" / "skills" / SKILL_NAME
@@ -476,7 +476,7 @@ def test_both_operator_skills_install_and_update_independently(
         producer=operator_pipeline,
         command_config_machine=command_config_machine,
     )
-    assert (targets / "deploy-ava-cluster" / "SKILL.md").read_text() == "deployment v2\n"
+    assert (targets / "deploy-meiva-cluster" / "SKILL.md").read_text() == "deployment v2\n"
     assert _tree_snapshot(targets / SKILL_NAME) == operate_before
     (operate / "SKILL.md").write_text("operator v2\n")
     _run(
@@ -487,11 +487,11 @@ def test_both_operator_skills_install_and_update_independently(
         command_config_machine=command_config_machine,
     )
     assert (targets / SKILL_NAME / "SKILL.md").read_text() == "operator v2\n"
-    assert (targets / "deploy-ava-cluster" / "SKILL.md").read_text() == "deployment v2\n"
-    ledger_root = home / ".ava" / "configs" / "external-agent-skills"
+    assert (targets / "deploy-meiva-cluster" / "SKILL.md").read_text() == "deployment v2\n"
+    ledger_root = home / ".meiva" / "configs" / "external-agent-skills"
     key = "codex" if client == ".codex" else "claude"
     assert (ledger_root / f"{key}.json").is_file()
-    assert (ledger_root / f"{key}-deploy-ava-cluster.json").is_file()
+    assert (ledger_root / f"{key}-deploy-meiva-cluster.json").is_file()
 
 
 def test_operator_conflict_does_not_block_deployment_update(
@@ -527,7 +527,7 @@ def test_operator_conflict_does_not_block_deployment_update(
         command_config_machine=command_config_machine,
     )
     assert (target / "SKILL.md").read_text() == "user customization\n"
-    assert (target.parent / "deploy-ava-cluster" / "SKILL.md").read_text() == "deployment v2\n"
+    assert (target.parent / "deploy-meiva-cluster" / "SKILL.md").read_text() == "deployment v2\n"
 
 
 def test_deployment_publication_crash_is_reported_without_changing_operator(
@@ -558,7 +558,7 @@ def test_deployment_publication_crash_is_reported_without_changing_operator(
 
     def interrupt_publication(source: Path, destination: Path) -> None:
         original_rename(source, destination)
-        if destination.name.startswith(".deploy-ava-cluster.ava-stage-"):
+        if destination.name.startswith(".deploy-meiva-cluster.meiva-stage-"):
             raise SystemExit("interrupted deployment publication")
 
     monkeypatch.setattr(bridge, "rename_no_replace", interrupt_publication)
@@ -581,7 +581,7 @@ def test_deployment_publication_crash_is_reported_without_changing_operator(
     )
     assert "not resumed" in capsys.readouterr().err
     assert _tree_snapshot(_target(home / ".codex")) == operator_before
-    assert not (home / ".codex" / "skills" / "deploy-ava-cluster").exists()
+    assert not (home / ".codex" / "skills" / "deploy-meiva-cluster").exists()
 
 
 def test_product_guide_has_one_builtin_source_and_nested_operator_entries() -> None:
@@ -589,9 +589,9 @@ def test_product_guide_has_one_builtin_source_and_nested_operator_entries() -> N
 
     repo = Path(__file__).resolve().parents[4]
     sources, _ = iter_sources(repo)
-    canonical = repo / "ava_builtins" / "skills" / "platform" / "ava-guide"
-    assert (repo / ".agents" / "skills" / "ava-guide").resolve() == canonical
-    assert any(source.name == "ava-guide" and source.src == canonical for source in sources)
+    canonical = repo / "meiva_builtins" / "skills" / "platform" / "meiva-guide"
+    assert (repo / ".agents" / "skills" / "meiva-guide").resolve() == canonical
+    assert any(source.name == "meiva-guide" and source.src == canonical for source in sources)
     executor = canonical.parent / "impersonator-guide"
     assert any(source.name == "impersonator-guide" and source.src == executor for source in sources)
     assert not (repo / ".agents" / "skills" / "impersonator-guide").exists()
@@ -606,20 +606,20 @@ def test_builtin_guide_installs_with_the_core_update_channel(
 ) -> None:
     import shutil
 
-    import ava.skills
+    import meiva.skills
     from base.packages.extensions import install_registry
     from cli.commands.extensions.skills_sync import converge_skills
 
     product_repo = Path(__file__).resolve().parents[4]
     repo = tmp_path / "repo"
-    sources = repo / "ava_builtins" / "skills" / "platform"
-    for name in ("ava-guide", "impersonator-guide"):
+    sources = repo / "meiva_builtins" / "skills" / "platform"
+    for name in ("meiva-guide", "impersonator-guide"):
         shutil.copytree(
-            product_repo / "ava_builtins" / "skills" / "platform" / name, sources / name
+            product_repo / "meiva_builtins" / "skills" / "platform" / name, sources / name
         )
     converge_skills(repo, unit_home)
-    installed_names = {skill["name"] for skill in ava.skills.names()}
-    for name in ("ava-guide", "impersonator-guide"):
+    installed_names = {skill["name"] for skill in meiva.skills.names()}
+    for name in ("meiva-guide", "impersonator-guide"):
         assert name in installed_names
         entry = install_registry.get(name)
         assert entry is not None and entry.enabled and entry.origin == "repo"

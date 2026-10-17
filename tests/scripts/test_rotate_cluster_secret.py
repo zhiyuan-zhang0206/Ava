@@ -38,9 +38,9 @@ _RESTORES = itertools.count()
 def _home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, secret: str) -> Path:
     path = (tmp_path / "home").resolve()
     path.mkdir(mode=0o700)
-    (path / ".env").write_text(f"AVA_CLUSTER_SECRET={secret}\n")
+    (path / ".env").write_text(f"MEIVA_CLUSTER_SECRET={secret}\n")
     (path / ".env").chmod(0o600)
-    monkeypatch.setattr(paths, "ava_home", lambda: path)
+    monkeypatch.setattr(paths, "meiva_home", lambda: path)
     monkeypatch.setattr(settings.data_plane, "cluster_secret", secret)
     return path
 
@@ -66,7 +66,7 @@ def open_home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
 
 
 def _secret(home: Path) -> str:
-    return dotenv_values(home / ".env")["AVA_CLUSTER_SECRET"] or ""
+    return dotenv_values(home / ".env")["MEIVA_CLUSTER_SECRET"] or ""
 
 
 class _Journal:
@@ -138,7 +138,7 @@ def backups(
         staging = directory / f"stage-{now.minute}"
         return backup.run_backup(
             now,
-            db_url="dbname=ava",
+            db_url="dbname=meiva",
             publish=False,
             staging=staging,
             db=database,
@@ -254,8 +254,8 @@ def test_a_pin_that_contradicts_the_record_is_refused(
 
 
 def test_a_home_without_a_secret_has_nothing_to_rotate(home: Path) -> None:
-    (home / ".env").write_text("AVA_CLUSTER_SECRET=\n")
-    with pytest.raises(rotate.RotationRefusedError, match="no AVA_CLUSTER_SECRET"):
+    (home / ".env").write_text("MEIVA_CLUSTER_SECRET=\n")
+    with pytest.raises(rotate.RotationRefusedError, match="no MEIVA_CLUSTER_SECRET"):
         rotate.advance(home, None, lambda _rotation: None)
     assert passphrase.pinned(home) is None
 

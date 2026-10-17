@@ -12,10 +12,8 @@ import pytest
 from fastapi import APIRouter, FastAPI
 from fastapi.testclient import TestClient
 
-import ava
-import ava.agents
-from ava.gateway_client import spawn, use_client
-from ava.sdk_surface import agent_identity
+import meiva
+import meiva.agents
 from base.api_contracts.agent_contract import GatewayUnavailable
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from base.host.net.tests.retry_waits import retry_waits as retry_waits
@@ -24,6 +22,8 @@ from gateway.app import lifespan
 from gateway.tests.agents.gateway_auth import without_credentials
 from gateway.tests.lifecycle.creation.test_guarded_creation import PATH, SECRET
 from gateway.tests.lifecycle.creation.test_guarded_creation import client as client
+from meiva.gateway_client import spawn, use_client
+from meiva.sdk_surface import agent_identity
 from tests.fixtures.gateway_config import GatewayTestClient, gateway_test_client
 from tests.path_scoped.gateway_tests import local_spawn_in_process as local_spawn_in_process
 
@@ -202,11 +202,11 @@ def test_changed_sdk_context_same_principal_key_conflicts(
 
     http.post.side_effect = submit
     monkeypatch.setattr(agent_identity, "require_actor", lambda: "user")
-    ava.context.require_machine().set(name="local-test")
-    original = ava.agents.spawn(prompt="same raw inputs", idempotency_key="context")
-    ava.context.require_machine().set(name="another-machine")
+    meiva.context.require_machine().set(name="local-test")
+    original = meiva.agents.spawn(prompt="same raw inputs", idempotency_key="context")
+    meiva.context.require_machine().set(name="another-machine")
     with pytest.raises(httpx.HTTPStatusError) as changed:
-        ava.agents.spawn(prompt="same raw inputs", idempotency_key="context")
+        meiva.agents.spawn(prompt="same raw inputs", idempotency_key="context")
     assert changed.value.response.status_code == 409
     assert db_conn.execute("SELECT id FROM agents").fetchall() == [(original,)]
     assert {call.args[0] for call in http.post.call_args_list} == {PATH}

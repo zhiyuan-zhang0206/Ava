@@ -27,10 +27,10 @@ from agent.messages import (
 )
 from agent.nodes import CLAIM, INIT_CONTEXT, NodeName
 from agent.state import AgentState, CompactState, ContextReset
-from base.agents.context import AvaContext, agent_id_from_config
+from base.agents.context import MeivaContext, agent_id_from_config
 from base.agents.history.closing_request import ClosingRequest
 from base.agents.history.compact_boundary import mark_compact_boundary
-from base.agents.messages.kwargs import AvaMsgType, read_ava_kwargs
+from base.agents.messages.kwargs import MeivaMsgType, read_meiva_kwargs
 from base.agents.to_user import DOCUMENT_FILENAME
 from base.events.live.projection import Cancelled, CompactDone, CompactionMode, CompactionStatus
 from base.host.env.agent_slices import AgentSlices
@@ -45,7 +45,7 @@ from base.telemetry.audit_events import prepare_event_log, record_audit_reported
 COMPACTION_INSTRUCTION = """[system] Context compaction checkpoint: the conversation above is about to be
 replaced by the summary you write now. Produce it now as plain text — do not
 write code or call any tool; anything other than text is discarded. Write it
-exactly as the `ava.self.compact` contract below specifies: first person, every
+exactly as the `meiva.self.compact` contract below specifies: first person, every
 section filled, "(none)" only when one genuinely has nothing. Refer to others as
 "the user" or "agent N". If a summary already appears above, rewrite it in place
 — one flat, updated summary, never a summary nested inside a summary.
@@ -64,7 +64,7 @@ class EmptyCompactionSummaryError(RuntimeError):
     pass
 
 
-# ava:ref agent/graph/docs/context-window/replacement.ava.okf.md#retained-boundary-checkpoints
+# meiva:ref agent/graph/docs/context-window/replacement.meiva.okf.md#retained-boundary-checkpoints
 async def stamp_compact_boundary(
     pool: AsyncConnectionPool | None,
     agent_id: int,
@@ -102,7 +102,7 @@ def conversation_messages(messages: list[AnyMessage]) -> list[AnyMessage]:
     return messages[1:] if has_system else messages
 
 
-# ava:ref agent/graph/docs/context-window/preparation.ava.okf.md#completed-window-attribution
+# meiva:ref agent/graph/docs/context-window/preparation.meiva.okf.md#completed-window-attribution
 def emit_compaction_monitoring(
     messages: list[AnyMessage],
     summary: str,
@@ -132,7 +132,7 @@ def emit_compaction_monitoring(
     )
 
 
-# ava:ref agent/graph/docs/context-window/replacement.ava.okf.md#summary-request-prefix
+# meiva:ref agent/graph/docs/context-window/replacement.meiva.okf.md#summary-request-prefix
 async def generate_summary(
     messages: list[AnyMessage],
     llm: BaseChatModel,
@@ -148,7 +148,7 @@ async def generate_summary(
         raise ValueError("conversation is empty, nothing to compress")
 
     instruction = HumanMessage(
-        content=f"{COMPACTION_INSTRUCTION}\nava.self.compact contract:\n{compact_contract()}"
+        content=f"{COMPACTION_INSTRUCTION}\nmeiva.self.compact contract:\n{compact_contract()}"
     )
     compaction_input = [*system_head, *content_msgs, instruction]
     response = await ainvoke_tool_call(
@@ -183,20 +183,22 @@ def _estimate_tokens(messages: list[AnyMessage]) -> int:
     return total_chars // 4
 
 
-# ava:ref agent/graph/docs/context-window/preparation.ava.okf.md#occupancy-and-reply-opportunity
+# meiva:ref agent/graph/docs/context-window/preparation.meiva.okf.md#occupancy-and-reply-opportunity
 def _context_occupancy(messages: list[AnyMessage]) -> int:
     tokens = latest_input_tokens(messages)
     return tokens if tokens is not None else _estimate_tokens(messages)
 
 
-# ava:ref agent/graph/docs/context-window/preparation.ava.okf.md#occupancy-and-reply-opportunity
+# meiva:ref agent/graph/docs/context-window/preparation.meiva.okf.md#occupancy-and-reply-opportunity
 def _summary_awaits_reply(messages: list[AnyMessage]) -> bool:
     for message in reversed(messages):
         if isinstance(message, AIMessage):
             return False
-        if isinstance(message, HumanMessage) and read_ava_kwargs(message).get("ava_msg_type") in (
-            AvaMsgType.COMPACT_SUMMARY.value,
-            AvaMsgType.COMPACT_REQUEST.value,
+        if isinstance(message, HumanMessage) and read_meiva_kwargs(message).get(
+            "meiva_msg_type"
+        ) in (
+            MeivaMsgType.COMPACT_SUMMARY.value,
+            MeivaMsgType.COMPACT_REQUEST.value,
         ):
             return True
     return False
@@ -211,7 +213,7 @@ def auto_compact_will_fire(state: AgentState, agent: AgentSlices, *, catalog: Mo
     return bool(conversation_messages(state.messages))
 
 
-# ava:ref agent/graph/docs/context-window/replacement.ava.okf.md#compact-failure-boundary
+# meiva:ref agent/graph/docs/context-window/replacement.meiva.okf.md#compact-failure-boundary
 async def auto_compact_summary(
     messages: list[AnyMessage],
     llm: BaseChatModel,
@@ -259,10 +261,10 @@ async def auto_compact_summary(
     return summary
 
 
-# ava:ref agent/graph/docs/context-window/replacement.ava.okf.md#compact-failure-boundary
+# meiva:ref agent/graph/docs/context-window/replacement.meiva.okf.md#compact-failure-boundary
 async def auto_compact_for_llm(
     state: AgentState,
-    runtime: Runtime[AvaContext],
+    runtime: Runtime[MeivaContext],
     config: RunnableConfig,
 ) -> dict[str, Any] | None:
     if _summary_awaits_reply(state.messages):
@@ -355,12 +357,12 @@ async def auto_compact_for_llm(
     dump_path = dump_history(state.messages, agent_id, runtime.context.require_agent().history_dump)
     summary_kwargs: dict[str, Any] = {
         "additional_kwargs": {
-            "ava_msg_type": AvaMsgType.COMPACT_SUMMARY.value,
-            "ava_created_at": datetime.now(UTC).isoformat(),
+            "meiva_msg_type": MeivaMsgType.COMPACT_SUMMARY.value,
+            "meiva_created_at": datetime.now(UTC).isoformat(),
         },
     }
     if compact_run_id is not None:
-        summary_kwargs["additional_kwargs"]["ava_compact_id"] = compact_run_id
+        summary_kwargs["additional_kwargs"]["meiva_compact_id"] = compact_run_id
     transition = build_compact_transition(
         summary,
         resume=CLAIM,
@@ -379,7 +381,7 @@ async def auto_compact_for_llm(
     return transition
 
 
-# ava:ref agent/graph/docs/context-window/replacement.ava.okf.md#clean-replacement
+# meiva:ref agent/graph/docs/context-window/replacement.meiva.okf.md#clean-replacement
 def build_compact_transition(
     summary: str,
     *,
@@ -410,15 +412,15 @@ COMPACT_REMINDER_NOTE = (
     "Your working context has reached the soft compaction threshold. "
     "Wind down this context now: finish only the immediate safe step, "
     "persist new durable information, and complete the preparation below. "
-    "Then call ava.self.compact(summary) before starting further substantive work. "
+    "Then call meiva.self.compact(summary) before starting further substantive work. "
     "Keep preparation brief; do not start a new investigation or wait for the "
     "hard limit, where automatic compaction cannot run file-writing tools. "
     "Write the summary as its docstring specifies. "
-    "Read ava.help(ava.self.compact) if you need the contract."
+    "Read meiva.help(meiva.self.compact) if you need the contract."
 )
 
 
-# ava:ref agent/graph/docs/context-window/preparation.ava.okf.md#soft-preparation-delivery
+# meiva:ref agent/graph/docs/context-window/preparation.meiva.okf.md#soft-preparation-delivery
 def _reminder_content(
     agent: AgentSlices, *, catalog: ModelCatalog, extensions: ExtensionRegistry
 ) -> str:
@@ -447,7 +449,7 @@ def _reminder_content(
     return "\n\n".join(parts)
 
 
-# ava:ref agent/graph/docs/context-window/preparation.ava.okf.md#soft-preparation-delivery
+# meiva:ref agent/graph/docs/context-window/preparation.meiva.okf.md#soft-preparation-delivery
 def compact_reminder_update(
     state: AgentState,
     agent: AgentSlices,
@@ -498,7 +500,7 @@ class _CompactReminderHook(Hook):
     async def __call__(
         self,
         state: AgentState,
-        runtime: Runtime[AvaContext],
+        runtime: Runtime[MeivaContext],
         _config: RunnableConfig,
         /,
     ) -> dict[str, Any] | None:

@@ -16,7 +16,7 @@ from base.agents.history.checkpoint_serde import STATIC_CHECKPOINT_MSGPACK_TYPES
 from base.agents.history.checkpoint_serializer import CheckpointSerializer
 from base.agents.incarnation import exec_request_evidence
 from base.native_process.runtime_incarnation import RuntimeIncarnation
-from base.paths import ava_home
+from base.paths import meiva_home
 from base.sessions import backend
 
 _CONSUMER_MODULES = frozenset(
@@ -47,8 +47,8 @@ def require_no_consumers(conn: psycopg.Connection[Any], agent_id: int) -> None:
     commands.
     """
     native_backend = backend.get_backend()
-    if native_backend.has_session(f"ava-agent-{agent_id}") or native_backend.list_sessions(
-        prefix=f"ava-boot-{agent_id}-"
+    if native_backend.has_session(f"meiva-agent-{agent_id}") or native_backend.list_sessions(
+        prefix=f"meiva-boot-{agent_id}-"
     ):
         raise RuntimeError(f"legacy native consumer still owns agent {agent_id}")
     _require_no_unsettled_exec(conn, agent_id)
@@ -68,7 +68,7 @@ def _require_no_unsettled_exec(conn: psycopg.Connection[Any], agent_id: int) -> 
     )
     report = exec_request_evidence.quarantine_stale(
         agent_id,
-        home=ava_home(),
+        home=meiva_home(),
         incumbent=incumbent,
         resources=None if row is None else row[2],
         reason="maintenance cold prepare",
@@ -83,7 +83,7 @@ def _require_no_unsettled_exec(conn: psycopg.Connection[Any], agent_id: int) -> 
 
 
 def require_no_consumer_process() -> None:
-    home = ava_home().resolve()
+    home = meiva_home().resolve()
     for process in psutil.process_iter():
         try:
             argv = process.cmdline() or []
@@ -98,7 +98,7 @@ def require_no_consumer_process() -> None:
         ):
             continue
         try:
-            raw_home = process.environ().get("AVA_HOME")
+            raw_home = process.environ().get("MEIVA_HOME")
         except psutil.NoSuchProcess:
             continue
         except psutil.AccessDenied as exc:

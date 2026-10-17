@@ -65,7 +65,7 @@ def _round(watch: MaintenanceHoldWatch) -> bool:
     return result.alive
 
 
-def _hold(holder: str = "ava-stop-7", phase: MaintenancePhase = MaintenancePhase.STOPPED) -> None:
+def _hold(holder: str = "meiva-stop-7", phase: MaintenancePhase = MaintenancePhase.STOPPED) -> None:
     admission = pause_owner.begin_maintenance(holder, ACQUIRED)
     assert admission.snapshot.maintenance is not None
     pause_owner.change_maintenance(
@@ -80,12 +80,12 @@ def test_a_hold_past_the_threshold_raises_one_event_naming_the_recovery(
     watch, _ = _watch(ACQUIRED + timedelta(minutes=31))
     assert not _round(watch)
     (event,) = recorder.events()
-    assert event["holder"] == "ava-stop-7"
+    assert event["holder"] == "meiva-stop-7"
     assert event["phase"] == "stopped"
     assert event["state"] == "paused"
     assert event["acquired_at"] == ACQUIRED.isoformat()
     assert event["held_seconds"] == 31 * 60
-    assert "ava start" in str(event["message"])
+    assert "meiva start" in str(event["message"])
 
 
 def test_a_hold_under_the_threshold_raises_nothing(recorder: _Recorder) -> None:
@@ -111,7 +111,7 @@ def test_no_hold_or_a_released_hold_raises_nothing(recorder: _Recorder, journal:
     snapshot = pause_owner.read()
     assert snapshot.maintenance is not None
     pause_owner.change_maintenance(
-        "ava-stop-7", ACQUIRED, snapshot.maintenance, snapshot.maintenance, resumed=True
+        "meiva-stop-7", ACQUIRED, snapshot.maintenance, snapshot.maintenance, resumed=True
     )
     assert pause_owner.read().status == "resumed"
     assert _round(watch)
@@ -137,12 +137,12 @@ def test_a_released_hold_rearms_the_alert_for_the_next_hold(
     journal.unlink()
     assert _round(watch)
     later = ACQUIRED + timedelta(hours=2)
-    admission = pause_owner.begin_maintenance("ava-restart-9", later)
+    admission = pause_owner.begin_maintenance("meiva-restart-9", later)
     assert admission.created_here
     move(later + timedelta(minutes=45))
     assert not _round(watch)
     holders = [event["holder"] for event in recorder.events()]
-    assert holders == ["ava-stop-7", "ava-restart-9"]
+    assert holders == ["meiva-stop-7", "meiva-restart-9"]
 
 
 def test_an_unreadable_journal_is_timed_from_its_mtime_and_never_raises(

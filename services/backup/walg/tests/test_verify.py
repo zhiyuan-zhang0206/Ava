@@ -12,7 +12,7 @@ from services.backup.walg.runner import WalgCommandError
 from services.backup.walg.tests.support import Sandbox, fixture_text, make_sandbox
 from services.backup.walg.verify import VerifyOutputError, parse_verdict
 
-ADMIN_URL = "postgresql://tester@/postgres?host=/sockets/ava-pg-home&port=5433"
+ADMIN_URL = "postgresql://tester@/postgres?host=/sockets/meiva-pg-home&port=5433"
 
 
 @pytest.fixture
@@ -83,4 +83,4 @@ def test_wal_verify_is_handed_the_owner_only_socket(sandbox: Sandbox) -> None:
 
     verify.verify_chain(ADMIN_URL, path_reader=lambda: settings.walg.walg_config_file)
 
-    assert sandbox.verify_env_log() == ["PGHOST=/sockets/ava-pg-home PGPORT=5433 PGUSER=tester"]
+    assert sandbox.verify_env_log() == ["PGHOST=/sockets/meiva-pg-home PGPORT=5433 PGUSER=tester"]

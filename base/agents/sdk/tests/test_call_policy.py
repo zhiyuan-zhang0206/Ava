@@ -26,9 +26,9 @@ def test_local_policy_reads_live_file(
     monkeypatch.setattr(bootstrap, "config_source_is_local", lambda: gateway)
     monkeypatch.setattr(bootstrap, "should_fetch_from_gateway", lambda: False)
     monkeypatch.setattr(dotenv_file, "env_file_path", lambda: env_file)
-    env_file.write_text("AVA_SDK_CALL_SAMPLING_ENABLED=true\nAVA_SDK_CALL_SAMPLE_EVERY=4\n")
+    env_file.write_text("MEIVA_SDK_CALL_SAMPLING_ENABLED=true\nMEIVA_SDK_CALL_SAMPLE_EVERY=4\n")
     assert call_policy.read_policy() == SamplingPolicy(sampling_enabled=True, sample_every=4)
-    env_file.write_text("AVA_SDK_CALL_SAMPLING_ENABLED=false\nAVA_SDK_CALL_SAMPLE_EVERY=7\n")
+    env_file.write_text("MEIVA_SDK_CALL_SAMPLING_ENABLED=false\nMEIVA_SDK_CALL_SAMPLE_EVERY=7\n")
     assert call_policy.read_policy() == SamplingPolicy(sampling_enabled=False, sample_every=7)
     env_file.write_text("")
     assert call_policy.read_policy() == SamplingPolicy()
@@ -105,7 +105,7 @@ def test_enrolled_process_reads_gateway_policy(monkeypatch: pytest.MonkeyPatch) 
 
     def fetch(_url: str, **kwargs: Any) -> dict[str, str]:
         requests.append(kwargs)
-        return {"AVA_SDK_CALL_SAMPLING_ENABLED": "true", "AVA_SDK_CALL_SAMPLE_EVERY": "2"}
+        return {"MEIVA_SDK_CALL_SAMPLING_ENABLED": "true", "MEIVA_SDK_CALL_SAMPLE_EVERY": "2"}
 
     monkeypatch.setattr(bootstrap, "fetch_bootstrap_config", fetch)
     assert call_policy.read_policy() == SamplingPolicy(sampling_enabled=True, sample_every=2)
@@ -264,7 +264,7 @@ def test_sdk_telemetry_cold_import_does_not_load_httpx(tmp_path: Path) -> None:
             "cold_import_loads_no_httpx",
         ],
         cwd=tmp_path,
-        env={**os.environ, "AVA_HOME": str(tmp_path / "home"), "AVA_CONFIG_FETCH": "skip"},
+        env={**os.environ, "MEIVA_HOME": str(tmp_path / "home"), "MEIVA_CONFIG_FETCH": "skip"},
         capture_output=True,
         text=True,
         check=False,

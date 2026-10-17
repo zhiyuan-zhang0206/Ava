@@ -42,7 +42,7 @@ from base.events.live.bus import EventBus
 from base.host.exit_codes import hard_exit as _hard_exit
 from base.native_process.code_version import CodeVersion
 from base.native_process.loaded_commit import LoadedCommit
-from base.paths import ava_home
+from base.paths import meiva_home
 from base.sessions.backend import get_shell_backend
 from base.sessions.page_session import page_session_name
 from base.sessions.protocol import SessionBackend
@@ -270,7 +270,7 @@ def page_server_occupants() -> dict[int, tuple[int, str | None]]:
             env = proc.environ()
         except (psutil.Error, OSError):
             env = {}
-        found[int(match.group(1))] = (pid, env.get("AVA_HOME"))
+        found[int(match.group(1))] = (pid, env.get("MEIVA_HOME"))
     return found
 
 
@@ -336,7 +336,7 @@ def _reclaim_occupants(
 ) -> None:
     """Kill detached/orphan servers while preserving live page shells."""
     wanted_ports = {row.port for row in rows}
-    own_home = str(ava_home())
+    own_home = str(meiva_home())
     for port, (pid, home) in occupants.items():
         if page_session_owner(pid, shell_pids) is not None:
             continue
@@ -567,7 +567,7 @@ def main() -> None:
     machine_config = ConfigBoot()
     machine_config.boot()
     machine = machine_from_boot(machine_config)
-    process_home = ava_home().resolve()
+    process_home = meiva_home().resolve()
     assert_schema_current(machine_config.view.data_plane.db_url)
     version = CodeVersion(image)
     gate = ProcessDbGate(version=version.get, process="page_server", exempt=False)

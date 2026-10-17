@@ -101,7 +101,7 @@ def test_the_real_dry_run_satisfies_every_invariant() -> None:
 
 
 def test_a_key_outside_the_backup_and_wal_prefixes_aborts() -> None:
-    other_prefix = "ava-logical/2026-10-01/dump.enc"
+    other_prefix = "meiva-logical/2026-10-01/dump.enc"
 
     with pytest.raises(RetentionAbortedError, match="outside basebackups_005/ and wal_005/"):
         assert_invariants([*PLANNED, other_prefix], _backups())

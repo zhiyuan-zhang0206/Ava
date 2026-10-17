@@ -1,0 +1,34 @@
+[uses]
+"test_meiva_root_daemon.py" = ["child_unit.py"]
+"test_meiva_root_health.py" = ["child_unit.py"]
+"test_meiva_root_intent.py" = ["child_unit.py"]
+"test_meiva_root_stop_window.py" = ["child_unit.py"]
+"test_meiva_root_supervisor.py" = ["child_unit.py"]
+"test_maintenance_late_child.py" = ["child_unit.py"]
+
+[debt.first-party-patch]
+"test_meiva_root_failure_state.py#monkeypatch.setattr services.supervision.meiva_root.health.monotonic" = 1
+"test_meiva_root_health.py#monkeypatch.setattr services.supervision.meiva_root.health.monotonic" = 1
+"test_meiva_root_ipc.py#monkeypatch.setattr base.deploy.lifecycle.start_serving.meiva_home" = 1
+"test_meiva_root_ipc.py#monkeypatch.setattr base.native_process.ownership.OwnedProcess.live" = 2
+"test_meiva_root_ipc.py#monkeypatch.setattr base.native_process.ownership.sys" = 1
+"test_meiva_root_ipc.py#monkeypatch.setattr base.native_process.root_control.client.sys" = 2
+"test_meiva_root_probes.py#monkeypatch.setattr services.supervision.meiva_root.probes.resolve_ref" = 1
+"test_meiva_root_selfcheck.py#monkeypatch.setattr services.supervision.meiva_root.selfcheck.child_state" = 1
+
+[debt.restricted-python]
+"child_unit.py#python -c" = 1
+"test_meiva_root_daemon.py#python -c" = 3
+"test_meiva_root_health.py#python -c" = 2
+"test_meiva_root_selfcheck.py#python -c" = 2
+"test_meiva_root_supervisor.py#python -c" = 3
+"test_meiva_root_supervisor_reaping.py#python -c" = 2
+"test_root_work_ownership.py#python -c" = 5
+
+[debt.stdlib-patch]
+"test_meiva_root_supervisor.py#monkeypatch.setattr os.killpg" = 2
+
+[debt.unresolved-patch]
+"test_meiva_root_intent.py#monkeypatch.setattr owner._signal_owned" = 1
+"test_meiva_root_intent.py#monkeypatch.setattr owner._stop_unit" = 1
+"test_root_work_ownership.py#monkeypatch.setattr owner._watch" = 4

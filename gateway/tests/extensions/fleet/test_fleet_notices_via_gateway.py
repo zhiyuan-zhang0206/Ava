@@ -1,6 +1,6 @@
 """The fleet notice SDK (notify / edit_notice / dismiss_notice) against the in-process gateway.
 
-Split out of `ava_builtins/plugins/ava_fleet/tests/test_ava_fleet_plugin.py`: these cases route the SDK's gateway client at `gateway.app`, so they live with the gateway tests."""
+Split out of `meiva_builtins/plugins/meiva_fleet/tests/test_meiva_fleet_plugin.py`: these cases route the SDK's gateway client at `gateway.app`, so they live with the gateway tests."""
 
 from collections.abc import Iterator
 from typing import Any
@@ -9,15 +9,15 @@ from uuid import uuid4
 import psycopg
 import pytest
 
-import ava
-from ava.tests.fixtures.pin_agent import pin_agent
-from ava_builtins.plugins.ava_fleet.tests.registry_support import (
-    installed_fleet_surface,
-)
+import meiva
 from base.agents.observation.snapshot import select_one
 from base.cluster.machine import MachineIdentity
 from base.config import settings
 from base.packages.plugin_providers import build_model_catalog
+from meiva.tests.fixtures.pin_agent import pin_agent
+from meiva_builtins.plugins.meiva_fleet.tests.registry_support import (
+    installed_fleet_surface,
+)
 
 
 def seed_agent(db: psycopg.Connection) -> int:
@@ -46,7 +46,7 @@ def sdk_via_inprocess_gateway(
 
     The assembled Gateway reads both data stores, so the fixture declares
     `gateway_data_plane`."""
-    from ava.gateway_client import use_client
+    from meiva.gateway_client import use_client
     from tests.fixtures.gateway_config import gateway_test_client
 
     with (
@@ -102,14 +102,14 @@ def test_notify_inserts_fyi_and_snapshot_counts_unread(
     agent_id = seed_agent(db_conn)
     pin_agent(agent_id)
     # require_response defaults False -> these are FYI notices.
-    nid = ava.ui.notify(
+    nid = meiva.ui.notify(
         "migration done", content="14k rows", priority="P1", idempotency_key=str(uuid4())
     )  # type: ignore[attr-defined]
     assert isinstance(nid, int)  # Notice is an int subclass — backward compatible
     _assert_first_notice_is_sole_pending_fyi(nid)
 
     # Posting a second notice auto-resolves the first (at most one).
-    nid2 = ava.ui.notify("hit a rate limit", idempotency_key=str(uuid4()))  # type: ignore[attr-defined]
+    nid2 = meiva.ui.notify("hit a rate limit", idempotency_key=str(uuid4()))  # type: ignore[attr-defined]
     _assert_second_notice_supersedes_first(nid, nid2)
 
     db_conn.rollback()  # notify() committed via its own cursor; refresh our view
@@ -138,7 +138,7 @@ def test_notify_require_response_rides_awaiting_worklist(
 ):
     agent_id = seed_agent(db_conn)
     pin_agent(agent_id)
-    ava.ui.notify(  # type: ignore[attr-defined]
+    meiva.ui.notify(  # type: ignore[attr-defined]
         "Send the release email?",
         content="A) yes\nB) no",
         priority="P0",
@@ -147,7 +147,7 @@ def test_notify_require_response_rides_awaiting_worklist(
         idempotency_key=str(uuid4()),
     )
     # Posting a second require_response notice auto-resolves the first.
-    nid2 = ava.ui.notify("Name the branch?", require_response=True, idempotency_key=str(uuid4()))  # type: ignore[attr-defined]
+    nid2 = meiva.ui.notify("Name the branch?", require_response=True, idempotency_key=str(uuid4()))  # type: ignore[attr-defined]
     assert nid2.superseded != []  # pyright: ignore[reportAttributeAccessIssue, reportUnknownMemberType]
 
     db_conn.rollback()
@@ -171,7 +171,7 @@ def test_sdk_question_keeps_number_order_in_snapshot(
 ) -> None:
     agent_id = seed_agent(db_conn)
     pin_agent(agent_id)
-    ava.ui.notify(  # type: ignore[attr-defined]
+    meiva.ui.notify(  # type: ignore[attr-defined]
         "Choose the scope?",
         require_response=True,
         question={
@@ -229,7 +229,7 @@ def test_notify_records_task_id_and_rides_snapshot(
     agent_id = seed_agent(db_conn)
     tid = _seed_task(db_conn, agent_id)
     pin_agent(agent_id)
-    ava.ui.notify(
+    meiva.ui.notify(
         "stalled on a decision", require_response=True, task=tid, idempotency_key=str(uuid4())
     )  # type: ignore[attr-defined]
     db_conn.rollback()  # notify committed via its own cursor; refresh our view
@@ -249,7 +249,7 @@ def test_notify_without_task_leaves_task_id_null(
 ):
     agent_id = seed_agent(db_conn)
     pin_agent(agent_id)
-    ava.ui.notify("fyi, no task", idempotency_key=str(uuid4()))  # type: ignore[attr-defined]
+    meiva.ui.notify("fyi, no task", idempotency_key=str(uuid4()))  # type: ignore[attr-defined]
     db_conn.rollback()
     assert _notice_task_id(db_conn, agent_id) is None
 
@@ -260,7 +260,7 @@ def test_notify_nonexistent_task_raises(
     agent_id = seed_agent(db_conn)
     pin_agent(agent_id)
     with pytest.raises(ValueError, match="task 999999 does not exist"):
-        ava.ui.notify("names a ghost task", task=999999, idempotency_key=str(uuid4()))  # type: ignore[attr-defined]
+        meiva.ui.notify("names a ghost task", task=999999, idempotency_key=str(uuid4()))  # type: ignore[attr-defined]
 
 
 def test_edit_notice_partial_update(
@@ -268,11 +268,11 @@ def test_edit_notice_partial_update(
 ):
     agent_id = seed_agent(db_conn)
     pin_agent(agent_id)
-    nid = ava.ui.notify(
+    nid = meiva.ui.notify(
         "draft title", content="old body", priority="P2", idempotency_key=str(uuid4())
     )  # type: ignore[attr-defined]
     # change only title + priority; content is left as-is (omitted != cleared).
-    ava.ui.edit_notice(title="new title", priority="P0")  # type: ignore[attr-defined]
+    meiva.ui.edit_notice(title="new title", priority="P0")  # type: ignore[attr-defined]
 
     db_conn.rollback()
     with db_conn.cursor() as cur:
@@ -289,7 +289,7 @@ def test_edit_notice_partial_update(
 
     # passing content=None explicitly clears it (the _UNSET sentinel
     # distinguishes "leave alone" from "erase").
-    ava.ui.edit_notice(content=None)  # type: ignore[attr-defined]
+    meiva.ui.edit_notice(content=None)  # type: ignore[attr-defined]
     db_conn.rollback()
     with db_conn.cursor() as cur:
         cur.execute(
@@ -327,7 +327,7 @@ def test_response_notice_content_edits_publish_refreshed_snapshot(
 
     agent_id = seed_agent(db_conn)
     pin_agent(agent_id)
-    ava.ui.notify(  # type: ignore[attr-defined]
+    meiva.ui.notify(  # type: ignore[attr-defined]
         "decision needed",
         content="revision 0",
         priority="P1",
@@ -337,7 +337,7 @@ def test_response_notice_content_edits_publish_refreshed_snapshot(
     )
     for revision in range(1, 11):
         content = f"revision {revision}"
-        ava.ui.edit_notice(content=content)  # type: ignore[attr-defined]
+        meiva.ui.edit_notice(content=content)  # type: ignore[attr-defined]
 
     # One AgentUpdated for creation plus one per content-only edit keeps the
     # inspector's cached snapshot authoritative through the whole chain.
@@ -364,20 +364,20 @@ def test_edit_notice_validation_and_guards(
 ):
     agent_id = seed_agent(db_conn)
     pin_agent(agent_id)
-    ava.ui.notify("fyi notice", idempotency_key=str(uuid4()))  # type: ignore[attr-defined]
+    meiva.ui.notify("fyi notice", idempotency_key=str(uuid4()))  # type: ignore[attr-defined]
 
     # nothing passed -> nothing to change.
     with pytest.raises(ValueError, match="at least one field"):
-        ava.ui.edit_notice()  # type: ignore[attr-defined]
+        meiva.ui.edit_notice()  # type: ignore[attr-defined]
     # bad priority.
     with pytest.raises(ValueError, match="priority"):
-        ava.ui.edit_notice(priority="P9")  # type: ignore[attr-defined]
+        meiva.ui.edit_notice(priority="P9")  # type: ignore[attr-defined]
     # blocking=True on an FYI (require_response False) is rejected.
     with pytest.raises(ValueError, match="needs a response"):
-        ava.ui.edit_notice(blocking=True)  # type: ignore[attr-defined]
+        meiva.ui.edit_notice(blocking=True)  # type: ignore[attr-defined]
     # no open notice is idempotent (no-op).
-    ava.ui.dismiss_notice()  # type: ignore[attr-defined]
-    ava.ui.edit_notice(title="too late")  # type: ignore[attr-defined]
+    meiva.ui.dismiss_notice()  # type: ignore[attr-defined]
+    meiva.ui.edit_notice(title="too late")  # type: ignore[attr-defined]
 
 
 def test_dismiss_notice_withdraws(
@@ -385,8 +385,8 @@ def test_dismiss_notice_withdraws(
 ):
     agent_id = seed_agent(db_conn)
     pin_agent(agent_id)
-    nid = ava.ui.notify("stale fyi", idempotency_key=str(uuid4()))  # type: ignore[attr-defined]
-    ava.ui.dismiss_notice()  # type: ignore[attr-defined]
+    nid = meiva.ui.notify("stale fyi", idempotency_key=str(uuid4()))  # type: ignore[attr-defined]
+    meiva.ui.dismiss_notice()  # type: ignore[attr-defined]
 
     db_conn.rollback()
     with db_conn.cursor() as cur:
@@ -410,7 +410,7 @@ def test_dismiss_notice_withdraws(
     assert snap.unread_notice_count == 0
 
     # dismissing again is idempotent (no-op).
-    ava.ui.dismiss_notice()  # type: ignore[attr-defined]
+    meiva.ui.dismiss_notice()  # type: ignore[attr-defined]
 
 
 def test_supersede_and_withdraw_publish_notice_resolved_for_both_kinds(
@@ -437,12 +437,12 @@ def test_supersede_and_withdraw_publish_notice_resolved_for_both_kinds(
 
     agent_id = seed_agent(db_conn)
     pin_agent(agent_id)
-    ava.ui.notify("Q1?", require_response=True, idempotency_key=str(uuid4()))  # type: ignore[attr-defined]
+    meiva.ui.notify("Q1?", require_response=True, idempotency_key=str(uuid4()))  # type: ignore[attr-defined]
     assert resolved == []  # the first post resolves nothing
     # A second require_response notice supersedes the first — must publish even
     # though the superseded notice needed a response.
-    ava.ui.notify("Q2?", require_response=True, idempotency_key=str(uuid4()))  # type: ignore[attr-defined]
+    meiva.ui.notify("Q2?", require_response=True, idempotency_key=str(uuid4()))  # type: ignore[attr-defined]
     assert len(resolved) == 1
     # Withdrawing the surviving require_response notice publishes too.
-    ava.ui.dismiss_notice()  # type: ignore[attr-defined]
+    meiva.ui.dismiss_notice()  # type: ignore[attr-defined]
     assert len(resolved) == 2

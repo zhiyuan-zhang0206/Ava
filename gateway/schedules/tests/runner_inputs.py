@@ -1,10 +1,8 @@
 from contextlib import closing
 from functools import partial
 
-import ava
-from ava.boot import process_clients
-from ava.sdk_surface import process_context
-from base.agents.context import AvaContext
+import meiva
+from base.agents.context import MeivaContext
 from base.agents.context.clients import ClientSet
 from base.agents.context.identity import AgentIdentity
 from base.clock import Clock
@@ -15,12 +13,14 @@ from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
 from base.native_process.code_version import CodeVersion
 from base.telemetry import process_name
+from meiva.boot import process_clients
+from meiva.sdk_surface import process_context
 from services.wake.schedule_manager import engine
 
 
 def bind_actor(schedule_id: int, *, clients: ClientSet, machine: MachineIdentity) -> None:
     process_context.bind_context(
-        AvaContext(
+        MeivaContext(
             identity=AgentIdentity(agent_id=None, owns_loop=True, actor=f"schedule:{schedule_id}"),
             clients=clients,
             machine=machine,
@@ -45,5 +45,5 @@ def run_schedule(schedule_id: int, revision: int | None = None, *, machine: Mach
             database=database,
             inputs=ScheduleInputs(database, clients.event_pipeline, image, machine=machine),
             bind_actor=partial(bind_actor, clients=clients, machine=machine),
-            load_plugins=ava.ensure_plugins_loaded,
+            load_plugins=meiva.ensure_plugins_loaded,
         )

@@ -5,8 +5,8 @@ from typing import get_type_hints
 import pytest
 from pydantic import ValidationError
 
-from ava.agents import ShellSessionsKill as SdkShellSessionsKill
 from base.api_contracts.agent_contract import ShellSessionKillTiming
+from meiva.agents import ShellSessionsKill as SdkShellSessionsKill
 from ops.rpc_schemas.terminate import ShellSessionsKill as RpcShellSessionsKill
 
 

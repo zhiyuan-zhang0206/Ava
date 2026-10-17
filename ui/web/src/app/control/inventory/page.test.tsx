@@ -43,7 +43,7 @@ function wrap(ui: React.ReactElement, qc?: QueryClient) {
 const H1 = "h1";
 const H2 = "h2";
 
-// ava_code: present+enabled on h1, present+disabled on h2 -> 1/2 enabled.
+// meiva_code: present+enabled on h1, present+disabled on h2 -> 1/2 enabled.
 // only_h1: present on h1 only -> its h2 cell is "not installed".
 // mcp "needs_display": present+disabled on h1 with can_enable:false.
 const AGGREGATE: InventoryAggregate = {
@@ -51,7 +51,7 @@ const AGGREGATE: InventoryAggregate = {
   unreachable: [],
   plugins: [
     {
-      name: "ava_code",
+      name: "meiva_code",
       kind: "plugin",
       description: "Code execution plugin",
       hosts: {
@@ -117,7 +117,7 @@ describe("InventoryPage render", () => {
   it("renders both section headers + every item row", async () => {
     vi.spyOn(api, "getInventory").mockResolvedValue(AGGREGATE);
     wrap(<InventoryPage />);
-    await waitFor(() => screen.getByText("ava_code"));
+    await waitFor(() => screen.getByText("meiva_code"));
     expect(screen.getByText("Plugins")).toBeTruthy();
     expect(screen.getByText("MCP servers")).toBeTruthy();
     expect(screen.getByText("only_h1")).toBeTruthy();
@@ -127,7 +127,7 @@ describe("InventoryPage render", () => {
   it("machine columns appear as headers", async () => {
     vi.spyOn(api, "getInventory").mockResolvedValue(AGGREGATE);
     wrap(<InventoryPage />);
-    await waitFor(() => screen.getByText("ava_code"));
+    await waitFor(() => screen.getByText("meiva_code"));
     // Each machine appears as a header cell.
     expect(screen.getAllByText(H1).length).toBeGreaterThan(0);
     expect(screen.getAllByText(H2).length).toBeGreaterThan(0);
@@ -136,9 +136,9 @@ describe("InventoryPage render", () => {
   it("N/M enabled chip reflects present+enabled over present", async () => {
     vi.spyOn(api, "getInventory").mockResolvedValue(AGGREGATE);
     wrap(<InventoryPage />);
-    await waitFor(() => screen.getByTestId("summary-ava_code"));
-    // ava_code: enabled on h1, disabled on h2, present on both -> 1/2.
-    expect(screen.getByTestId("summary-ava_code").textContent).toBe("1/2 enabled");
+    await waitFor(() => screen.getByTestId("summary-meiva_code"));
+    // meiva_code: enabled on h1, disabled on h2, present on both -> 1/2.
+    expect(screen.getByTestId("summary-meiva_code").textContent).toBe("1/2 enabled");
     // only_h1: present on h1 only, disabled -> 0/1.
     expect(screen.getByTestId("summary-only_h1").textContent).toBe("0/1 enabled");
   });
@@ -169,22 +169,22 @@ describe("InventoryPage toggle (putInventory)", () => {
     vi.spyOn(api, "getInventory").mockResolvedValue(AGGREGATE);
     const putSpy = vi.spyOn(api, "putInventory").mockResolvedValue(OK_RESULT);
     wrap(<InventoryPage />);
-    // ava_code is enabled on h1 -> clicking turns it OFF.
-    const cell = await waitFor(() => screen.getByTestId(`cell-ava_code-${H1}`));
+    // meiva_code is enabled on h1 -> clicking turns it OFF.
+    const cell = await waitFor(() => screen.getByTestId(`cell-meiva_code-${H1}`));
     fireEvent.click(cell);
     await waitFor(() => expect(putSpy).toHaveBeenCalled());
-    expect(putSpy).toHaveBeenCalledWith({ plugins: { ava_code: false } }, H1);
+    expect(putSpy).toHaveBeenCalledWith({ plugins: { meiva_code: false } }, H1);
   });
 
   it("clicking a disabled cell calls putInventory to enable it on that host", async () => {
     vi.spyOn(api, "getInventory").mockResolvedValue(AGGREGATE);
     const putSpy = vi.spyOn(api, "putInventory").mockResolvedValue(OK_RESULT);
     wrap(<InventoryPage />);
-    // ava_code is disabled on h2 -> clicking turns it ON.
-    const cell = await waitFor(() => screen.getByTestId(`cell-ava_code-${H2}`));
+    // meiva_code is disabled on h2 -> clicking turns it ON.
+    const cell = await waitFor(() => screen.getByTestId(`cell-meiva_code-${H2}`));
     fireEvent.click(cell);
     await waitFor(() =>
-      expect(putSpy).toHaveBeenCalledWith({ plugins: { ava_code: true } }, H2),
+      expect(putSpy).toHaveBeenCalledWith({ plugins: { meiva_code: true } }, H2),
     );
   });
 
@@ -225,7 +225,7 @@ describe("InventoryPage toggle (putInventory)", () => {
     const qc = makeQc();
     const invalidateSpy = vi.spyOn(qc, "invalidateQueries");
     wrap(<InventoryPage />, qc);
-    const cell = await waitFor(() => screen.getByTestId(`cell-ava_code-${H1}`));
+    const cell = await waitFor(() => screen.getByTestId(`cell-meiva_code-${H1}`));
     fireEvent.click(cell);
     await waitFor(() => {
       const keys = invalidateSpy.mock.calls.map(([opts]) => opts?.queryKey);
@@ -238,12 +238,12 @@ describe("InventoryPage toggle (putInventory)", () => {
     vi.spyOn(api, "getInventory").mockResolvedValue(AGGREGATE);
     const putSpy = vi.spyOn(api, "putInventory").mockResolvedValue(OK_RESULT);
     wrap(<InventoryPage />);
-    // ava_code: enabled on h1 (skipped — already target), disabled on h2 ->
+    // meiva_code: enabled on h1 (skipped — already target), disabled on h2 ->
     // exactly one PUT for h2.
-    const btn = await waitFor(() => screen.getByTestId("enable-all-ava_code"));
+    const btn = await waitFor(() => screen.getByTestId("enable-all-meiva_code"));
     fireEvent.click(btn);
     await waitFor(() => expect(putSpy).toHaveBeenCalledTimes(1));
-    expect(putSpy).toHaveBeenCalledWith({ plugins: { ava_code: true } }, H2);
+    expect(putSpy).toHaveBeenCalledWith({ plugins: { meiva_code: true } }, H2);
   });
 });
 

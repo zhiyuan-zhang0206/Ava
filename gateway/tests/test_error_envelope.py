@@ -17,7 +17,7 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 from starlette.responses import Response
 
 from base import config
-from base.api_contracts.agent_contract import AgentNotFound, AvaAgentError, ErrorReason
+from base.api_contracts.agent_contract import AgentNotFound, ErrorReason, MeivaAgentError
 from base.config.tests.configuration import snapshot_process_config
 from base.host.db_authority.api import AcceptanceCache
 from base.telemetry.tests.capture.event_capture import EmittedEvents
@@ -30,8 +30,8 @@ from gateway.http.auth import rejection_log
 from gateway.http.config import gateway_config_from_boot
 from gateway.http.middleware.error_envelope import request_trace_middleware
 from gateway.http.middleware.error_handlers import (
-    ava_agent_error_handler,
     http_exception_handler,
+    meiva_agent_error_handler,
     request_validation_error_handler,
     unhandled_exception_handler,
 )
@@ -89,7 +89,7 @@ def handler_client() -> Iterator[GatewayTestClient]:
         allow_headers=["*"],
     )
     app.middleware("http")(request_trace_middleware)
-    app.add_exception_handler(AvaAgentError, ava_agent_error_handler)  # type: ignore[arg-type]
+    app.add_exception_handler(MeivaAgentError, meiva_agent_error_handler)  # type: ignore[arg-type]
     app.add_exception_handler(StarletteHTTPException, http_exception_handler)  # type: ignore[arg-type]
     app.add_exception_handler(RequestValidationError, request_validation_error_handler)  # type: ignore[arg-type]
     app.add_exception_handler(Exception, unhandled_exception_handler)

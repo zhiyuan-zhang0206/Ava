@@ -10,8 +10,8 @@ new agent's own:
 - shared (cluster) memory index: NOT `on_fork` — cluster-wide content; the
   inherited copy is the same thing a graft would add (the timezone rule).
 
-The ava_memory registrations are re-established per test (the same load path
-`test_ava_memory_notes.py` uses), because other modules clear the plugin
+The meiva_memory registrations are re-established per test (the same load path
+`test_meiva_memory_notes.py` uses), because other modules clear the plugin
 registrations on teardown.
 """
 
@@ -40,7 +40,7 @@ from base.config.service_read import ConfigAuthority
 from base.db.code_version_gate import ProcessDbGate
 from base.lm.catalog import ModelCatalog
 from base.packages.extensions import install_registry
-from base.paths import ava_home, skills_dir
+from base.paths import meiva_home, skills_dir
 
 
 @pytest.fixture
@@ -70,7 +70,7 @@ def _fake_note(tag: NoteTag, content: str, id: str) -> HumanMessage:
     return HumanMessage(
         content=f"[system] {content}",
         id=id,
-        additional_kwargs={"ava_msg_type": "system_note", "ava_note_tag": tag.value},
+        additional_kwargs={"meiva_msg_type": "system_note", "meiva_note_tag": tag.value},
     )
 
 
@@ -138,7 +138,7 @@ async def test_fork_tail_grafts_delta_skills_from_inbound_payload(
     """Scenario 2b: a skill the fork's config added (source never had it) rides
     the fork inbound payload and lands as a full-body note at the TAIL — after
     the fork marker and the on_fork notes, never inside the cached prefix."""
-    load_dir = skills_dir(ava_home())
+    load_dir = skills_dir(meiva_home())
     load_dir.mkdir()
     extra = load_dir / "extra"
     extra.mkdir()
@@ -176,13 +176,13 @@ async def test_fork_tail_grafts_delta_skills_from_inbound_payload(
     assert isinstance(tail_note, HumanMessage)
     assert isinstance(tail_note.content, str)  # pyright: ignore[reportUnknownMemberType]
     assert "EXTRA SKILL BODY" in tail_note.content
-    assert "## ava.skills.extra" in tail_note.content
-    assert tail_note.additional_kwargs.get("ava_note_tag") == "preloaded_skills"  # pyright: ignore[reportUnknownMemberType]
+    assert "## meiva.skills.extra" in tail_note.content
+    assert tail_note.additional_kwargs.get("meiva_note_tag") == "preloaded_skills"  # pyright: ignore[reportUnknownMemberType]
     # The graft sits AFTER the fork marker: [RemoveMessage, sys, inherited, marker, ..., delta]
     tags = [
-        m.additional_kwargs.get("ava_note_tag")  # pyright: ignore[reportUnknownMemberType]
+        m.additional_kwargs.get("meiva_note_tag")  # pyright: ignore[reportUnknownMemberType]
         for m in msgs
-        if isinstance(m, HumanMessage) and m.additional_kwargs.get("ava_note_tag")  # pyright: ignore[reportUnknownMemberType]
+        if isinstance(m, HumanMessage) and m.additional_kwargs.get("meiva_note_tag")  # pyright: ignore[reportUnknownMemberType]
     ]
     assert tags[0] == "lifecycle_fork"
     assert tags[-1] == "preloaded_skills"
@@ -217,8 +217,8 @@ async def test_fork_without_payload_grafts_nothing(
     )
     msgs = cast(list[BaseMessage], (cmd.update or {})["messages"])
     tags = [
-        m.additional_kwargs.get("ava_note_tag")  # pyright: ignore[reportUnknownMemberType]
+        m.additional_kwargs.get("meiva_note_tag")  # pyright: ignore[reportUnknownMemberType]
         for m in msgs
-        if isinstance(m, HumanMessage) and m.additional_kwargs.get("ava_note_tag")  # pyright: ignore[reportUnknownMemberType]
+        if isinstance(m, HumanMessage) and m.additional_kwargs.get("meiva_note_tag")  # pyright: ignore[reportUnknownMemberType]
     ]
     assert "preloaded_skills" not in tags

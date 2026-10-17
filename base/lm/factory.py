@@ -1,7 +1,7 @@
 """LLM provider factory — picks LangChain's chat model by model name prefix.
 
 For test / multi-instance / debug scenarios, a custom factory can be
-injected via `AVA_LLM_OVERRIDE=mod:factory` env (see tests/e2e/README.md);
+injected via `MEIVA_LLM_OVERRIDE=mod:factory` env (see tests/e2e/README.md);
 if the env is not set, the original path is used.
 
 
@@ -16,12 +16,12 @@ Current provider matrix:
 | `mimo-*`     | Xiaomi    | `ReasoningContentChatModel`| `MIMO_API_KEY`      | `https://api.xiaomimimo.com/v1`   |
 | `kimi-*`     | Moonshot  | `langchain-moonshot`        | `MOONSHOT_API_KEY`  | (default)                         |
 | `glm-*`      | Zhipu     | `ReasoningContentChatModel`| `GLM_API_KEY`       | `https://open.bigmodel.cn/api/paas/v4` |
-| `qwen*`      | Alibaba   | `ReasoningContentChatModel`| `DASHSCOPE_API_KEY` | `AVA_DASHSCOPE_BASE_URL` (default `https://dashscope.aliyuncs.com/compatible-mode/v1`) |
+| `qwen*`      | Alibaba   | `ReasoningContentChatModel`| `DASHSCOPE_API_KEY` | `MEIVA_DASHSCOPE_BASE_URL` (default `https://dashscope.aliyuncs.com/compatible-mode/v1`) |
 
 kimi uses `ChatMoonshot` (`langchain-moonshot`) and captures reasoning in
 `additional_kwargs["reasoning_content"]` (not canonical content blocks) — the
 streaming fan-out (`RedisStreamHandler`) and timeline (`base/agents/history/timeline.py`)
-handle that style. Its binding lives in `ava_builtins/plugins/lm_moonshot`.
+handle that style. Its binding lives in `meiva_builtins/plugins/lm_moonshot`.
 
 glm / mimo / qwen use `ReasoningContentChatModel` (`base/lm/compat/openai_reasoning.py`), a
 ChatOpenAI subclass folding `reasoning_content` deltas into canonical
@@ -106,7 +106,7 @@ from base.lm.registry import (
 
 
 class _LLMFactory(Protocol):
-    """Contract for the callable that `AVA_LLM_OVERRIDE=mod:factory` points to.
+    """Contract for the callable that `MEIVA_LLM_OVERRIDE=mod:factory` points to.
 
     Newly written fake factories should conform to this signature: take
     model name and explicit agent id (None outside an agent), return a
@@ -223,7 +223,7 @@ def validate_model_config(
     _validate_model_effort(effective_model, config, catalog=catalog)
 
     # 2. API key must be configured — unless an LLM override is active
-    # (e2e tests inject fake chat models via AVA_LLM_OVERRIDE and don't need
+    # (e2e tests inject fake chat models via MEIVA_LLM_OVERRIDE and don't need
     # real keys; the override path in build_chat_model skips the real LLM).
     if not check_provider_key or llm_override:
         return effective_model
@@ -288,32 +288,32 @@ def _ensure_provider_key(effective_model: str, *, catalog: ModelCatalog) -> None
 
 
 def resolve_override(override: str, model: str, *, agent_id: int | None = None) -> BaseChatModel:
-    """Parse `AVA_LLM_OVERRIDE=mod:factory` env; report failure errors in four
+    """Parse `MEIVA_LLM_OVERRIDE=mod:factory` env; report failure errors in four
     classes hierarchically ("format / module not found / factory not found /
     return type wrong"), so the user can pinpoint."""
     module_path, sep, factory_name = override.partition(":")
     if not sep or not module_path or not factory_name.isidentifier():
         raise ValueError(
-            f"AVA_LLM_OVERRIDE={override!r}: requires 'module.path:factory_name' form "
+            f"MEIVA_LLM_OVERRIDE={override!r}: requires 'module.path:factory_name' form "
             f"(factory_name must be a valid Python identifier)"
         )
     try:
         module = importlib.import_module(module_path)
     except ImportError as e:
         raise ImportError(
-            f"AVA_LLM_OVERRIDE={override!r}: cannot find module {module_path!r} ({e})"
+            f"MEIVA_LLM_OVERRIDE={override!r}: cannot find module {module_path!r} ({e})"
         ) from e
     factory: _LLMFactory | None = getattr(module, factory_name, None)
     if factory is None:
         raise AttributeError(
-            f"AVA_LLM_OVERRIDE={override!r}: module {module_path!r} has no attribute {factory_name!r}"
+            f"MEIVA_LLM_OVERRIDE={override!r}: module {module_path!r} has no attribute {factory_name!r}"
         )
     from langchain_core.language_models.chat_models import BaseChatModel
 
     result = factory(model, agent_id=agent_id)
     if not isinstance(result, BaseChatModel):
         raise TypeError(
-            f"AVA_LLM_OVERRIDE={override!r}: factory returned {type(result).__name__!r}, "
+            f"MEIVA_LLM_OVERRIDE={override!r}: factory returned {type(result).__name__!r}, "
             f"not a BaseChatModel subclass"
         )
     return result
@@ -344,7 +344,7 @@ def build_chat_model(
     Dispatches to a registered provider-plugin binding (each documents its own
     key / thinking / reasoning-effort wiring). The
     cross-provider resolution shared by every branch happens here:
-    `AVA_LLM_OVERRIDE`, the streaming default, and the reasoning-effort knob
+    `MEIVA_LLM_OVERRIDE`, the streaming default, and the reasoning-effort knob
     (`resolved_effort` — explicit env/.env/overlay value wins, else the model's
     registry default, else the provider default).
 
@@ -378,21 +378,21 @@ def build_chat_model(
             timeout elsewhere). None = the provider SDK's own default. The
             agent's streaming path deliberately leaves it None (its own
             TTFT / inter-chunk timeouts govern); the non-streaming SDK
-            paths (ava.understand / ava.web.fetch answer) pass
+            paths (meiva.understand / meiva.web.fetch answer) pass
             settings.lm.llm_invoke_timeout_seconds so a wedged provider
             surfaces in tens of seconds instead of the SDK default (~600s).
 
-        media_resolution: media-path only (ava.understand) — the Gemini
+        media_resolution: media-path only (meiva.understand) — the Gemini
             low/medium/high resolution setting, mapped onto Google's
             MediaResolution enum by the gemini branch; ignored by other
             providers. None = the SDK default.
-        media_thinking_level: media-path only (ava.understand) — the Gemini
+        media_thinking_level: media-path only (meiva.understand) — the Gemini
             thinking_level vocabulary carried explicitly (the media path maps
             `effort` itself, including the `max` → configured-knob special
             case) instead of the resolved cross-provider effort; also keeps
             include_thoughts at the SDK default, matching the media path's
             historic wire shape. Ignored by other providers.
-        base_url: media-path only (ava.understand) — endpoint override for
+        base_url: media-path only (meiva.understand) — endpoint override for
             the gemini branch (e.g. a self-hosted relay / provider mirror);
             None = the SDK default official endpoint. Ignored by other
             providers.
@@ -444,7 +444,7 @@ def build_chat_model_bound(
     llm_override: str,
 ) -> tuple[BaseChatModel, provider_api.ProviderBinding | None]:
     """Internal companion: return the client and binding selected by this build."""
-    # e2e tests inject fake chat model via AVA_LLM_OVERRIDE (tests/e2e/README.md);
+    # e2e tests inject fake chat model via MEIVA_LLM_OVERRIDE (tests/e2e/README.md);
     # if set, warn loudly — a dev accidentally leaving it in .env would route
     # all agents through a fake LLM, and production observability must be fail-loud.
     if type(single_attempt) is not bool:
@@ -454,7 +454,7 @@ def build_chat_model_bound(
         if single_attempt:
             raise ValueError("LLM overrides do not declare single-attempt construction")
         logger.warning(
-            f"AVA_LLM_OVERRIDE active: model={model!r} does not go through real LLM, routed via {override!r}"
+            f"MEIVA_LLM_OVERRIDE active: model={model!r} does not go through real LLM, routed via {override!r}"
         )
         return resolve_override(override, model, agent_id=agent_id), None
 

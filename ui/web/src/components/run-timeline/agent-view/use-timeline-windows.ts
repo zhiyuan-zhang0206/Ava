@@ -23,7 +23,7 @@ function covers(data: RunTimelineResponse | undefined, view: Viewport | null): b
   return window.from <= view.from && window.to >= view.to;
 }
 
-// ava:ref ui/web/src/docs/frontend-components/run-timeline/window-reads.ava.okf.md#snapshot-window-reads
+// meiva:ref ui/web/src/docs/frontend-components/run-timeline/window-reads.meiva.okf.md#snapshot-window-reads
 export function useTimelineWindows(ids: readonly number[], viewport: Viewport | null) {
   const client = useQueryClient();
   const [settled, setSettled] = useState<Viewport | null>(null);

@@ -18,25 +18,25 @@ LINUX_MINUTE_USD = 0.006
 MACOS_MINUTE_USD = 0.062
 INCLUDED_MINUTES_MONTHLY = 3000
 
-DEFAULT_REPO = "zhiyuan-zhang0206/Ava"
+DEFAULT_REPO = "zhiyuan-zhang0206/Meiva"
 _LEDGER_DIR = Path(__file__).resolve().parents[1] / "ci_usage"
 DEFAULT_LEDGER = _LEDGER_DIR / "ledger.jsonl"
 
-_AGENT_RE = re.compile(r"\[Ava-(\d+)\]")
+_AGENT_RE = re.compile(r"\[Meiva-(\d+)\]")
 _TASK_RE = re.compile(r"\(task #(\d+)\)")
 _TRUNK_PR_RE = re.compile(r"trunk-merge/pr-(\d+)/")
-_BRANCH_AGENT_RE = re.compile(r"^ava-(\d+)-")
+_BRANCH_AGENT_RE = re.compile(r"^meiva-(\d+)-")
 
-# ava:ref scripts/ci/pull_requests/docs/ci-usage.ava.okf.md#github-page-limit
+# meiva:ref scripts/ci/pull_requests/docs/ci-usage.meiva.okf.md#github-page-limit
 _WINDOW_CHUNK_SECONDS = 4 * 3600
 
 
-# ava:ref scripts/ci/pull_requests/docs/ci-usage.ava.okf.md#complete-github-evidence
+# meiva:ref scripts/ci/pull_requests/docs/ci-usage.meiva.okf.md#complete-github-evidence
 class CiUsageReadError(RuntimeError):
     pass
 
 
-# ava:ref scripts/ci/pull_requests/docs/ci-usage.ava.okf.md#complete-github-evidence
+# meiva:ref scripts/ci/pull_requests/docs/ci-usage.meiva.okf.md#complete-github-evidence
 def _gh_output(argv: list[str], *, operation: str, host: Host) -> str:
     try:
         result = host.run(argv, capture_output=True, text=True, timeout=_GH_TIMEOUT_S)
@@ -47,7 +47,7 @@ def _gh_output(argv: list[str], *, operation: str, host: Host) -> str:
     return result.stdout
 
 
-# ava:ref scripts/ci/pull_requests/docs/ci-usage.ava.okf.md#complete-github-evidence
+# meiva:ref scripts/ci/pull_requests/docs/ci-usage.meiva.okf.md#complete-github-evidence
 def _gh_api(path: str, *, host: Host) -> Any:
     output = _gh_output(["gh", "api", path], operation=path, host=host)
     try:
@@ -56,7 +56,7 @@ def _gh_api(path: str, *, host: Host) -> Any:
         raise CiUsageReadError(f"{path}: GitHub response is not JSON") from exc
 
 
-# ava:ref scripts/ci/pull_requests/docs/ci-usage.ava.okf.md#complete-github-evidence
+# meiva:ref scripts/ci/pull_requests/docs/ci-usage.meiva.okf.md#complete-github-evidence
 def _read_page(path: str, key: str, *, host: Host) -> tuple[int, list[dict[str, Any]]]:
     payload = _gh_api(path, host=host)
     if not isinstance(payload, dict):
@@ -72,7 +72,7 @@ def _read_page(path: str, key: str, *, host: Host) -> tuple[int, list[dict[str, 
     return total, rows
 
 
-# ava:ref scripts/ci/pull_requests/docs/ci-usage.ava.okf.md#complete-github-evidence
+# meiva:ref scripts/ci/pull_requests/docs/ci-usage.meiva.okf.md#complete-github-evidence
 def _pages(
     path: str, key: str, *, host: Host, max_items: int | None = None
 ) -> list[dict[str, Any]]:
@@ -86,7 +86,7 @@ def _pages(
         )
         if expected is not None and total != expected:
             raise CiUsageReadError(f"{path}: incomplete read; total_count changed while paging")
-        # ava:ref scripts/ci/pull_requests/docs/ci-usage.ava.okf.md#github-page-limit
+        # meiva:ref scripts/ci/pull_requests/docs/ci-usage.meiva.okf.md#github-page-limit
         if max_items is not None and total >= max_items:
             raise CiUsageReadError(
                 f"{path}: incomplete read; narrow the window below {max_items} runs"
@@ -128,9 +128,9 @@ def _real_pr_of_trunk_branch(head_ref: str) -> int | None:
     return int(str(match.group(1))) if match else None
 
 
-# ava:ref scripts/ci/pull_requests/docs/accounting.ava.okf.md#minute-billing
+# meiva:ref scripts/ci/pull_requests/docs/accounting.meiva.okf.md#minute-billing
 def job_minutes(started: str | None, completed: str | None) -> int:
-    # ava:ref scripts/ci/pull_requests/docs/ci-usage.ava.okf.md#completed-job-minutes
+    # meiva:ref scripts/ci/pull_requests/docs/ci-usage.meiva.okf.md#completed-job-minutes
     if started is None or completed is None:
         return 0
     start = datetime.fromisoformat(started.replace("Z", "+00:00"))
@@ -140,7 +140,7 @@ def job_minutes(started: str | None, completed: str | None) -> int:
     return math.ceil((end - start).total_seconds() / 60.0)
 
 
-# ava:ref scripts/ci/pull_requests/docs/ci-usage.ava.okf.md#attribution-sources
+# meiva:ref scripts/ci/pull_requests/docs/ci-usage.meiva.okf.md#attribution-sources
 def _identity_from_prs(
     run: dict[str, Any], repo: str, real_pr: int | None, *, host: Host
 ) -> tuple[int | None, int | None, int | None]:
@@ -172,9 +172,9 @@ def _merged_pr_of(run: dict[str, Any], repo: str, *, host: Host) -> int | None:
     return merged_prs[0]["number"] if merged_prs else None
 
 
-# ava:ref scripts/ci/pull_requests/docs/accounting.ava.okf.md#attribution-fallback-chain
+# meiva:ref scripts/ci/pull_requests/docs/accounting.meiva.okf.md#attribution-fallback-chain
 def _run_identity(
-    # ava:ref scripts/ci/pull_requests/docs/ci-usage.ava.okf.md#attribution-sources
+    # meiva:ref scripts/ci/pull_requests/docs/ci-usage.meiva.okf.md#attribution-sources
     run: dict[str, Any],
     repo: str,
     *,
@@ -214,7 +214,7 @@ def _run_entry(run: dict[str, Any], repo: str, *, host: Host) -> dict[str, Any]:
     }
 
 
-# ava:ref scripts/ci/pull_requests/docs/ci-usage.ava.okf.md#completed-job-minutes
+# meiva:ref scripts/ci/pull_requests/docs/ci-usage.meiva.okf.md#completed-job-minutes
 def _completed_job_minutes(job: dict[str, Any]) -> int:
     if job.get("status") != "completed" or not isinstance(job.get("conclusion"), str):
         raise CiUsageReadError(f"job {job['id']}: incomplete; job is not completed")
@@ -245,7 +245,7 @@ def _fill_job_minutes(entry: dict[str, Any], repo: str, *, host: Host) -> None:
         entry["jobs"] += 1
 
 
-# ava:ref scripts/ci/pull_requests/docs/ci-usage.ava.okf.md#complete-github-evidence
+# meiva:ref scripts/ci/pull_requests/docs/ci-usage.meiva.okf.md#complete-github-evidence
 def collect(repo: str, since: str, until: str, *, host: Host) -> list[dict[str, Any]]:
     entries: dict[int, dict[str, Any]] = {}
     since_dt = datetime.fromisoformat(since.replace("Z", "+00:00"))
@@ -304,9 +304,9 @@ def load_ledger(path: Path) -> dict[int, dict[str, Any]]:
     return ledger
 
 
-# ava:ref scripts/ci/pull_requests/docs/accounting.ava.okf.md#ledger-idempotence
+# meiva:ref scripts/ci/pull_requests/docs/accounting.meiva.okf.md#ledger-idempotence
 def append_ledger(path: Path, entries: list[dict[str, Any]]) -> int:
-    # ava:ref scripts/ci/pull_requests/docs/ci-usage.ava.okf.md#preserve-ledger-history
+    # meiva:ref scripts/ci/pull_requests/docs/ci-usage.meiva.okf.md#preserve-ledger-history
     ledger = load_ledger(path)
     fresh = [e for e in entries if e["run_id"] not in ledger]
     if not fresh:
@@ -318,7 +318,7 @@ def append_ledger(path: Path, entries: list[dict[str, Any]]) -> int:
     return len(fresh)
 
 
-# ava:ref scripts/ci/pull_requests/docs/accounting.ava.okf.md#overage-equivalent-cost
+# meiva:ref scripts/ci/pull_requests/docs/accounting.meiva.okf.md#overage-equivalent-cost
 def report_rows(
     ledger: dict[int, dict[str, Any]], *, days: int, agent: int | None
 ) -> list[dict[str, Any]]:
@@ -395,7 +395,7 @@ def _print_entries(entries: list[dict[str, Any]]) -> None:
         )
 
 
-# ava:ref scripts/ci/pull_requests/docs/ci-usage.ava.okf.md#complete-github-evidence
+# meiva:ref scripts/ci/pull_requests/docs/ci-usage.meiva.okf.md#complete-github-evidence
 def main(argv: list[str] | None = None, *, host: Host) -> int:
     parser = argparse.ArgumentParser(description="CI usage attribution and ledger")
     parser.add_argument(

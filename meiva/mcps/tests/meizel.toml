@@ -1,0 +1,34 @@
+[uses]
+"daemon" = ["test_daemon.py"]
+"test_call_identity_check.py" = ["_mcps_helpers.py"]
+"test_mcps.py" = ["_mcps_helpers.py"]
+"test_mcps_remote.py" = ["_mcps_helpers.py"]
+"test_remote_timeout.py" = ["_mcps_helpers.py"]
+"test_retry_classify.py" = ["_mcps_helpers.py"]
+
+[debt.first-party-patch]
+"_mcps_helpers.py#monkeypatch.setattr meiva.mcps.config.builtin_mcp_paths" = 1
+"test_browser.py#monkeypatch.setattr meiva.mcps._browser._CONNECT_ATTEMPTS" = 1
+"test_browser.py#monkeypatch.setattr meiva.mcps._browser._CONNECT_DELAY_S" = 1
+"test_browser.py#monkeypatch.setattr meiva.mcps._browser._RELEASE_TIMEOUT_S" = 1
+"test_browser.py#monkeypatch.setattr meiva.mcps._browser.asyncio.open_unix_connection" = 2
+"test_computer.py#monkeypatch.setattr meiva.mcps._computer.asyncio.open_unix_connection" = 2
+"test_daemon.py#monkeypatch.setattr meiva.mcps._daemon.asyncio.Event" = 1
+"test_daemon.py#monkeypatch.setattr meiva.mcps._daemon.connect_server" = 12
+"test_daemon.py#monkeypatch.setattr meiva.mcps._daemon.reap_stale_daemons" = 1
+"test_daemon.py#monkeypatch.setattr meiva.mcps.config.builtin_mcp_paths" = 1
+"test_mcps.py#monkeypatch.setattr meiva.mcps._remote.daemon_socket_path" = 3
+"test_mcps.py#monkeypatch.setattr meiva.mcps._remote.socket_path_for" = 2
+"test_mcps_remote.py#monkeypatch.setattr meiva.mcps._remote.daemon_socket_path" = 1
+"test_mcps_remote.py#monkeypatch.setattr meiva.mcps._remote.time.time" = 3
+"test_retry_classify.py#monkeypatch.setattr meiva.mcps._daemon.asyncio.sleep" = 1
+"test_retry_classify.py#monkeypatch.setattr meiva.mcps._daemon.get_session" = 1
+"test_retry_classify.py#monkeypatch.setattr meiva.mcps._daemon.invalidate_session" = 1
+
+[debt.stdlib-patch]
+"test_mcps_remote.py#monkeypatch.setattr socket.socket" = 1
+"test_retry_classify.py#monkeypatch.setattr socket.socket" = 1
+
+[debt.third-party-patch]
+"test_daemon_reap.py#patch psutil.process_iter" = 1
+"test_request_admission.py#monkeypatch.setattr mcp.client.stdio.stdio_client" = 1

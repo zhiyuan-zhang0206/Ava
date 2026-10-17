@@ -28,7 +28,7 @@ def plugin_services() -> tuple[ServiceSpec, ...]:
     reverse edge from ops into any specific plugin's domain code.
 
     Discovery keys on plugin **presence**, NOT the agent-facing enable-state
-    (``ava plugins enable/disable``): the roster is a machine/cluster concern, and
+    (``meiva plugins enable/disable``): the roster is a machine/cluster concern, and
     coupling it to the agent-plugin-registration plane would be cross-plane
     semantics. A plugin gates its own service (whether it starts) via an explicit
     settings field in ``ServiceSpec.gate`` — e.g. task-maintenance's
@@ -38,7 +38,7 @@ def plugin_services() -> tuple[ServiceSpec, ...]:
 
     The ``services.py`` module is loaded by FILE PATH (like
     `base.packages.plugin_config_admin.update_all_disk_images` loads `default_config.py`) so an
-    external plugin under ``~/.ava/plugins/`` — off the ``plugins.`` package path —
+    external plugin under ``~/.meiva/plugins/`` — off the ``plugins.`` package path —
     can register too; it must import only light deps (ops / base), never its
     own `plugin.py`, so this load does not drag the agent kernel into the ops
     process.

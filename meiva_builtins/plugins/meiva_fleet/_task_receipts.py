@@ -1,0 +1,71 @@
+"""Agent-scoped task update receipts, owned by the SDK mutation transaction."""
+
+from typing import Any
+
+import psycopg
+from psycopg.types.json import Jsonb
+
+from base.agents.context import MeivaContext
+from base.api_contracts.idempotency import validate_idempotency_key
+from meiva.sdk_surface import agent_identity
+
+from ._task_update import UNSET_FIELD
+
+
+def update_identity(key: str, *, context: MeivaContext) -> tuple[int, str]:
+    """Validate the required key and established actor before mutation admission."""
+    validated = validate_idempotency_key(key)
+    return agent_identity.require_agent_id(context), validated
+
+
+def update_request(values: dict[str, object]) -> dict[str, object]:
+    """Capture effective inputs before notes acquire a timestamp or parents resolve."""
+    return {
+        name: value
+        for name, value in values.items()
+        if value is not UNSET_FIELD and (value is not None or name == "parent_id")
+    }
+
+
+def replay_update(
+    cur: psycopg.Cursor[Any],
+    actor: int,
+    task_id: int,
+    key: str,
+    request: dict[str, object],
+    *,
+    context: MeivaContext,
+) -> bool:
+    """Serialize a logical update and recheck identity after any lock wait."""
+    cur.execute(
+        "SELECT pg_advisory_xact_lock(hashtextextended(%s, 0))",
+        (f"task-update:{actor}:{task_id}:{key}",),
+    )
+    if agent_identity.require_agent_id(context) != actor:
+        raise RuntimeError("task update actor changed while waiting for operation admission")
+    cur.execute(
+        "SELECT request FROM task_update_receipts "
+        "WHERE actor_agent_id=%s AND task_id=%s AND operation_key=%s",
+        (actor, task_id, key),
+    )
+    row = cur.fetchone()
+    if row is None:
+        return False
+    if row[0] != request:
+        raise ValueError("idempotency key identifies a different task update")
+    return True
+
+
+def record_update(
+    cur: psycopg.Cursor[Any],
+    actor: int,
+    task_id: int,
+    key: str,
+    request: dict[str, object],
+) -> None:
+    """A retained row proves this void-returning mutation committed once."""
+    cur.execute(
+        "INSERT INTO task_update_receipts (actor_agent_id, task_id, operation_key, request) "
+        "VALUES (%s, %s, %s, %s)",
+        (actor, task_id, key, Jsonb(request)),
+    )

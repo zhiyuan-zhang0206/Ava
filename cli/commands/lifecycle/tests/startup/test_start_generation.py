@@ -47,17 +47,17 @@ def test_development_generation_includes_dirty_and_untracked_source(tmp_path: Pa
     (tmp_path / "ignored").mkdir()
     (tmp_path / "ignored" / "build").write_text("generated")
     assert source_digest(tmp_path) == initial
-    assert launch_digest(tmp_path, {"AVA_MACHINE_NAME": "first"}, home=tmp_path) != launch_digest(
-        tmp_path, {"AVA_MACHINE_NAME": "second"}, home=tmp_path
+    assert launch_digest(tmp_path, {"MEIVA_MACHINE_NAME": "first"}, home=tmp_path) != launch_digest(
+        tmp_path, {"MEIVA_MACHINE_NAME": "second"}, home=tmp_path
     )
     assert launch_digest(tmp_path, {"USER": "first"}, home=tmp_path) == launch_digest(
         tmp_path, {"USER": "second"}, home=tmp_path
     )
     home = tmp_path / "ignored" / "home"
     home.mkdir()
-    (home / ".env").write_text("AVA_SSE_THROTTLE_RATE=10\n")
+    (home / ".env").write_text("MEIVA_SSE_THROTTLE_RATE=10\n")
     configured = launch_digest(tmp_path, {}, home=home)
-    (home / ".env").write_text("AVA_SSE_THROTTLE_RATE=20\n")
+    (home / ".env").write_text("MEIVA_SSE_THROTTLE_RATE=20\n")
     assert source_digest(tmp_path) == initial
     assert launch_digest(tmp_path, {}, home=home) != configured
     source.unlink()
@@ -71,11 +71,11 @@ def test_unreadable_source_inventory_refuses(tmp_path: Path) -> None:
 
 def test_generation_binds_configuration_omitted_from_transport(tmp_path: Path) -> None:
     environment = tmp_path / ".env"
-    environment.write_text("AVA_SSE_THROTTLE_RATE=10\n")
+    environment.write_text("MEIVA_SSE_THROTTLE_RATE=10\n")
     initial = configuration_digest(tmp_path)
-    environment.write_text("AVA_SSE_THROTTLE_RATE=20\n")
+    environment.write_text("MEIVA_SSE_THROTTLE_RATE=20\n")
     assert configuration_digest(tmp_path) != initial
-    environment.write_text("AVA_SSE_THROTTLE_RATE=10\n")
+    environment.write_text("MEIVA_SSE_THROTTLE_RATE=10\n")
     assert configuration_digest(tmp_path) == initial
     plugin = tmp_path / "configs" / "example" / "config.json"
     plugin.parent.mkdir(parents=True)
@@ -197,7 +197,7 @@ def test_generation_binds_the_delivered_write_generation(
     )
     home = tmp_path / "home"
     home.mkdir()
-    (home / ".env").write_text("AVA_SSE_THROTTLE_RATE=10\n")
+    (home / ".env").write_text("MEIVA_SSE_THROTTLE_RATE=10\n")
     unborn = launch_digest(repo, {}, home=home)
     seed_write_generation(home)
     born = launch_digest(repo, {}, home=home)

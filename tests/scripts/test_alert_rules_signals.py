@@ -26,56 +26,72 @@ class Signal(NamedTuple):
 
 
 SIGNALS: dict[str, Signal] = {
-    "ava-ops-health-probe-warning": Signal("health_probe_failing", "ava-ops", "3m", "warning"),
-    "ava-ops-health-probe-error": Signal("health_probe_failing", "ava-ops", "10m", "error"),
-    "ava-ops-health-probe-silent": Signal("health_probe_ran", "ava-ops", "0m", "error"),
-    "ava-ops-service-start-unready": Signal("service_start_unready", "ava-ops", "0m", "warning"),
-    "ava-ops-boot-retries-exhausted": Signal("boot_retries_exhausted", "ava-ops", "0m", "error"),
-    "ava-ops-schedule-verify-failed": Signal("schedule_verify_failed", "ava-ops", "0m", "error"),
-    "ava-ops-schedule-stalled": Signal("schedule_stalled", "ava-ops-slow", "0m", "warning"),
-    "ava-ops-schedule-convergence-abandoned": Signal(
-        "schedule_convergence_abandoned", "ava-ops-slow", "0m", "warning"
+    "meiva-ops-health-probe-warning": Signal("health_probe_failing", "meiva-ops", "3m", "warning"),
+    "meiva-ops-health-probe-error": Signal("health_probe_failing", "meiva-ops", "10m", "error"),
+    "meiva-ops-health-probe-silent": Signal("health_probe_ran", "meiva-ops", "0m", "error"),
+    "meiva-ops-service-start-unready": Signal(
+        "service_start_unready", "meiva-ops", "0m", "warning"
     ),
-    "ava-ops-maintenance-hold-overdue": Signal(
-        "maintenance_hold_overdue", "ava-ops-slow", "0m", "warning"
+    "meiva-ops-boot-retries-exhausted": Signal(
+        "boot_retries_exhausted", "meiva-ops", "0m", "error"
     ),
-    "ava-ops-agent-continuation-lost": Signal("agent_continuation_lost", "ava-ops", "0m", "error"),
-    "ava-ops-machine-offline-warning": Signal("machine_probe_failed", "ava-ops", "3m", "warning"),
-    "ava-ops-machine-offline-error": Signal("machine_probe_failed", "ava-ops", "10m", "error"),
-    "ava-ops-exec-child-boot-failed": Signal("exec_child_boot_failed", "ava-ops", "0s", "warning"),
-    "ava-ops-inspect-metrics-gap": Signal(
-        "inspect_metrics_coverage_gap", "ava-ops", "0s", "warning"
+    "meiva-ops-schedule-verify-failed": Signal(
+        "schedule_verify_failed", "meiva-ops", "0m", "error"
     ),
-    "ava-ops-impersonation-seal-stuck": Signal(
-        "impersonation_event_log_incomplete", "ava-ops", "0s", "warning"
+    "meiva-ops-schedule-stalled": Signal("schedule_stalled", "meiva-ops-slow", "0m", "warning"),
+    "meiva-ops-schedule-convergence-abandoned": Signal(
+        "schedule_convergence_abandoned", "meiva-ops-slow", "0m", "warning"
     ),
-    "ava-ops-impersonation-capture-failed": Signal(
-        "impersonation_event_log_incomplete", "ava-ops", "0s", "warning"
+    "meiva-ops-maintenance-hold-overdue": Signal(
+        "maintenance_hold_overdue", "meiva-ops-slow", "0m", "warning"
     ),
-    "ava-ops-impersonation-notice-failed": Signal(
-        "impersonation_terminal_notice_failed", "ava-ops", "0m", "warning"
+    "meiva-ops-agent-continuation-lost": Signal(
+        "agent_continuation_lost", "meiva-ops", "0m", "error"
     ),
-    "ava-ops-im-push-failed": Signal("im_push_failed", "ava-ops", "0s", "warning"),
-    "ava-ops-im-feishu-owner-seed-failed": Signal(
-        "im_feishu_owner_seed_failed", "ava-ops", "0s", "warning"
+    "meiva-ops-machine-offline-warning": Signal(
+        "machine_probe_failed", "meiva-ops", "3m", "warning"
     ),
-    "ava-ops-im-push-stall": Signal("im_push_health", "ava-ops", "2m", "warning"),
-    "ava-ops-lifecycle-pointer-stuck": Signal(
-        "lifecycle_pointer_stuck", "ava-ops-slow", "0s", "warning", 0
+    "meiva-ops-machine-offline-error": Signal("machine_probe_failed", "meiva-ops", "10m", "error"),
+    "meiva-ops-exec-child-boot-failed": Signal(
+        "exec_child_boot_failed", "meiva-ops", "0s", "warning"
     ),
-    "ava-ops-delivery-stalled": Signal("delivery_stalled", "ava-ops", "1m", "warning"),
-    "ava-ops-db-pool-acquire-slow": Signal("db_pool_acquire_slow", "ava-ops", "2m", "warning"),
-    "ava-ops-root-unit-restart-failed": Signal("root_unit_failure_state", "ava-ops", "0m", "error"),
-    "ava-ops-root-unit-breaker-open": Signal(
-        "root_unit_failure_state", "ava-ops", "0m", "critical"
+    "meiva-ops-inspect-metrics-gap": Signal(
+        "inspect_metrics_coverage_gap", "meiva-ops", "0s", "warning"
     ),
-    "ava-ops-root-unit-not-revivable": Signal(
-        "root_unit_not_revivable", "ava-ops", "0m", "error", 1
+    "meiva-ops-impersonation-seal-stuck": Signal(
+        "impersonation_event_log_incomplete", "meiva-ops", "0s", "warning"
     ),
-    "ava-ops-root-diagnostic-venv": Signal("root_diagnostic", "ava-ops", "0m", "warning", 1),
-    "ava-ops-root-diagnostic-brew-pin": Signal("root_diagnostic", "ava-ops", "0m", "warning", 1),
-    "ava-ops-root-diagnostic-browser-reach": Signal(
-        "root_diagnostic", "ava-ops-slow", "0m", "warning", 2
+    "meiva-ops-impersonation-capture-failed": Signal(
+        "impersonation_event_log_incomplete", "meiva-ops", "0s", "warning"
+    ),
+    "meiva-ops-impersonation-notice-failed": Signal(
+        "impersonation_terminal_notice_failed", "meiva-ops", "0m", "warning"
+    ),
+    "meiva-ops-im-push-failed": Signal("im_push_failed", "meiva-ops", "0s", "warning"),
+    "meiva-ops-im-feishu-owner-seed-failed": Signal(
+        "im_feishu_owner_seed_failed", "meiva-ops", "0s", "warning"
+    ),
+    "meiva-ops-im-push-stall": Signal("im_push_health", "meiva-ops", "2m", "warning"),
+    "meiva-ops-lifecycle-pointer-stuck": Signal(
+        "lifecycle_pointer_stuck", "meiva-ops-slow", "0s", "warning", 0
+    ),
+    "meiva-ops-delivery-stalled": Signal("delivery_stalled", "meiva-ops", "1m", "warning"),
+    "meiva-ops-db-pool-acquire-slow": Signal("db_pool_acquire_slow", "meiva-ops", "2m", "warning"),
+    "meiva-ops-root-unit-restart-failed": Signal(
+        "root_unit_failure_state", "meiva-ops", "0m", "error"
+    ),
+    "meiva-ops-root-unit-breaker-open": Signal(
+        "root_unit_failure_state", "meiva-ops", "0m", "critical"
+    ),
+    "meiva-ops-root-unit-not-revivable": Signal(
+        "root_unit_not_revivable", "meiva-ops", "0m", "error", 1
+    ),
+    "meiva-ops-root-diagnostic-venv": Signal("root_diagnostic", "meiva-ops", "0m", "warning", 1),
+    "meiva-ops-root-diagnostic-brew-pin": Signal(
+        "root_diagnostic", "meiva-ops", "0m", "warning", 1
+    ),
+    "meiva-ops-root-diagnostic-browser-reach": Signal(
+        "root_diagnostic", "meiva-ops-slow", "0m", "warning", 2
     ),
 }
 
@@ -119,7 +135,7 @@ def test_the_rule_reads_its_declared_telemetry_event_in_the_prod_cluster(uid: st
     assert f'event_name="{SIGNALS[uid].event}"' in query
     spec = EVENTS[SIGNALS[uid].event]
     assert spec.category == "telemetry"
-    assert '| json | cluster=".ava"' in query
+    assert '| json | cluster=".meiva"' in query
     assert 'category="telemetry"' in query
 
 
@@ -149,30 +165,30 @@ def test_the_notification_text_names_only_labels_the_query_keeps(uid: str) -> No
 
 
 def test_the_health_rules_label_their_check_for_routing_and_the_window_silence() -> None:
-    for uid in ("ava-ops-health-probe-warning", "ava-ops-health-probe-error"):
+    for uid in ("meiva-ops-health-probe-warning", "meiva-ops-health-probe-error"):
         assert "sum by (attributes_check)" in _query(_rules()[uid][1])
 
 
 def test_the_probe_dead_man_fires_on_an_absent_heartbeat_and_routes_to_telegram() -> None:
-    rule = _rules()["ava-ops-health-probe-silent"][1]
+    rule = _rules()["meiva-ops-health-probe-silent"][1]
     assert "absent_over_time(" in _query(rule)
     assert rule["labels"]["metric"] == "health_probe_silent"
 
 
 def test_the_warning_and_error_tiers_of_one_outage_share_a_query() -> None:
-    for warning, error in (("ava-ops-health-probe-warning", "ava-ops-health-probe-error"),):
+    for warning, error in (("meiva-ops-health-probe-warning", "meiva-ops-health-probe-error"),):
         assert _query(_rules()[warning][1]) == _query(_rules()[error][1])
 
 
 def test_grafana_owns_five_minute_recovery_and_missing_series_grace() -> None:
     for group, rule in _rules().values():
         assert rule["keepFiringFor"] == "5m"
-        assert rule["missing_series_evals_to_resolve"] == (6 if group == "ava-ops" else 2)
+        assert rule["missing_series_evals_to_resolve"] == (6 if group == "meiva-ops" else 2)
         assert "keep_firing_for" not in rule
 
 
 @pytest.mark.parametrize("diagnostic", ["venv", "brew-pin", "browser-reach"])
 def test_root_diagnostics_keep_the_machine_identity(diagnostic: str) -> None:
-    rule = _rules()["ava-ops-root-diagnostic-" + diagnostic][1]
+    rule = _rules()["meiva-ops-root-diagnostic-" + diagnostic][1]
     assert "sum by (machine)" in _query(rule)
     assert "{{ $labels.machine }}" in rule["annotations"]["summary"]

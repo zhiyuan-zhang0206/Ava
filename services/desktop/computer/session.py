@@ -23,8 +23,8 @@ action lock still serializes individual executions; ownership decides WHO
 may act, the lock decides WHEN.
 
 Config via env (daemon is a per-machine service):
-  AVA_COMPUTER_LEASE_S          (default 30)
-  AVA_COMPUTER_QUEUE_TIMEOUT_S  (default 30)
+  MEIVA_COMPUTER_LEASE_S          (default 30)
+  MEIVA_COMPUTER_QUEUE_TIMEOUT_S  (default 30)
 """
 
 from __future__ import annotations

@@ -5,7 +5,7 @@ The Postgres/Redis helpers that used to live here are `base/deploy/tests/contain
 
 import psycopg
 
-_RUNNER_LOGIN = "ava_g0_runner"
+_RUNNER_LOGIN = "meiva_g0_runner"
 _RUNNER_PASSWORD = "suite-runner-password"  # noqa: S105 — throwaway pg only
 
 
@@ -22,7 +22,7 @@ def runner_projection(db_url: str | None = None) -> str:
     from base.host.net.url_secret import url_with_userinfo
 
     admin = settings.data_plane.db_url
-    grant_runner_login(admin, owner="ava_citest", login=_RUNNER_LOGIN, password=_RUNNER_PASSWORD)
+    grant_runner_login(admin, owner="meiva_citest", login=_RUNNER_LOGIN, password=_RUNNER_PASSWORD)
     return url_with_userinfo(db_url or admin, _RUNNER_LOGIN, _RUNNER_PASSWORD)
 
 
@@ -30,9 +30,9 @@ def grant_runner_login(url: str, *, owner: str, login: str, password: str) -> st
     """Give a throwaway database the runner capability and return a runner URL.
 
     The production shape: `base.cluster.authority.ensure_groups` converges the
-    NOLOGIN `ava_gateway` / `ava_runner` groups on `url`'s database (default
+    NOLOGIN `meiva_gateway` / `meiva_runner` groups on `url`'s database (default
     privileges declared FOR `owner`, the role that creates later tables), and
-    `login` inherits `ava_runner` exactly as a write generation's runner login
+    `login` inherits `meiva_runner` exactly as a write generation's runner login
     does (INHERIT TRUE, SET FALSE, ADMIN FALSE). Idempotent. `url` must dial a
     superuser session.
     """

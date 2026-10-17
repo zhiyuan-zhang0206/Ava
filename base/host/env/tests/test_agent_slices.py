@@ -119,9 +119,9 @@ def test_a_live_default_edit_reaches_the_next_resolution(monkeypatch: pytest.Mon
 
 def test_list_settings_are_frozen_into_tuples() -> None:
     slices = AgentSlices.resolve(
-        {"sdk_disable": ["ava.x", "ava.y"]}, default_reader=_default_reader
+        {"sdk_disable": ["meiva.x", "meiva.y"]}, default_reader=_default_reader
     )
-    assert slices.prompt.sdk_disable == ("ava.x", "ava.y")
+    assert slices.prompt.sdk_disable == ("meiva.x", "meiva.y")
 
 
 def test_read_serves_a_setting_no_slice_names_from_the_pin_else_the_live_default() -> None:

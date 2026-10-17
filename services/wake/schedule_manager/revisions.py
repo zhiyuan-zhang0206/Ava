@@ -31,7 +31,7 @@ def claim_convergence(pool: ConnectionPool[Any], schedule_id: int) -> Generator[
     """
     with write_transaction(pool) as conn:
         row = conn.execute(
-            "SELECT pg_try_advisory_xact_lock(hashtextextended('ava.schedule-convergence:' || %s::text, 0))",
+            "SELECT pg_try_advisory_xact_lock(hashtextextended('meiva.schedule-convergence:' || %s::text, 0))",
             (schedule_id,),
         ).fetchone()
         assert row is not None  # noqa: S101 — SELECT always returns one boolean

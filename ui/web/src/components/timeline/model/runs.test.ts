@@ -212,11 +212,11 @@ describe("summarizeTurn — SDK call aggregation", () => {
   it("aggregates call counts by method across code items, sourced from the backend AST field (not a text scan)", () => {
     const run = [
       item("agent_code", null, undefined, {
-        payload: "ava.files.read('a')",
+        payload: "meiva.files.read('a')",
         sdk_calls: [{ method: "files.read", count: 1 }],
       }),
       item("agent_code", null, undefined, {
-        payload: "ava.files.read('b')\nava.shell.run('ls')",
+        payload: "meiva.files.read('b')\nmeiva.shell.run('ls')",
         sdk_calls: [
           { method: "files.read", count: 1 },
           { method: "shell.run", count: 3 },
@@ -259,7 +259,7 @@ describe("summarizeTurn — SDK call aggregation", () => {
   it("trusts a genuinely empty backend sdk_calls ([]) as zero — does not regex-scan the payload text", () => {
     const run = [
       item("agent_code", null, undefined, {
-        payload: "# example: ava.files.read('x')\nprint('hi')",
+        payload: "# example: meiva.files.read('x')\nprint('hi')",
         sdk_calls: [],
       }),
     ];
@@ -267,7 +267,7 @@ describe("summarizeTurn — SDK call aggregation", () => {
   });
 
   it("skips (does not regex-scan) an item whose sdk_calls field is absent, e.g. never committed", () => {
-    const run = [item("agent_code", null, undefined, { payload: "ava.agents.spawn()", sdk_calls: null })];
+    const run = [item("agent_code", null, undefined, { payload: "meiva.agents.spawn()", sdk_calls: null })];
     expect(summarizeTurn(run).sdkCalls).toEqual([]);
   });
 
@@ -552,7 +552,7 @@ describe("groupIntoTurns", () => {
   });
 
   it("attach items fold into the turn's details block (user ruling 2026-08-30)", () => {
-    // ava.self.attach lands right after the exec output; it must group into
+    // meiva.self.attach lands right after the exec output; it must group into
     // the same work block instead of rendering as an always-visible card.
     const items = [
       item("agent_chat"), // 0 primary

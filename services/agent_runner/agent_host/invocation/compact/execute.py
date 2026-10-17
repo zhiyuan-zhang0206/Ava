@@ -26,7 +26,7 @@ from base.agents.compaction.execution import (
 )
 from base.agents.compaction.models import CompactHeldError, CompactOutcome, PreparedSummary
 from base.agents.compaction.source_owner import require_source_receiver
-from base.agents.context import AvaContext
+from base.agents.context import MeivaContext
 from base.agents.incarnation.native_work import activate_work
 from base.config import settings
 from base.db.transaction import async_write_transaction
@@ -69,7 +69,7 @@ async def _generate_original(
     pool: AsyncConnectionPool,
     saver: AsyncPostgresSaver,
     incarnation: RuntimeIncarnation,
-    ctx: AvaContext,
+    ctx: MeivaContext,
     continuation: CompactContinuation,
 ) -> bool:
     command = continuation.command
@@ -163,7 +163,7 @@ async def _finish_original(
     saver: AsyncPostgresSaver,
     graph: CompactGraph,
     incarnation: RuntimeIncarnation,
-    ctx: AvaContext,
+    ctx: MeivaContext,
     continuation: CompactContinuation,
 ) -> bool:
     command = continuation.command
@@ -202,7 +202,7 @@ async def run_compact(
     saver: AsyncPostgresSaver,
     graph: CompactGraph,
     incarnation: RuntimeIncarnation,
-    ctx: AvaContext,
+    ctx: MeivaContext,
 ) -> bool:
     """Run a fresh command once; an interrupted attempt stays held for inspection."""
     command = await pending(pool, incarnation.agent_id)

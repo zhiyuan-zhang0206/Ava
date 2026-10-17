@@ -7,7 +7,7 @@ exports = ["containers.py", "db_authority_tests.py", "maintenance_factory.py", "
 "test_maintenance_cold.py" = ["maintenance_factory.py"]
 
 [debt.env-patch]
-"test_migration_authority.py#monkeypatch.setenv os.environ.AVA_HOME" = 1
+"test_migration_authority.py#monkeypatch.setenv os.environ.MEIVA_HOME" = 1
 
 [debt.first-party-patch]
 "maintenance_factory.py#monkeypatch.setattr base.deploy.maintenance.pause_owner.lock_path" = 1

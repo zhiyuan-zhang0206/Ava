@@ -196,8 +196,8 @@ class PluginUpdateResult(BaseModel):
 def update_all_disk_images() -> PluginUpdateResult:
     """Scan all plugins, auto-merge disk-image schema diff, return structured result.
 
-    Driven by the `ava plugins update` CLI (`cli/commands/extensions/plugins.py`); the
-    `ava start` converge step runs the same path. There is no gateway endpoint
+    Driven by the `meiva plugins update` CLI (`cli/commands/extensions/plugins.py`); the
+    `meiva start` converge step runs the same path. There is no gateway endpoint
     for it. Each plugin goes through
     `base.packages.plugins.config_registration.merge_disk_image_schema(name, Cls)`:
       - disk image missing -> write default

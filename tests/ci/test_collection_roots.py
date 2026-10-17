@@ -167,7 +167,7 @@ _SYNTHETIC_TREE = {
     "base/pkg/tests/test_a.py": True,
     "base/pkg/tests/x/y/z/w/test_deep.py": True,
     "base/pkg/tests/tests/test_tests_in_tests.py": True,
-    "ava_builtins/skills/s/scripts/tests/test_s.py": True,
+    "meiva_builtins/skills/s/scripts/tests/test_s.py": True,
     "base/build/tests/test_root_named_build.py": True,  # an explicit root is not skipped
     # a helper in a `test_*` directory is collected too: `*` spans `/`
     "tests/a/test_dir/helper.py": True,
@@ -313,7 +313,7 @@ def test_python_files_makes_location_the_test_definition(tmp_path: Path) -> None
         "tests/components/agent/test_nested.py",
         "base/pkg/tests/test_a.py",
         "base/pkg/tests/area/test_b.py",
-        "ava_builtins/skills/x/scripts/tests/test_c.py",
+        "meiva_builtins/skills/x/scripts/tests/test_c.py",
         "services/example/area/tests/test_d.py",
         # Production modules that happen to be named test_*.py.
         "base/db/test_db_guard.py",
@@ -332,7 +332,7 @@ def test_python_files_makes_location_the_test_definition(tmp_path: Path) -> None
     )
     collected = sorted(line for line in result.stdout.splitlines() if "::" in line)
     assert collected == [
-        "ava_builtins/skills/x/scripts/tests/test_c.py::test_it",
+        "meiva_builtins/skills/x/scripts/tests/test_c.py::test_it",
         "base/pkg/tests/area/test_b.py::test_it",
         "base/pkg/tests/test_a.py::test_it",
         "services/example/area/tests/test_d.py::test_it",

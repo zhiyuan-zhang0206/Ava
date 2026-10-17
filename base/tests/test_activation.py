@@ -22,9 +22,11 @@ def _spy_emit(monkeypatch: pytest.MonkeyPatch) -> list[tuple[str, str, str, str]
 def test_records_an_attributed_firing(monkeypatch: pytest.MonkeyPatch) -> None:
     emitted = _spy_emit(monkeypatch)
 
-    activation.record("ava_syntax_fix", "hooks", "before_exec", detail="wrote messages", model="m")
+    activation.record(
+        "meiva_syntax_fix", "hooks", "before_exec", detail="wrote messages", model="m"
+    )
 
-    assert emitted == [("ava_syntax_fix", "hooks", "before_exec", "wrote messages")]
+    assert emitted == [("meiva_syntax_fix", "hooks", "before_exec", "wrote messages")]
 
 
 def test_unattributed_firing_records_nothing(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -36,13 +38,13 @@ def test_unattributed_firing_records_nothing(monkeypatch: pytest.MonkeyPatch) ->
 
 
 def test_event_carries_the_model_in_force(loguru_records: LogRecords) -> None:
-    activation.emit("ava_code", "sdkWraps", "files.read", "inner_calls=0", "deepseek-flash")
+    activation.emit("meiva_code", "sdkWraps", "files.read", "inner_calls=0", "deepseek-flash")
 
     logged = loguru_records.events(activation.PLUGIN_ACTIVATION_EVENT)
     assert len(logged) == 1
     payload = logged[0]["extra"]
     assert payload["event"] == activation.PLUGIN_ACTIVATION_EVENT
-    assert payload["plugin"] == "ava_code"
+    assert payload["plugin"] == "meiva_code"
     assert payload["surface"] == "sdkWraps"
     assert payload["identifier"] == "files.read"
     assert payload["detail"] == "inner_calls=0"
@@ -57,7 +59,7 @@ def test_emit_failure_is_swallowed(monkeypatch: pytest.MonkeyPatch) -> None:
 
     monkeypatch.setattr(activation, "logger", _Broken())
 
-    activation.record("ava_memory", "hooks", "after_exec", detail="wrote messages", model="m")
+    activation.record("meiva_memory", "hooks", "after_exec", detail="wrote messages", model="m")
 
 
 def test_registered_event_name_is_on_contract() -> None:

@@ -1,7 +1,7 @@
 """browser is agent-runner-scoped AND gated by browser_enabled AND host capability
 (browser_incapability). The start roster (services_for_capabilities) drops a gated-out
 browser; the diagnostic view (services_for_capabilities_annotated) keeps it WITH the
-reason so `ava status` / `ava start` can show why it is absent."""
+reason so `meiva status` / `meiva start` can show why it is absent."""
 
 import pytest
 
@@ -79,7 +79,7 @@ def test_annotated_keeps_browser_with_incapability_reason(
     command_machine: MachineIdentity,
 ) -> None:
     """The diagnostic view keeps a capability-gated browser WITH its reason, even
-    though the start roster drops it — so `ava status` shows why, not nothing."""
+    though the start roster drops it — so `meiva status` shows why, not nothing."""
     monkeypatch.setattr(settings.services, "browser_enabled", True)
 
     def fake_browser_incapability(_chrome: str | None, *, host: Host) -> str | None:
@@ -103,7 +103,7 @@ def test_annotated_browser_disabled_reason(
     monkeypatch.setattr(spec, "browser_incapability", lambda _chrome, **_kwargs: None)  # pyright: ignore[reportUnknownArgumentType]
     assert (
         _annotated("agent-runner", machine=command_machine)["browser"]
-        == "disabled (AVA_BROWSER_ENABLED off)"
+        == "disabled (MEIVA_BROWSER_ENABLED off)"
     )
 
 

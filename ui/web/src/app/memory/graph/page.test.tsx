@@ -39,8 +39,8 @@ function seed(): MemoryGraphResponse {
         tags: [],
         primary_tag: "",
         timestamp: null,
-        ava_agent: null,
-        ava_machine: null,
+        meiva_agent: null,
+        meiva_machine: null,
       },
       {
         id: "alpha.md",
@@ -51,8 +51,8 @@ function seed(): MemoryGraphResponse {
         tags: ["user-profile", "tech-ops"],
         primary_tag: "user-profile",
         timestamp: "2026-06-18T10:00:00Z",
-        ava_agent: "7",
-        ava_machine: "test-host",
+        meiva_agent: "7",
+        meiva_machine: "test-host",
       },
       {
         id: "beta.md",
@@ -63,8 +63,8 @@ function seed(): MemoryGraphResponse {
         tags: ["tech-ops"],
         primary_tag: "tech-ops",
         timestamp: null,
-        ava_agent: null,
-        ava_machine: null,
+        meiva_agent: null,
+        meiva_machine: null,
       },
     ],
     edges: [
@@ -83,8 +83,8 @@ function seedNote(path: string): MemoryNoteResponse {
     description: "First note",
     tags: ["user-profile", "tech-ops"],
     timestamp: "2026-06-18T10:00:00Z",
-    ava_agent: "7",
-    ava_machine: "test-host",
+    meiva_agent: "7",
+    meiva_machine: "test-host",
     body: "\n# Alpha\n\nBody **with** markdown.\n",
   };
 }
@@ -252,8 +252,8 @@ describe("Memory graph page", () => {
       tags: [],
       primary_tag: "",
       timestamp: null,
-      ava_agent: null,
-      ava_machine: null,
+      meiva_agent: null,
+      meiva_machine: null,
     });
     mockGetMemoryGraph.mockResolvedValue(graph);
     const { container } = wrap();

@@ -1,4 +1,4 @@
-"""ava-mcp-daemon healthcheck — a probe returns a bool, never an exception."""
+"""meiva-mcp-daemon healthcheck — a probe returns a bool, never an exception."""
 
 import json
 import logging

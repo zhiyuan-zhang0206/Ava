@@ -13,7 +13,7 @@ from pathlib import Path
 from services.backup.artifact.names import REMOTE_ROOT
 
 _CHILD = Path(__file__).with_name("child_offsite_entry.py")
-_NAME = "ava-20260916T030000Z.dump.enc"
+_NAME = "meiva-20260916T030000Z.dump.enc"
 
 
 def _artifact(tmp_path: Path, data: bytes = b"encrypted artifact") -> Path:
@@ -55,12 +55,12 @@ def test_standalone_success_is_visible(tmp_path: Path) -> None:
         tmp_path,
         "fake",
         "--offsite-root",
-        "ava-pitr-scratch/smoke",
+        "meiva-pitr-scratch/smoke",
     )
 
     assert proc.returncode == 0, proc.stderr
     assert "[backup] off-site published" in proc.stderr
-    assert f"ava-pitr-scratch/smoke/{_NAME}" in proc.stderr
+    assert f"meiva-pitr-scratch/smoke/{_NAME}" in proc.stderr
 
 
 def test_standalone_unconfigured_still_says_so_and_exits_zero(tmp_path: Path) -> None:

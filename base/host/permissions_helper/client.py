@@ -254,8 +254,8 @@ _NO_GRANT_DIAGNOSTIC = (
     "screen capture returns the wallpaper or a black image. This affects skills that "
     "capture the macOS desktop through the helper; browser screenshots are taken over "
     "Chrome DevTools and are unaffected. Fix: System Settings > Privacy & Security > "
-    "Screen Recording, enable AvaPermissionsHelper, then restart its launchd job "
-    "(`launchctl list | grep com.ava.permissions-helper` for the label, then "
+    "Screen Recording, enable MeivaPermissionsHelper, then restart its launchd job "
+    "(`launchctl list | grep com.meiva.permissions-helper` for the label, then "
     "`launchctl kickstart -k gui/$(id -u)/<label>`)."
 )
 
@@ -263,7 +263,7 @@ _NO_AX_GRANT_DIAGNOSTIC = (
     "The permissions helper is running but holds no Accessibility grant, so macOS silently "
     "drops the synthetic clicks and keystrokes it posts (calls return success but the desktop "
     "never sees them). Screen Recording is a separate grant and is unaffected. Fix: System "
-    "Settings > Privacy & Security > Accessibility, enable AvaPermissionsHelper — rebuilding "
+    "Settings > Privacy & Security > Accessibility, enable MeivaPermissionsHelper — rebuilding "
     "or re-signing the helper resets this grant once. The grant applies to the running helper "
     "immediately; no launchd restart is needed."
 )
@@ -600,7 +600,7 @@ class PermissionsHelperClient(StatefulCalls):
         return result["sent"]
 
     def seed_root(self, config: RootSeedConfig) -> RootStatus:
-        """Tell the root keeper what ava-root to launch and keep alive.
+        """Tell the root keeper what meiva-root to launch and keep alive.
 
         The seed never disrupts a live root it already started — it applies to the
         next spawn. A run dir already held by another live root leaves the keeper
@@ -664,8 +664,8 @@ class PermissionsHelperClient(StatefulCalls):
                         "liveness problem, not a permission one. While it is down every "
                         "desktop action it performs fails: OS-level screenshots, clicks, "
                         "keystrokes, window geometry. Check its launchd job "
-                        "(`launchctl list | grep com.ava.permissions-helper`) and "
-                        "$AVA_HOME/logs/permissions-helper.log."
+                        "(`launchctl list | grep com.meiva.permissions-helper`) and "
+                        "$MEIVA_HOME/logs/permissions-helper.log."
                     ),
                 )
             if result["preflight_screen"]:
@@ -699,8 +699,8 @@ class PermissionsHelperClient(StatefulCalls):
                         "problem, not a permission one. While it is down every desktop action "
                         "it performs fails: OS-level screenshots, clicks, keystrokes, window "
                         "geometry. Check its launchd job "
-                        "(`launchctl list | grep com.ava.permissions-helper`) and "
-                        "$AVA_HOME/logs/permissions-helper.log."
+                        "(`launchctl list | grep com.meiva.permissions-helper`) and "
+                        "$MEIVA_HOME/logs/permissions-helper.log."
                     ),
                 )
             if result["ax_trusted"] is True:

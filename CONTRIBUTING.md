@@ -1,4 +1,4 @@
-# Contributing to Ava
+# Contributing to Meiva
 
 The repository's contribution guide is [docs/contributing.md](docs/contributing.md).
 It covers project references, development isolation, relevant checks, contributor

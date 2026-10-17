@@ -6,13 +6,13 @@
 "test_native_mouse_hold.py" = ["support.py"]
 
 [debt.env-patch]
-"test_build_dir_follows_variable.py#monkeypatch.setenv os.environ.AVA_HOME" = 2
-"test_os_jobs_gate.py#monkeypatch.setenv os.environ.AVA_HOME" = 5
-"test_permissions_helper.py#monkeypatch.setenv os.environ.AVA_HOME" = 1
+"test_build_dir_follows_variable.py#monkeypatch.setenv os.environ.MEIVA_HOME" = 2
+"test_os_jobs_gate.py#monkeypatch.setenv os.environ.MEIVA_HOME" = 5
+"test_permissions_helper.py#monkeypatch.setenv os.environ.MEIVA_HOME" = 1
 
 [debt.first-party-patch]
 "test_helper_retirement.py#monkeypatch.setattr base.native_process.ownership.OwnedProcess.capture" = 1
-"test_helper_retirement.py#monkeypatch.setattr base.paths.ava_home" = 1
+"test_helper_retirement.py#monkeypatch.setattr base.paths.meiva_home" = 1
 "test_helper_retirement.py#monkeypatch.setattr base.paths.permissions_helper_app_dir" = 3
 "test_helper_retirement.py#monkeypatch.setattr services.desktop.permissions_helper.launchd_job.executable_pids" = 2
 "test_helper_retirement.py#monkeypatch.setattr services.desktop.permissions_helper.launchd_job.helper_job_agents_dir" = 8
@@ -31,8 +31,8 @@
 "test_helper_retirement.py#monkeypatch.setattr services.desktop.permissions_helper.lifecycle.source_content_hash" = 2
 "test_helper_retirement.py#monkeypatch.setattr services.desktop.permissions_helper.lifecycle.verify_dr" = 2
 "test_os_jobs_gate.py#monkeypatch.setattr base.config.settings.general.os_jobs_enabled" = 1
-"test_os_jobs_gate.py#monkeypatch.setattr base.host.system.autostart.ava_binary_path" = 1
-"test_os_jobs_gate.py#monkeypatch.setattr base.host.system.cron.ava_binary_path" = 2
+"test_os_jobs_gate.py#monkeypatch.setattr base.host.system.autostart.meiva_binary_path" = 1
+"test_os_jobs_gate.py#monkeypatch.setattr base.host.system.cron.meiva_binary_path" = 2
 "test_os_jobs_gate.py#monkeypatch.setattr base.host.system.pr_flow_job.credential_blocker" = 2
 "test_os_jobs_gate.py#monkeypatch.setattr base.paths.repo_root" = 1
 "test_permissions_helper.py#monkeypatch.setattr base.paths.permissions_helper_app_dir" = 1
@@ -42,7 +42,7 @@
 "test_permissions_helper.py#monkeypatch.setattr services.desktop.permissions_helper.lifecycle.LOCALES" = 1
 "test_permissions_helper.py#monkeypatch.setattr services.desktop.permissions_helper.lifecycle.SOURCE" = 1
 "test_permissions_helper.py#monkeypatch.setattr services.desktop.permissions_helper.lifecycle.agents_dir" = 1
-"test_permissions_helper.py#monkeypatch.setattr services.desktop.permissions_helper.lifecycle.base.paths.ava_home" = 1
+"test_permissions_helper.py#monkeypatch.setattr services.desktop.permissions_helper.lifecycle.base.paths.meiva_home" = 1
 "test_permissions_helper.py#monkeypatch.setattr services.desktop.permissions_helper.lifecycle.helper_socket" = 2
 "test_permissions_helper.py#monkeypatch.setattr services.desktop.permissions_helper.lifecycle.is_loaded" = 1
 "test_permissions_helper.py#monkeypatch.setattr services.desktop.permissions_helper.lifecycle.label" = 1

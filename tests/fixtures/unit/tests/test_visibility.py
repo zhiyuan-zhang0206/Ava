@@ -55,8 +55,8 @@ pytest_plugins = [
 ]
 
 def pytest_unconfigure(config):
-    assert "ava" not in sys.modules
-    assert "ava.sdk_surface.install" not in sys.modules
+    assert "meiva" not in sys.modules
+    assert "meiva.sdk_surface.install" not in sys.modules
     assert {"base.config", "base.db", "base.telemetry", "cli.commands.probe"}.isdisjoint(sys.modules)
 """
     )
@@ -65,8 +65,8 @@ def pytest_unconfigure(config):
 import sys
 
 def test_guarded_pure_case(request):
-    assert "ava" not in sys.modules
-    assert "ava.sdk_surface.install" not in sys.modules
+    assert "meiva" not in sys.modules
+    assert "meiva.sdk_surface.install" not in sys.modules
     assert {"base.config", "base.db", "base.telemetry", "cli.commands.probe"}.isdisjoint(sys.modules)
     assert {"_restore_agent_identity", "_restore_metering", "_guard_bootstrap_fetch",
             "_guard_process_exec", "_guard_permissions_helper_native_io"} <= set(request.fixturenames)

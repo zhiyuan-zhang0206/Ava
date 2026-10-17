@@ -109,10 +109,10 @@ describe("messageCardConfig", () => {
     expect(cfg!.rich).toBe("output");
   });
 
-  it("agent_chat → no rich, title='Ava ▸'", () => {
+  it("agent_chat → no rich, title='Meiva ▸'", () => {
     const cfg = messageCardConfig(item("agent_chat"));
     expect(cfg!.rich).toBeNull();
-    expect(cfg!.title).toBe("Ava ▸");
+    expect(cfg!.title).toBe("Meiva ▸");
   });
 
   it("agent_chat partial → title includes '(streaming…)'", () => {
@@ -338,7 +338,7 @@ describe("CardHeader", () => {
     const { container } = renderWithQuery(
       <CardHeader item={baseItem} config={cfg} expanded={true} onToggle={noop} />,
     );
-    expect(container.textContent).toContain("Ava ▸");
+    expect(container.textContent).toContain("Meiva ▸");
   });
 
   it("collapsed state → aria-expanded=false, data-expanded=false, no title (no hover tooltip)", () => {
@@ -364,7 +364,7 @@ describe("CardHeader", () => {
   });
 
   it("hovering or focusing the toggle warms the code-highlighter chunk (intent prefetch)", () => {
-    // Regression coverage for the P2 adversarial-review finding on Ava #3463:
+    // Regression coverage for the P2 adversarial-review finding on Meiva #3463:
     // this wiring had no assertion that pointer-enter/focus actually invokes
     // the prefetch, only that a mocked no-op didn't blow up.
     preloadPythonCodeHighlighter.mockClear();
@@ -453,7 +453,7 @@ describe("CardHeader", () => {
 
   it("agent_code with SDK calls shows method names", () => {
     const cItem = item("agent_code", {
-      payload: "ava.files.read('x')",
+      payload: "meiva.files.read('x')",
       sdk_calls: [
         { method: "files.read", count: 2 },
         { method: "shell.run", count: 1 },
@@ -567,7 +567,7 @@ describe("CardHeader", () => {
 
   it("agent_code without sdk_calls never scans the payload for call names", () => {
     const cItem = item("agent_code", {
-      payload: "ava.files.read('x')\nava.shell.run('ls')",
+      payload: "meiva.files.read('x')\nmeiva.shell.run('ls')",
     });
     const cfg = messageCardConfig(cItem)!;
     const { container } = renderWithQuery(

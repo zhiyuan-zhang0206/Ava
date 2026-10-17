@@ -47,9 +47,9 @@ def helper_parent(sock: socket.socket) -> tuple[OwnedProcess, OwnedProcess]:
 
 def _read_helper_parent(sock: socket.socket) -> tuple[OwnedProcess, OwnedProcess]:
     from base.native_process.root_control.client import peer_pid, root_process
-    from base.paths import ava_home
+    from base.paths import meiva_home
 
-    root = root_process(home=ava_home())
+    root = root_process(home=meiva_home())
     if root is None:
         raise ParentEvidenceError("no captured root generation")
     parent = psutil.Process(root.pid).parent()

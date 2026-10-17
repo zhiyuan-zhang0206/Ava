@@ -11,7 +11,7 @@ use tauri::{AppHandle, Runtime, State};
 use crate::state::AppState;
 use crate::{external, window};
 
-/// What the injected prelude publishes as `window.__AVA_APP__`, and what the
+/// What the injected prelude publishes as `window.__MEIVA_APP__`, and what the
 /// bundled pages read back through `app_config`.
 #[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -29,7 +29,7 @@ pub struct AppConfig {
 /// Where the user is sent when the in-app update path cannot run. The release
 /// workflow keeps this page pointing at the newest rolling build.
 const UPDATE_DOWNLOAD_PAGE: &str =
-    "https://github.com/zhiyuan-zhang0206/Ava/releases/tag/android-latest";
+    "https://github.com/zhiyuan-zhang0206/Meiva/releases/tag/android-latest";
 
 impl AppConfig {
     pub fn build<R: Runtime>(app: &AppHandle<R>, state: &AppState) -> Self {

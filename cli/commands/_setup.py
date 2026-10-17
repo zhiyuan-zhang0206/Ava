@@ -1,11 +1,11 @@
 """Setup-field resolution (the home's `.env`, read through Settings).
 
 Called by `cmd_start`. Resolution never writes; the home's durable identity is
-persisted by `ava init` (`cli/init_intent.py`, `cli/start_identity.py`), so starts take
+persisted by `meiva init` (`cli/init_intent.py`, `cli/start_identity.py`), so starts take
 no identity input.
 
 Capabilities (serve_gateway / serve_agent_runner / serve_observability_station)
-are independent booleans, each the settings bool of its `AVA_MACHINE_SERVE_*` key
+are independent booleans, each the settings bool of its `MEIVA_MACHINE_SERVE_*` key
 (unset = off); the string setup fields (machine_name / description / memory_remote /
 gateway_url) are resolved by `SetupField` below, gated by which capabilities this
 host carries.
@@ -22,7 +22,7 @@ from base.config import ConfigBoot
 
 class SetupValues(TypedDict):
     """The resolved host setup fields `collect_setup_values` returns and
-    `_register_machine_or_die` / `ava start` consume. `machine_role` (the derived
+    `_register_machine_or_die` / `meiva start` consume. `machine_role` (the derived
     comma-string of this host's capabilities), `machine_name`, and `gateway_url`
     are guaranteed once the returned `missing` list is empty — a required field
     that failed to resolve lands in `missing`, which the caller checks first. The
@@ -43,7 +43,7 @@ class SetupField:
 
     Attributes:
         name: `settings.<name>` Python attribute
-        env_var: equivalent env var (e.g. `AVA_MACHINE_NAME`)
+        env_var: equivalent env var (e.g. `MEIVA_MACHINE_NAME`)
         hint: value hint shown in error messages (e.g. "<name>, e.g. host-a")
         roles: tuple of capability values this field is required by (("gateway",), ("agent-runner",), or both)
         optional: missing field does not enter the missing-error list; caller decides fallback
@@ -66,7 +66,7 @@ class _Capability:
     Attributes:
         capability: the capability token this flag declares ("gateway" /
             "agent-runner" / "observability-station")
-        env_var: the `.env` key (e.g. `AVA_MACHINE_SERVE_GATEWAY`)
+        env_var: the `.env` key (e.g. `MEIVA_MACHINE_SERVE_GATEWAY`)
         settings_attr: `settings.<attr>` (bool | None — None = env unset)
     """
 
@@ -78,17 +78,17 @@ class _Capability:
 _CAPABILITIES: tuple[_Capability, ...] = (
     _Capability(
         capability="gateway",
-        env_var="AVA_MACHINE_SERVE_GATEWAY",
+        env_var="MEIVA_MACHINE_SERVE_GATEWAY",
         settings_attr="machine_serve_gateway",
     ),
     _Capability(
         capability="agent-runner",
-        env_var="AVA_MACHINE_SERVE_AGENT_RUNNER",
+        env_var="MEIVA_MACHINE_SERVE_AGENT_RUNNER",
         settings_attr="machine_serve_agent_runner",
     ),
     _Capability(
         capability="observability-station",
-        env_var="AVA_MACHINE_SERVE_OBSERVABILITY_STATION",
+        env_var="MEIVA_MACHINE_SERVE_OBSERVABILITY_STATION",
         settings_attr="machine_serve_observability_station",
     ),
 )
@@ -97,19 +97,19 @@ _CAPABILITIES: tuple[_Capability, ...] = (
 _SETUP_FIELDS: tuple[SetupField, ...] = (
     SetupField(
         name="machine_name",
-        env_var="AVA_MACHINE_NAME",
+        env_var="MEIVA_MACHINE_NAME",
         hint="<name>, e.g. host-a / host-b",
     ),
     SetupField(
         name="machine_description",
-        env_var="AVA_MACHINE_DESCRIPTION",
+        env_var="MEIVA_MACHINE_DESCRIPTION",
         hint='<free text>, e.g. "voice IO + browser + always-on"',
         optional=True,
     ),
     SetupField(
         name="memory_remote",
-        env_var="AVA_MEMORY_REMOTE",
-        hint="<git-url>, e.g. git@github.com:you/AvaMemory.git (empty = local init, no remote)",
+        env_var="MEIVA_MEMORY_REMOTE",
+        hint="<git-url>, e.g. git@github.com:you/MeivaMemory.git (empty = local init, no remote)",
         optional=True,
     ),
     # gateway_url is the URL of the gateway.
@@ -118,7 +118,7 @@ _SETUP_FIELDS: tuple[SetupField, ...] = (
     # and cluster status (the gateway dials the agent-runner the other way).
     SetupField(
         name="gateway_url",
-        env_var="AVA_GATEWAY_URL",
+        env_var="MEIVA_GATEWAY_URL",
         hint="<url>, e.g. http://<gateway-host>:8800 (gateway: this host's own URL; agent-runner: the gateway it reaches)",
         roles=("gateway", "agent-runner"),
     ),
@@ -157,7 +157,7 @@ def collect_setup_values(
     Phase 2: filter the rest of `_SETUP_FIELDS` by `roles`, then resolve and
     collect missing. Missing optional fields do not enter the missing list —
     caller decides fallback (e.g. when memory_remote is missing, explicit
-    `ava memory init` takes the local-init path).
+    `meiva memory init` takes the local-init path).
     """
     caps = {cap.capability for cap in _CAPABILITIES if _resolve_capability(cap, config)}
     if not caps:
@@ -188,17 +188,17 @@ def collect_setup_values(
 def missing_setup_message(missing: list[SetupField | _Capability]) -> str:
     """Why a start cannot proceed: the identity this home recorded lacks required fields.
 
-    `ava init` records them once and refuses an initialized home, so the repair is
+    `meiva init` records them once and refuses an initialized home, so the repair is
     to set the named keys in the home's `.env` (or its environment), not to re-run
     init.
     """
-    lines = ["\n✗ ava start: this home's recorded setup is incomplete:"]
+    lines = ["\n✗ meiva start: this home's recorded setup is incomplete:"]
     for f in missing:
         hint = "true / false" if isinstance(f, _Capability) else f.hint
         lines.append(f"  {f.env_var}  {hint}")
     lines.append(
-        "\nA home initialized by `ava init` records these; set the keys above in "
-        "$AVA_HOME/.env (`ava init` refuses an initialized home). A home that was never "
-        "initialized needs `ava init` first (see `ava init --help`)."
+        "\nA home initialized by `meiva init` records these; set the keys above in "
+        "$MEIVA_HOME/.env (`meiva init` refuses an initialized home). A home that was never "
+        "initialized needs `meiva init` first (see `meiva init --help`)."
     )
     return "\n".join(lines)

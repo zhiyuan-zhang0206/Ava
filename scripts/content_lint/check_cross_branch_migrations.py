@@ -27,7 +27,7 @@ cost, no longer a lie.
 ## What counts as a breach
 
 An explicit name list, not a heuristic. Inferring "long-lived" from a branch's
-age or commit count would fire on ordinary `ava-<id>-<task>` branches, which are
+age or commit count would fire on ordinary `meiva-<id>-<task>` branches, which are
 numerous and short-lived by policy. The names below are the ones that denote a
 parallel integration line — the shape that reintroduces the drift.
 

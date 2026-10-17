@@ -140,9 +140,9 @@ def test_runner_hard_exit_child_ownership(
     db_conn: psycopg.Connection, unit_home: Path, mode: str
 ) -> None:
     # The runner is a separate process that boots its config from its home's `.env`
-    # (`AVA_HOME` is this test's `unit_home`, which starts bare): name the test
+    # (`MEIVA_HOME` is this test's `unit_home`, which starts bare): name the test
     # database there, as a started cluster's `.env` does.
-    (unit_home / ".env").write_text(f"AVA_DB_URL={settings.data_plane.db_url}\n")
+    (unit_home / ".env").write_text(f"MEIVA_DB_URL={settings.data_plane.db_url}\n")
     root = unit_home / "cleanup"
     root.mkdir()
     complete = mode in ("complete", "delayed-completion")

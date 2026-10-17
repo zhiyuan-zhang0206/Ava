@@ -1,5 +1,5 @@
 # Branch protection and workflow activation live in GitHub, outside the git
-# tree that declares Ava's merge gate. This read-only audit makes drift visible;
+# tree that declares Meiva's merge gate. This read-only audit makes drift visible;
 # only its alert/resolve loop writes the single tracked issue.
 
 name: Audit Branch Protection
@@ -41,7 +41,7 @@ jobs:
         id: audit
         continue-on-error: true
         env:
-          GH_TOKEN: ${{ secrets.AVA_AUDIT_PAT }}
+          GH_TOKEN: ${{ secrets.MEIVA_AUDIT_PAT }}
         shell: bash
         run: |
           set -o pipefail

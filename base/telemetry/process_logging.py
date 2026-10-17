@@ -256,7 +256,7 @@ def add_event_sink(
 
 
 # Process-level singleton: exec_child calls this from two paths (env
-# AVA_AGENT_ID + request), and a second registration double-emits every
+# MEIVA_AGENT_ID + request), and a second registration double-emits every
 # loguru record (byte-identical mirror rows, task #1638). The stored id is
 # re-verified against live handlers so a removed sink re-registers.
 _event_sink_id: int | None = None
@@ -325,7 +325,7 @@ def init_cli_process(
     The CLI's verbs are the keys of ``cli.main._CLI_LOG_NAMES`` (``start``,
     ``restart``, ``lgtm on|off``), which also name each
     one's file; ``cli.main`` calls this before dispatch. Every other verb
-    (``ava status`` etc.) opens no sink — its output already lands on the
+    (``meiva status`` etc.) opens no sink — its output already lands on the
     caller's terminal, and the extra sinks would clutter ``logs/`` and the
     event stream with one row per command.
 

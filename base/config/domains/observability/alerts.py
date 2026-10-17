@@ -26,7 +26,7 @@ class AlertsSettings(EnvSettings):
 
     webhook_token: SecretStr | None = Field(
         default=None,
-        alias="AVA_ALERTS_WEBHOOK_TOKEN",
+        alias="MEIVA_ALERTS_WEBHOOK_TOKEN",
         description=(
             "Shared secret the Grafana alert webhook contact point sends as "
             "`X-Alerts-Token` on "
@@ -45,7 +45,7 @@ class AlertsSettings(EnvSettings):
 
     im_notify_enabled: bool = Field(
         default=True,
-        alias="AVA_ALERTS_IM_NOTIFY_ENABLED",
+        alias="MEIVA_ALERTS_IM_NOTIFY_ENABLED",
         description=(
             "Send firing/resolved alert notifications to the user's connected "
             "IM channels (Telegram / WeChat / Feishu via the im_bridge daemon). "
@@ -61,7 +61,7 @@ class AlertsSettings(EnvSettings):
 
     provider_guard_balance_enabled: bool = Field(
         default=True,
-        alias="AVA_PROVIDER_GUARD_BALANCE_ENABLED",
+        alias="MEIVA_PROVIDER_GUARD_BALANCE_ENABLED",
         description=(
             "Run the provider-account balance check in the cluster health probe "
             "(checks 9-10, cli/commands/cluster/_provider_guard.py) — the pre-arrears "
@@ -78,7 +78,7 @@ class AlertsSettings(EnvSettings):
 
     provider_guard_balance_min_cny: float = Field(
         default=500.0,
-        alias="AVA_PROVIDER_GUARD_BALANCE_MIN_CNY",
+        alias="MEIVA_PROVIDER_GUARD_BALANCE_MIN_CNY",
         description=(
             "Minimum DeepSeek account balance (CNY) before the health probe "
             "fails and alerts. The default approximates one day of the fleet's "
@@ -98,7 +98,7 @@ class AlertsSettings(EnvSettings):
 
     provider_guard_balance_url: str = Field(
         default="https://api.deepseek.com/user/balance",
-        alias="AVA_PROVIDER_GUARD_BALANCE_URL",
+        alias="MEIVA_PROVIDER_GUARD_BALANCE_URL",
         description=(
             "Balance endpoint the provider-account check reads (GET with the "
             "cluster DEEPSEEK_API_KEY bearer; DeepSeek /user/balance response "
@@ -115,7 +115,7 @@ class AlertsSettings(EnvSettings):
 
     provider_guard_balance_timeout_seconds: float = Field(
         default=20.0,
-        alias="AVA_PROVIDER_GUARD_BALANCE_TIMEOUT_SECONDS",
+        alias="MEIVA_PROVIDER_GUARD_BALANCE_TIMEOUT_SECONDS",
         description=(
             "Per-request timeout for the balance read (seconds). Generous "
             "because the check rides the 300s probe tick, and an unreadable "
@@ -132,7 +132,7 @@ class AlertsSettings(EnvSettings):
 
     provider_guard_blocked_agents_enabled: bool = Field(
         default=True,
-        alias="AVA_PROVIDER_GUARD_BLOCKED_AGENTS_ENABLED",
+        alias="MEIVA_PROVIDER_GUARD_BLOCKED_AGENTS_ENABLED",
         description=(
             "Run the blocked-agents check in the cluster health probe: fails "
             "while several agents are halted by permanent provider rejections "
@@ -152,7 +152,7 @@ class AlertsSettings(EnvSettings):
 
     provider_guard_blocked_agents_min: int = Field(
         default=3,
-        alias="AVA_PROVIDER_GUARD_BLOCKED_AGENTS_MIN",
+        alias="MEIVA_PROVIDER_GUARD_BLOCKED_AGENTS_MIN",
         description=(
             "How many agents halted by permanent provider rejections trip the "
             "blocked-agents check. Three correlates a fleet-wide cause on a "
@@ -170,7 +170,7 @@ class AlertsSettings(EnvSettings):
 
     provider_guard_blocked_agents_window_hours: float = Field(
         default=24.0,
-        alias="AVA_PROVIDER_GUARD_BLOCKED_AGENTS_WINDOW_HOURS",
+        alias="MEIVA_PROVIDER_GUARD_BLOCKED_AGENTS_WINDOW_HOURS",
         description=(
             "Recency window for the blocked-agents check: only agents whose "
             "last fatal turn falls inside it count. Bounds the count to the "

@@ -12,7 +12,7 @@ deployment address past a job that classifies by code side).
 
 User ruling 2026-08-20 (+ the 2026-08-03/04 Gateway-URL rule): the repo must
 not carry a deployment's private overlay addresses as literals. The cluster's
-hand-visible URL is derived from the `AVA_GATEWAY_URL` variable, never
+hand-visible URL is derived from the `MEIVA_GATEWAY_URL` variable, never
 hardcoded; a literal would leak the deployment topology into a public repo
 and mislead a consumer that has a different overlay. What is neutral and
 allowed is the RANGE NAME — `100.64.0.0/10` (the CGNAT / VPN-overlay range) —
@@ -117,7 +117,7 @@ def main(argv: list[str] | None = None, *, repo_root: Path = _REPO_ROOT) -> int:
     if total:
         print(
             "\nTailnet IP literal found in the repo. Derive the address from "
-            "configuration (AVA_GATEWAY_URL / reachable_host()), use a neutral "
+            "configuration (MEIVA_GATEWAY_URL / reachable_host()), use a neutral "
             "site like a 10.x literal for opaque test fixtures, or, when the "
             "test genuinely exercises the 100.64.0.0/10 range, annotate the "
             "line with `# tailnet-ip-ok: <reason>`. The CIDR notation "

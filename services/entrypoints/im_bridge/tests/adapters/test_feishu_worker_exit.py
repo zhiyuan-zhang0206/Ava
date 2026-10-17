@@ -99,23 +99,23 @@ def test_sigterm_exits_while_feishu_sdk_worker_remains_blocked(
     tmp_path: Path, responsive: bool
 ) -> None:
     markers_path, log_path = tmp_path / "markers.txt", tmp_path / "im-feishu.log"
-    home = tmp_path / "ava-home"
+    home = tmp_path / "meiva-home"
     home.mkdir()
     with socket.socket() as sock:
         sock.bind(("127.0.0.1", 0))
         endpoint = f"http://127.0.0.1:{sock.getsockname()[1]}"
     (home / ".env").write_text(
-        f"AVA_TELEMETRY_OTLP_ENDPOINT={endpoint}\nAVA_MACHINE_NAME=feishu-shutdown-test\n",
+        f"MEIVA_TELEMETRY_OTLP_ENDPOINT={endpoint}\nMEIVA_MACHINE_NAME=feishu-shutdown-test\n",
         encoding="utf-8",
     )
     env = {
         **os.environ,
-        "AVA_HOME": str(home),
-        "AVA_TELEMETRY_OTLP_ENDPOINT": endpoint,
+        "MEIVA_HOME": str(home),
+        "MEIVA_TELEMETRY_OTLP_ENDPOINT": endpoint,
         "DAEMON_SHUTDOWN_TEST_MARKERS": str(markers_path),
         "FEISHU_TEST_RESPONSIVE_LOOP": str(int(responsive)),
     }
-    env.pop("AVA_PERMISSIONS_HELPER_PID", None)
+    env.pop("MEIVA_PERMISSIONS_HELPER_PID", None)
     log_file = log_path.open("wb")
     proc = subprocess.Popen(  # noqa: S603 -- fixed interpreter and repository-owned helper
         [

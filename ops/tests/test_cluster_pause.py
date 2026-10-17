@@ -312,7 +312,7 @@ def test_unpause_changes_no_service_sessions(
     *,
     machine_identity: MachineIdentity,
 ) -> None:
-    """Service startup belongs to ava start; unpause only releases native admission."""
+    """Service startup belongs to meiva start; unpause only releases native admission."""
     local_runtime.has_answer = False
     cluster_pause.unpause_local_cluster(database, event_bus, local_machine=machine_identity)
     assert posture == ["idle"]
@@ -327,7 +327,7 @@ def test_unpause_refuses_a_held_unit_whose_services_stopped(
     *,
     machine_identity: MachineIdentity,
 ) -> None:
-    """A held unit whose services stopped resumes only after `ava start` passes readiness."""
+    """A held unit whose services stopped resumes only after `meiva start` passes readiness."""
     from base.deploy.maintenance.state import MaintenanceHold
 
     when = datetime(2026, 9, 10, tzinfo=UTC)
@@ -339,5 +339,7 @@ def test_unpause_refuses_a_held_unit_whose_services_stopped(
 
     with pytest.raises(RuntimeError) as raised:
         cluster_pause.unpause_local_cluster(database, event_bus, local_machine=machine_identity)
-    assert str(raised.value) == "services have stopped; ava start must pass readiness before resume"
+    assert (
+        str(raised.value) == "services have stopped; meiva start must pass readiness before resume"
+    )
     assert posture == []

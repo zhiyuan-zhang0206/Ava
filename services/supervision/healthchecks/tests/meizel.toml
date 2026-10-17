@@ -1,7 +1,7 @@
 [debt.env-patch]
 "test_healthcheck_memory_search.py#patch.dict os.environ" = 1
-"test_healthcheck_otel_collector.py#monkeypatch.delitem os.environ.AVA_TELEMETRY_OTLP_ENDPOINT" = 1
-"test_healthcheck_otel_collector.py#monkeypatch.setitem os.environ.AVA_TELEMETRY_OTLP_ENDPOINT" = 1
+"test_healthcheck_otel_collector.py#monkeypatch.delitem os.environ.MEIVA_TELEMETRY_OTLP_ENDPOINT" = 1
+"test_healthcheck_otel_collector.py#monkeypatch.setitem os.environ.MEIVA_TELEMETRY_OTLP_ENDPOINT" = 1
 "test_prod_venv.py#monkeypatch.setenv os.environ.PYTHONPATH" = 2
 "test_prod_venv.py#monkeypatch.setenv os.environ.VIRTUAL_ENV" = 1
 
@@ -19,8 +19,8 @@
 "test_healthcheck_lgtm.py#monkeypatch.setattr base.config.settings.observability.telemetry_loki_url" = 1
 "test_healthcheck_lgtm.py#monkeypatch.setattr base.config.settings.observability.telemetry_prometheus_url" = 1
 "test_healthcheck_lgtm.py#monkeypatch.setattr base.native_process.root_control.client.root_process" = 1
-"test_healthcheck_lgtm.py#monkeypatch.setattr base.paths.ava_home" = 1
-"test_healthcheck_lgtm.py#monkeypatch.setattr services.supervision.healthchecks.lgtm.ava_home" = 1
+"test_healthcheck_lgtm.py#monkeypatch.setattr base.paths.meiva_home" = 1
+"test_healthcheck_lgtm.py#monkeypatch.setattr services.supervision.healthchecks.lgtm.meiva_home" = 1
 "test_healthcheck_lgtm.py#monkeypatch.setattr services.supervision.healthchecks.lgtm.open_local" = 10
 "test_healthcheck_lgtm.py#monkeypatch.setattr services.supervision.healthchecks.lgtm.protocol_readiness" = 1
 "test_healthcheck_lgtm.py#monkeypatch.setattr services.supervision.healthchecks.lgtm.time.sleep" = 1

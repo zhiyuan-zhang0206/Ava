@@ -51,7 +51,7 @@ async def get_system_broadcast(request: Request) -> StreamingResponse:
 
 @router.get("/api/agents/{agent_id}/system")
 async def get_system_events(agent_id: int, request: Request) -> StreamingResponse:
-    """SSE endpoint — subscribe to `ava:events`, only forward SYSTEM_ROLES events.
+    """SSE endpoint — subscribe to `meiva:events`, only forward SYSTEM_ROLES events.
 
     SYSTEM_ROLES contains code_delta / exec_output / compact_done /
     cancelled etc. "system state" events — clients that need to track the

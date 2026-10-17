@@ -20,5 +20,5 @@ def test_overrides_an_inherited_ssh_command(monkeypatch: pytest.MonkeyPatch) -> 
 
 
 def test_carries_the_rest_of_the_environment(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("AVA_GITENV_CANARY", "kept")
-    assert git_env()["AVA_GITENV_CANARY"] == "kept"
+    monkeypatch.setenv("MEIVA_GITENV_CANARY", "kept")
+    assert git_env()["MEIVA_GITENV_CANARY"] == "kept"

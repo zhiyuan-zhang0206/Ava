@@ -6,7 +6,7 @@ from uuid import uuid4
 
 import pytest
 
-from base.agents.context import AvaContext
+from base.agents.context import MeivaContext
 from base.agents.incarnation.native_work_models import NativeWorkTarget
 from base.native_process.runtime_incarnation import RuntimeIncarnation
 
@@ -29,10 +29,10 @@ async def test_context_branches_keep_work_and_incarnation_after_parent_replaceme
         protocol=1,
     )
     second = first.model_copy(update={"work_id": uuid4()})
-    original = AvaContext(original_incarnation=incarnation, native_work=first)
+    original = MeivaContext(original_incarnation=incarnation, native_work=first)
     child_ready, release_child = asyncio.Event(), asyncio.Event()
 
-    async def copied(context: AvaContext) -> None:
+    async def copied(context: MeivaContext) -> None:
         child_ready.set()
         await release_child.wait()
         assert context.original_incarnation is incarnation

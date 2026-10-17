@@ -30,7 +30,7 @@ named surfaces consumers import.
 
 Index and reader live OUTSIDE the ``base.config`` package on purpose, like
 ``base/config/config_registry.py``: ``base/host/env/registry.py`` (the env-authority
-projections that ``load_ava_env`` runs before Settings exists) imports it, and a
+projections that ``load_meiva_env`` runs before Settings exists) imports it, and a
 package submodule import would execute the ``base.config`` facade first —
 re-entering the boot it is part of.
 
@@ -40,7 +40,7 @@ Run after changing any config field, or let the pre-commit
     .venv/bin/python scripts/codegen/gen_config_lite_table.py
 
 The script is its own repair tool, designed to run in exactly the states that
-need it: it boots the config package under ``AVA_CONFIG_FETCH=skip`` (no .env
+need it: it boots the config package under ``MEIVA_CONFIG_FETCH=skip`` (no .env
 load, no authority pass, no gateway fetch) and recreates a missing or corrupt
 index as an empty stub before reading the registry.
 """
@@ -115,7 +115,7 @@ def _ensure_index_present() -> None:
 
 # Regeneration must be as repairable as the settings-lite verbs: a broken .env
 # (or an unreachable gateway) must not block the tool that regenerates the
-# config index. The scratch home carries no `.env` and `AVA_CONFIG_FETCH=skip`
+# config index. The scratch home carries no `.env` and `MEIVA_CONFIG_FETCH=skip`
 # stops any gateway fetch; the index is read for nothing but the surfaces this
 # script rewrites anyway. The registry data itself comes from the model
 # declarations, never from the environment.
@@ -187,7 +187,7 @@ LITE_MANIFEST: tuple[LiteField, ...] = (
         "llm_model",
         "literal",
         None,
-        "ava/sdk_surface/attachment_transport.py model gate + lifecycle reads",
+        "meiva/sdk_surface/attachment_transport.py model gate + lifecycle reads",
     ),
     LiteField(
         "telemetry_otlp_enabled", "literal", None, "base/telemetry/otlp/telemetry_otlp boot read"

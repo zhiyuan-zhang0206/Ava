@@ -58,11 +58,11 @@ async def test_sync_async_reads_mark_plain_and_snapshot_without_store_access(
     for result in (sync, async_):
         messages = result.checkpoint["channel_values"]["messages"]
         assert messages[0].id is None
-        assert messages[0].additional_kwargs == {"ava_ephemeral_message_id": True}
+        assert messages[0].additional_kwargs == {"meiva_ephemeral_message_id": True}
         assert messages[1].additional_kwargs == {}
         assert result.pending_writes is not None
         pending = cast(AIMessage, result.pending_writes[0][2][0])
-        assert pending.additional_kwargs.get("ava_ephemeral_message_id") is True
+        assert pending.additional_kwargs.get("meiva_ephemeral_message_id") is True
 
 
 @pytest.mark.parametrize("seed", ["plain", "snapshot", "writes", "overwrite"])
@@ -79,14 +79,14 @@ def test_legacy_walk_seed_and_writes_never_upgrade_after_reserialization(seed: s
     serde = JsonPlusSerializer()
     first = fold_history(deepcopy(entry))
     second = fold_history(deepcopy(entry))
-    assert first[0].additional_kwargs["ava_ephemeral_message_id"] is True
+    assert first[0].additional_kwargs["meiva_ephemeral_message_id"] is True
     if seed == "writes":
         assert first[0].id and first[0].id != second[0].id
     restored = serde.loads_typed(serde.dumps_typed(first))
     items, _ = build_timeline_items(restored, inputs=_TIMELINE_INPUTS)
     assert items[0].source_message_id is None
     assert items[0].source_block_idx is None
-    assert "ava_ephemeral_message_id" not in items[0].payload
+    assert "meiva_ephemeral_message_id" not in items[0].payload
 
 
 def test_durable_source_coordinates_survive_compact_renumbering_and_json() -> None:
@@ -115,13 +115,13 @@ def test_durable_source_coordinates_survive_compact_renumbering_and_json() -> No
 
 
 def test_only_explicit_inbound_id_qualifies_legacy_source() -> None:
-    legacy = HumanMessage(content="chat", additional_kwargs={"ava_msg_type": "inbound"})
+    legacy = HumanMessage(content="chat", additional_kwargs={"meiva_msg_type": "inbound"})
     unidentified, _ = build_timeline_items([legacy], inputs=_TIMELINE_INPUTS)
     assert unidentified[0].inbound_id is None
     assert unidentified[0].source_inbound_id is None
     assert unidentified[0].source_block_idx is None
     explicit = HumanMessage(
-        content="chat", additional_kwargs={"ava_msg_type": "inbound", "ava_inbound_id": 9}
+        content="chat", additional_kwargs={"meiva_msg_type": "inbound", "meiva_inbound_id": 9}
     )
     qualified, _ = build_timeline_items(
         normalize_stored_message_ids([explicit]), inputs=_TIMELINE_INPUTS
@@ -159,13 +159,13 @@ async def test_real_postgres_plain_checkpoint_sync_async_provenance(
     for result in (sync, async_):
         assert (
             result.checkpoint["channel_values"]["messages"][0].additional_kwargs[
-                "ava_ephemeral_message_id"
+                "meiva_ephemeral_message_id"
             ]
             is True
         )
         assert result.pending_writes is not None
         pending = cast(AIMessage, result.pending_writes[0][2][0])
-        assert pending.additional_kwargs.get("ava_ephemeral_message_id") is True
+        assert pending.additional_kwargs.get("meiva_ephemeral_message_id") is True
     raw = saver.get_tuple(config)
     assert raw is not None
     assert raw.checkpoint["channel_values"]["messages"][0].additional_kwargs == {}
@@ -175,7 +175,7 @@ async def test_real_postgres_plain_checkpoint_sync_async_provenance(
     listed = next(iterator)
     assert (
         listed.checkpoint["channel_values"]["messages"][0].additional_kwargs[
-            "ava_ephemeral_message_id"
+            "meiva_ephemeral_message_id"
         ]
         is True
     )
@@ -185,7 +185,7 @@ async def test_real_postgres_plain_checkpoint_sync_async_provenance(
     listed_async = await anext(async_iterator)
     assert (
         listed_async.checkpoint["channel_values"]["messages"][0].additional_kwargs[
-            "ava_ephemeral_message_id"
+            "meiva_ephemeral_message_id"
         ]
         is True
     )
@@ -218,7 +218,7 @@ async def test_history_iterators_preserve_laziness_arguments_and_source_marker()
     assert events == [((None,), {"limit": 2})]
     assert (
         first.checkpoint["channel_values"]["messages"][0].additional_kwargs[
-            "ava_ephemeral_message_id"
+            "meiva_ephemeral_message_id"
         ]
         is True
     )
@@ -231,7 +231,7 @@ async def test_history_iterators_preserve_laziness_arguments_and_source_marker()
     assert events == [((None,), {"limit": 2})]
     assert (
         first_async.checkpoint["channel_values"]["messages"][0].additional_kwargs[
-            "ava_ephemeral_message_id"
+            "meiva_ephemeral_message_id"
         ]
         is True
     )
@@ -270,13 +270,13 @@ async def test_recovery_cache_hit_normalizes_newly_decoded_pending_writes() -> N
     assert len(walks) == 1
     assert (
         second.checkpoint["channel_values"]["messages"][0].additional_kwargs[
-            "ava_ephemeral_message_id"
+            "meiva_ephemeral_message_id"
         ]
         is True
     )
     assert second.pending_writes is not None
     pending = cast(AIMessage, second.pending_writes[0][2][0])
-    assert pending.additional_kwargs.get("ava_ephemeral_message_id") is True
+    assert pending.additional_kwargs.get("meiva_ephemeral_message_id") is True
 
 
 def test_reserved_provenance_is_not_serialized_into_provider_messages() -> None:
@@ -291,5 +291,5 @@ def test_reserved_provenance_is_not_serialized_into_provider_messages() -> None:
     google = cast(Any, google_models)._parse_chat_history(messages)
     openai = [cast(Any, openai_models)._convert_message_to_dict(message) for message in messages]
     for payload in (anthropic, google, openai):
-        assert "ava_ephemeral_message_id" not in repr(payload)
-    assert all(m.additional_kwargs["ava_ephemeral_message_id"] for m in messages)
+        assert "meiva_ephemeral_message_id" not in repr(payload)
+    assert all(m.additional_kwargs["meiva_ephemeral_message_id"] for m in messages)

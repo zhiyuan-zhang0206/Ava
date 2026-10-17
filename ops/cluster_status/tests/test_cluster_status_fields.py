@@ -36,20 +36,20 @@ def test_collect_sessions_enumerates_both_backends(monkeypatch):
             return {n: self.session_started_at(n) for n in names}
 
     svc = _FakeBackend(
-        ["ava-main-restarter", "ava-main-gateway", "ava-main-agent-9", "other-stray"]
+        ["meiva-main-restarter", "meiva-main-gateway", "meiva-main-agent-9", "other-stray"]
     )
-    shell = _FakeBackend(["ava-main-agent-7-shell-0", "ava-main-agent-7-shell-0-watcher"])
+    shell = _FakeBackend(["meiva-main-agent-7-shell-0", "meiva-main-agent-7-shell-0-watcher"])
     monkeypatch.setattr(sessions_backend, "get_backend", lambda: svc)  # pyright: ignore[reportUnknownMemberType]
     monkeypatch.setattr(sessions_backend, "get_shell_backend", lambda: shell)  # pyright: ignore[reportUnknownMemberType]
 
     sessions, shell_count, total = cluster_status.collect_sessions()
     names = {s.name for s in sessions}
     assert names == {
-        "ava-main-restarter",
-        "ava-main-gateway",
-        "ava-main-agent-7-shell-0",
-        "ava-main-agent-7-shell-0-watcher",
-    }  # stray AND the bare agent process (ava-main-agent-9) excluded
+        "meiva-main-restarter",
+        "meiva-main-gateway",
+        "meiva-main-agent-7-shell-0",
+        "meiva-main-agent-7-shell-0-watcher",
+    }  # stray AND the bare agent process (meiva-main-agent-9) excluded
     assert shell_count == 2
     assert total == 4
 
@@ -57,7 +57,7 @@ def test_collect_sessions_enumerates_both_backends(monkeypatch):
 def test_collect_sessions_records_uptime_when_started_at_known(monkeypatch):
     class _FakeBackend:
         def list_sessions(self, prefix=""):
-            return ["ava-main-restarter"]
+            return ["meiva-main-restarter"]
 
         def session_started_at(self, name: str) -> float | None:
             return 1000.0
@@ -84,10 +84,10 @@ def test_collect_sessions_records_uptime_when_started_at_known(monkeypatch):
 
 def test_count_agent_shells():
     sessions = _rows(
-        "ava-main-agent-7-shell-0",
-        "ava-main-agent-7-shell-0-watcher",
-        "ava-main-agent-12-shell-3",
-        "ava-main-restarter",  # not an agent shell
+        "meiva-main-agent-7-shell-0",
+        "meiva-main-agent-7-shell-0-watcher",
+        "meiva-main-agent-12-shell-3",
+        "meiva-main-restarter",  # not an agent shell
     )
     assert count_agent_shells(sessions) == 3
 
@@ -110,13 +110,13 @@ def test_agent_shell_sessions_parses_and_filters(monkeypatch: pytest.MonkeyPatch
     name 'watcher', a named shell -> its slug."""
     _stub_sessions(
         monkeypatch,
-        "ava-main-agent-7",  # main, excluded
-        "ava-main-agent-7-shell-2-watcher",
-        "ava-main-agent-7-shell-0",
-        "ava-main-agent-7-shell-1-dev-server",
-        "ava-main-agent-7-shell-3-page-dashboard",
-        "ava-main-agent-12-shell-3",  # other agent
-        "ava-main-restarter",  # not an agent
+        "meiva-main-agent-7",  # main, excluded
+        "meiva-main-agent-7-shell-2-watcher",
+        "meiva-main-agent-7-shell-0",
+        "meiva-main-agent-7-shell-1-dev-server",
+        "meiva-main-agent-7-shell-3-page-dashboard",
+        "meiva-main-agent-12-shell-3",  # other agent
+        "meiva-main-restarter",  # not an agent
     )
     shells = agent_shell_sessions(7)
     assert [(s.id, s.name) for s in shells] == [
@@ -128,7 +128,7 @@ def test_agent_shell_sessions_parses_and_filters(monkeypatch: pytest.MonkeyPatch
 
 
 def test_agent_shell_sessions_none_for_agent_without_shells(monkeypatch: pytest.MonkeyPatch):
-    _stub_sessions(monkeypatch, "ava-main-agent-7-shell-0")
+    _stub_sessions(monkeypatch, "meiva-main-agent-7-shell-0")
     assert agent_shell_sessions(99) == []
 
 
@@ -191,7 +191,7 @@ def test_capture_shell_unnamed_session_no_suffix(monkeypatch: pytest.MonkeyPatch
 def test_capture_shell_unknown_session_raises(monkeypatch: pytest.MonkeyPatch):
     """No live shell with that id on this host → ShellNotFoundError (surfaces as
     a failed shell_capture op; the gateway 404s)."""
-    _stub_sessions(monkeypatch, "ava-main-agent-7-shell-3")
+    _stub_sessions(monkeypatch, "meiva-main-agent-7-shell-3")
     import pytest
 
     from ops.cluster_status import ShellNotFoundError
@@ -300,7 +300,7 @@ def test_kill_agent_shells_kills_only_the_owners_shell_sessions(
 ) -> None:
     """Every `-agent-<id>-shell-<sid>[-<name>]` session of the owner goes —
     watchers included; another agent's shells, non-shell sessions and the
-    owner's `ava.ui.serve` page sessions (named by the page daemon's grammar)
+    owner's `meiva.ui.serve` page sessions (named by the page daemon's grammar)
     stay."""
     from base.cluster import session_name
     from base.sessions.page_session import page_session_name
@@ -308,16 +308,16 @@ def test_kill_agent_shells_kills_only_the_owners_shell_sessions(
     page = page_session_name(7, "dash_board", 3)
     _stub_sessions(
         monkeypatch,
-        "ava-agent-7",
-        "ava-agent-7-shell-0",
-        "ava-agent-7-shell-2-watcher",
+        "meiva-agent-7",
+        "meiva-agent-7-shell-0",
+        "meiva-agent-7-shell-2-watcher",
         page,
-        "ava-agent-7-shell-5-dev-server",
-        "ava-agent-7-shell-6-new-generation",
-        "ava-agent-7-shell-8-later",
-        "ava-agent-71-shell-0",
-        "ava-agent-12-shell-3",
-        "ava-restarter",
+        "meiva-agent-7-shell-5-dev-server",
+        "meiva-agent-7-shell-6-new-generation",
+        "meiva-agent-7-shell-8-later",
+        "meiva-agent-71-shell-0",
+        "meiva-agent-12-shell-3",
+        "meiva-restarter",
     )
     backend = _KillAllBackend()
     monkeypatch.setattr(sessions_backend, "get_shell_backend", lambda: backend)
@@ -339,7 +339,7 @@ def test_kill_agent_shells_raises_after_trying_every_session(
 ) -> None:
     from base.cluster import session_name
 
-    _stub_sessions(monkeypatch, "ava-agent-7-shell-0", "ava-agent-7-shell-1")
+    _stub_sessions(monkeypatch, "meiva-agent-7-shell-0", "meiva-agent-7-shell-1")
     backend = _KillAllBackend(survives=frozenset({session_name("agent-7-shell-0")}))
     monkeypatch.setattr(sessions_backend, "get_shell_backend", lambda: backend)
 
@@ -350,7 +350,7 @@ def test_kill_agent_shells_raises_after_trying_every_session(
 
 def test_capture_shell_capture_failure_raises(monkeypatch: pytest.MonkeyPatch):
     """A backend capture failure (session died after probe) → RuntimeError."""
-    _stub_sessions(monkeypatch, "ava-main-agent-7-shell-1")
+    _stub_sessions(monkeypatch, "meiva-main-agent-7-shell-1")
     _stub_capture_backend(monkeypatch, error=RuntimeError("can't find pane"))
     import pytest
 

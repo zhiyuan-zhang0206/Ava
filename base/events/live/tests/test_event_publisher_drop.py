@@ -17,7 +17,7 @@ def _publisher(maxsize: int = 2) -> AgentEventPublisher:
     redis = MagicMock()
     redis.connection_pool.disconnect = AsyncMock()
     return AgentEventPublisher(
-        redis, "ava:events", agent_id=42, maxsize=maxsize, publish_timeout=0.1
+        redis, "meiva:events", agent_id=42, maxsize=maxsize, publish_timeout=0.1
     )
 
 
@@ -100,7 +100,7 @@ async def test_batch_command_failure_detail_carries_the_class_and_message(
 
     redis = MagicMock()
     redis.pipeline.return_value = _Pipeline()
-    pub = AgentEventPublisher(redis, "ava:events", agent_id=42, maxsize=2, publish_timeout=0.1)
+    pub = AgentEventPublisher(redis, "meiva:events", agent_id=42, maxsize=2, publish_timeout=0.1)
     await pub._publish_batch(["one"])
 
     assert len(_reports(loguru_records)) == 1

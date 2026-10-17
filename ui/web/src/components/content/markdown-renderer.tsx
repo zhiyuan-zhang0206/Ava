@@ -1,4 +1,4 @@
-// ava:ref ui/web/src/docs/frontend-components/markdown-surfaces.ava.okf.md#markdown-rendering
+// meiva:ref ui/web/src/docs/frontend-components/markdown-surfaces.meiva.okf.md#markdown-rendering
 "use client";
 
 import { memo, useEffect, useState } from "react";
@@ -23,7 +23,7 @@ const urlTransform = (url: string): string => {
   return /^(https?:|mailto:|#)/i.test(url) ? url : "about:blank";
 };
 
-// ava:ref ui/web/src/docs/frontend-components/markdown-safe-content.ava.okf.md#markdown-html-subset
+// meiva:ref ui/web/src/docs/frontend-components/markdown-safe-content.meiva.okf.md#markdown-html-subset
 const sanitizeSchema = {
   ...defaultSchema,
   clobberPrefix: "",
@@ -121,7 +121,7 @@ export interface ChatMarkdownProps {
   resolveUrl?: UrlTransform;
 }
 
-// ava:ref ui/web/src/docs/frontend-components/markdown-safe-content.ava.okf.md#markdown-document-anchors
+// meiva:ref ui/web/src/docs/frontend-components/markdown-safe-content.meiva.okf.md#markdown-document-anchors
 export const ChatMarkdownRenderer = memo(function ChatMarkdownRenderer({ content, components: overrides, resolveUrl }: ChatMarkdownProps) {
   const [math, setMath] = useState<MarkdownMath | null>(null);
   const needsMath = content.includes("$");

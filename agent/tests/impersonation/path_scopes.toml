@@ -1,7 +1,7 @@
 "agent.tests.agent_tests" = [
     "test_impersonation_integration.py",
 ]
-"ava.tests.fixtures.ava_tests" = [
+"meiva.tests.fixtures.meiva_tests" = [
     "test_external_database_owner.py",
     "test_external_machine_owner.py",
 ]

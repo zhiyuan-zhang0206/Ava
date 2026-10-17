@@ -3,12 +3,12 @@
 Gateway-hosted schedules for cluster agents: a schedule is a persistent,
 supervised session (a `script` + the `command` that runs it) owned by the
 `schedule-manager` service's ScheduleManager — see `services/wake/schedule_manager/manager.py`. Manage them via
-`ava schedules ...` (thin client over `/api/schedules`) or the
+`meiva schedules ...` (thin client over `/api/schedules`) or the
 `/control/schedules` page.
 
 ## Built-in schedules
 
-Ava ships a set of built-in schedules, declared in
+Meiva ships a set of built-in schedules, declared in
 [`manifest.json`](manifest.json) next to their script templates in this
 directory. The manifest is the single expression of the built-in policy
 (user ruling 2026-08-11, pre-open-source):
@@ -25,7 +25,7 @@ directory. The manifest is the single expression of the built-in policy
 | `model-update-tracker` | `model-update-tracker-schedule.py` | product | **enabled** |
 
 - **product** schedules (adversarial evaluation, self-evolution, memory, model
-  tracking, debt clearing, CI observability) are Ava's own
+  tracking, debt clearing, CI observability) are Meiva's own
   improvement loops — they ship and start by default.
 - **operator** schedules (cluster-operator tooling) ship with the product but
   start **disabled**: they exist so they are discoverable, and start only when
@@ -46,7 +46,7 @@ from the manifest's `default_enabled`. It runs:
 1. **at every `schedule-manager` start** (before its first reconcile) — a fresh
    install comes up with its built-ins (enabled ones are launched by the
    manager's reconcile loop within a poll tick), and
-2. **`ava schedules provision`** — manual restore, works even while the
+2. **`meiva schedules provision`** — manual restore, works even while the
    gateway is down.
 
 Provisioning is **idempotent**. A missing row is created. An existing row whose
@@ -57,7 +57,7 @@ stale the moment a library function the script calls changes shape (2026-10-03:
 writes a `schedule_versions` row (`builtin-resync <hash>`, so the replaced text stays
 recoverable) and queues the sync request that relaunches a live session onto the
 new code. `enabled` and `description` of an existing row are never touched, so
-`ava schedules stop <name>` (or disable in the UI) keeps a built-in around without
+`meiva schedules stop <name>` (or disable in the UI) keeps a built-in around without
 running. Delete a built-in and the next provision brings it back with its manifest
 default. The checkout is the source of truth for a built-in's code: a hand edit of
 its stored script is replaced at the next provision; edit the template instead.
@@ -85,20 +85,20 @@ provisioned and changed templates are resynced at the next `schedule-manager`
 start; changed `default_enabled` / description only apply to rows that do not
 exist yet — an existing cluster's rows keep their operator-set state. To push a
 template into a running cluster without a restart of the manager, run
-`ava schedules provision`.
+`meiva schedules provision`.
 
 ## Deployment notes
 
 - **The DB is authoritative.** The gateway materializes each schedule's script
-  from the `schedules` table to `~/.ava/schedules/<id>/` on launch; editing
+  from the `schedules` table to `~/.meiva/schedules/<id>/` on launch; editing
   only the on-disk copy is overwritten at the next launch/restart. Change a
-  schedule through `ava schedules update` / the API, never by editing the
+  schedule through `meiva schedules update` / the API, never by editing the
   materialized file.
 - **Cron expressions are cluster wall clock.** The built-in scripts read
-  `settings.general.timezone` (`AVA_TIMEZONE`, scope `cluster-pinned`) and pass
+  `settings.general.timezone` (`MEIVA_TIMEZONE`, scope `cluster-pinned`) and pass
   it to `next_fire`, so `0 4 * * *` means 04:00 cluster time on every host in
-  the fleet — the host's OS timezone never enters. `AVA_TIMEZONE` is read once
-  at process start, so a changed value needs `ava schedules restart <id>`.
+  the fleet — the host's OS timezone never enters. `MEIVA_TIMEZONE` is read once
+  at process start, so a changed value needs `meiva schedules restart <id>`.
   A one-off schedule you write yourself should do the same rather than
   hard-coding an IANA name; `next_fire(expr, timezone=None)` computes in UTC.
 - **Built-in cron slots are durably claimed.** Templates use
@@ -109,12 +109,12 @@ template into a running cluster without a restart of the manager, run
   claimed UTC slot and payload for report windows.
 - **A template change reaches a running cluster at the next `schedule-manager`
   start** (see "How built-ins get created"), or at once through
-  `ava schedules provision`. A resynced **enabled** schedule is relaunched onto the
+  `meiva schedules provision`. A resynced **enabled** schedule is relaunched onto the
   new script by the manager's sync request; a disabled one picks it up when it is
-  next started. `ava schedules get <name>` shows which script the row holds. A
+  next started. `meiva schedules get <name>` shows which script the row holds. A
   one-off change to a single schedule that is not in the manifest still goes
-  through `ava schedules update <name> --script-file <file>`.
-- **Verify in-store scripts when repo code moves.** `ava schedules verify`
+  through `meiva schedules update <name> --script-file <file>`.
+- **Verify in-store scripts when repo code moves.** `meiva schedules verify`
   checks every schedule's DB-embedded script — stopped rows included, built-in
   and agent-created alike — against the checkout it runs from: `py_compile`, a
   top-level-imports-only execution in the checkout's runner venv, a name-read
@@ -124,7 +124,7 @@ template into a running cluster without a restart of the manager, run
   `inspect.signature().bind` of every call the script makes into repo code
   (`schedules.catchup.fire_slot_once(...)`, `inputs.database()`;
   the argument shape only, so a call it cannot bind statically — `*args`, an
-  instance method, a rebound name, the plugin-wrapped `ava.*` SDK — is skipped,
+  instance method, a rebound name, the plugin-wrapped `meiva.*` SDK — is skipped,
   never guessed). Nothing is started, stopped, or written. The drift classes that
   bit (a module move — e.g. the watcher module's move to `base.daemon.schedules.watcher`
   — leaving stale in-store imports, task #4800; a `shared` -> `base` rename leaving a
@@ -143,16 +143,16 @@ template into a running cluster without a restart of the manager, run
 - Deploy a one-off schedule with:
 
 ```bash
-ava schedules create <name> --script-file <script.py> [--description "..."]
-ava schedules start <name>
+meiva schedules create <name> --script-file <script.py> [--description "..."]
+meiva schedules start <name>
 ```
 
-The running copy on each host lives in `~/.ava/schedules/<id>/`; this directory
+The running copy on each host lives in `~/.meiva/schedules/<id>/`; this directory
 is the version-controlled source of truth — never edit only the running copy.
 
 ## Script repair during maintenance
 
-Normal schedule edits use `ava schedules update`. Business HTTP admission is
+Normal schedule edits use `meiva schedules update`. Business HTTP admission is
 closed during the stop/start window, so that command returns `cluster_updating`
 while the gateway is held. A stopped cluster can instead use the reviewed
 operator tool `scripts/host_ops/update_schedule_script.py`. It accepts only a
@@ -166,7 +166,7 @@ with the **existing installed source's own interpreter**, explicit home/source
 paths, and the old stored script's SHA-256:
 
 ```bash
-AVA_HOME="$H" "$S/.venv/bin/python" "$TOOL" "$ID" \
+MEIVA_HOME="$H" "$S/.venv/bin/python" "$TOOL" "$ID" \
   --home "$H" --source "$S" --script-file "$PREPARED_SCRIPT" \
   --expected-sha256 "$OLD_SCRIPT_SHA256"
 ```

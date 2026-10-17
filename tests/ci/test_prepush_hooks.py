@@ -35,9 +35,9 @@ def checkout(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     repo = tmp_path / "main clone"
     repo.mkdir()
     subprocess.run(["git", "init", "-q", str(repo)], check=True)
-    monkeypatch.setenv("AVA_PREPUSH_LOCK_DIR", str(tmp_path / "locks"))
-    monkeypatch.setenv("AVA_PREPUSH_MAX_LOAD_PER_CORE", "1000000")
-    monkeypatch.setenv("AVA_PREPUSH_LOCK_WAIT_SECONDS", "2")
+    monkeypatch.setenv("MEIVA_PREPUSH_LOCK_DIR", str(tmp_path / "locks"))
+    monkeypatch.setenv("MEIVA_PREPUSH_MAX_LOAD_PER_CORE", "1000000")
+    monkeypatch.setenv("MEIVA_PREPUSH_LOCK_WAIT_SECONDS", "2")
     executable = repo / ".venv/bin/pyright"
     executable.parent.mkdir(parents=True)
     executable.symlink_to(sys.executable)
@@ -153,7 +153,7 @@ def test_artifact_freshness_hook_list_matches_config() -> None:
         "events-registry-fresh",
         "config-lite-table-fresh",
         "lint-pyright-test-environments",
-        "lint-ava-okf",
+        "lint-meiva-okf",
         "check-doc-references",
     }
     assert len(listed) == len(expected), "duplicate id in prepush_freshness.HOOKS"
@@ -277,9 +277,9 @@ def test_pyright_files_scopes_to_changed_existing_python_files(tmp_path: Path) -
 
     env = {
         **os.environ,
-        "AVA_PREPUSH_LOCK_DIR": str(tmp_path / "locks"),
-        "AVA_PREPUSH_MAX_LOAD_PER_CORE": "1000000",
-        "AVA_PREPUSH_LOCK_WAIT_SECONDS": "2",
+        "MEIVA_PREPUSH_LOCK_DIR": str(tmp_path / "locks"),
+        "MEIVA_PREPUSH_MAX_LOAD_PER_CORE": "1000000",
+        "MEIVA_PREPUSH_LOCK_WAIT_SECONDS": "2",
     }
     result = subprocess.run(
         ["bash", str(PYRIGHT_FILES)],
@@ -429,7 +429,7 @@ def test_concurrent_guards_serialize_never_run_in_parallel(checkout: Path, tmp_p
         assert second.returncode == 0
         assert "SKIPPED" not in err_b
     else:
-        # B never got the lock within AVA_PREPUSH_LOCK_WAIT_SECONDS: a clean
+        # B never got the lock within MEIVA_PREPUSH_LOCK_WAIT_SECONDS: a clean
         # skip is correct too (never a silent pass, never a parallel run).
         assert second.returncode == 0
         assert "PRE-PUSH SKIPPED [pyright]: lock wait timed out" in err_b
@@ -446,7 +446,7 @@ def test_load_skip(checkout: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     )
     probe.chmod(0o755)
     monkeypatch.setenv("PATH", str(probe_dir) + os.pathsep + os.environ["PATH"])
-    monkeypatch.setenv("AVA_PREPUSH_MAX_LOAD_PER_CORE", "0")
+    monkeypatch.setenv("MEIVA_PREPUSH_MAX_LOAD_PER_CORE", "0")
     result = run_guard(checkout)
     assert result.returncode == 0
     assert "PRE-PUSH SKIPPED [pyright]" in result.stderr
@@ -484,7 +484,7 @@ def test_lock_wait_proceeds(checkout: Path, tmp_path: Path) -> None:
 
 
 def test_lock_timeout(checkout: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("AVA_PREPUSH_LOCK_WAIT_SECONDS", "0.01")
+    monkeypatch.setenv("MEIVA_PREPUSH_LOCK_WAIT_SECONDS", "0.01")
     lock_dir = tmp_path / "locks"
     lock_dir.mkdir()
     with (lock_dir / "pyright.lock").open("w") as held:
@@ -685,9 +685,9 @@ def _scan(home: Path) -> subprocess.CompletedProcess[str]:
 
 def test_machine_scan_clean(tmp_path: Path) -> None:
     home = tmp_path / "home"
-    repo = _init_checkout(home / "Ava")
+    repo = _init_checkout(home / "Meiva")
     install_fixture(repo, repo / ".venv/bin/python")
-    source = _init_checkout(home / ".ava" / "source")
+    source = _init_checkout(home / ".meiva" / "source")
     install_fixture(source, source / ".venv/bin/python")
     result = _scan(home)
     assert result.returncode == 0
@@ -697,9 +697,9 @@ def test_machine_scan_clean(tmp_path: Path) -> None:
 
 def test_machine_scan_reports_drifted_checkout(tmp_path: Path) -> None:
     home = tmp_path / "home"
-    repo = _init_checkout(home / "Ava")
+    repo = _init_checkout(home / "Meiva")
     install_fixture(repo, repo / ".venv/bin/python")
-    drifted = _init_checkout(home / ".ava-preview" / "source")
+    drifted = _init_checkout(home / ".meiva-preview" / "source")
     interpreter = drifted / ".worktrees" / "wt" / ".venv/bin/python"
     interpreter.parent.mkdir(parents=True)
     interpreter.symlink_to(sys.executable)
@@ -712,7 +712,7 @@ def test_machine_scan_reports_drifted_checkout(tmp_path: Path) -> None:
 
 def test_machine_scan_reports_missing_hooks(tmp_path: Path) -> None:
     home = tmp_path / "home"
-    _init_checkout(home / "Ava")  # hooks dir holds only the samples
+    _init_checkout(home / "Meiva")  # hooks dir holds only the samples
     result = _scan(home)
     assert result.returncode == 1
     assert result.stdout.count("missing or non-executable") == 2
@@ -721,7 +721,7 @@ def test_machine_scan_reports_missing_hooks(tmp_path: Path) -> None:
 
 def test_machine_scan_dedupes_linked_worktrees(tmp_path: Path) -> None:
     home = tmp_path / "home"
-    repo = _init_checkout(home / "Ava")
+    repo = _init_checkout(home / "Meiva")
     install_fixture(repo, repo / ".venv/bin/python")
     subprocess.run(
         [
@@ -741,7 +741,7 @@ def test_machine_scan_dedupes_linked_worktrees(tmp_path: Path) -> None:
         ],
         check=True,
     )
-    linked = home / ".ava-linked" / "source"
+    linked = home / ".meiva-linked" / "source"
     linked.parent.mkdir()
     subprocess.run(
         ["git", "-C", str(repo), "worktree", "add", "-q", str(linked), "-b", "probe"],

@@ -52,7 +52,7 @@
   "system": "System",
   "agent": "Agent {id}",
   "externalAgent": "External agent {name}",
-  "agentChat": "Ava ▸{suffix}",
+  "agentChat": "Meiva ▸{suffix}",
   "compactSummarySingular": "compact summary",
   "compactSummariesPlural": "compact summaries",
   "systemNoteSingular": "system note",

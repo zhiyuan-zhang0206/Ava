@@ -3082,8 +3082,8 @@ export interface components {
             tags: string[];
             primary_tag: string;
             timestamp: string | null;
-            ava_agent: string | null;
-            ava_machine: string | null;
+            meiva_agent: string | null;
+            meiva_machine: string | null;
         };
         MemoryGraphResponse: {
             nodes: components["schemas"]["MemoryGraphNode"][];
@@ -3096,8 +3096,8 @@ export interface components {
             description: string | null;
             tags: string[];
             timestamp: string | null;
-            ava_agent: string | null;
-            ava_machine: string | null;
+            meiva_agent: string | null;
+            meiva_machine: string | null;
             body: string;
         };
         MemoryRefreshResponse: {

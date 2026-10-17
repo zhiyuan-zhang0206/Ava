@@ -15,28 +15,28 @@ def sandbox(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Sandbox:
     return make_sandbox(tmp_path, monkeypatch)
 
 
-def test_the_environment_carries_process_mechanics_and_no_ava_authority(
+def test_the_environment_carries_process_mechanics_and_no_meiva_authority(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setenv("AVA_API_TOKEN", "token-value")
-    monkeypatch.setenv("AVA_TEST_ONLY_SECRET", "secret-value")
+    monkeypatch.setenv("MEIVA_API_TOKEN", "token-value")
+    monkeypatch.setenv("MEIVA_TEST_ONLY_SECRET", "secret-value")
     monkeypatch.setenv("OSS_ACCESS_KEY_SECRET", "ambient-secret")
 
     env = runner.walg_env()
 
     assert "PATH" in env
-    assert not [name for name in env if name.startswith("AVA_")]
+    assert not [name for name in env if name.startswith("MEIVA_")]
     assert "OSS_ACCESS_KEY_SECRET" not in env, "storage credentials come from the 0600 file only"
 
 
 def test_postgres_connection_variables_name_the_owner_only_socket() -> None:
     env = runner.walg_env(
-        pg_admin_url="postgresql://zzy@/postgres?host=/sockets/ava-pg-home&port=5433",
+        pg_admin_url="postgresql://zzy@/postgres?host=/sockets/meiva-pg-home&port=5433",
         extra={"WALG_DELTA_MAX_STEPS": "6"},
     )
 
     assert (env["PGHOST"], env["PGPORT"], env["PGUSER"], env["PGDATABASE"]) == (
-        "/sockets/ava-pg-home",
+        "/sockets/meiva-pg-home",
         "5433",
         "zzy",
         "postgres",
@@ -84,7 +84,7 @@ def test_a_hung_call_is_cut_off(sandbox: Sandbox) -> None:
 def test_off_means_no_call(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     sandbox = make_sandbox(tmp_path, monkeypatch, enabled=False)
 
-    with pytest.raises(WalgConfigError, match="AVA_WALG_CONFIG_FILE is not set"):
+    with pytest.raises(WalgConfigError, match="MEIVA_WALG_CONFIG_FILE is not set"):
         runner.run_walg(
             ["st", "ls"], timeout_s=30, path_reader=lambda: settings.walg.walg_config_file
         )

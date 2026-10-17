@@ -2,13 +2,13 @@
 
 pre-commit and pre-push run the repository's own scripts on every commit and push; nobody
 chose to run them, and a developer's checkout often sits on a host that runs a cluster.
-Importing application code boots the config package, which loads `$AVA_HOME/.env` (else
-`~/.ava/.env`): that cluster's credentials. So every script a hook launches that reaches
-application code calls `enter_scratch_home()` — a fresh temporary `AVA_HOME`, whatever the
+Importing application code boots the config package, which loads `$MEIVA_HOME/.env` (else
+`~/.meiva/.env`): that cluster's credentials. So every script a hook launches that reaches
+application code calls `enter_scratch_home()` — a fresh temporary `MEIVA_HOME`, whatever the
 caller's environment carries — behind `if __name__ == "__main__":`, before its first
 import that reaches application code. Only as a program: tests import these modules, and a
 module that entered a scratch home while being imported would replace the whole pytest
-worker's `AVA_HOME` (`enter_scratch_home` refuses inside pytest for that reason).
+worker's `MEIVA_HOME` (`enter_scratch_home` refuses inside pytest for that reason).
 
 Every other script is run by a person or an agent, on purpose. For those the rule is the
 development convention (`docs/conventions/dev-setup.md`), not code.
@@ -180,7 +180,7 @@ def test_a_hook_script_exempt_from_the_scratch_home_runs_without_a_third_party_p
     module body must run with the standard library alone, so it cannot reach the config
     boot that the scratch home exists to keep away from a real home."""
     assert rel in _hook_scripts()
-    env = {k: v for k, v in os.environ.items() if not k.startswith("AVA_")}
+    env = {k: v for k, v in os.environ.items() if not k.startswith("MEIVA_")}
     env["HOME"] = str(tmp_path)
     result = subprocess.run(  # noqa: S603 — fixed argv, repository script, no shell
         [
@@ -198,16 +198,16 @@ def test_a_hook_script_exempt_from_the_scratch_home_runs_without_a_third_party_p
         check=False,
     )
     assert result.returncode == 0, result.stderr
-    assert not (tmp_path / ".ava").exists()
+    assert not (tmp_path / ".meiva").exists()
 
 
 def test_enter_scratch_home_refuses_inside_a_pytest_process() -> None:
     from base.host.env.dotenv_boot import enter_scratch_home
 
-    home = os.environ["AVA_HOME"]
+    home = os.environ["MEIVA_HOME"]
     with pytest.raises(RuntimeError, match="pytest process"):
         enter_scratch_home()
-    assert os.environ["AVA_HOME"] == home
+    assert os.environ["MEIVA_HOME"] == home
 
 
 def _unreadable_home(root: Path) -> Path:
@@ -216,24 +216,24 @@ def _unreadable_home(root: Path) -> Path:
     home.mkdir(parents=True)
     for name in (".env", "mirror.env"):
         path = home / name
-        path.write_text("AVA_MACHINE_SERVE_GATEWAY=true\nAVA_CLUSTER_SECRET=canary\n")
+        path.write_text("MEIVA_MACHINE_SERVE_GATEWAY=true\nMEIVA_CLUSTER_SECRET=canary\n")
         path.chmod(0)
     return home
 
 
 def test_a_hook_script_never_reads_the_home_its_environment_names(tmp_path: Path) -> None:
     """The canary. The OpenAPI dump (a hook's payload) imports `gateway.app`, the heaviest
-    import chain a hook runs. With `AVA_HOME` naming an unreadable home and `~/.ava` under
+    import chain a hook runs. With `MEIVA_HOME` naming an unreadable home and `~/.meiva` under
     HOME unreadable too, it still succeeds: it never looked at either."""
     canary = _unreadable_home(tmp_path / "named")
     user_home = tmp_path / "user"
-    (user_home / ".ava").mkdir(parents=True)
+    (user_home / ".meiva").mkdir(parents=True)
     for name in (".env", "mirror.env"):
-        (user_home / ".ava" / name).write_text("AVA_CLUSTER_SECRET=canary\n")
-        (user_home / ".ava" / name).chmod(0)
+        (user_home / ".meiva" / name).write_text("MEIVA_CLUSTER_SECRET=canary\n")
+        (user_home / ".meiva" / name).chmod(0)
     out = tmp_path / "openapi.json"
-    env = {k: v for k, v in os.environ.items() if not k.startswith("AVA_")}
-    env.update(AVA_HOME=str(canary), HOME=str(user_home))
+    env = {k: v for k, v in os.environ.items() if not k.startswith("MEIVA_")}
+    env.update(MEIVA_HOME=str(canary), HOME=str(user_home))
 
     result = subprocess.run(  # noqa: S603 — fixed argv, repository tool, no shell
         [sys.executable, "scripts/codegen/dump_openapi.py", str(out)],
@@ -248,4 +248,4 @@ def test_a_hook_script_never_reads_the_home_its_environment_names(tmp_path: Path
     assert result.returncode == 0, result.stderr
     assert out.is_file()
     assert sorted(p.name for p in canary.iterdir()) == [".env", "mirror.env"]
-    assert sorted(p.name for p in (user_home / ".ava").iterdir()) == [".env", "mirror.env"]
+    assert sorted(p.name for p in (user_home / ".meiva").iterdir()) == [".env", "mirror.env"]

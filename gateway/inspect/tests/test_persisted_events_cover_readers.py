@@ -55,7 +55,7 @@ def _queried_by_sql() -> tuple[dict[str, Path], dict[str, Path]]:
 
 
 def _self_evolution_names() -> set[str]:
-    path = _ROOT / "ava_builtins/skills/platform/ava-self-evolution/scripts/record.py"
+    path = _ROOT / "meiva_builtins/skills/platform/meiva-self-evolution/scripts/record.py"
     failures: set[str] = set()
     for node in ast.walk(ast.parse(path.read_text(encoding="utf-8"))):
         if (
@@ -77,7 +77,7 @@ def _parameter_lists() -> dict[str, set[str]]:
         "aggregate_sql.LIFECYCLE_EVENTS": set(aggregate_sql.LIFECYCLE_EVENTS),
         "ops_series LLM error family": set(family_events(LLM_ERROR_FAMILY)),
         "telemetry_staleness.HEARTBEAT_EVENT": {telemetry_staleness.HEARTBEAT_EVENT},
-        "ava-self-evolution record.py": _self_evolution_names(),
+        "meiva-self-evolution record.py": _self_evolution_names(),
     }
 
 

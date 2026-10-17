@@ -54,8 +54,8 @@ from base.telemetry.audit_events import audit_event_uid, prepare_event_log
 
 # The capability group the grants target, and the generation-shaped login that
 # inherits it (the only identity that logs in).
-_RUNNER_GROUP = "ava_runner"
-_RUNNER_LOGIN = "ava_g0_runner"
+_RUNNER_GROUP = "meiva_runner"
+_RUNNER_LOGIN = "meiva_g0_runner"
 
 
 def _send_event(actor_id: int, target_id: int) -> Event:
@@ -360,7 +360,7 @@ def restricted_source(
     owner_url = settings.data_plane.db_url
     runner_url = grant_runner_login(
         owner_url,
-        owner="ava_citest",
+        owner="meiva_citest",
         login=_RUNNER_LOGIN,
         password="test-runner-password",  # noqa: S106 -- throwaway role credential
     )

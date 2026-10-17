@@ -1,9 +1,9 @@
 """Logical backup maintenance on an always-authenticated born home.
 
 A home born by the real start steps (`test_single_box.born`): NOLOGIN schema
-owner, write generation 0, a credential-free `AVA_DB_URL`. The maintenance
-process here holds NO write-generation login: its `AVA_DB_URL` is the
-credential-free endpoint and no `AVA_DB_ADMIN_PASSWORD` exists anywhere. The
+owner, write generation 0, a credential-free `MEIVA_DB_URL`. The maintenance
+process here holds NO write-generation login: its `MEIVA_DB_URL` is the
+credential-free endpoint and no `MEIVA_DB_ADMIN_PASSWORD` exists anywhere. The
 scheduled dump must still work, because it dials the home's own authority
 (`base.cluster.dataplane.pg_admin`): the OS-user administrator over the owner-only socket,
 acting as the schema owner.
@@ -70,10 +70,10 @@ def maintenance(born: Born, monkeypatch: pytest.MonkeyPatch) -> Born:
     endpoint = born.endpoint()
     assert conninfo_to_dict(endpoint).get("password") is None
     monkeypatch.setattr(settings.data_plane, "db_url", endpoint)
-    monkeypatch.setitem(os.environ, "AVA_DB_URL", endpoint)
+    monkeypatch.setitem(os.environ, "MEIVA_DB_URL", endpoint)
     monkeypatch.delitem(os.environ, delivery.GENERATION_ENV, raising=False)
-    monkeypatch.delenv("AVA_DB_ADMIN_PASSWORD", raising=False)
-    assert "AVA_DB_ADMIN_PASSWORD" not in (born.home / ".env").read_text()
+    monkeypatch.delenv("MEIVA_DB_ADMIN_PASSWORD", raising=False)
+    assert "MEIVA_DB_ADMIN_PASSWORD" not in (born.home / ".env").read_text()
     monkeypatch.setattr(offsite, "publish", _no_publish)
     return born
 
@@ -104,8 +104,8 @@ def _assert_owner_dial(conninfo: str) -> None:
     target = conninfo_to_dict(conninfo)
     assert target["host"] == str(ci.pg_socket_dir())
     assert target["user"] == getpass.getuser()
-    assert target["dbname"] == "ava"
-    assert target["options"] == "-c role=ava"
+    assert target["dbname"] == "meiva"
+    assert target["options"] == "-c role=meiva"
     assert "password" not in target
 
 
@@ -173,4 +173,4 @@ def test_scheduled_backup_dumps_as_the_owner_and_restores(
     assert report.agents == 1
     assert report.sample_agent_id == agent_id
     assert report.sample_message_count == 1
-    assert report.agents_owner == "ava"
+    assert report.agents_owner == "meiva"

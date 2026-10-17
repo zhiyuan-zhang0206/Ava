@@ -1,6 +1,6 @@
 [debt.env-patch]
-"test_impersonation_agents.py#monkeypatch.delenv os.environ.AVA_IMPERSONATION_RELAY_TOKEN" = 1
-"test_impersonation_agents.py#monkeypatch.setenv os.environ.AVA_IMPERSONATION_RELAY_TOKEN" = 1
+"test_impersonation_agents.py#monkeypatch.delenv os.environ.MEIVA_IMPERSONATION_RELAY_TOKEN" = 1
+"test_impersonation_agents.py#monkeypatch.setenv os.environ.MEIVA_IMPERSONATION_RELAY_TOKEN" = 1
 
 [debt.first-party-patch]
 "test_delivery.py#monkeypatch.setattr base.agents.impersonation.delivery.publish_agent_updated_sync" = 1

@@ -1,7 +1,7 @@
 """Core event-stream panels — the Events trio and the gateway sample count.
 
 The last Loki panels of the hand-written board that live outside the
-``ava_observability`` pack (task #3697 S2): the three Events panels at the top
+``meiva_observability`` pack (task #3697 S2): the three Events panels at the top
 of the core section — the filtered "what happened" tier view, the per-type
 count table, and the raw stream — plus the gateway-latency sample-count
 companion of the route latency panel.

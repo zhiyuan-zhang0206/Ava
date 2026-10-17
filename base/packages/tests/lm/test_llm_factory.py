@@ -172,7 +172,7 @@ class TestBuildChatModel:
 
     def test_deepseek_default_is_max(self, *, model_catalog: ModelCatalog) -> None:
         """DeepSeek's per-model registry default is 'max' — DeepSeek only automatically
-        upgrades to max for recognized harnesses (docs note Claude Code / OpenCode), Ava is not
+        upgrades to max for recognized harnesses (docs note Claude Code / OpenCode), Meiva is not
         on that list, so we must explicitly request it. Changing this default will break this
         test, signaling the need to sync docs / runbook."""
         assert (
@@ -221,7 +221,7 @@ class TestBuildChatModel:
         """effort='none' must never reach `output_config.effort` — DeepSeek's wire
         vocabulary is graded levels only and 400s on it ("unknown variant `none`,
         expected one of high, low, medium, max, xhigh"), which is what took every
-        `ava.web.fetch` down (AVA_WEB_FETCH_REASONING ships as "none"). Off is the
+        `meiva.web.fetch` down (MEIVA_WEB_FETCH_REASONING ships as "none"). Off is the
         endpoint's thinking switch, which is also what the setting promises."""
         monkeypatch.setenv("DEEPSEEK_API_KEY", "sk-test-deepseek")
         llm = build_chat_model(
@@ -267,8 +267,8 @@ class TestBuildChatModel:
     def test_shipped_web_fetch_config_builds_an_accepted_request(
         self, monkeypatch: pytest.MonkeyPatch, *, model_catalog: ModelCatalog
     ) -> None:
-        """The pair `ava.web.fetch` ships with (AVA_WEB_FETCH_MODEL=deepseek-flash,
-        AVA_WEB_FETCH_REASONING=none) has to build a request the endpoint accepts —
+        """The pair `meiva.web.fetch` ships with (MEIVA_WEB_FETCH_MODEL=deepseek-flash,
+        MEIVA_WEB_FETCH_REASONING=none) has to build a request the endpoint accepts —
         that exact pair is what 400'd on every fetch in production."""
         monkeypatch.setenv("DEEPSEEK_API_KEY", "sk-test-deepseek")
         llm = build_chat_model(
@@ -464,7 +464,7 @@ class TestBuildChatModel:
     def test_gemini_media_args_build(
         self, monkeypatch: pytest.MonkeyPatch, *, model_catalog: ModelCatalog
     ) -> None:
-        """Media-path extras (ava.understand): media_resolution maps onto the
+        """Media-path extras (meiva.understand): media_resolution maps onto the
         Google enum, media_thinking_level wins over the resolved effort, and
         base_url overrides the endpoint. include_thoughts stays at the SDK
         default (None) — the media path never surfaced thought blocks."""

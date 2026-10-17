@@ -1,5 +1,5 @@
 [debt.env-patch]
-"test_send_message_retries_through_gateway_rollout.py#monkeypatch.setenv os.environ.AVA_HOME" = 2
+"test_send_message_retries_through_gateway_rollout.py#monkeypatch.setenv os.environ.MEIVA_HOME" = 2
 
 [debt.first-party-patch]
 "test_send_message_retries_through_gateway_rollout.py#monkeypatch.setattr services.entrypoints.im_bridge.core.TYPING_INTERVAL_S" = 3

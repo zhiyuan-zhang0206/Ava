@@ -56,7 +56,7 @@ def overflow_dir(agent_id: int) -> Path:
 
 
 class ExecEnvelope(NamedTuple):
-    """The text fed to the LLM and where its body begins (`ava_exec_body_start`)."""
+    """The text fed to the LLM and where its body begins (`meiva_exec_body_start`)."""
 
     text: str
     body_start: int
@@ -205,9 +205,9 @@ def wrap_code_output(
         # primitives must be named here, where the timeout is actually seen.
         body += (
             "\n[hint: this budget is for quick work. Run a long shell command "
-            "with ava.shell.run_background (delivers a completion message), or "
-            "long Python code as ava.watcher.launch; drive interactive programs "
-            "in ava.shell.sessions.]\n"
+            "with meiva.shell.run_background (delivers a completion message), or "
+            "long Python code as meiva.watcher.launch; drive interactive programs "
+            "in meiva.shell.sessions.]\n"
         )
     head = header + "\n\n"
     return ExecEnvelope(head + body, len(head))
@@ -249,7 +249,7 @@ def truncate_both_ends(
     archive holds only what survived that first cap, so the banner says exactly
     that instead of promising the full output.
 
-    Public because the ava_code plugin reuses the same truncate-and-archive
+    Public because the meiva_code plugin reuses the same truncate-and-archive
     logic for oversized context files (AGENTS.md / CLAUDE.md) — the user
     ruling (2026-08-11) prescribes the exec-output overflow shape for any
     content too large to fully inject: inline head+tail + archive path."""

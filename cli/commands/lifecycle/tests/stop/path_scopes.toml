@@ -9,7 +9,7 @@
 ]
 "base.host.db_authority.tests.generation" = ["."]
 "base.paths.tests.homes" = ["."]
-"ava.tests.fixtures.sdk" = [
+"meiva.tests.fixtures.sdk" = [
     "test_data_plane_stop.py",
     "test_maintenance_stop_report.py",
     "test_stop.py",

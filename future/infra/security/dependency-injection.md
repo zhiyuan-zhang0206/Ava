@@ -18,19 +18,19 @@ supplies the package doors and the shrink-only baseline practice the enforcement
 - **`Settings`** aggregates per-domain sub-models in `base/config/` and is imported
   everywhere. Process profiles (gateway, agent, runner) choose which domains a
   process constructs, and a boot-lite layer serves a small field subset until the
-  first read outside it. `AVA_HOME` is read at each call by the path helpers.
+  first read outside it. `MEIVA_HOME` is read at each call by the path helpers.
 - **Per-agent config** resolves as `config_overlay > birth_config > cluster
   default` ([per-agent config lifecycle](../../../docs/decisions/runtime/config/2026-07-31-per-agent-config-lifecycle.md)).
   The host turns the two stored maps into pins (`base/config/agent_pins.py`) and
   resolves them, with the plugin pins, into the agent's `AgentSlices` each turn; only
   the turn identity is still bound in a ContextVar.
-- **`AvaContext`** (`base/agents/context/__init__.py`) is LangGraph's per-run context. The
+- **`MeivaContext`** (`base/agents/context/__init__.py`) is LangGraph's per-run context. The
   host builds one per turn in `services/agent_runner/agent_host/host.py` with the handles (model,
   event publisher, database pool, `Database`, `EventBus`) and the agent's resolved
   `AgentSlices` (`base/host/env/agent_slices.py`); graph code reads
   `runtime.context.agent`.
 - **One compiled graph** is shared by every agent in a host
-  ([agent runtime](../../../agent/docs/agent-runtime/agent-runtime.ava.okf.md)).
+  ([agent runtime](../../../agent/docs/agent-runtime/agent-runtime.meiva.okf.md)).
 
 ## Target shape
 
@@ -72,7 +72,7 @@ code reads no environment variable.
 Values that are read lazily at call time today are read once at the root and passed
 down:
 
-- `home` and the paths derived from it come from one read of `AVA_HOME`;
+- `home` and the paths derived from it come from one read of `MEIVA_HOME`;
 - a `Platform` value carries the operating-system facts that module constants
   carry now;
 - the clock and the id and random sources are handed to the components that decide
@@ -92,8 +92,8 @@ down:
 - **Turn.** What exists for one turn: identity and incarnation, cancellation, the
   event publisher, the pools the host hands in.
 
-All three ride in `AvaContext`, which LangGraph passes to every node as
-`Runtime[AvaContext]` and the host builds once per turn. It replaces the ContextVar
+All three ride in `MeivaContext`, which LangGraph passes to every node as
+`Runtime[MeivaContext]` and the host builds once per turn. It replaces the ContextVar
 pins for framework config, plugin config and turn identity; the views that read
 them and the lint that polices their use are deleted at the end. Code a node calls
 receives what it needs as arguments, where a ContextVar reached into everything
@@ -132,7 +132,7 @@ built; agent- and turn-level values reach them through the runtime context.
 ### 8. Background duties are services; request paths start no tasks
 
 - A periodic or event-driven background duty is its own service: an independent
-  process supervised by `ava-root`, with its own health check, readiness proof and
+  process supervised by `meiva-root`, with its own health check, readiness proof and
   lifecycle. It does not stay inside the service that happens to need it.
 - Its body is a sequential loop: scan, act, sleep. A round that has not finished
   prevents the next from starting, so single-flight holds by construction and no
@@ -148,7 +148,7 @@ built; agent- and turn-level values reach them through the runtime context.
   one service with three resident sequential loops (ruling A'). Each loop is sequential,
   so single-flight holds by construction. One `TaskGroup` in the service's main function
   owns the three loops; if any loop crashes, the group cancels the others and the process
-  exits for `ava-root` to restart it. Cool-down and failure counts live in the database.
+  exits for `meiva-root` to restart it. Cool-down and failure counts live in the database.
   Every other background duty stays its own service.
 - A side effect on a request path, such as the notification the gateway sends after
   a database commit, does not start a free-floating task. It is awaited in the
@@ -221,7 +221,7 @@ finish in one change freezes what is left; a finished one has none.
    first, then the shared kernel and the secrets. The IM bridge batch is done
    (below); the other slices of that kind follow the same pattern.
 5. **Turn context.** Move the config pins, plugin config and turn identity from
-   ContextVars into `AvaContext` once the agent-level slices exist; delete the
+   ContextVars into `MeivaContext` once the agent-level slices exist; delete the
    views and the lint that polices them.
 6. **Background duties become services.** Driven by the audit result: each duty
    moves into a service with a sequential loop and durable cool-down and retry
@@ -324,8 +324,8 @@ and the clock; the endpoint table is indexed by service name, a daemon taking on
   last ambient dial is gone, in the same change; the shim is deleted with the last package.
 - **Done, the endpoint table** (`base/daemon/endpoints.py`): `ServiceEndpoints.from_settings()`
   builds one row per health daemon (`ServiceEndpoint`: name, healthz port, pidfile under
-  `$AVA_HOME/run`) from the fixed port table, the unit's `AVA_<NAME>_HEALTH_PORT` override and
-  `AVA_HOME`. A daemon root takes its own row (`.of("labeler")`) and hands the port to
+  `$MEIVA_HOME/run`) from the fixed port table, the unit's `MEIVA_<NAME>_HEALTH_PORT` override and
+  `MEIVA_HOME`. A daemon root takes its own row (`.of("labeler")`) and hands the port to
   `start_health_server`, whose port is a required argument. The old lookup functions
   (`health_port`, `pid_path`) are gone. The `ambient-endpoint` rule fails `ServiceEndpoints.
   from_settings()` outside the modules named in `ENDPOINT_PACKAGES`: every daemon root, and the
@@ -367,7 +367,7 @@ and the clock; the endpoint table is indexed by service name, a daemon taking on
   `base.config.wiring.root_bundle`. The `bundle-leak` rule fails any annotation of such a class outside
   its defining module, so the bundle stays a local variable of the root and never becomes a
   parameter type (a function handed the whole bundle can reach any member).
-- **Not yet**: the agent-side per-turn slices carried in `AvaContext`.
+- **Not yet**: the agent-side per-turn slices carried in `MeivaContext`.
 
 ## Open questions
 

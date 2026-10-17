@@ -69,7 +69,7 @@ class TimelineItem(BaseModel):
     source_inbound_id: int | None = None
     source_block_idx: int | None = None
     # The compact run this item belongs to (None elsewhere): a forced/auto
-    # compact's summary message carries `ava_compact_id`, pairing the item
+    # compact's summary message carries `meiva_compact_id`, pairing the item
     # with the live compact_started / compact_finished events (ticking
     # "Compacting" block → summary item handoff on the frontend).
     compact_id: str | None = None
@@ -84,7 +84,7 @@ class TimelineItem(BaseModel):
     reasoning_ms: int | None = None
     reasoning_tokens: int | None = None
     # Wall-clock the code ran, set only on `code_output` items (None elsewhere).
-    # Read from the exec_output message's ava_exec_ms (agent/graph/exec/node.py).
+    # Read from the exec_output message's meiva_exec_ms (agent/graph/exec/node.py).
     # Drives the collapsed-output chip ("ran in 1.3s").
     exec_ms: int | None = None
     # Whether the frontend chip shows this item's wall-clock ts. True everywhere
@@ -93,7 +93,7 @@ class TimelineItem(BaseModel):
     # `_NO_TIMESTAMP_NOTE_TAGS`. Default True keeps every other kind unchanged.
     show_timestamp: bool = True
     # Image urls on a multimodal `inbound_chat` / `attach` item (None
-    # elsewhere): inbound_chat = gateway-relative urls from ava_image_urls
+    # elsewhere): inbound_chat = gateway-relative urls from meiva_image_urls
     # (via assetUrl); attach = data URIs from content blocks (rendered raw).
     images: list[str] | None = None
     # Per-image caption lines on an `attach` item, aligned 1:1 with `images`:
@@ -107,7 +107,7 @@ class TimelineItem(BaseModel):
     # exec_output ToolMessage's `sdk_calls`; None until that lands / other kinds).
     sdk_calls: list[SdkCall] | None = None
     # Wall-clock the code-generation took, set only on `agent_code` items (None
-    # elsewhere). Read from the AIMessage's ava_code_ms_by_block (keyed by code
+    # elsewhere). Read from the AIMessage's meiva_code_ms_by_block (keyed by code
     # block_idx). Drives the detail-block chip "Wrote code for Xs".
     code_elapsed_ms: int | None = None
 

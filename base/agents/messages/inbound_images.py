@@ -6,7 +6,7 @@ from pathlib import Path
 from typing import Any, cast
 
 # Suffix -> MIME for image uploads that can be inlined as native model content.
-# Mirrors the image row of `ava._understand`'s media map; a suffix not listed
+# Mirrors the image row of `meiva._understand`'s media map; a suffix not listed
 # here is not treated as an inlineable image (the message endpoint 422s a
 # reference to it, the claim node never base64-inlines it).
 IMAGE_MIME: dict[str, str] = {
@@ -45,7 +45,7 @@ def inbound_image_urls(agent_id: int, payload: dict[str, Any] | None) -> list[st
     (gateway/agents/state.py) applied at write time — one of this
     agent's upload urls carrying a recognized image suffix. That keeps the
     strip's thumbnails on the exact url contract the timeline uses
-    (`ava_image_urls`), never a path the browser cannot load. Malformed
+    (`meiva_image_urls`), never a path the browser cannot load. Malformed
     blocks are skipped, not fatal: a queue read degrades a row rather than
     failing the whole strip.
     """

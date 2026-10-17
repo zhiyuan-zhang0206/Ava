@@ -24,7 +24,7 @@ def _names(outcome: closure.Outcome) -> list[str]:
 
 
 def test_a_regular_job_and_its_shell_close_within_the_grace(unit_home: Path) -> None:
-    name = "ava-agent-987-shell-2045-job"
+    name = "meiva-agent-987-shell-2045-job"
     shell = jobs.start(name, unit_home, jobs.TERM_OK)
     output_until(name, "job-ready")
     (job,) = jobs.live_children(shell)
@@ -44,10 +44,10 @@ def test_a_regular_job_and_its_shell_close_within_the_grace(unit_home: Path) -> 
 
 
 def test_an_idle_session_closes_silently(unit_home: Path) -> None:
-    (unit_home / ".bash_profile").write_text("PS1='ava-idle-shell> '\n")
-    name = "ava-agent-987-shell-2044-idle"
+    (unit_home / ".bash_profile").write_text("PS1='meiva-idle-shell> '\n")
+    name = "meiva-agent-987-shell-2044-idle"
     new(name, unit_home, {"HOME": str(unit_home)})
-    assert wait_for(lambda: support.screen(name).rstrip().endswith("ava-idle-shell>"))
+    assert wait_for(lambda: support.screen(name).rstrip().endswith("meiva-idle-shell>"))
     shell = support.shell_process(name)
 
     outcome = client.close_all(grace_s=5.0, kill_s=3.0)
@@ -58,7 +58,7 @@ def test_an_idle_session_closes_silently(unit_home: Path) -> None:
 
 
 def test_a_restart_loop_shell_cannot_outlive_the_closure(unit_home: Path) -> None:
-    name = "ava-agent-987-shell-2045-loop"
+    name = "meiva-agent-987-shell-2045-loop"
     new(name, unit_home, cmd=jobs.LOOP_SHELL)
     shell = support.shell_process(name)
     wait_for_foreground(wait_for_job(shell, ["bash", "-c", "while true; do sleep 1; done"]))
@@ -70,7 +70,7 @@ def test_a_restart_loop_shell_cannot_outlive_the_closure(unit_home: Path) -> Non
 
 
 def test_a_job_that_ignores_termination_is_killed_after_its_grace(unit_home: Path) -> None:
-    name = "ava-agent-987-shell-2045-stubborn"
+    name = "meiva-agent-987-shell-2045-stubborn"
     shell = jobs.start(name, unit_home, jobs.STUBBORN)
     output_until(name, "stubborn-ready")
     (job,) = jobs.live_children(shell)
@@ -89,7 +89,7 @@ def test_a_job_that_ignores_termination_is_killed_after_its_grace(unit_home: Pat
 def test_an_untracked_nohup_job_does_not_block_terminal_closure(
     unit_home: Path, *, background_exited: bool
 ) -> None:
-    name = "ava-agent-987-shell-2049-nohup"
+    name = "meiva-agent-987-shell-2049-nohup"
     new(name, unit_home)
     shell = support.shell_process(name)
     marker = unit_home / "nohup.pid"
@@ -110,7 +110,7 @@ def test_an_untracked_nohup_job_does_not_block_terminal_closure(
 
 
 def test_an_escaped_child_holding_the_slave_does_not_block_master_teardown(unit_home: Path) -> None:
-    name = "ava-agent-987-shell-escaped-slave"
+    name = "meiva-agent-987-shell-escaped-slave"
     marker = unit_home / "escaped.pid"
     shell = jobs.create(name, unit_home, jobs.setsid_child(marker, escape=True))
     child = jobs.wait_for_file(marker, "the escaped worker")
@@ -127,13 +127,13 @@ def test_an_escaped_child_holding_the_slave_does_not_block_master_teardown(unit_
 
 
 def test_the_closure_covers_every_session_at_once(unit_home: Path) -> None:
-    busy = [f"ava-agent-987-shell-{n}-multi" for n in range(5)]
+    busy = [f"meiva-agent-987-shell-{n}-multi" for n in range(5)]
     shells = [jobs.start(name, unit_home, jobs.STUBBORN) for name in busy]
     for name, shell in zip(busy, shells, strict=True):
         output_until(name, "stubborn-ready")
         (job,) = jobs.live_children(shell)
         wait_for_foreground(job)
-    idle = "ava-agent-987-shell-99-quiet"
+    idle = "meiva-agent-987-shell-99-quiet"
     new(idle, unit_home)
 
     outcome = client.close_all(grace_s=1.0, kill_s=3.0)
@@ -148,8 +148,8 @@ def test_a_closure_over_no_sessions_is_empty() -> None:
 
 
 def test_no_session_is_born_while_the_closure_runs(unit_home: Path) -> None:
-    jobs.start("ava-agent-987-shell-2060-slow", unit_home, jobs.STUBBORN)
-    output_until("ava-agent-987-shell-2060-slow", "stubborn-ready")
+    jobs.start("meiva-agent-987-shell-2060-slow", unit_home, jobs.STUBBORN)
+    output_until("meiva-agent-987-shell-2060-slow", "stubborn-ready")
     closing = threading.Thread(target=client.close_all, kwargs={"grace_s": 3.0, "kill_s": 3.0})
     closing.start()
     try:
@@ -157,22 +157,22 @@ def test_no_session_is_born_while_the_closure_runs(unit_home: Path) -> None:
 
         def refused() -> bool:
             try:
-                new("ava-agent-987-shell-2061-late", unit_home)
+                new("meiva-agent-987-shell-2061-late", unit_home)
             except client.ServiceError as exc:
                 refusal.append(exc)
                 return True
-            client.kill("ava-agent-987-shell-2061-late", graceful=False)
+            client.kill("meiva-agent-987-shell-2061-late", graceful=False)
             return False
 
         assert wait_for(refused, timeout=5, interval=0.05)
         assert "closing" in str(refusal[0])
     finally:
         closing.join(timeout=60)
-    assert new("ava-agent-987-shell-2061-late", unit_home) is True
+    assert new("meiva-agent-987-shell-2061-late", unit_home) is True
 
 
 def test_the_closure_outcome_survives_the_wire(unit_home: Path) -> None:
-    name = "ava-agent-987-shell-2070-wire"
+    name = "meiva-agent-987-shell-2070-wire"
     jobs.start(name, unit_home, jobs.STUBBORN)
     output_until(name, "stubborn-ready")
     (info,) = client.list_sessions()

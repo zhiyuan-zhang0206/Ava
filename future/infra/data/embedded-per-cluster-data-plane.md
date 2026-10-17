@@ -2,14 +2,14 @@
 
 **Current ownership:** this is archived source material for the implemented
 per-home isolation model. Current startup facts are in
-[data-plane startup](../../../cli/commands/data_plane/docs/data-plane-startup.ava.okf.md).
+[data-plane startup](../../../cli/commands/data_plane/docs/data-plane-startup.meiva.okf.md).
 Only the Redis binary-vendoring leg remains a plan, tracked in
 [vendored data-plane binaries](vendored-data-plane-binaries.md); the original
 body below is retained as evidence, not an additional implementation checklist.
 
 **Status: done, except the redis half of slice 3.** Slices 1 + 2 are implemented —
 every cluster (including the prod default home) runs its own Postgres+Redis instance
-under its `$AVA_HOME`; the shared-instance + logical-isolation model and
+under its `$MEIVA_HOME`; the shared-instance + logical-isolation model and
 `cli/commands/_compose.py` are gone. Slice 3 (bundling the binaries so there is no
 brew/apt dependency) is **half done**: Postgres is vendored
 (`base/cluster/dataplane/runtime_binaries.py`), redis is not. That remaining leg lives entirely in
@@ -23,7 +23,7 @@ hardening logical isolation, and what that deleted. The shipped model is describ
 ## The invariant
 
 > **One cluster owns one Postgres instance and one Redis instance, both living
-> entirely under that cluster's `$AVA_HOME`. Nothing in the data plane is shared
+> entirely under that cluster's `$MEIVA_HOME`. Nothing in the data plane is shared
 > between two clusters on a box.**
 
 Cluster isolation becomes *home-directory isolation* and nothing else. Two clusters
@@ -41,8 +41,8 @@ ambiguity structurally impossible.
 
 Two clusters co-located on one box (the everyday dev case: several worktree
 clusters; CI running suites concurrently) share one Postgres on `:5432` and one
-Redis on `:6379`. Isolation is *logical*: `ava_<cluster>` database name + role,
-Redis logical-DB index + `ava:<cluster>:*` channel prefix + ACL user, all kept
+Redis on `:6379`. Isolation is *logical*: `meiva_<cluster>` database name + role,
+Redis logical-DB index + `meiva:<cluster>:*` channel prefix + ACL user, all kept
 correct by configuration. When that configuration is even slightly wrong, clusters
 write into each other's data — observed in dev — and tests that spin up ephemeral
 data planes clash on the shared ports/instance (the documented "concurrent
@@ -53,7 +53,7 @@ bring-up code, on the per-cluster auth/provisioning model, and on test hygiene.
 Physical isolation removes the class of bug instead of hardening the machinery
 that prevents it.
 
-The trade is favorable for Ava's scale: a per-cluster data plane costs ~100-150 MB
+The trade is favorable for Meiva's scale: a per-cluster data plane costs ~100-150 MB
 RAM (Postgres `shared_buffers` tuned down + Redis ~5 MB) — roughly *one agent's*
 RSS. On any box already running agents it is noise; the expensive side of the
 ledger is engineer-hours debugging cross-talk and writing isolation-aware tests,
@@ -68,7 +68,7 @@ clusters apart *inside one instance* is unnecessary. The bulk is in
 
 - **Redis logical-DB index allocation + channel prefix** (`redis_db_index`,
   `redis_prefix`, `allocate_redis_index`, `redis_channel_prefix`,
-  `ava:<cluster>:*`). Every instance is single-cluster: DB 0, bare channel names,
+  `meiva:<cluster>:*`). Every instance is single-cluster: DB 0, bare channel names,
   no neighbour to prefix away from.
 - **Shared-instance Redis ACL users + box-level admin-secret dance**
   (`redis_admin_secret`, `RedisAdminSecretMissing`). The physical-instance model
@@ -79,10 +79,10 @@ clusters apart *inside one instance* is unnecessary. The bulk is in
   carried was retired 2026-09-20). Each instance
   `initdb`s its own superuser; a NOLOGIN owner role owns the db, and processes
   dial write-generation logins over SCRAM
-  ([authority](../../../base/cluster/authority/docs/authority.ava.okf.md)).
+  ([authority](../../../base/cluster/authority/docs/authority.meiva.okf.md)).
 - **Shared-instance foreign/neighbour probes** — `_shared_infra_running`,
   `_foreign_redis_error`, `_redis_listening`. A per-cluster instance on its own
-  port with its own data dir under `$AVA_HOME` is unambiguously this cluster's;
+  port with its own data dir under `$MEIVA_HOME` is unambiguously this cluster's;
   "is the thing on :6379 ours, a neighbour's, or foreign" stops being a question.
 
 ## What stays: auth uniform, transport uniform
@@ -93,7 +93,7 @@ more than the marginal isolation a unix socket would buy on a single box (it
 would force single-box connection strings into socket paths while split clusters
 stay `host:port` — an asymmetry not worth its weight).
 
-`AVA_CLUSTER_SECRET` stays as the control-plane bearer. A per-cluster TCP port
+`MEIVA_CLUSTER_SECRET` stays as the control-plane bearer. A per-cluster TCP port
 on loopback is reachable by *any* local process — including a co-located
 cluster — so every instance keeps independent data-plane locks, whatever the
 bearer: the write generation's SCRAM logins (the owner never logs in; the OS
@@ -110,7 +110,7 @@ per-cluster instead of the fixed 5432/6379.
 
 This landed incrementally to protect prod data: slice 1 gave *new* clusters their own
 per-cluster instance while prod stayed on the shared instance; a data-migration then
-`pg_dump`/restored prod into its own instance (db `ava_main`, fixed pg 5433 / redis
+`pg_dump`/restored prod into its own instance (db `meiva_main`, fixed pg 5433 / redis
 6380 — off the default 5432/6379 so it never collides with a stray host pg/redis); slice
 2 removed the grandfather branch and all shared-instance machinery. There is now one
 model: every cluster owns its instance, and `uses_own_instance` is simply
@@ -120,12 +120,12 @@ model: every cluster owns its instance, and `uses_own_instance` is simply
 
 At the time, `cli/commands/_compose.py` already managed native pg/redis lifecycle:
 cold-start `initdb`, start/stop, config rendering. This change **re-scoped** that
-management from per-host-shared to per-`$AVA_HOME` (it now lives in
+management from per-host-shared to per-`$MEIVA_HOME` (it now lives in
 `cli/commands/data_plane/cluster_instance.py`; `_compose.py` is gone). It was not a
 from-scratch supervision lift.
 
-- **Data dir moves under `$AVA_HOME`.** `_pg_data()` / `_redis_conf_*()` resolve
-  to `$AVA_HOME/pg/` and `$AVA_HOME/redis/` instead of the brew/apt shared
+- **Data dir moves under `$MEIVA_HOME`.** `_pg_data()` / `_redis_conf_*()` resolve
+  to `$MEIVA_HOME/pg/` and `$MEIVA_HOME/redis/` instead of the brew/apt shared
   locations. Each cluster's postmaster and redis own that directory.
 - **Postgres + Redis have their own slots in the fixed port table**
   (`base/host/env/port_table.py`): pg 5433 / redis 6380, exactly as the gateway and
@@ -149,7 +149,7 @@ ordering: the shared-isolation machinery cannot be deleted while prod still
 runs on it, so deletion follows the prod migration, not slice 1.
 
 1. **✅ Done — per-cluster instance path for new clusters.** A new (non-prod)
-   cluster `initdb`s its own instance under `$AVA_HOME` on its allocated pg/redis
+   cluster `initdb`s its own instance under `$MEIVA_HOME` on its allocated pg/redis
    ports, separate owner/Redis-admin/runtime credentials, runs the schema, and connects
    there; prod stayed on the shared path (byte-identical prod bring-up). `initdb`
    template cache so a new cluster / a test spins up by directory copy. Delivered the
@@ -157,8 +157,8 @@ runs on it, so deletion follows the prod migration, not slice 1.
 2. **✅ Done — migrate prod off the shared instance + delete the shared machinery.**
    `pg_dump`/restore prod into its own per-cluster instance (pg 5433 / redis 6380),
    drop the grandfather branch, and remove the now-dead shared-isolation code
-   (redis logical-DB index, the per-cluster `ava:<cluster>:*` channel-prefix isolation
-   — channels are now the fixed `ava:*` — the box-level redis admin secret, the shared
+   (redis logical-DB index, the per-cluster `meiva:<cluster>:*` channel-prefix isolation
+   — channels are now the fixed `meiva:*` — the box-level redis admin secret, the shared
    bring-up in `_compose.py`, and the foreign/neighbour probes) plus the vestigial
    `ClusterRecord` fields (`redis_db_index`, `redis_prefix`). **Kept**: the per-cluster
    Postgres role and redis ACL user (the runtime identities — carried by the cluster's URLs as data, now
@@ -180,13 +180,13 @@ The "What it deletes" list above describes the end state, now reached in slices 
   instance model with uniform per-cluster-port TCP + separately scoped credentials.
 - Supersedes the north star in the `redis-data-plane-ownership` design note and
   the "external/managed data plane as a knob" framing — the data plane is always
-  Ava-owned and per-cluster; the only remaining knob is whether an instance is
+  Meiva-owned and per-cluster; the only remaining knob is whether an instance is
   reachable across machines (split deployment) or loopback-only (single box),
   which is just the existing bind posture, not a separate isolation model.
 - Reverses much of PR #108 (redis admin-secret ownership) and PR #114
-  (`AVA_PG_BOOTSTRAP_URL` / per-cluster role provisioning) — that machinery
+  (`MEIVA_PG_BOOTSTRAP_URL` / per-cluster role provisioning) — that machinery
   managed shared-instance isolation, which no longer exists. The external/managed
-  Postgres knob (`AVA_PG_BOOTSTRAP_URL`) survives only if external-DB hosting
+  Postgres knob (`MEIVA_PG_BOOTSTRAP_URL`) survives only if external-DB hosting
   remains a goal; otherwise it goes too.
 - Connection budgeting — `max_connections` is now per-cluster, not
   a per-host shared 1000.
@@ -195,8 +195,8 @@ The "What it deletes" list above describes the end state, now reached in slices 
 
 ## redis-bridge external-migration boundary (task #1945, WP3)
 
-On macOS, the `com.ava.redis-bridge` relay (`/usr/bin/python3
-$AVA_HOME/redis-bridge/relay.py`, per host) is
+On macOS, the `com.meiva.redis-bridge` relay (`/usr/bin/python3
+$MEIVA_HOME/redis-bridge/relay.py`, per host) is
 the off-loopback Redis inbound mechanism: macOS Redis binds loopback-only
 (see `docs/decisions/data/redis/2026-08-24-redis-loopback-only.md`), and the bridge
 forwards the host's private-network address + Redis port to `127.0.0.1`, so a

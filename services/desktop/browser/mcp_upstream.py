@@ -40,7 +40,7 @@ _LEAN_FLAGS = ["--usageStatistics=false"]
 _READ_TIMEOUT = timedelta(seconds=180)
 
 # Every teardown await is bounded by `SHUTDOWN_STEP_TIMEOUT_S` (see
-# `services.desktop.browser.shutdown_budget` for the total ava-root must allow): after
+# `services.desktop.browser.shutdown_budget` for the total meiva-root must allow): after
 # SIGTERM the daemon must exit even when a cleanup step wedges (a stuck upstream
 # stack close, a session loop mid-request). A step that overruns is logged and
 # shutdown continues — the process exits anyway, so no live resource is ever

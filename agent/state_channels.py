@@ -28,7 +28,7 @@ class CompactState(BaseModel):
     since Issue #1284, grouped into a sub-state by the state-nesting refactor).
 
     `version` is a monotonic counter, +=1 on each successful compaction, never
-    resets; subscribers (ava_code, ava_sdk_reminder) bookmark against it.
+    resets; subscribers (meiva_code, meiva_sdk_reminder) bookmark against it.
     `reminder_shown` / `reminder_seen_version` track the one-time wind-down
     reminder so it fires at most once per context window.
 
@@ -116,7 +116,7 @@ class CapabilitiesState(BaseModel):
     and advanced by the drift check that keeps the listing honest between builds
     (`agent/graph/hooks/capabilities.py`). The record has to exist because the two
     sides age differently: the index is rendered once per context window, while
-    `ava.skills` under it is an uncached filesystem scan — without a snapshot,
+    `meiva.skills` under it is an uncached filesystem scan — without a snapshot,
     nothing in the loop can tell that they have diverged.
 
     `None` means no snapshot has been recorded for the current window — a

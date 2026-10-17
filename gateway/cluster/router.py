@@ -141,11 +141,11 @@ async def _dispatch_op(
 async def post_cluster_stopping(machine: str, home: str, request: Request) -> dict[str, str]:
     """Record that the (machine, home) unit is shutting down intentionally.
 
-    `ava stop` POSTs this (best-effort) just before local teardown so the
+    `meiva stop` POSTs this (best-effort) just before local teardown so the
     cluster view distinguishes a deliberate stop from a crash — the live probe
     cannot. Stamps the unit's `stopped_at` and recomputes the composed
-    `machines` row; `ava start` clears it. `home` is the stopping unit's
-    $AVA_HOME so a co-located peer unit keeps its capability.
+    `machines` row; `meiva start` clears it. `home` is the stopping unit's
+    $MEIVA_HOME so a co-located peer unit keeps its capability.
 
     `machine`/`home` are caller-asserted, not verified against the auth
     principal (same trust model as the other cluster control endpoints).
@@ -166,7 +166,7 @@ async def get_cluster_status(request: Request) -> ClusterStatus:
     orchestration session + prod-source HEAD; no shell/daemon probes — that is
     agent-runner data a pure gateway does not have).
 
-    Consumed by `ava status`'s gateway supplement. For the full multi-machine
+    Consumed by `meiva status`'s gateway supplement. For the full multi-machine
     roster use `/api/cluster/roster`. Bypasses 503 mode so status stays visible
     during pause — observability is always online.
     """
@@ -199,7 +199,7 @@ async def get_cluster_roster(
 ) -> list[MachineStatus]:
     """The full multi-machine roster — every registered machine + status.
 
-    Backs the thin-client `ava cluster status`: the gateway's own row is
+    Backs the thin-client `meiva cluster status`: the gateway's own row is
     resolved locally; each agent-runner renders from the heartbeat liveness
     pass's last status_probe (`MachineStatus.observed_at` says how old), so the
     read dials nothing and a down host cannot slow it. `fresh=true` probes every
@@ -224,7 +224,7 @@ async def get_cluster_roster(
 #     watchdog / memory-indexer and the agent processes.
 #   - Cleaning up a stale machines row after a host is decommissioned or
 #     renamed: a one-shot DELETE endpoint.
-# Both endpoints bypass the paused-host 503 (so they keep working during an `ava
+# Both endpoints bypass the paused-host 503 (so they keep working during an `meiva
 # update` window). The gateway is unauthenticated (the private network is the boundary).
 
 
@@ -361,7 +361,7 @@ async def get_cluster_machines(
 ) -> list[AgentMachineRow]:
     """List every registered machine with its description + live status.
 
-    Backs ava.agents.list_machines(). Live status comes from the same source the
+    Backs meiva.agents.list_machines(). Live status comes from the same source the
     roster uses: the heartbeat liveness pass's last status_probe, or with
     `fresh=true` a probe of every runner now (gateway is live from its own
     perspective). role / gateway_url are intentionally omitted — agents reason
@@ -407,10 +407,10 @@ def set_machine_staging(
     """Set or clear a machine's operator staging flag (`is_staging`).
 
     The staging latch is what keeps a registered staging host out of the
-    agent-runner target set — `ava start` on it clears its `stopped_at` like any
+    agent-runner target set — `meiva start` on it clears its `stopped_at` like any
     host, and this flag is the exclusion (`base.cluster.machines.list_agent_runners`
     skips is_staging rows). Backed by `base.cluster.machines.set_staging`; the CLI
-    verbs `ava cluster mark-staging` / `unmark-staging` call this endpoint.
+    verbs `meiva cluster mark-staging` / `unmark-staging` call this endpoint.
     """
     changed = machines.set_staging(request.app.state.db, name, is_staging=req.is_staging)
     if not changed:

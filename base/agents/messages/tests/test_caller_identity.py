@@ -61,7 +61,7 @@ def test_caller_cannot_carry_authentication_or_capabilities() -> None:
         )
 
 
-@pytest.mark.parametrize("kind", ["human", "system", "ava_agent", "admin", "unknown"])
+@pytest.mark.parametrize("kind", ["human", "system", "meiva_agent", "admin", "unknown"])
 def test_external_model_cannot_impersonate_other_identity_kinds(kind: str) -> None:
     with pytest.raises(ValidationError):
         CallerIdentity.model_validate({"kind": kind, "subject": "codex"})

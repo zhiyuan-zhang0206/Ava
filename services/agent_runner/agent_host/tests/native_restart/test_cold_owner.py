@@ -54,8 +54,8 @@ async def test_dead_original_host_is_superseded_without_new_restart_target(
         text=True,
         env={
             **os.environ,
-            "AVA_TEST_NATIVE_DB": db_conn.info.dsn,
-            "AVA_TEST_NATIVE_AGENT": str(agent),
+            "MEIVA_TEST_NATIVE_DB": db_conn.info.dsn,
+            "MEIVA_TEST_NATIVE_AGENT": str(agent),
         },
     )
     try:

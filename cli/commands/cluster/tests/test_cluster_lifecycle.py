@@ -1,4 +1,4 @@
-"""`ava cluster destroy`: a confirmed decommission of the host's cluster, which
+"""`meiva cluster destroy`: a confirmed decommission of the host's cluster, which
 closes native ownership before marking the home detached."""
 
 from __future__ import annotations
@@ -41,10 +41,10 @@ def roles() -> list[str]:
 
 @pytest.fixture
 def home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, roles: list[str]) -> Path:
-    """A born home: `AVA_HOME` names it and its start intent records the cluster."""
+    """A born home: `MEIVA_HOME` names it and its start intent records the cluster."""
     home = (tmp_path / "home").resolve()
     home.mkdir(mode=0o700)
-    monkeypatch.setenv("AVA_HOME", str(home))
+    monkeypatch.setenv("MEIVA_HOME", str(home))
 
     def read_intent(_home: Path) -> dict[str, object]:
         return {"roles": roles}
@@ -200,7 +200,7 @@ def test_the_default_home_can_be_destroyed(
     default_home: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """It used to be refused outright; the typed path is what guards it now."""
-    prod = (default_home / ".ava").resolve()
+    prod = (default_home / ".meiva").resolve()
     prod.mkdir(mode=0o700)
     monkeypatch.setattr(start_identity, "read_intent", _gateway_intent)
     monkeypatch.setattr(lifecycle, "stop_cluster", _nothing_to_stop)

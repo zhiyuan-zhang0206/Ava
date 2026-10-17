@@ -1,4 +1,4 @@
-# TLS + Authentication for Ava Gateway & Frontend
+# TLS + Authentication for Meiva Gateway & Frontend
 
 > **Status: Phases 1 + 2 landed and deployed. Phase 3 (TLS) is the only remaining
 > slice.**
@@ -9,14 +9,14 @@
 > **cookie-based session auth**, not
 > the Next.js proxy this doc originally recommended (see "Decision" below).
 >
-> Current edge posture (bearer-gated when configured, loopback + `AVA_MACHINE_HOST`
+> Current edge posture (bearer-gated when configured, loopback + `MEIVA_MACHINE_HOST`
 > binds, trusted CIDRs) is in `AGENTS.md` "Running" + [`runbook.md`](../../../docs/conventions/runbook.md).
 > Everything below is kept for the *why* — chiefly why cookies beat a proxy and
 > beat bearer tokens in the browser.
 
 ## Vision
 
-Ava should have proper authentication like any normal web app:
+Meiva should have proper authentication like any normal web app:
 - **HTTPS everywhere** — no plain HTTP on any user-facing surface. *(Phase 3, the
   remaining gap: the browser still talks plain HTTP to `:8000` / `:3000` over the
   private overlay.)*
@@ -63,7 +63,7 @@ forcing function is what produced Phase 2.
 
 1. **`EventSource` cannot send custom headers.** The standard API takes a URL and
    `withCredentials` — there is no way to attach `Authorization: Bearer` to an SSE
-   connection. Ava's UI is SSE-heavy, so this is not a corner case.
+   connection. Meiva's UI is SSE-heavy, so this is not a corner case.
 2. **The cluster secret must stay server-side** — never in browser JS, a
    `NEXT_PUBLIC_*` env var, or the bundle.
 3. **Single user, private network.** No OAuth, no multi-user, no federated identity.
@@ -73,7 +73,7 @@ forcing function is what produced Phase 2.
 ### Decision: cookie-based session auth
 
 `POST /api/auth/login` verifies the password (the cluster secret) and sets an
-HttpOnly `ava_session` cookie (`gateway/http/auth/router.py`); the browser then carries
+HttpOnly `meiva_session` cookie (`gateway/http/auth/router.py`); the browser then carries
 it automatically on both `fetch()` and `EventSource`. CORS allows exact configured
 origins (or derives the local and gateway-host frontend origins), since the frontend
 (`:3000`) and gateway (`:8000`) are co-located but cross-origin. Cookie-authenticated
@@ -131,7 +131,7 @@ TLS is "add a cert + switch the scheme", not a re-architecture.
 1. **Should loopback be exempt from auth?** Leaning no — keep auth uniform; an
    exemption would reintroduce a "same box" special case.
 2. **Should the gateway stop binding `0.0.0.0`?** It should bind `127.0.0.1` AND
-   `AVA_MACHINE_HOST`, matching the Postgres/PgBouncer/Linux-Redis posture; macOS
+   `MEIVA_MACHINE_HOST`, matching the Postgres/PgBouncer/Linux-Redis posture; macOS
    Redis remains loopback-only with off-box ingress carried by the relay bridge.
    The ops server deliberately still binds `0.0.0.0` (the gateway dials it across the private
    network and it authenticates), so this is specifically about the gateway's

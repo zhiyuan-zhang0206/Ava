@@ -2,7 +2,7 @@
 
 The script parses coverage.json (coverage.py's JSON report) and enforces two
 tiers: the combined core-domain line-rate gate and per-risk-domain minimum
-line floors for ops/services/ava_builtins. These tests build synthetic
+line floors for ops/services/meiva_builtins. These tests build synthetic
 reports, so no real coverage data is involved.
 """
 
@@ -33,7 +33,7 @@ def _files(classes: dict[str, tuple[int, int]]) -> dict[str, dict]:
     }
 
 
-_CORE = ("agent", "ava", "cli", "gateway", "base", "ui")
+_CORE = ("agent", "meiva", "cli", "gateway", "base", "ui")
 
 
 def _core_classes(covered: int = 9, valid: int = 10) -> dict[str, tuple[int, int]]:
@@ -43,14 +43,14 @@ def _core_classes(covered: int = 9, valid: int = 10) -> dict[str, tuple[int, int
 def test_core_gate_passes_and_prints_table(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    monkeypatch.setattr(gates, "FLOORS", {"ops": 0.0, "services": 0.0, "ava_builtins": 0.0})
+    monkeypatch.setattr(gates, "FLOORS", {"ops": 0.0, "services": 0.0, "meiva_builtins": 0.0})
     files = _files(
-        {**_core_classes(), "ops": (4, 10), "services": (3, 10), "ava_builtins": (2, 10)}
+        {**_core_classes(), "ops": (4, 10), "services": (3, 10), "meiva_builtins": (2, 10)}
     )
     assert gates.check(files, threshold=85.0) == 0
     out = capsys.readouterr().out
-    assert "core domains agent+ava+cli+gateway+base+ui: 90.0%" in out
-    assert "ops" in out and "services" in out and "ava_builtins" in out
+    assert "core domains agent+meiva+cli+gateway+base+ui: 90.0%" in out
+    assert "ops" in out and "services" in out and "meiva_builtins" in out
 
 
 def test_core_gate_fails_below_threshold(capsys: pytest.CaptureFixture[str]) -> None:

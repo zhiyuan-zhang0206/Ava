@@ -3,7 +3,7 @@
 Free prose in source is removed or moved to the component's current documentation.
 Retain explanations only when they add a constraint, external dependency, decision
 or caller contract that names and executable behavior cannot express clearly.
-The owning document stays beside the code in `docs/*.ava.okf.md`.
+The owning document stays beside the code in `docs/*.meiva.okf.md`.
 
 ## Source forms
 
@@ -11,7 +11,7 @@ Python and JavaScript/TypeScript source may contain an exact pointer, without
 trailing prose:
 
 ```python
-# ava:ref base/agents/context/gateway_client/docs/memory-search.ava.okf.md#default-timeout
+# meiva:ref base/agents/context/gateway_client/docs/memory-search.meiva.okf.md#default-timeout
 ```
 
 JavaScript/TypeScript uses the same payload after `//`. Place it immediately
@@ -28,7 +28,7 @@ Additional prose, other JSDoc tags and unattached markers still fail.
 Python line directives have a closed syntax: `# noqa: CODE[, CODE...]` and
 `# pyright: ignore[reportRule[, reportRule...]]`. Bare ignores, file-wide settings,
 `type: ignore` and trailing prose are not accepted. A strict directive needs an
-exact `ava:ref` bound to its enclosing function, method, class or module. Local
+exact `meiva:ref` bound to its enclosing function, method, class or module. Local
 assignments do not own the directive rationale, and an outer or sibling
 definition cannot supply it. The document states the actual constraint or trust
 boundary; naming a lint rule is not an explanation. Ruff, Pyright and the existing
@@ -38,12 +38,12 @@ unused-directive checks retain responsibility for rule validity and necessity.
 `gateway_access_from_settings` call line in the ambient audit's non-test scope.
 That audit owns the accepted batches and caller inventory; this syntax does not
 authorize a new ambient dependency. A stop-window exemption uses exactly
-`# quiesce-exempt: ava:ref path/to/owner.ava.okf.md#id`, with its reason in that
+`# quiesce-exempt: meiva:ref path/to/owner.meiva.okf.md#id`, with its reason in that
 definition's typed owner. The existing quiesce check still rejects wrong placement
 and stale markers. Neither form accepts a free-text explanation in source.
 
 Agent-visible Python SDK docstrings are generated projections of `api` records.
-They remain available to `ava.help`; edit the document owner and run `render-api`.
+They remain available to `meiva.help`; edit the document owner and run `render-api`.
 The static SDK export resolver must prove the actual exported definition. An
 internal function cannot preserve its prose by declaring itself an API.
 
@@ -57,7 +57,7 @@ and truth, including whether changed behavior requires updating existing help.
 
 ## Document contracts
 
-A live `ava-contract` fenced block contains TOML with a unique kebab-case `id`,
+A live `meiva-contract` fenced block contains TOML with a unique kebab-case `id`,
 `kind`, a nonempty `statement`, exact `code` definitions and exact `tests`.
 Unknown fields and unknown kinds fail. Code anchors join a tracked source path and qualified symbol with a colon;
 `<module>` names the module. Test anchors use pytest's
@@ -69,7 +69,7 @@ by literal imported-runner suite and test labels separated by `::`.
 | `invariant` | A current behavioral or ordering constraint | None |
 | `external` | A constraint imposed by a dependency or protocol | `source` (HTTPS), `applies_to` (version or scope) |
 | `decision` | A pointer to a recorded architectural choice | `decision` (exact existing decision document) |
-| `api` | The text callers receive through SDK help | `api` (statically proved `ava.*` export), exactly one code definition |
+| `api` | The text callers receive through SDK help | `api` (statically proved `meiva.*` export), exactly one code definition |
 
 Every record needs code bindings within its document's component. Every kind
 except `decision` also needs test bindings. Historical records and plans cannot
@@ -81,9 +81,9 @@ owning document is unchanged.
 The tool checks that a test definition exists, not that it runs or supports the
 statement. It does not fetch external links or infer semantic changes from code
 hashes. Run affected tests and review their assertions against the statement.
-See [the checker](../../../scripts/content_lint/code_comments/docs/code_comments.ava.okf.md)
+See [the checker](../../../scripts/content_lint/code_comments/docs/code_comments.meiva.okf.md)
 for parser boundaries and commands, and the gateway client's
-[memory-search contracts](../../../base/agents/context/gateway_client/docs/memory-search.ava.okf.md)
+[memory-search contracts](../../../base/agents/context/gateway_client/docs/memory-search.meiva.okf.md)
 for complete records.
 
 ## Migration and enforcement
@@ -108,7 +108,7 @@ Repeated declarations use their kind, ordinal and sibling-group size to keep
 separate matching credit; adding/removing a repeated declaration invalidates only
 that group's old identity. Local assignments are not lexical boundaries. The
 checker does not reconstruct historical identities from delete-and-rewrite edits.
-See the [incremental checker](../../../scripts/content_lint/code_comments/docs/incremental.ava.okf.md)
+See the [incremental checker](../../../scripts/content_lint/code_comments/docs/incremental.meiva.okf.md)
 for the parser and snapshot boundary.
 
 Python and JavaScript/TypeScript are the implemented language boundary. Shell,

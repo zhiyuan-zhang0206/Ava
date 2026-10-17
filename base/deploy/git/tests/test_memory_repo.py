@@ -124,11 +124,11 @@ def test_init_gateway_on_main_is_noop(
 def test_gateway_memory_dir_combined_uses_subdirectory(
     monkeypatch: pytest.MonkeyPatch, *, machine_identity: MachineIdentity
 ) -> None:
-    from base.paths import ava_home
+    from base.paths import meiva_home
 
     machine_identity.set(role="gateway,agent-runner", name="test-host")
     gmd = gateway_memory_dir(roles=machine_identity.role())
-    home = ava_home()
+    home = meiva_home()
     assert gmd == home / "gateway" / "memory"
 
     from base.paths import memory_dir
@@ -139,12 +139,12 @@ def test_gateway_memory_dir_combined_uses_subdirectory(
 def test_gateway_memory_dir_gateway_only_equals_memory_dir(
     *, machine_identity: MachineIdentity
 ) -> None:
-    from base.paths import ava_home, memory_dir
+    from base.paths import meiva_home, memory_dir
 
     machine_identity.set(role="gateway", name="cloud")
     gmd = gateway_memory_dir(roles=machine_identity.role())
     assert gmd == memory_dir()
-    assert gmd == ava_home() / "memory"
+    assert gmd == meiva_home() / "memory"
 
 
 def test_init_gateway_creates_checkout_on_main(
@@ -308,7 +308,7 @@ def test_init_keep_local_fresh_repo_inits_without_remote(
     *,
     machine_identity: MachineIdentity,
 ) -> None:
-    # ava:ref base/deploy/git/tests/docs/memory-repo-tests.ava.okf.md#initialization-command-recorder
+    # meiva:ref base/deploy/git/tests/docs/memory-repo-tests.meiva.okf.md#initialization-command-recorder
     machine_identity.set(role="agent-runner", name="test-host-2")
     monkeypatch.setattr(memory_repo.settings.general, "memory_keep_local", True)
     monkeypatch.setattr(memory_repo, "is_initialized", lambda: False)

@@ -7,7 +7,7 @@ policies, dim, shape validation) — these tests ARE the statement that
 (`httpx.AsyncClient`), with a dummy API key. Deadline guards additionally
 use a local trickling HTTP server.
 
-Also pins the factory switch: `AVA_EMBEDDING_BACKEND` dispatch, unknown
+Also pins the factory switch: `MEIVA_EMBEDDING_BACKEND` dispatch, unknown
 values fail fast, and the provider declares the vector space (`dim` +
 `fingerprint`) the storage layer consumes.
 """
@@ -181,15 +181,15 @@ def _embedding_cost(tok_in: int) -> float:
 def _assert_priced_embedding_span(tracer: _RecordingTracer, *, tok_in: int) -> None:
     assert len(tracer.spans) == 1
     span = tracer.spans[0]
-    assert span.name == "ava.billing.call"
+    assert span.name == "meiva.billing.call"
     assert span.ended is True
-    assert span.attributes["ava.billing.vendor"] == "google"
-    assert span.attributes["ava.billing.model"] == MODEL_ID
-    assert span.attributes["ava.billing.tokens_in"] == tok_in
-    assert span.attributes["ava.billing.tokens_out"] == 0
-    assert span.attributes["ava.billing.usage_kind"] == "embedding"
-    assert span.attributes["ava.billing.cost"] == round(_embedding_cost(tok_in), 6)
-    assert "ava.billing.unpriced" not in span.attributes
+    assert span.attributes["meiva.billing.vendor"] == "google"
+    assert span.attributes["meiva.billing.model"] == MODEL_ID
+    assert span.attributes["meiva.billing.tokens_in"] == tok_in
+    assert span.attributes["meiva.billing.tokens_out"] == 0
+    assert span.attributes["meiva.billing.usage_kind"] == "embedding"
+    assert span.attributes["meiva.billing.cost"] == round(_embedding_cost(tok_in), 6)
+    assert "meiva.billing.unpriced" not in span.attributes
 
 
 def _assert_unpriced_embedding_span(tracer: _RecordingTracer, *, tok_in: int) -> None:
@@ -200,14 +200,14 @@ def _assert_unpriced_embedding_span(tracer: _RecordingTracer, *, tok_in: int) ->
 
     assert len(tracer.spans) == 1
     span = tracer.spans[0]
-    assert span.name == "ava.billing.call"
+    assert span.name == "meiva.billing.call"
     assert span.ended is True
-    assert span.attributes["ava.billing.vendor"] == "google"
-    assert span.attributes["ava.billing.model"] == gemini.MODEL_ID
-    assert span.attributes["ava.billing.tokens_in"] == tok_in
-    assert span.attributes["ava.billing.usage_kind"] == "embedding"
-    assert span.attributes["ava.billing.cost"] == 0.0
-    assert span.attributes["ava.billing.unpriced"] is True
+    assert span.attributes["meiva.billing.vendor"] == "google"
+    assert span.attributes["meiva.billing.model"] == gemini.MODEL_ID
+    assert span.attributes["meiva.billing.tokens_in"] == tok_in
+    assert span.attributes["meiva.billing.usage_kind"] == "embedding"
+    assert span.attributes["meiva.billing.cost"] == 0.0
+    assert span.attributes["meiva.billing.unpriced"] is True
 
 
 @pytest.fixture(autouse=True)
@@ -461,7 +461,7 @@ def test_query_embed_policy_is_lighter_than_document_policy() -> None:
     (task #2003/B): a search query sits inside the gateway's own search
     deadline, so the indexer's 4-attempt schedule (1->2->4->8s) could spend
     the whole budget retrying
-    a 429 the caller (passive recall / an explicit ava.memory.search) would
+    a 429 the caller (passive recall / an explicit meiva.memory.search) would
     simply watch expire — and the caller retries the *search*, not the embed."""
     assert QUERY_EMBED_POLICY.max_attempts < EMBED_POLICY.max_attempts
 
@@ -493,7 +493,7 @@ def test_embed_4xx_fails_immediately(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 def test_embed_timeout_from_settings(monkeypatch: pytest.MonkeyPatch) -> None:
-    """The per-request timeout comes from config (AVA_EMBED_TIMEOUT_SECONDS,
+    """The per-request timeout comes from config (MEIVA_EMBED_TIMEOUT_SECONDS,
     task #698 G8); the retry policy is a module constant (R2-D)."""
 
     monkeypatch.setattr(settings.services, "memory_embed_timeout_seconds", 12.5)

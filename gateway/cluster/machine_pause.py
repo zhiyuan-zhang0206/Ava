@@ -2,7 +2,7 @@
 and `.../resume` (Task #1283: temporarily pull a machine out of the cluster,
 e.g. the operator is away for a week and disconnects it; the cluster then
 shows only its active members, no offline signal is emitted for the expected
-absence, rollouts and spawns skip it, and `ava cluster resume` brings it
+absence, rollouts and spawns skip it, and `meiva cluster resume` brings it
 back).
 
 Split out of gateway/cluster/router.py at the 800-line ceiling (same pattern
@@ -31,7 +31,7 @@ from ops.lifecycle import force_mark_terminated
 router = APIRouter()
 
 # The drain owner every active task of a paused machine's agents is
-# reassigned to. #405 is the Ava P0 lead — the role that redistributes work when
+# reassigned to. #405 is the Meiva P0 lead — the role that redistributes work when
 # an owner disappears (2026-08-14 Task #1283 ruling: drain reassigns, with a
 # note on each task; the reminder daemon surfaces the reassignment to the new
 # owner). A constant, not a flag: the pause is an operator act on the gateway,
@@ -76,7 +76,7 @@ def _drain_tasks_blocking(pool: ConnectionPool, name: str) -> int:
             note = task_note_line(
                 f"machine {name} paused \u2014 owner agent #{owner_id} "
                 f"terminated; task reassigned to drain owner #{_MACHINE_PAUSE_DRAIN_OWNER} "
-                f"(see `ava cluster resume {name}`)"
+                f"(see `meiva cluster resume {name}`)"
             )
             with conn.cursor() as cur:
                 cur.execute(
@@ -123,7 +123,7 @@ def _force_mark_terminated_blocking(
 async def pause_cluster_machine(
     name: str, req: MachinePauseRequest, request: Request
 ) -> MachinePauseResponse:
-    """Temporarily pull a machine out of the cluster (`ava cluster pause`).
+    """Temporarily pull a machine out of the cluster (`meiva cluster pause`).
 
     The operator act starts with an admission fence, then drains and sweeps:
 
@@ -228,16 +228,16 @@ async def pause_cluster_machine(
 
 @router.post("/api/cluster/machines/{name}/resume", response_model=MachineResumeResponse)
 def resume_cluster_machine(name: str, request: Request) -> MachineResumeResponse:
-    """Restore a paused machine as a normal cluster member (`ava cluster resume`).
+    """Restore a paused machine as a normal cluster member (`meiva cluster resume`).
 
     Clears `paused_at`/`pause_reason`; the row's registration info (gateway_url
     / role / description) was never touched, so probing, the roster, rollout and
     spawn acceptance all resume immediately. The machine's own side needs no
-    gateway action: when it is back online it re-runs `ava start`, whose
+    gateway action: when it is back online it re-runs `meiva start`, whose
     `register_self()` refreshes its dial URL (its reachable address may have
     changed) and clears its `stopped_at` latch. If the machine's reachable
     address changed, the gateway's pg_hba must cover the new IP — see the ops checklist in the
-    CLI output (`AVA_TRUSTED_CIDRS`, then `ava restart` on the gateway host).
+    CLI output (`MEIVA_TRUSTED_CIDRS`, then `meiva restart` on the gateway host).
 
     404 when the row does not exist; idempotent (resumed=False) when the
     machine was not paused.

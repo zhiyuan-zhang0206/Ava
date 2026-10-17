@@ -1,4 +1,4 @@
-"""base/paths/__init__.py unit tests — AVA_HOME resolution + path helpers + first-access mkdir."""
+"""base/paths/__init__.py unit tests — MEIVA_HOME resolution + path helpers + first-access mkdir."""
 
 from pathlib import Path
 
@@ -9,47 +9,47 @@ from base.paths.home import default_home, is_default_home
 
 
 @pytest.fixture(autouse=True)
-def _isolate_ava_home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
-    """Each test points AVA_HOME at tmp_path to avoid polluting ~/.ava."""
-    monkeypatch.setenv("AVA_HOME", str(tmp_path / "ava"))
+def _isolate_meiva_home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    """Each test points MEIVA_HOME at tmp_path to avoid polluting ~/.meiva."""
+    monkeypatch.setenv("MEIVA_HOME", str(tmp_path / "meiva"))
 
 
-def test_ava_home_reads_settings(tmp_path: Path):
-    assert paths.ava_home() == tmp_path / "ava"
+def test_meiva_home_reads_settings(tmp_path: Path):
+    assert paths.meiva_home() == tmp_path / "meiva"
 
 
-def test_ava_home_auto_mkdirs(tmp_path: Path):
-    target = tmp_path / "ava"
+def test_meiva_home_auto_mkdirs(tmp_path: Path):
+    target = tmp_path / "meiva"
     assert not target.exists()
-    paths.ava_home()
+    paths.meiva_home()
     assert target.is_dir()
 
 
-def test_ava_home_repairs_owner_only_mode(tmp_path: Path):
+def test_meiva_home_repairs_owner_only_mode(tmp_path: Path):
     """The unit root cannot retain permissions inherited from a lax umask."""
-    target = tmp_path / "ava"
+    target = tmp_path / "meiva"
     target.mkdir()
     target.chmod(0o755)
 
-    assert paths.ava_home() == target
+    assert paths.meiva_home() == target
     assert target.stat().st_mode & 0o777 == 0o700
 
 
-def test_plugins_dir_under_ava_home(tmp_path: Path):
-    assert paths.plugins_dir() == tmp_path / "ava" / "plugins"
+def test_plugins_dir_under_meiva_home(tmp_path: Path):
+    assert paths.plugins_dir() == tmp_path / "meiva" / "plugins"
 
 
 def test_plugins_dir_auto_mkdirs(tmp_path: Path):
-    target = tmp_path / "ava" / "plugins"
+    target = tmp_path / "meiva" / "plugins"
     assert not target.exists()
     paths.plugins_dir()
     assert target.is_dir()
 
 
-def test_default_home_is_bare_ava():
-    assert default_home() == Path("~/.ava").expanduser()
+def test_default_home_is_bare_meiva():
+    assert default_home() == Path("~/.meiva").expanduser()
 
 
 def test_is_default_home_expands_and_compares():
-    assert is_default_home(Path("~/.ava"))
-    assert not is_default_home(Path("~/.ava-foo"))
+    assert is_default_home(Path("~/.meiva"))
+    assert not is_default_home(Path("~/.meiva-foo"))

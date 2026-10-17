@@ -1,8 +1,8 @@
-# Ava frontend
+# Meiva frontend
 
-The Ava cluster's web UI — Next.js 16 (App Router, Turbopack) + React 19 +
+The Meiva cluster's web UI — Next.js 16 (App Router, Turbopack) + React 19 +
 Tailwind 4 + shadcn/ui (Radix primitives). It is the user-facing control
-surface for the Ava agent cluster: per-agent chat timelines, the fleet view
+surface for the Meiva agent cluster: per-agent chat timelines, the fleet view
 (graph / inbox / task board), system control pages (/control), insights and
 the memory graph.
 
@@ -11,13 +11,13 @@ the memory graph.
 - SSE keeps Query read models live for visible pages, with a global stream,
   selected-agent subscriptions and a separate alerts stream. HTTPS can share
   transports across pages; authoritative snapshots repair lifecycle state.
-  See [frontend data flow](src/docs/frontend-data-flow/frontend-data-flow.ava.okf.md).
+  See [frontend data flow](src/docs/frontend-data-flow/frontend-data-flow.meiva.okf.md).
 - No Next rewrites proxy for `/api` — the frontend connects to the gateway
   directly (`API_BASE` resolution in `src/lib/api.ts`); same-origin reverse
   proxy in prod.
-- State rules live in `src/docs/frontend-state/frontend-state.ava.okf.md` and
-  `src/docs/frontend-data-flow/frontend-data-flow.ava.okf.md`; layout and component
-  contracts live in `src/docs/frontend-components/frontend-components.ava.okf.md`.
+- State rules live in `src/docs/frontend-state/frontend-state.meiva.okf.md` and
+  `src/docs/frontend-data-flow/frontend-data-flow.meiva.okf.md`; layout and component
+  contracts live in `src/docs/frontend-components/frontend-components.meiva.okf.md`.
 
 ## Development
 

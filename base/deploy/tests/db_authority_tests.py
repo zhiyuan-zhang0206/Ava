@@ -9,10 +9,10 @@ instance then switches to the always-authenticated ``pg_hba``:
 
 - the OS user reaches the bootstrap superuser only through ``peer`` on the
   owner-only socket (an ident map names it, since the throwaway superuser is
-  ``ava`` rather than the OS user);
+  ``meiva`` rather than the OS user);
 - every other role authenticates with SCRAM over the socket and TCP;
 - one harness-only line keeps the throwaway stall watchdog's passwordless
-  ``ava@127.0.0.1/postgres`` probe alive. It admits no application role.
+  ``meiva@127.0.0.1/postgres`` probe alive. It admits no application role.
 
 ``authority_postgres`` gives each test a fresh database copied from the
 template plus a private home, born through the real authority functions
@@ -49,22 +49,22 @@ from base.deploy.schema.migrations import apply_pending_migrations
 from base.host.db_authority.ledger import activate, create_ledger, read_secret, require_ledger
 from base.host.db_authority.model import GATEWAY_GROUP, RUNNER_GROUP, GenerationSecret, Groups
 
-OWNER = "ava_test_owner"
-_TEMPLATE = "ava_test_tmpl"
-_SUPERUSER = "ava"
+OWNER = "meiva_test_owner"
+_TEMPLATE = "meiva_test_tmpl"
+_SUPERUSER = "meiva"
 _SCHEMA = Path(__file__).resolve().parents[3] / "db" / "schema.sql"
 
 _HBA = """\
 # TYPE  DATABASE  USER  ADDRESS       METHOD
-local   all       ava                 peer map=ava_admin
-host    postgres  ava   127.0.0.1/32  trust
+local   all       meiva                 peer map=meiva_admin
+host    postgres  meiva   127.0.0.1/32  trust
 local   all       all                 scram-sha-256
 host    all       all   127.0.0.1/32  scram-sha-256
 host    all       all   ::1/128       scram-sha-256
 """
 _HBA_RULES = [
-    ("local", ["all"], ["ava"], "peer"),
-    ("host", ["postgres"], ["ava"], "trust"),
+    ("local", ["all"], ["meiva"], "peer"),
+    ("host", ["postgres"], ["meiva"], "trust"),
     ("local", ["all"], ["all"], "scram-sha-256"),
     ("host", ["all"], ["all"], "scram-sha-256"),
     ("host", ["all"], ["all"], "scram-sha-256"),
@@ -116,7 +116,7 @@ def _build_template(tcp: str, *, machine: MachineIdentity) -> None:
 
 
 def _authenticate(instance: Instance, tcp: str, data_dir: Path) -> None:
-    (data_dir / "pg_ident.conf").write_text(f"ava_admin {getpass.getuser()} {_SUPERUSER}\n")
+    (data_dir / "pg_ident.conf").write_text(f"meiva_admin {getpass.getuser()} {_SUPERUSER}\n")
     (data_dir / "pg_hba.conf").write_text(_HBA)
     with psycopg.connect(f"{tcp}/postgres", autocommit=True) as conn:
         conn.execute("SELECT pg_reload_conf()")
@@ -151,8 +151,8 @@ def _authority_instance(process_config: ConfigBoot) -> Iterator[Instance]:
         _restart(data_dir)
         _build_template(tcp, machine=machine_from_boot(process_config))
         with psycopg.connect(f"{tcp}/postgres", autocommit=True) as conn:
-            conn.execute("DROP DATABASE ava_citest")
-            conn.execute("DROP ROLE ava_citest")
+            conn.execute("DROP DATABASE meiva_citest")
+            conn.execute("DROP ROLE meiva_citest")
         instance = Instance(port=port, socket_dir=socket_row[0])
         _authenticate(instance, tcp, data_dir)
         yield instance
@@ -243,7 +243,7 @@ def authority_unborn(
     _authority_instance: Instance, tmp_path: Path, postgres_access: None
 ) -> Iterator[AuthorityCluster]:
     """A fresh owner-owned cluster database and private home, before birth."""
-    database = f"ava_test_auth_{uuid.uuid4().hex[:12]}"
+    database = f"meiva_test_auth_{uuid.uuid4().hex[:12]}"
     with _authority_instance.admin("postgres") as conn:
         conn.execute(
             sql.SQL("CREATE DATABASE {} TEMPLATE {} OWNER {}").format(

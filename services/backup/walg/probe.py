@@ -1,13 +1,13 @@
 """WAL archiving health: one sentence when it is broken, None when it is fine.
 
-Called by the cluster health probe (`ava health-probe`, every few minutes). Every
+Called by the cluster health probe (`meiva health-probe`, every few minutes). Every
 condition is a state, not a threshold, and the text of each failure is fixed: the
 probe's episode logic keys on the full message, so a number or a timestamp in it
 would start a new episode at every run and the alert would never escalate.
 
 - the Postgres that is running must carry the archive settings the code launches
   it with (a retained postmaster keeps its old launch arguments, so "archiving was
-  switched on" is not true until the next `ava stop` + `ava start`);
+  switched on" is not true until the next `meiva stop` + `meiva start`);
 - the archiver must not be failing right now (`last_failed_time` newer than
   `last_archived_time`);
 - WAL that is complete but not yet archived must not have been waiting longer than
@@ -64,7 +64,7 @@ CONFIG_UNUSABLE = "WAL archiving: the WAL-G configuration is unusable"
 KEY_CHANGED = "WAL archiving: the encryption key is not the key this home pinned"
 SETTINGS_DIFFER = (
     "WAL archiving: Postgres is not running with the configured archive settings "
-    "(ava stop, then ava start)"
+    "(meiva stop, then meiva start)"
 )
 ARCHIVER_FAILING = "WAL archiving: the archiver is failing"
 ARCHIVE_BEHIND = "WAL archiving: complete WAL has been waiting for archive beyond the RPO objective"

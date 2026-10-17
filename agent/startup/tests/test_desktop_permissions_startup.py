@@ -56,16 +56,16 @@ class _FakeUI:
 
 @pytest.fixture
 def fake_ui(monkeypatch: pytest.MonkeyPatch) -> _FakeUI:
-    import ava as ava_module
+    import meiva as meiva_module
 
     ui = _FakeUI()
-    monkeypatch.setattr(ava_module, "ui", ui, raising=False)
+    monkeypatch.setattr(meiva_module, "ui", ui, raising=False)
     return ui
 
 
 def _patch_status_homes(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    monkeypatch.setattr(screen_capture, "ava_home", lambda: tmp_path)
-    monkeypatch.setattr(accessibility, "ava_home", lambda: tmp_path)
+    monkeypatch.setattr(screen_capture, "meiva_home", lambda: tmp_path)
+    monkeypatch.setattr(accessibility, "meiva_home", lambda: tmp_path)
 
 
 class TestNotifyDesktopPermissionsAtStartup:
@@ -151,9 +151,9 @@ class TestNotifyDesktopPermissionsAtStartup:
             def notify(self, **kwargs: object) -> int:
                 raise RuntimeError("gateway unreachable")
 
-        import ava as ava_module
+        import meiva as meiva_module
 
-        monkeypatch.setattr(ava_module, "ui", FailingUI(), raising=False)
+        monkeypatch.setattr(meiva_module, "ui", FailingUI(), raising=False)
 
         await notify_desktop_permissions_at_startup()
 

@@ -3,7 +3,7 @@ command line (issue #974).
 
 `ps -eo command` shows every process's argv to any local user on macOS and Linux
 alike — a wider surface than an environment, which is owner-only on both. So
-every place Ava starts a long-running process is driven here with a sentinel
+every place Meiva starts a long-running process is driven here with a sentinel
 secret in the environment, and the argv it builds is asserted clean. A future
 launcher that reaches for `redis-cli -a`, an env-var argv splice, or an
 argv-carried JSON blob fails here rather than in a `ps` listing.
@@ -11,7 +11,7 @@ argv-carried JSON blob fails here rather than in a `ps` listing.
 The schedule launcher contract lives with the schedule-manager tests and shares
 the sentinel environment and real PTY argv harness from base.sessions.pty.tests.secret_argv.
 
-Coverage is per *launcher*, not per caller: the `ava start` session launch,
+Coverage is per *launcher*, not per caller: the `meiva start` session launch,
 schedule processes and agent shells each funnel into one of the functions below
 (the Redis bring-up is covered beside its code, in
 `cli/commands/data_plane/tests/instance/test_redis_bringup_argv.py`). Schedule and agent-shell sessions are created through the
@@ -58,7 +58,7 @@ def _fake_child_pid_never_resolves(monkeypatch: pytest.MonkeyPatch) -> None:
     happens to be in use on the box resolves to a stranger, and the session
     record then carries that stranger's REAL create_time — so
     `_process_for_record`'s recycling guard passes (it is genuinely the same
-    process) and a later `kill_session("ava-gateway")` force-kills that
+    process) and a later `kill_session("meiva-gateway")` force-kills that
     stranger's whole process tree. On a CI runner low pids are always in use,
     and the stranger is typically a sibling xdist worker: the observed symptom is
     `[gwN] node down: Not properly terminated` charged to whichever test was
@@ -107,12 +107,12 @@ def captured_argv(
 def test_session_backend_new_session(
     secret_env: None, captured_argv: list[list[str]], monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """`ava start` / `ava restart` bring every daemon up through here."""
+    """`meiva start` / `meiva restart` bring every daemon up through here."""
     from base.sessions.backend import PosixProcSessionBackend
     from base.sessions.env_forwarding import forward_env_dict
 
     PosixProcSessionBackend().new_session(
-        "ava-gateway", ".venv/bin/python -m gateway", Path("/repo"), env=forward_env_dict()
+        "meiva-gateway", ".venv/bin/python -m gateway", Path("/repo"), env=forward_env_dict()
     )
     assert captured_argv, "no subprocess was launched"
     assert_clean(captured_argv[-1], label="PosixProcSessionBackend.new_session")
@@ -124,7 +124,7 @@ def test_launch_record_cannot_reach_a_live_process(
     """The session record a launch leaves behind must resolve to nothing.
 
     This is the one thing in this file that can act outside the test. The child
-    pid here is fabricated, and `kill_session("ava-gateway")` resolves whatever
+    pid here is fabricated, and `kill_session("meiva-gateway")` resolves whatever
     record it finds and force-kills that pid's whole process TREE. A record
     naming a live stranger therefore turns an argv-shape assertion into a kill
     of an unrelated process
@@ -138,17 +138,17 @@ def test_launch_record_cannot_reach_a_live_process(
     from base.sessions.env_forwarding import forward_env_dict
 
     PosixProcSessionBackend().new_session(
-        "ava-gateway", ".venv/bin/python -m gateway", Path("/repo"), env=forward_env_dict()
+        "meiva-gateway", ".venv/bin/python -m gateway", Path("/repo"), env=forward_env_dict()
     )
     assert captured_argv, "no subprocess was launched"
-    assert not posixproc.has_session("ava-gateway")
+    assert not posixproc.has_session("meiva-gateway")
 
 
 def _shell_env_report(name: str) -> str:
     """What a secret-name lookup in the session's shell prints (empty: none is set)."""
     type_line(
         name,
-        "printenv AVA_CLUSTER_SECRET AVA_DB_URL AVA_REDIS_URL DEEPSEEK_API_KEY; echo ENVCHECK_DONE",
+        "printenv MEIVA_CLUSTER_SECRET MEIVA_DB_URL MEIVA_REDIS_URL DEEPSEEK_API_KEY; echo ENVCHECK_DONE",
     )
     return output_until(name, "ENVCHECK_DONE")
 
@@ -163,17 +163,17 @@ def test_agent_shell_session(
     children re-source them at their own boot), so the secret values appear
     NOWHERE in this launch path: not on an argv of the service or the shell, not in
     the shell's environment."""
-    from ava.shell.sessions import ShellSessions
-    from ava.shell.tests.support import FakeDatabase
     from base.sessions.backend import get_shell_backend
+    from meiva.shell.sessions import ShellSessions
+    from meiva.shell.tests.support import FakeDatabase
 
     ShellSessions(
         backend=get_shell_backend(), database=FakeDatabase(next_index=3), agent_id=1
     ).create("probe", ttl=120)
-    name = "ava-agent-1-shell-3-probe"
+    name = "meiva-agent-1-shell-3-probe"
     assert get_shell_backend().has_session(name)
 
     report = _shell_env_report(name)
     for secret in SECRET_VALUES:
         assert secret not in report, f"{secret!r} leaked into the shell's environment"
-    assert_service_tree_clean(pty_service, label="ava.shell.sessions.create_session")
+    assert_service_tree_clean(pty_service, label="meiva.shell.sessions.create_session")

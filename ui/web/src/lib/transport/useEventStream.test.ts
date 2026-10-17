@@ -658,7 +658,7 @@ describe("EventStreamProvider half-dead watchdog", () => {
   it("shared CONNECTING state keeps the watchdog armed until a frame arrives", async () => {
     const locks = {
       request: (_name: string, _options: LockOptions, callback: (lock: Lock) => Promise<void>) =>
-        callback({ name: "ava-ui-sse", mode: "exclusive" }),
+        callback({ name: "meiva-ui-sse", mode: "exclusive" }),
     };
     const nativeNavigator = navigator;
     vi.stubGlobal("navigator", new Proxy(nativeNavigator, {

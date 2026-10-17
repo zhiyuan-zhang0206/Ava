@@ -1,7 +1,7 @@
 # pyright: reportOptionalSubscript=false
 """Mutmut gap tests for `agent/graph/llm/node.py` (baseline PR #302).
 
-`capture_ava_overview` in `_base_prompt.py` captures `ava.help(ava)` stdout.
+`capture_meiva_overview` in `_base_prompt.py` captures `meiva.help(meiva)` stdout.
 The cancel-task/stream-first boundary discards partial generations and publishes
 Cancelled only for cancellation; normal completion calls handler.finish().
 Stop-reason and thinking-block validation cover the remaining mutation gaps.
@@ -24,11 +24,10 @@ from langgraph.types import Command
 
 from agent.graph import llm_node
 from agent.graph.llm_errors import LlmLedger
-from agent.graph.prompt._base_prompt import capture_ava_overview, get_ava_overview
+from agent.graph.prompt._base_prompt import capture_meiva_overview, get_meiva_overview
 from agent.hooks.tests.fakes import make_fake_ops_pool
 from agent.state import AgentState
-from ava.tests.fixtures.pin_agent import hosted_resources as hosted_resources
-from base.agents.context import AvaContext
+from base.agents.context import MeivaContext
 from base.clock import Clock
 from base.config import settings
 from base.db import Database
@@ -38,6 +37,7 @@ from base.events.live.projection import EVENT_ADAPTER, Cancelled
 from base.host.env.agent_slices import AgentSlices, LlmCallPolicy
 from base.native_process.turn_identity import HostedTurnResources
 from base.packages.plugin_providers import build_model_catalog
+from meiva.tests.fixtures.pin_agent import hosted_resources as hosted_resources
 
 CONFIG: RunnableConfig = {"configurable": {"thread_id": "7"}}
 
@@ -48,31 +48,31 @@ def ledger() -> LlmLedger:
     return LlmLedger()
 
 
-# ───────────── capture_ava_overview ─────────────
+# ───────────── capture_meiva_overview ─────────────
 
 
-def test_capture_ava_overview_returns_non_empty_string() -> None:
-    """Direct import + call of `capture_ava_overview` — lock that `buf = io.StringIO()`
+def test_capture_meiva_overview_returns_non_empty_string() -> None:
+    """Direct import + call of `capture_meiva_overview` — lock that `buf = io.StringIO()`
     was not changed to None or list(); `redirect_stdout(buf)` actually captures the
-    output of `ava.help(ava)` (mutation `redirect_stdout(None)` would let stdout leak → return ''),
+    output of `meiva.help(meiva)` (mutation `redirect_stdout(None)` would let stdout leak → return ''),
     `buf.getvalue()` is not empty."""
-    overview = capture_ava_overview()
+    overview = capture_meiva_overview()
 
     assert isinstance(overview, str)
-    assert len(overview) > 0, "buf did not capture ava.help stdout — redirect_stdout was severed"
+    assert len(overview) > 0, "buf did not capture meiva.help stdout — redirect_stdout was severed"
 
 
-def test_capture_ava_overview_surfaces_public_sdk_index() -> None:
-    # The overview = `# ava` H1 + one entry per public top-level namespace as
+def test_capture_meiva_overview_surfaces_public_sdk_index() -> None:
+    # The overview = `# meiva` H1 + one entry per public top-level namespace as
     # `from . import X` + that module's docstring. This is the SDK index, so the
     # agent discovers the gateway primitives (agents / watcher / self) without
-    # spelunking; full per-namespace detail stays on demand via ava.help(ava.X).
+    # spelunking; full per-namespace detail stays on demand via meiva.help(meiva.X).
     # The root docstring was deliberately removed (sysprompt verbosity audit,
-    # PR #840) — the `# ava` heading stands alone.
-    overview = capture_ava_overview()
+    # PR #840) — the `# meiva` heading stands alone.
+    overview = capture_meiva_overview()
 
-    assert overview.startswith("# ava\n\n"), (
-        f"overview does not start with `# ava` heading: {overview[:200]!r}"
+    assert overview.startswith("# meiva\n\n"), (
+        f"overview does not start with `# meiva` heading: {overview[:200]!r}"
     )
     assert "Drill into" not in overview, (
         f"removed root docstring still rendered: {overview[:200]!r}"
@@ -82,33 +82,33 @@ def test_capture_ava_overview_surfaces_public_sdk_index() -> None:
         assert f"from . import {name}" in overview, (
             f"surface primitive {name!r} should appear in overview: {overview[:600]!r}"
         )
-    # only `# ava` heading; children render as `from . import` import stubs, not headings
+    # only `# meiva` heading; children render as `from . import` import stubs, not headings
     heading_lines = [
         line
         for line in overview.splitlines()
         if line.lstrip().startswith("#") and not line.lstrip().startswith("#!")
     ]
-    assert heading_lines == ["# ava"], (
-        f"overview should have only one `# ava` heading, got: {heading_lines!r}"
+    assert heading_lines == ["# meiva"], (
+        f"overview should have only one `# meiva` heading, got: {heading_lines!r}"
     )
 
 
-def test_capture_ava_overview_is_pure_no_stdout_leak(capsys) -> None:
-    """`redirect_stdout(buf)` must capture all ava.help output into buf, **not**
+def test_capture_meiva_overview_is_pure_no_stdout_leak(capsys) -> None:
+    """`redirect_stdout(buf)` must capture all meiva.help output into buf, **not**
     leak to main stdout. Lock that the line `with contextlib.redirect_stdout(buf):`
     was not changed to `with contextlib.redirect_stdout(sys.stdout):` — such a mutation
-    would make ava.help actually print to stdout, then capsys.readouterr().out would not be empty."""
+    would make meiva.help actually print to stdout, then capsys.readouterr().out would not be empty."""
     capsys.readouterr()  # clear any prior output  # pyright: ignore[reportUnknownMemberType]
-    overview = capture_ava_overview()
+    overview = capture_meiva_overview()
     captured = capsys.readouterr()  # pyright: ignore[reportUnknownMemberType]
 
     assert overview, "overview is empty"
     assert captured.out == "", (  # pyright: ignore[reportUnknownMemberType]
-        f"redirect_stdout ineffective, ava.help content leaked to main stdout: {captured.out[:200]!r}"  # pyright: ignore[reportUnknownMemberType]
+        f"redirect_stdout ineffective, meiva.help content leaked to main stdout: {captured.out[:200]!r}"  # pyright: ignore[reportUnknownMemberType]
     )
 
 
-def test_get_ava_overview_advertises_installed_plugin_namespace() -> None:
+def test_get_meiva_overview_advertises_installed_plugin_namespace() -> None:
     """A plugin-installed namespace **does** appear in the overview index.
 
     The namespace itself must be discoverable at the top level even if the
@@ -119,18 +119,18 @@ def test_get_ava_overview_advertises_installed_plugin_namespace() -> None:
     """
     from types import SimpleNamespace
 
-    from ava.sdk_surface import plugins
+    from meiva.sdk_surface import plugins
 
     fake_ns = SimpleNamespace(
         __doc__="Fake plugin namespace just for this test.",
-        __all_for_ava__=["ping"],
+        __all_for_meiva__=["ping"],
         ping=lambda: "pong",
     )
     fake_ns.ping.__doc__ = "Return pong."
 
     undo = plugins.install_namespace("fake-plugin", "fake_late", fake_ns, {})
     try:
-        overview = get_ava_overview()
+        overview = get_meiva_overview()
         assert "fake_late" in overview, (
             f"overview should advertise the installed plugin namespace (otherwise a namespace "
             f"without a section would disappear). overview:\n{overview[:600]}"
@@ -154,7 +154,7 @@ def make_runtime(
     event_publisher=None,
     execution_info: ExecutionInfo | None = None,
     database_gate: ProcessDbGate,
-) -> Runtime[AvaContext]:
+) -> Runtime[MeivaContext]:
     """test helper: assemble Runtime the same way as test_cancel.py.
 
     llm_node / exec_node don't directly touch ops_pool, so use AsyncMock
@@ -165,7 +165,7 @@ def make_runtime(
         llm = MagicMock()
     if isinstance(llm, MagicMock):
         llm.bind_tools.return_value = llm
-    ctx = AvaContext(
+    ctx = MeivaContext(
         hosted_resources=resources,
         ops_pool=make_fake_ops_pool(),
         llm=llm,  # pyright: ignore[reportUnknownArgumentType]
@@ -318,7 +318,7 @@ async def test_silent_idle_with_reasoning_continue_loops_not_raises(
     """No tool_call AND empty text BUT output_tokens > 0 (model produced
     reasoning) → the node no longer raises. It commits the reasoning AIMessage
     and returns halted=False so the claim node loops straight back to the LLM
-    (the ava_silent_idle plugin then injects a Continue nudge). No token-wasting
+    (the meiva_silent_idle plugin then injects a Continue nudge). No token-wasting
     blind re-stream."""
 
     async def _empty_complete() -> AsyncIterator[AIMessageChunk]:

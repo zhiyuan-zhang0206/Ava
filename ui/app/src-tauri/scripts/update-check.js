@@ -1,10 +1,10 @@
-// ava:ref ui/app/docs/android-updates.ava.okf.md#android-update-prompt
+// meiva:ref ui/app/docs/android-updates.meiva.okf.md#android-update-prompt
 (function () {
-  var cfg = window.__AVA_APP__;
+  var cfg = window.__MEIVA_APP__;
   if (!cfg || cfg.platform !== "android" || !cfg.version) return;
   if (window.top !== window) return;
   if (location.protocol === "tauri:" || location.hostname === "tauri.localhost") return;
-  var MARKER = "ava-app-update-checked";
+  var MARKER = "meiva-app-update-checked";
   if (!window.sessionStorage || window.sessionStorage.getItem(MARKER)) return;
   window.sessionStorage.setItem(MARKER, "1");
 
@@ -13,12 +13,12 @@
   }
 
   function label(check) {
-    return "Ava " + check.latestVersionName + " (build " + check.latestVersionCode + ") is available";
+    return "Meiva " + check.latestVersionName + " (build " + check.latestVersionCode + ") is available";
   }
 
   function banner(check) {
     var bar = document.createElement("div");
-    bar.setAttribute("data-ava-app", "update-banner");
+    bar.setAttribute("data-meiva-app", "update-banner");
     bar.style.cssText = [
       "position:fixed",
       "left:0",
@@ -65,12 +65,12 @@
           update.textContent = "Open download page";
           update.addEventListener("click", function () {
             invoke("app_open_external", { url: page }).catch(function (error) {
-              console.error("[ava-app] update download page failed", error);
+              console.error("[meiva-app] update download page failed", error);
             });
           });
         })
         .catch(function (error) {
-          console.error("[ava-app] update install failed", error);
+          console.error("[meiva-app] update install failed", error);
           bar.remove();
         });
     });
@@ -99,12 +99,12 @@
           title: label(check),
           body: "Tap Update in the app to install it.",
         }).catch(function (error) {
-          console.error("[ava-app] update notification failed", error);
+          console.error("[meiva-app] update notification failed", error);
         });
       }
       if (document.body) banner(check);
     })
     .catch(function (error) {
-      console.error("[ava-app] update check failed", error);
+      console.error("[meiva-app] update check failed", error);
     });
 })();

@@ -20,8 +20,8 @@ describe a production deployment.
 - Compact separators and their reserved spacing are removed.
 
 Current behavior is owned by the
-[timeline view](../ui/web/src/docs/frontend-components/timeline-view/timeline-view.ava.okf.md)
-and [timeline cache](../ui/web/src/docs/frontend-state/timeline-cache.ava.okf.md).
+[timeline view](../ui/web/src/docs/frontend-components/timeline-view/timeline-view.meiva.okf.md)
+and [timeline cache](../ui/web/src/docs/frontend-state/timeline-cache.meiva.okf.md).
 The original audit findings in the review evidence remain open: this preview does
 not replace the Compact retention pipeline, add read deadlines or repair shared
 SSE connection-generation replay. Physical macOS trackpad release timing still

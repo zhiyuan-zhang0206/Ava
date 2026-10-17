@@ -1,4 +1,4 @@
-"""`ava` CLI top-level dispatch routing.
+"""`meiva` CLI top-level dispatch routing.
 
 main() builds the argparse parser, parses argv, then calls `args.func(args)`
 where `func` was bound at parser-build time via `set_defaults(func=...)`,
@@ -83,12 +83,12 @@ def test_every_leaf_subcommand_binds_a_handler_from_its_parser_module() -> None:
         func = leaf.get_default("func")
         assert callable(func), f"{leaf.prog!r} has no callable 'func' bound"
         module = getattr(func, "__module__", "")
-        if leaf.prog.startswith(("ava agents ", "ava notices ")):
+        if leaf.prog.startswith(("meiva agents ", "meiva notices ")):
             assert module == "cli.commands.agents.parsers", (leaf.prog, module)
-        elif leaf.prog.startswith("ava impersonate "):
+        elif leaf.prog.startswith("meiva impersonate "):
             assert module == "cli.commands.agents.impersonation_parsers", (leaf.prog, module)
         elif leaf.prog.startswith(
-            ("ava mcp ", "ava memory ", "ava packages ", "ava plugins ", "ava skill ")
+            ("meiva mcp ", "meiva memory ", "meiva packages ", "meiva plugins ", "meiva skill ")
         ):
             assert module.startswith("cli.commands.extensions.parsers."), (leaf.prog, module)
         else:
@@ -118,7 +118,7 @@ def test_import_defers_cli_logging_until_dispatch(tmp_path: Path) -> None:
     assert result.returncode == 0, result.stderr
 
 
-# Each top-level (and nested) ava sub-command maps to a _h_* handler defined
+# Each top-level (and nested) meiva sub-command maps to a _h_* handler defined
 # in its owning settings-free parser module.
 _HANDLERS: tuple[tuple[list[str], object, str], ...] = (
     (["stop"], _host, "_h_stop"),
@@ -170,16 +170,16 @@ def _stub_dispatch(
 ) -> None:
     """Use the real parser tree and replace only this entry-point test's dispatch."""
     parser = build_parser()
-    leaf = next(item for item in _iter_leaf_parsers(parser) if item.prog == f"ava {command}")
+    leaf = next(item for item in _iter_leaf_parsers(parser) if item.prog == f"meiva {command}")
     leaf.set_defaults(func=handler)
     monkeypatch.setattr(_parsers, "build_parser", _ignoring_retention(lambda: parser))
 
 
 def test_cli_discards_an_inherited_process_profile(monkeypatch: pytest.MonkeyPatch) -> None:
     """The CLI always constructs the full settings domain set."""
-    monkeypatch.setenv("AVA_PROCESS_PROFILE", "agent")
-    assert "AVA_PROCESS_PROFILE" in os.environ
-    # main() records the discarded profile as AVA_LAUNCHER_PROFILE. Register the absent key
+    monkeypatch.setenv("MEIVA_PROCESS_PROFILE", "agent")
+    assert "MEIVA_PROCESS_PROFILE" in os.environ
+    # main() records the discarded profile as MEIVA_LAUNCHER_PROFILE. Register the absent key
     # (setenv) before removing it so teardown deletes what main() assigned.
     monkeypatch.setenv(LAUNCHER_PROFILE_ENV_KEY, "")
     monkeypatch.delenv(LAUNCHER_PROFILE_ENV_KEY)
@@ -190,7 +190,7 @@ def test_cli_discards_an_inherited_process_profile(monkeypatch: pytest.MonkeyPat
     _stub_dispatch(monkeypatch, "status", _fake)
 
     assert _main.main(["status"]) == 0
-    assert "AVA_PROCESS_PROFILE" not in os.environ
+    assert "MEIVA_PROCESS_PROFILE" not in os.environ
 
 
 def test_restart_handler_forwards_the_parsed_config_overlay(
@@ -216,8 +216,8 @@ def test_restart_handler_forwards_the_parsed_config_overlay(
 
 
 def test_migrations_subcommand_removed() -> None:
-    """`ava migrations apply` is gone — migration is now a side-effect of
-    `ava start`. argparse exits 2 on the unknown subcommand."""
+    """`meiva migrations apply` is gone — migration is now a side-effect of
+    `meiva start`. argparse exits 2 on the unknown subcommand."""
     with pytest.raises(SystemExit):
         _parsers.parse_args(["migrations", "apply"])
 
@@ -239,7 +239,7 @@ def test_image_release_and_pitr_activation_verbs_are_removed(argv: list[str]) ->
 
 
 def test_logs_retention_parser_accepts_the_public_flags() -> None:
-    """The local-log cleanup contract is reachable at `ava logs retention`."""
+    """The local-log cleanup contract is reachable at `meiva logs retention`."""
     args = _parsers.parse_args(
         ["logs", "retention", "--family-days", "gateway=31,ops=30", "--dry-run"]
     )
@@ -277,9 +277,9 @@ def test_logs_retention_default_comes_from_observability_settings() -> None:
     from base.config.domains.observability.settings import ObservabilitySettings
 
     field = ObservabilitySettings.model_fields["log_retention_days"]
-    configured = ObservabilitySettings(AVA_LOG_RETENTION_DAYS=23)
+    configured = ObservabilitySettings(MEIVA_LOG_RETENTION_DAYS=23)
 
-    assert field.alias == "AVA_LOG_RETENTION_DAYS"
+    assert field.alias == "MEIVA_LOG_RETENTION_DAYS"
     assert configured.log_retention_days == 23
 
 
@@ -294,7 +294,7 @@ def test_logs_retention_settings_reject_non_positive_environment_default() -> No
     from base.config.domains.observability.settings import ObservabilitySettings
 
     with pytest.raises(ValidationError):
-        ObservabilitySettings(AVA_LOG_RETENTION_DAYS=0)
+        ObservabilitySettings(MEIVA_LOG_RETENTION_DAYS=0)
 
 
 def test_logs_retention_help_explains_defaults_and_dry_run(
@@ -306,7 +306,7 @@ def test_logs_retention_help_explains_defaults_and_dry_run(
     assert exited.value.code == 0
     help_text = capsys.readouterr().out
     assert "14 days" in help_text
-    assert "AVA_LOG_RETENTION_DAYS" in help_text
+    assert "MEIVA_LOG_RETENTION_DAYS" in help_text
     assert "agent=15" in help_text
     assert "--older-than DAYS | --family-days" in help_text
     assert "without\n                        deleting" in help_text
@@ -337,7 +337,7 @@ def test_the_removed_wal_verbs_no_longer_parse(argv: list[str]) -> None:
 
 
 def test_start_subcommand_forwards_argparse_flags(monkeypatch: pytest.MonkeyPatch) -> None:
-    """`ava start --only-service gateway ...` reaches _h_start with the parsed
+    """`meiva start --only-service gateway ...` reaches _h_start with the parsed
     argparse Namespace: the service selection is all `start` takes."""
     captured: dict[str, argparse.Namespace] = {}
 
@@ -358,7 +358,7 @@ def test_start_subcommand_forwards_argparse_flags(monkeypatch: pytest.MonkeyPatc
 
 
 def test_init_subcommand_binds_its_handler_and_takes_the_identity_flags() -> None:
-    """`ava init` owns the first-start inputs: machine name, capabilities, gateway."""
+    """`meiva init` owns the first-start inputs: machine name, capabilities, gateway."""
     args = _parsers.parse_args(
         [
             "init",
@@ -368,7 +368,7 @@ def test_init_subcommand_binds_its_handler_and_takes_the_identity_flags() -> Non
             "--memory-remote",
             "git@x:y.git",
             "--gateway-url",
-            "https://ava.example.com",
+            "https://meiva.example.com",
         ]
     )
     assert args.func is _host.h_init
@@ -376,13 +376,13 @@ def test_init_subcommand_binds_its_handler_and_takes_the_identity_flags() -> Non
     assert args.serve_gateway is True
     assert args.serve_agent_runner is None  # unset: no flag given
     assert args.memory_remote == "git@x:y.git"
-    assert args.gateway_url == "https://ava.example.com"
+    assert args.gateway_url == "https://meiva.example.com"
 
 
 def test_maintenance_verbs_opt_out_of_the_gateway_fetch(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    """`status` / `cluster` / `agents` / `config` / `logs` set AVA_CONFIG_FETCH=skip
+    """`status` / `cluster` / `agents` / `config` / `logs` set MEIVA_CONFIG_FETCH=skip
     before dispatch (settings-lite: they must work while the gateway is down);
     start and normal stop need the real cluster configuration."""
     import os as _os
@@ -393,29 +393,29 @@ def test_maintenance_verbs_opt_out_of_the_gateway_fetch(
 
     monkeypatch.setattr(start_identity, "require_initialized", admitted)
     for verb in ("status", "cluster", "agents", "config", "logs"):
-        env = {"PATH": "/usr/bin", "AVA_HOME": str(tmp_path)}
+        env = {"PATH": "/usr/bin", "MEIVA_HOME": str(tmp_path)}
         monkeypatch.setattr(_os, "environ", env)
         monkeypatch.setattr(
             _parsers, "build_parser", _ignoring_retention(lambda v=verb: _noop_parser(v))
         )
         assert _main.main([verb]) == 0
-        assert env.get("AVA_CONFIG_FETCH") == "skip", f"{verb} must be settings-lite"
+        assert env.get("MEIVA_CONFIG_FETCH") == "skip", f"{verb} must be settings-lite"
 
     # Starting and graceful draining both need data-plane configuration.
     for verb in ("start", "stop"):
-        env = {"PATH": "/usr/bin", "AVA_HOME": str(tmp_path)}
+        env = {"PATH": "/usr/bin", "MEIVA_HOME": str(tmp_path)}
         monkeypatch.setattr(_os, "environ", env)
         monkeypatch.setattr(
             _parsers, "build_parser", _ignoring_retention(lambda v=verb: _noop_parser(v))
         )
         assert _main.main([verb]) == 0
-        assert "AVA_CONFIG_FETCH" not in env
+        assert "MEIVA_CONFIG_FETCH" not in env
 
 
 def _noop_parser(verb: str) -> argparse.ArgumentParser:
     """A parser that accepts `verb` as a positional and dispatches to a no-op —
     for tests that only assert main()'s pre-dispatch env pinning."""
-    parser = argparse.ArgumentParser(prog="ava")
+    parser = argparse.ArgumentParser(prog="meiva")
     parser.add_argument("verb", nargs="?")
     parser.set_defaults(func=lambda _args: 0)
     return parser
@@ -440,18 +440,18 @@ def test_settings_load_failure_prints_env_template(
     rc = _main.main(["status"])
     captured = capsys.readouterr()
     assert rc == 1
-    assert "AVA_DB_URL" in captured.err
+    assert "MEIVA_DB_URL" in captured.err
 
 
 # -- checkout gate: every command from a foreign checkout -----------------------
 
 
 def _owned_home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
-    """A home that carries its own `source` checkout, named by AVA_HOME. This
+    """A home that carries its own `source` checkout, named by MEIVA_HOME. This
     checkout is not it, so the gate must refuse every command."""
-    home = tmp_path / ".ava"
+    home = tmp_path / ".meiva"
     (home / "source").mkdir(parents=True)
-    monkeypatch.setenv("AVA_HOME", str(home))
+    monkeypatch.setenv("MEIVA_HOME", str(home))
     return home
 
 
@@ -497,7 +497,7 @@ def test_foreign_checkout_is_refused_before_dispatch(
     err = capsys.readouterr().err
     assert str(home) in err, "the message must name the home it acts on"
     assert str(home / "source") in err, "and the checkout that may act on it"
-    assert "AVA_HOME" in err
+    assert "MEIVA_HOME" in err
     assert sorted(path.name for path in home.iterdir()) == ["source"], "nothing may be written"
 
 
@@ -506,10 +506,10 @@ def test_the_homes_own_checkout_runs_the_state_changing_verbs(
 ) -> None:
     """The home's `source` IS this checkout (here: a link to it), so its own CLI
     stops its own cluster — the production path."""
-    home = tmp_path / ".ava"
+    home = tmp_path / ".meiva"
     home.mkdir()
     (home / "source").symlink_to(Path(_main.__file__).resolve().parents[1])
-    monkeypatch.setenv("AVA_HOME", str(home))
+    monkeypatch.setenv("MEIVA_HOME", str(home))
     dispatched: list[str] = []
     monkeypatch.setattr(
         _parsers,
@@ -526,7 +526,7 @@ def test_a_home_with_no_source_accepts_any_checkout(
 ) -> None:
     """A test or scratch home has no checkout of its own: any checkout may
     start, stop and reconfigure it."""
-    monkeypatch.setenv("AVA_HOME", str(tmp_path))
+    monkeypatch.setenv("MEIVA_HOME", str(tmp_path))
     dispatched: list[str] = []
     monkeypatch.setattr(
         _parsers,
@@ -552,7 +552,7 @@ def test_foreign_checkout_may_still_ask_for_a_lone_help_flag(
     monkeypatch.setattr(
         _parsers,
         "build_parser",
-        _ignoring_retention(lambda: _noop_parser_recording("ava", dispatched)),
+        _ignoring_retention(lambda: _noop_parser_recording("meiva", dispatched)),
     )
 
     with pytest.raises(SystemExit) as exc:
@@ -562,7 +562,7 @@ def test_foreign_checkout_may_still_ask_for_a_lone_help_flag(
     assert "source checkout" not in capsys.readouterr().err
 
 
-def test_foreign_checkout_may_still_run_bare_ava(
+def test_foreign_checkout_may_still_run_bare_meiva(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
     """With no argv the gate has no verb to refuse; argparse owns the usage error."""
@@ -571,12 +571,12 @@ def test_foreign_checkout_may_still_run_bare_ava(
     monkeypatch.setattr(
         _parsers,
         "build_parser",
-        _ignoring_retention(lambda: _noop_parser_recording("ava", dispatched)),
+        _ignoring_retention(lambda: _noop_parser_recording("meiva", dispatched)),
     )
 
     assert _main.main([]) == 0
 
-    assert dispatched == ["ava"]
+    assert dispatched == ["meiva"]
     assert "source checkout" not in capsys.readouterr().err
 
 
@@ -584,7 +584,7 @@ def _noop_parser_recording(verb: str, sink: list[str]) -> argparse.ArgumentParse
     """`_noop_parser` that records that dispatch actually happened. Permissive
     enough to swallow the real verbs' flags (`-y`, `--path`) without argparse
     erroring before the assertion under test."""
-    parser = argparse.ArgumentParser(prog="ava")
+    parser = argparse.ArgumentParser(prog="meiva")
     parser.add_argument("verb", nargs="?")
     parser.add_argument("rest", nargs="*")
     parser.add_argument("-y", action="store_true")
@@ -596,11 +596,11 @@ def _noop_parser_recording(verb: str, sink: list[str]) -> argparse.ArgumentParse
 def _start_entry_probe(scenario: str, tmp_path: Path) -> None:
     """Run the real admitted start entry with the child's service phase boundary."""
     repo = Path(__file__).resolve().parents[2]
-    env = {key: value for key, value in os.environ.items() if not key.startswith("AVA_")}
+    env = {key: value for key, value in os.environ.items() if not key.startswith("MEIVA_")}
     env.update(
-        AVA_HOME=str(tmp_path / "home"),
-        AVA_DB_URL="postgresql://foreign.invalid/forbidden",
-        AVA_GATEWAY_URL="http://foreign.invalid",
+        MEIVA_HOME=str(tmp_path / "home"),
+        MEIVA_DB_URL="postgresql://foreign.invalid/forbidden",
+        MEIVA_GATEWAY_URL="http://foreign.invalid",
     )
     result = subprocess.run(  # noqa: S603 — fixed interpreter and literal probe
         [sys.executable, "-I", "-B", str(_CHILD), scenario, str(repo)],
@@ -632,7 +632,7 @@ def test_command_import_boundary_is_settings_free(entry: str, tmp_path: Path) ->
     additionally builds the real argparse tree and parses a real subcommand's
     args (without dispatching to its handler), since `cli.parsers` must stay
     just as settings-free while doing that. The `config` case imports the
-    `ava config` module, whose local repair path must also run without Settings."""
+    `meiva config` module, whose local repair path must also run without Settings."""
     result = _run_isolated_program("import_boundary", tmp_path, entry)
     assert result.returncode == 0, result.stderr
 
@@ -640,7 +640,7 @@ def test_command_import_boundary_is_settings_free(entry: str, tmp_path: Path) ->
 def test_help_keeps_service_database_admission_unchanged(
     tmp_path: Path,
 ) -> None:
-    """`ava stop` writes to the database to drain agents, so a host left on stale
+    """`meiva stop` writes to the database to drain agents, so a host left on stale
     code must still be able to run it through its own handles; help preserves the service gate."""
     result = _run_isolated_program("help_admission", tmp_path)
     assert result.returncode == 0, result.stderr

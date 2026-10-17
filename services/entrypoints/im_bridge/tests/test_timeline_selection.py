@@ -126,7 +126,7 @@ async def test_empty_switch_accepts_first_later_output_without_another_command()
         ]
         await core.poll_timeline_outbound()
         assert cast(FakePlainAdapter, core.adapters["telegram"]).sent == [
-            ("chat", "[Ava #7] first output")
+            ("chat", "[Meiva #7] first output")
         ]
 
 
@@ -178,7 +178,7 @@ async def test_spawn_switch_button_empty_receipt_then_first_output() -> None:
         await core.poll_timeline_outbound()
         assert upstream.sent == [(777, "first prompt", "user")]
         assert cast(FakePlainAdapter, core.adapters["telegram"]).sent == [
-            ("chat", "[Ava #777] first answer")
+            ("chat", "[Meiva #777] first answer")
         ]
 
 
@@ -205,7 +205,7 @@ async def test_postcommit_acceptance_response_loss_does_not_lose_or_duplicate_se
         await core._push_snapshot(("telegram", "chat"), state, {})
         await core.outbound_worker.run_once()
         assert cast(FakePlainAdapter, core.adapters["telegram"]).sent == [
-            ("chat", "[Ava #7] reply")
+            ("chat", "[Meiva #7] reply")
         ]
 
 
@@ -227,7 +227,7 @@ async def test_live_sse_snapshot_is_only_a_wakeup_and_periodic_pull_catches_comm
         upstream.timeline = [dict(live, payload="committed")]
         await core.poll_timeline_outbound()
         assert cast(FakePlainAdapter, core.adapters["telegram"]).sent == [
-            ("chat", "[Ava #7] committed")
+            ("chat", "[Meiva #7] committed")
         ]
 
 

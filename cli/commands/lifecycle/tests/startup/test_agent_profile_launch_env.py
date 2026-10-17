@@ -4,8 +4,8 @@ import pytest
 
 from base.host.env import bootstrap
 from cli.commands.lifecycle import root_driver
-from services.supervision.ava_root.manifest import load_manifests
-from services.supervision.ava_root_glue.manifests import generate
+from services.supervision.meiva_root.manifest import load_manifests
+from services.supervision.meiva_root_glue.manifests import generate
 from services.supervision.roster.service_spec import AGENT_RUNNER, ServiceSpec
 
 
@@ -25,7 +25,7 @@ def test_root_manifest_projects_runner_url_for_agent_profile(
         capabilities=AGENT_RUNNER,
         requires_db=True,
     )
-    projected = "postgresql://ava_runner:fixture@127.0.0.1:1/ava"
+    projected = "postgresql://meiva_runner:fixture@127.0.0.1:1/meiva"
 
     def _fake_projection() -> str:
         return projected
@@ -45,7 +45,7 @@ def test_root_manifest_projects_runner_url_for_agent_profile(
     )
     units = {unit.id: unit for unit in load_manifests(path).units}
     assert dict(units["agent-host"].env) == {
-        "AVA_PROCESS_PROFILE": "agent",
-        "AVA_DB_URL": projected,
+        "MEIVA_PROCESS_PROFILE": "agent",
+        "MEIVA_DB_URL": projected,
     }
-    assert "AVA_DB_URL" not in dict(units["ops"].env)
+    assert "MEIVA_DB_URL" not in dict(units["ops"].env)

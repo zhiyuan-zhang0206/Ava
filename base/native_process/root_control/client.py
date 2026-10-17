@@ -1,6 +1,6 @@
 """A blocking client for the K1 control plane.
 
-The server (`services.supervision.ava_root.server`) is asyncio; this client is a plain
+The server (`services.supervision.meiva_root.server`) is asyncio; this client is a plain
 blocking Unix socket — call sites (tooling, gates, tests) are
 synchronous, and one request/response pair per connection is all the protocol
 needs. Transport failures raise RootClientError; business
@@ -85,7 +85,7 @@ def root_process(*, home: Path, timeout: float = 2.0) -> OwnedProcess | None:
     """Read the captured native birth of the root of `home`; IPC failure remains unknown."""
     from base.paths import root_run_dir
 
-    response = RootClient(root_run_dir(home) / "ava-root.sock", timeout=timeout).status()
+    response = RootClient(root_run_dir(home) / "meiva-root.sock", timeout=timeout).status()
     raw = response.get("result")
     if response["ok"] is not True or not isinstance(raw, dict):
         raise RootClientError("root refused its native status")

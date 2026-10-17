@@ -15,9 +15,9 @@ def test_daemon_env_keeps_the_process_essentials(monkeypatch: pytest.MonkeyPatch
     }
     for name, value in essentials.items():
         monkeypatch.setenv(name, value)
-    monkeypatch.setenv("AVA_API_TOKEN", "gateway-api-token-" + "t" * 32)
+    monkeypatch.setenv("MEIVA_API_TOKEN", "gateway-api-token-" + "t" * 32)
 
     env = daemon_process_env()
 
     assert {name: env[name] for name in essentials} == essentials
-    assert "AVA_API_TOKEN" not in env
+    assert "MEIVA_API_TOKEN" not in env

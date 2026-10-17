@@ -6,7 +6,7 @@ the cwd, a signal handler) changes what every LATER test in the worker sees. The
 the leaker and the victim share a worker; moving test files changes the order and the shard
 composition, so a leak the old order hid starts to hit others. Three shapes seen here:
 
-  * `monkeypatch.setattr(ava.self, "AGENT_ID", ...)` on a name the module `__getattr__`
+  * `monkeypatch.setattr(meiva.self, "AGENT_ID", ...)` on a name the module `__getattr__`
     serves: monkeypatch records the dynamic value and its undo `setattr`s it back, so the name
     is a stored attribute for good (PR #3791).
   * `monkeypatch.delenv(key, raising=False)` on an absent key records nothing, so the key the
@@ -23,7 +23,7 @@ recorded, and before any module- or session-scoped fixture finalizes. What a wid
 set up is already in the "before" snapshot, so a module's first and last test are not special.
 `tests/ci/test_leak_guard.py` locks that position and the behavior.
 
-`AVA_LEAK_GUARD` selects the mode (any other value stops the run):
+`MEIVA_LEAK_GUARD` selects the mode (any other value stops the run):
   fail  (default) put back what the strict checks name, then fail the leaker at its own
         teardown, so victims stay green and only the leaker is red;
   warn  observe only: never changes a test outcome, never puts any state back (a leak is a
@@ -52,7 +52,7 @@ swapped through `sys.modules`, or the disk, sockets and processes. POSIX is the 
 Reporting: each finding is a JUnit property on the leaker's testcase (`leak_guard`, or
 `leak_guard_note` for a note; `leak_guard_fault` for a fault of the guard) that
 `scripts/ci/shard_counts.py` collects into the cluster-wide report, and the terminal summary
-prints the same list, xdist or not. Design and evidence: `tests/docs/test-leak-guard.ava.okf.md`.
+prints the same list, xdist or not. Design and evidence: `tests/docs/test-leak-guard.meiva.okf.md`.
 """
 
 from __future__ import annotations
@@ -402,9 +402,11 @@ class Run:
         self.worker_stats: list[dict[str, Any]] = []
 
     def configure(self, rootpath: str) -> None:
-        mode = os.environ.get("AVA_LEAK_GUARD", "fail")
+        mode = os.environ.get("MEIVA_LEAK_GUARD", "fail")
         if mode not in MODES:
-            raise pytest.UsageError(f"AVA_LEAK_GUARD={mode!r}: expected one of {', '.join(MODES)}")
+            raise pytest.UsageError(
+                f"MEIVA_LEAK_GUARD={mode!r}: expected one of {', '.join(MODES)}"
+            )
         self.mode = mode
         self.watch = ModuleWatch(first_party_pattern(rootpath.rstrip(os.sep) + os.sep).match)
 

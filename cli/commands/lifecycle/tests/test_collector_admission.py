@@ -36,12 +36,12 @@ def test_non_lgtm_gateway_converge_skips_collector_install(
     machine_config_763.set_field("machine_serve_gateway", True)
     machine_config_763.set_field("machine_serve_agent_runner", False)
     machine_config_763.set_field("machine_serve_observability_station", False)
-    home = tmp_path / ".ava-preview"
+    home = tmp_path / ".meiva-preview"
     home.mkdir()
-    monkeypatch.delitem(os.environ, "AVA_TELEMETRY_OTLP_ENDPOINT", raising=False)
+    monkeypatch.delitem(os.environ, "MEIVA_TELEMETRY_OTLP_ENDPOINT", raising=False)
     ctx = oc.ConvergeCtx(
         repo=Path(__file__).resolve().parents[4],
-        ava_home=home,
+        meiva_home=home,
         roles=frozenset({"gateway", "agent-runner"}),
         config=machine_config_763,
         database_factory=operator_database,
@@ -77,12 +77,14 @@ def test_non_lgtm_gateway_with_explicit_endpoint_installs_collector(
     machine_config_798.set_field("machine_serve_gateway", True)
     machine_config_798.set_field("machine_serve_agent_runner", False)
     machine_config_798.set_field("machine_serve_observability_station", False)
-    home = tmp_path / ".ava-preview"
+    home = tmp_path / ".meiva-preview"
     home.mkdir()
-    monkeypatch.setitem(os.environ, "AVA_TELEMETRY_OTLP_ENDPOINT", "http://collector.invalid:4318")
+    monkeypatch.setitem(
+        os.environ, "MEIVA_TELEMETRY_OTLP_ENDPOINT", "http://collector.invalid:4318"
+    )
     ctx = oc.ConvergeCtx(
         repo=Path(__file__).resolve().parents[4],
-        ava_home=home,
+        meiva_home=home,
         roles=frozenset({"gateway"}),
         config=machine_config_798,
         database_factory=operator_database,
@@ -128,10 +130,10 @@ def test_collector_preparation_never_controls_a_running_service_tree(
     machine_config_829.set_field("machine_serve_observability_station", False)
     home = tmp_path / "home"
     home.mkdir()
-    monkeypatch.delitem(os.environ, "AVA_TELEMETRY_OTLP_ENDPOINT", raising=False)
+    monkeypatch.delitem(os.environ, "MEIVA_TELEMETRY_OTLP_ENDPOINT", raising=False)
     ctx = oc.ConvergeCtx(
         repo=Path(__file__).resolve().parents[4],
-        ava_home=home,
+        meiva_home=home,
         roles=frozenset({"gateway"}),
         config=machine_config_829,
         database_factory=operator_database,
@@ -162,15 +164,15 @@ def test_non_lgtm_gateway_reports_and_preserves_residual_config(
     machine_config_859.set_field("machine_serve_gateway", True)
     machine_config_859.set_field("machine_serve_agent_runner", False)
     machine_config_859.set_field("machine_serve_observability_station", False)
-    home = tmp_path / ".ava-preview"
+    home = tmp_path / ".meiva-preview"
     collector = home / "otel-collector"
     collector.mkdir(parents=True)
     config = collector / "config.yaml"
     config.write_text("stale: true\n", encoding="utf-8")
-    monkeypatch.delitem(os.environ, "AVA_TELEMETRY_OTLP_ENDPOINT", raising=False)
+    monkeypatch.delitem(os.environ, "MEIVA_TELEMETRY_OTLP_ENDPOINT", raising=False)
     ctx = oc.ConvergeCtx(
         repo=Path(__file__).resolve().parents[4],
-        ava_home=home,
+        meiva_home=home,
         roles=frozenset({"gateway"}),
         config=machine_config_859,
         database_factory=operator_database,

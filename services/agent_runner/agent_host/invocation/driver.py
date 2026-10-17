@@ -6,7 +6,7 @@ from collections.abc import Awaitable, Callable
 from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
 from psycopg_pool import AsyncConnectionPool
 
-from base.agents.context import AvaContext
+from base.agents.context import MeivaContext
 from services.agent_runner.agent_host.invocation.compact.apply import CompactGraph
 from services.agent_runner.agent_host.invocation.compact.execute import run_compact
 from services.agent_runner.agent_host.invocation.compact.lifecycle import settle_original_restart
@@ -18,8 +18,8 @@ async def drive_context(
     saver: AsyncPostgresSaver,
     graph: CompactGraph,
     agent_id: int,
-    ctx: AvaContext,
-    invoke: Callable[[int, AvaContext], Awaitable[TurnOutcome]],
+    ctx: MeivaContext,
+    invoke: Callable[[int, MeivaContext], Awaitable[TurnOutcome]],
     drop_agent: Callable[[int], None],
 ) -> TurnOutcome:
     """The publisher and explicit context belong to this invocation, not a cached runtime."""
@@ -66,8 +66,8 @@ async def _drive_work(
     saver: AsyncPostgresSaver,
     graph: CompactGraph,
     agent_id: int,
-    ctx: AvaContext,
-    invoke: Callable[[int, AvaContext], Awaitable[TurnOutcome]],
+    ctx: MeivaContext,
+    invoke: Callable[[int, MeivaContext], Awaitable[TurnOutcome]],
     drop_agent: Callable[[int], None],
 ) -> TurnOutcome:
     """Run compact continuation and ordinary work in the admitted context."""

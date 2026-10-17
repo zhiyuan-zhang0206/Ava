@@ -43,7 +43,7 @@ pub fn attach_window_behavior(window: &WebviewWindow) {
 /// Build the tray icon and its menu.
 pub fn setup_tray(app: &AppHandle) -> tauri::Result<()> {
     let autostart_on = autostart_enabled(app);
-    let open = MenuItem::with_id(app, MENU_OPEN, "Open Ava", true, None::<&str>)?;
+    let open = MenuItem::with_id(app, MENU_OPEN, "Open Meiva", true, None::<&str>)?;
     let autostart = CheckMenuItem::with_id(
         app,
         MENU_AUTOSTART,
@@ -53,7 +53,7 @@ pub fn setup_tray(app: &AppHandle) -> tauri::Result<()> {
         None::<&str>,
     )?;
     let update = MenuItem::with_id(app, MENU_UPDATE, "Check for updates…", true, None::<&str>)?;
-    let quit = MenuItem::with_id(app, MENU_QUIT, "Quit Ava", true, None::<&str>)?;
+    let quit = MenuItem::with_id(app, MENU_QUIT, "Quit Meiva", true, None::<&str>)?;
     let menu = Menu::with_items(
         app,
         &[
@@ -66,11 +66,11 @@ pub fn setup_tray(app: &AppHandle) -> tauri::Result<()> {
         ],
     )?;
 
-    TrayIconBuilder::with_id("ava")
+    TrayIconBuilder::with_id("meiva")
         // No branded glyph: the app ships without a logo (task #3286). The
         // status item keeps its tooltip, menu, and click behavior; it just
         // renders without an image.
-        .tooltip("Ava")
+        .tooltip("Meiva")
         .menu(&menu)
         // A left click opens the window; the menu is the right-click surface.
         .show_menu_on_left_click(false)
@@ -136,7 +136,7 @@ pub fn check_for_updates(app: AppHandle, interactive: bool) {
                 match update.download_and_install(|_, _| {}, || {}).await {
                     // The new binary only runs after a restart; the user is
                     // mid-session, so ask rather than yanking the window away.
-                    Ok(()) => log::info!("update {version} staged — restart Ava to run it"),
+                    Ok(()) => log::info!("update {version} staged — restart Meiva to run it"),
                     Err(err) => log::error!("could not install update {version}: {err}"),
                 }
             }

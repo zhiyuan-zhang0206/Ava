@@ -104,16 +104,16 @@ def test_env_locking_never_touches_the_env_file_itself(
     from base.host.env.dotenv_file import upsert_env
 
     env = tmp_path / ".env"
-    env.write_text("AVA_KEEP=1\n")
+    env.write_text("MEIVA_KEEP=1\n")
     monkeypatch.setattr(dotenv_file, "env_file_path", lambda: env)
 
     assert env_lock_path(env) != env
     rc.write_fields({}, set())
-    upsert_env(env, {"AVA_NEW": "2"})
+    upsert_env(env, {"MEIVA_NEW": "2"})
 
     body = env.read_text()
-    assert "AVA_KEEP=1" in body, "the lock truncated the file it guards"
-    assert "AVA_NEW=2" in body
+    assert "MEIVA_KEEP=1" in body, "the lock truncated the file it guards"
+    assert "MEIVA_NEW=2" in body
 
 
 def test_the_env_wait_is_bounded_in_seconds() -> None:
@@ -151,7 +151,7 @@ def test_every_env_write_door_takes_the_lock(
 
     The first version of this change locked `write_fields` alone and claimed the
     CLI-converge / gateway-PUT / ops-daemon race was closed. It was not: converge
-    writes `.env` through `upsert_env` on **every `ava start`**, and `remove_env`
+    writes `.env` through `upsert_env` on **every `meiva start`**, and `remove_env`
     is another rewrite. First start uses the same upsert_env writer. A lock on
     one door orders nothing.
     """
@@ -160,7 +160,7 @@ def test_every_env_write_door_takes_the_lock(
     from base.host.env import dotenv_file
 
     env = tmp_path / ".env"
-    env.write_text("AVA_OLD=1\n")
+    env.write_text("MEIVA_OLD=1\n")
     monkeypatch.setattr(dotenv_file, "env_file_path", lambda: env)
     expected = env_lock_path(env)
 
@@ -169,8 +169,8 @@ def test_every_env_write_door_takes_the_lock(
     _recorded_lock(monkeypatch, dotenv_file_mod, taken)
 
     rc.write_fields({}, set())
-    dotenv_file_mod.upsert_env(env, {"AVA_NEW": "2"})
-    dotenv_file_mod.remove_env(env, {"AVA_OLD"})
+    dotenv_file_mod.upsert_env(env, {"MEIVA_NEW": "2"})
+    dotenv_file_mod.remove_env(env, {"MEIVA_OLD"})
 
     assert len(taken) == 3, f"a door wrote .env without the lock: {taken}"
     assert set(taken) == {expected}

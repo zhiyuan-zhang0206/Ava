@@ -1,9 +1,9 @@
-"""`ava` settings-load failure surfaces a friendly env template, not a traceback.
+"""`meiva` settings-load failure surfaces a friendly env template, not a traceback.
 
-A fresh host with no ~/.ava/.env (or one missing required fields) makes
+A fresh host with no ~/.meiva/.env (or one missing required fields) makes
 `Settings()` raise pydantic ValidationError on first `cli.commands` import.
 main() catches it and calls `print_settings_load_failure`, which must turn the
-raw error into a copy-paste list of the missing AVA_* vars plus the first-start
+raw error into a copy-paste list of the missing MEIVA_* vars plus the first-start
 hint that joins an agent-runner.
 """
 
@@ -30,18 +30,18 @@ def test_friendly_template_lists_missing_vars(capsys):
 
     assert rc == 1
     err = capsys.readouterr().err  # pyright: ignore[reportUnknownMemberType]
-    # Python attr names get uppercased + AVA_ prefixed to match the field aliases.
-    assert "AVA_DB_URL=<value>" in err
-    assert "AVA_REDIS_URL=<value>" in err
+    # Python attr names get uppercased + MEIVA_ prefixed to match the field aliases.
+    assert "MEIVA_DB_URL=<value>" in err
+    assert "MEIVA_REDIS_URL=<value>" in err
     # The runner's init is the recommended fix, not a raw traceback.
-    assert "ava init --serve-agent-runner" in err
+    assert "meiva init --serve-agent-runner" in err
     assert "Traceback" not in err
 
 
 def test_already_prefixed_alias_not_double_prefixed(capsys):
-    # A loc already shaped like an alias must not become AVA_AVA_X.
-    print_settings_load_failure(_validation_error("AVA_DB_URL"))
+    # A loc already shaped like an alias must not become MEIVA_MEIVA_X.
+    print_settings_load_failure(_validation_error("MEIVA_DB_URL"))
 
     err = capsys.readouterr().err  # pyright: ignore[reportUnknownMemberType]
-    assert "AVA_DB_URL=<value>" in err
-    assert "AVA_AVA_" not in err
+    assert "MEIVA_DB_URL=<value>" in err
+    assert "MEIVA_MEIVA_" not in err

@@ -1,6 +1,6 @@
 // useTasks — the task-list data source for the Task Graph and inbox.
 // Fetches the caller-selected /api/tasks projection. Freshness is SSE-driven:
-// task_created / task_updated events (published by the ava.tasks SDK write path)
+// task_created / task_updated events (published by the meiva.tasks SDK write path)
 // are folded by the R4 fold owner (lib/fold/tasks — debounced invalidation),
 // with a slow 30s poll as the reconciliation fallback for changes that skip the
 // SDK (the gateway PATCH path, daemon counter writes). There is no client-side

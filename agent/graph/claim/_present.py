@@ -7,13 +7,15 @@ from __future__ import annotations
 
 from typing import Any
 
-from base.agents.context import AvaContext
+from base.agents.context import MeivaContext
 from base.agents.history.timeline import build_timeline_items, tail_window, timeline_default_limit
 from base.agents.history.timeline_inputs import TimelineReadInputs
 from base.events.live.projection import InboundCommitted, TimelineSnapshot
 
 
-async def publish_inbound_committed(ctx: AvaContext, agent_id: int, inbound_ids: list[int]) -> None:
+async def publish_inbound_committed(
+    ctx: MeivaContext, agent_id: int, inbound_ids: list[int]
+) -> None:
     """Publish one InboundCommitted SSE event per chat inbound that has been
     envelope-wrapped into state.messages, triggering frontend timeline reload."""
     assert ctx.event_publisher is not None, (  # noqa: S101
@@ -26,7 +28,7 @@ async def publish_inbound_committed(ctx: AvaContext, agent_id: int, inbound_ids:
 
 
 def publish_end_timeline_snapshot(
-    ctx: AvaContext,
+    ctx: MeivaContext,
     state: Any,  # AgentState (lazy import to avoid circular)
     agent_id: int,
     new_msgs: list,

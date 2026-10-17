@@ -30,7 +30,7 @@ def test_writer_uses_one_captured_gate_and_is_joined(
     config = ConfigBoot()
     config.set_field("machine_name", "export-owner")
     monkeypatch.setattr(export_process, "ConfigBoot", lambda: config)
-    monkeypatch.setattr(export_process, "ava_home", lambda: tmp_path)
+    monkeypatch.setattr(export_process, "meiva_home", lambda: tmp_path)
 
     def count(repo: Path, rev: str = "HEAD") -> int:
         counts.append((repo, rev))
@@ -64,7 +64,9 @@ def test_writer_uses_one_captured_gate_and_is_joined(
                 gates[0].application_name()
             assert counts == []
         else:
-            assert gates[0].application_name() == gates[1].application_name() == "ava:exporter:v22"
+            assert (
+                gates[0].application_name() == gates[1].application_name() == "meiva:exporter:v22"
+            )
             assert counts == [(image.source_root, sha)]
     assert pipeline.stopped
 

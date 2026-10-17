@@ -1,4 +1,4 @@
-"""`ava stop`: the browser flag and the announcement around confirmation and teardown."""
+"""`meiva stop`: the browser flag and the announcement around confirmation and teardown."""
 
 from __future__ import annotations
 
@@ -104,11 +104,11 @@ def test_cmd_stop_announces_stopping_after_confirm_before_teardown(
     *,
     command_runtime: CommandRuntime,
 ) -> None:
-    """A confirmed `ava stop` best-effort POSTs
+    """A confirmed `meiva stop` best-effort POSTs
     /api/cluster/stopping?machine=<self>&home=<self-home> before the local
     teardown (so the cluster view shows 'stopped', not 'offline'). `home`
     identifies THIS unit so a co-located peer keeps its caps."""
-    from base.paths import ava_home
+    from base.paths import meiva_home
 
     patch_gateway_http(monkeypatch)
     command_runtime.machine.set(name="test-host")
@@ -133,7 +133,7 @@ def test_cmd_stop_announces_stopping_after_confirm_before_teardown(
     )
     assert rc == 0
     assert calls[0][0] == "http://gw:8000/api/cluster/stopping"
-    assert calls[0][1]["params"] == {"machine": "test-host", "home": str(ava_home())}
+    assert calls[0][1]["params"] == {"machine": "test-host", "home": str(meiva_home())}
     assert events == ["announce", "infra"]  # announced first, then teardown ran
 
 
@@ -146,7 +146,7 @@ def test_cmd_stop_aborted_confirm_does_not_announce(
     command_runtime: CommandRuntime,
 ) -> None:
     """Declining the confirm prompt must leave the roster untouched: the stopping
-    announce stamps `machines.stopped_at`, and only the next `ava start` clears
+    announce stamps `machines.stopped_at`, and only the next `meiva start` clears
     it — an announce fired before the gate would mark a running host 'stopped'."""
     patch_gateway_http(monkeypatch)
     command_runtime.machine.set(name="test-host")
@@ -175,7 +175,7 @@ def test_cmd_stop_proceeds_when_announce_fails(
     *,
     command_runtime: CommandRuntime,
 ) -> None:
-    """If the stopping announce can't reach the gateway, `ava stop` logs and still
+    """If the stopping announce can't reach the gateway, `meiva stop` logs and still
     tears down — the announce is best-effort, never a blocker."""
     patch_gateway_http(monkeypatch)
     command_runtime.machine.set(name="runner-a")

@@ -54,8 +54,8 @@ def _pty_home(
     # test_schedule_runner.py).
     from base.config import settings as _settings
 
-    (home / ".env").write_text(f"AVA_DB_URL={_settings.data_plane.db_url}\n")
-    monkeypatch.setenv("AVA_HOME", str(home))
+    (home / ".env").write_text(f"MEIVA_DB_URL={_settings.data_plane.db_url}\n")
+    monkeypatch.setenv("MEIVA_HOME", str(home))
     service = PtyServiceProcess(home)
     try:
         service.start()
@@ -103,7 +103,7 @@ def _insert_schedule(
 def _point_backend_home(monkeypatch: pytest.MonkeyPatch, _pty_home: str) -> None:
     # One variable names the dedicated home for every resolver: the client dials the
     # service socket under it, so the in-process resolver and the service agree.
-    monkeypatch.setitem(os.environ, "AVA_HOME", _pty_home)
+    monkeypatch.setitem(os.environ, "MEIVA_HOME", _pty_home)
 
 
 @pytest.fixture
@@ -156,7 +156,7 @@ def test_pty_launch_live_capture(
     sid = _insert_schedule(
         db_conn,
         "pty-live",
-        "import time; from ava.sdk_surface.agent_identity import require_actor; "
+        "import time; from meiva.sdk_surface.agent_identity import require_actor; "
         "print('RUNNER_ALIVE', require_actor()); time.sleep(30)",
         "python schedule.py",
     )

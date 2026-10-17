@@ -3,8 +3,8 @@
 // drifting implementations (tz audit, 2026-08).
 //
 // Display principle (audit §4.4): humans see BROWSER-LOCAL time. This is a
-// deliberate divergence from what an agent sees (cluster `AVA_TIMEZONE`) —
-// do not read AVA_TIMEZONE here. Consistency means "one wording scheme per
+// deliberate divergence from what an agent sees (cluster `MEIVA_TIMEZONE`) —
+// do not read MEIVA_TIMEZONE here. Consistency means "one wording scheme per
 // audience", not "the same clock for every audience".
 //
 // Three shapes, one job each:

@@ -6,7 +6,7 @@ for `qwen3.8-max` AND `qwen3.8-27b`:
 
 1. **`enable_thinking: false` is honored** — HTTP 200, `reasoning_content`
    absent, content exactly the requested token. Not the 400 an undocumented
-   switch risked. This matters because Ava's short-text paths (the labeler, the
+   switch risked. This matters because Meiva's short-text paths (the labeler, the
    judge) send it on every call.
 2. **The streamed terminal usage frame does carry
    `prompt_tokens_details.cached_tokens`** — measured `{"prompt_tokens": 2723,
@@ -47,27 +47,27 @@ this file now guards. A third question remains genuinely open:
    Two ways to close that, in the order they are likely to happen. Whoever hits
    a real billing failure should **capture the raw body** and reconcile it with
    the vocabulary — the alert is silent either way, so nothing else will surface
-   a mismatch. Or, deliberately: point `AVA_LIVE_DASHSCOPE_KEY` at a key on a
+   a mismatch. Or, deliberately: point `MEIVA_LIVE_DASHSCOPE_KEY` at a key on a
    drained account and run this file; the arrears rejection arrives on the first
    call. That needs an account with no balance, which is why the assertion lives
    in that operator's hands rather than in a test here.
 
 ## Running it
 
-    AVA_LIVE_DASHSCOPE_KEY=sk-... .venv/bin/python -m pytest \
+    MEIVA_LIVE_DASHSCOPE_KEY=sk-... .venv/bin/python -m pytest \
         base/tests/test_qwen_live_smoke.py -v
 
 Costs a few cents. Skipped whenever that variable is unset, which is every CI
 run and every ordinary local run. A dedicated Model Studio workspace is not
 reachable from the public default endpoint, so point the run at it with
-`AVA_LIVE_DASHSCOPE_BASE_URL=https://<workspace-id>.cn-beijing.maas.aliyuncs.com/compatible-mode/v1`
-— unset, the run uses whatever `AVA_DASHSCOPE_BASE_URL` resolves to.
+`MEIVA_LIVE_DASHSCOPE_BASE_URL=https://<workspace-id>.cn-beijing.maas.aliyuncs.com/compatible-mode/v1`
+— unset, the run uses whatever `MEIVA_DASHSCOPE_BASE_URL` resolves to.
 
 **Why not gate on `DASHSCOPE_API_KEY` itself** — the obvious design, and it is a
 trap that yields a test nobody can ever run. Two independent mechanisms close it:
 `DASHSCOPE_API_KEY` is a cluster-scope alias, so `base/host/env/dotenv_boot.py`'s
 env-authority pass DELETES it from `os.environ` at import unless this unit's own
-`.env` declares it; and the suite runs under a throwaway `$AVA_HOME` with no
+`.env` declares it; and the suite runs under a throwaway `$MEIVA_HOME` with no
 `.env` at all, so no provider key ever reaches `settings.lm.*` in tests. A gate
 reading `settings.lm.dashscope_api_key` is therefore permanently False. The
 opt-in variable is deliberately NOT a Settings alias so it survives both, and the
@@ -100,12 +100,12 @@ from base.lm.factory import build_chat_model
 # live 2026-08-27; the streamed cache frame fact is guarded here like the
 # rest (the file is opt-in live, so this run extends the measurement to flash).
 _MODELS = ("qwen3.8-max", "qwen3.8-27b", "qwen3.8-flash")
-_LIVE_KEY = os.environ.get("AVA_LIVE_DASHSCOPE_KEY")
-_LIVE_BASE_URL = os.environ.get("AVA_LIVE_DASHSCOPE_BASE_URL")
+_LIVE_KEY = os.environ.get("MEIVA_LIVE_DASHSCOPE_KEY")
+_LIVE_BASE_URL = os.environ.get("MEIVA_LIVE_DASHSCOPE_BASE_URL")
 
 pytestmark = pytest.mark.skipif(
     not _LIVE_KEY,
-    reason="live DashScope call — set AVA_LIVE_DASHSCOPE_KEY to opt in (never set in CI)",
+    reason="live DashScope call — set MEIVA_LIVE_DASHSCOPE_KEY to opt in (never set in CI)",
 )
 
 
@@ -116,7 +116,7 @@ def _live_provider(monkeypatch: pytest.MonkeyPatch) -> None:
     `setattr` on the settings singleton rather than `setenv`: the env is read
     once at import, so a late `setenv` would silently no-op (the trap
     `no_os_environ.py` Rule 2 exists to catch). The override is also pinned
-    empty — a stray `AVA_LLM_OVERRIDE` in the operator's shell would otherwise
+    empty — a stray `MEIVA_LLM_OVERRIDE` in the operator's shell would otherwise
     route this to a fake model and the test would "pass" without calling
     DashScope at all.
     """

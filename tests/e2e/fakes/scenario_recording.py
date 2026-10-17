@@ -19,8 +19,8 @@ _USAGE = {"input_tokens": 10, "output_tokens": 5, "total_tokens": 15}
 
 
 def scratch_root(kind: str) -> Path:
-    name = Path(os.environ["AVA_HOME"]).name
-    return Path(tempfile.gettempdir()).resolve() / f"ava-e2e-{kind}-{name}"
+    name = Path(os.environ["MEIVA_HOME"]).name
+    return Path(tempfile.gettempdir()).resolve() / f"meiva-e2e-{kind}-{name}"
 
 
 def _record_path() -> Path:
@@ -64,7 +64,7 @@ class RecordingModel(ScriptedFakeChatModel):
                 {
                     "type": m.type,
                     "text": _text(m.content),
-                    "tag": m.additional_kwargs.get("ava_note_tag"),
+                    "tag": m.additional_kwargs.get("meiva_note_tag"),
                     "tool_calls": [tc["name"] for tc in getattr(m, "tool_calls", [])],
                 }
                 for m in messages

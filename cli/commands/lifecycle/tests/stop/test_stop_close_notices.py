@@ -47,7 +47,7 @@ def test_busy_fixture_waits_for_the_job_after_a_login_helper(
     pty_reaper: PtyReaper,
     pty_service: PtyServiceProcess,
 ) -> None:
-    name = "ava-agent-987-shell-2044-login-readiness"
+    name = "meiva-agent-987-shell-2044-login-readiness"
     release = home / "release-login-helper"
     startup = home / "login-helper.py"
     startup.write_text(
@@ -88,7 +88,7 @@ def test_stop_records_notice_for_verified_closed_busy_session(
 ) -> None:
     dependencies(monkeypatch, machine=command_runtime.machine)
     stop_env(monkeypatch, home)
-    name = "ava-agent-987-shell-2044-busy"
+    name = "meiva-agent-987-shell-2044-busy"
     busy_session(home, name, jobs.TERM_OK, pty_reaper)
 
     assert (
@@ -150,7 +150,7 @@ def test_notices_are_written_once_in_the_terminals_phase_before_the_data_plane_s
 
     monkeypatch.setattr(pty_close_notices, "write_notices", write)
     monkeypatch.setattr(command, "stop_data_plane", stop_data_plane)
-    name = "ava-agent-987-shell-2044-order"
+    name = "meiva-agent-987-shell-2044-order"
     busy_session(home, name, jobs.TERM_OK, pty_reaper)
 
     assert (
@@ -190,7 +190,7 @@ def test_the_stop_writes_the_owners_inbound_to_the_database(
             (owner,),
         )
     db_conn.commit()
-    name = f"ava-agent-{owner}-shell-2044-landed"
+    name = f"meiva-agent-{owner}-shell-2044-landed"
     busy_session(home, name, jobs.TERM_OK, pty_reaper)
 
     assert (
@@ -215,7 +215,7 @@ def test_the_stop_writes_the_owners_inbound_to_the_database(
     assert len(rows) == 1
     source, content, closed_name = rows[0]
     assert source == "system" and closed_name == name
-    assert "closed by an operator stop (ava stop)" in content
+    assert "closed by an operator stop (meiva stop)" in content
 
 
 def test_an_unwritable_notice_is_loud_and_does_not_fail_the_stop(
@@ -239,7 +239,7 @@ def test_an_unwritable_notice_is_loud_and_does_not_fail_the_stop(
         return [(notice, ConnectionError("connection refused")) for notice in batch]
 
     monkeypatch.setattr(pty_close_notices, "write_notices", unreachable)
-    name = "ava-agent-987-shell-2044-unreachable"
+    name = "meiva-agent-987-shell-2044-unreachable"
     busy_session(home, name, jobs.TERM_OK, pty_reaper)
 
     assert (
@@ -272,7 +272,7 @@ def test_a_stop_without_the_service_tells_owners_the_service_crashed_not_that_it
     child = subprocess.Popen(["true"])
     gone = OwnedProcess.capture(psutil.Process(child.pid))
     child.wait(timeout=10)
-    name = "ava-agent-987-shell-2044-crashed"
+    name = "meiva-agent-987-shell-2044-crashed"
     ledger.write(
         ledger_path(), [closure.Target(name, gone, (gone, OwnedProcess(gone.pid, 0.0, None)))]
     )

@@ -4,12 +4,12 @@ This is framework API for the plugin loader and the plugin catalog, not the agen
 it lives in base so the SDK surface does not own plugin discovery.
 
 The one production load path (`base.packages.plugins.loading.faces.import_faces`, which
-`ava.sdk_surface.extensions.load_extensions` runs for the agent host, a child and the plugin catalog) uses the primitives here — `load_plugin_module`
+`meiva.sdk_surface.extensions.load_extensions` runs for the agent host, a child and the plugin catalog) uses the primitives here — `load_plugin_module`
 (the by-path import contract: dotted name, synthetic parent packages,
 `sys.modules` registration before execution, reload-in-place) and
 `safe_load_plugin_module` (the fail-soft wrapper), so a plugin sees one module name,
 `__package__`, and `sys.modules` identity however many times it loads. Importing registers nothing: the SDK
-surface a plugin declares is installed by `ava/sdk_surface/install.py`.
+surface a plugin declares is installed by `meiva/sdk_surface/install.py`.
 """
 
 from __future__ import annotations
@@ -36,12 +36,12 @@ def register_plugin_parent_packages(pkg: str, name: str, plugin_dir: Path) -> No
 
     External plugins load under the dotted prefix ``plugins.<name>``, and
     resolving that prefix through the normal import machinery requires
-    ``$AVA_HOME`` to be on sys.path. It is not in the exec child (``python -I
-    -m agent.execution.child`` boots with cwd=$AVA_HOME/source): ``import plugins``
+    ``$MEIVA_HOME`` to be on sys.path. It is not in the exec child (``python -I
+    -m agent.execution.child`` boots with cwd=$MEIVA_HOME/source): ``import plugins``
     there resolves to the checkout's own legacy ``plugins/`` directory when one
     exists, or to nothing — either way ``from . import _sibling`` inside
-    plugin.py raises ModuleNotFoundError and took ``import ava`` down with it
-    (2026-08-28 ava_ledger incident). The framework owns the dotted prefix, so
+    plugin.py raises ModuleNotFoundError and took ``import meiva`` down with it
+    (2026-08-28 meiva_ledger incident). The framework owns the dotted prefix, so
     it registers the parent packages itself: ``pkg`` as a namespace package
     over the external plugins root and ``pkg.<name>`` over this plugin's
     directory. Existing sys.modules entries are left untouched — the
@@ -66,11 +66,11 @@ def load_plugin_module(
 ) -> ModuleType:
     """Import one plugin's ``plugin.py`` by path under its production dotted name.
 
-    THE by-path loader (`ava.sdk_surface.extensions.load_extensions` drives it), so
+    THE by-path loader (`meiva.sdk_surface.extensions.load_extensions` drives it), so
     one plugin sees one module name, one ``__package__``, and one
     ``sys.modules`` identity however many times it loads. The dotted name is
     ``plugins.<name>.<module>`` for an external plugin and
-    ``ava_builtins.plugins.<name>.<module>`` for a built-in (`module` defaults
+    ``meiva_builtins.plugins.<name>.<module>`` for a built-in (`module` defaults
     to the entry ``plugin``; `faces.py` passes ``agent_runtime`` for
     the runtime face) — importlib sets
     ``__package__`` from it, which is what makes ``from . import sibling``
@@ -114,7 +114,7 @@ def load_plugin_module(
     sys.modules[spec.name] = loaded
     if pkg == "plugins":
         # External plugins only: built-in plugins resolve through the real
-        # `ava_builtins.plugins` package (source is on sys.path), and shadowing
+        # `meiva_builtins.plugins` package (source is on sys.path), and shadowing
         # it with a synthetic module would hide whatever its __init__.py defines
         # from later `importlib.import_module` callers.
         register_plugin_parent_packages(pkg, name, plugin_py.parent)
@@ -146,7 +146,7 @@ def safe_load_plugin_module(
     ``plugin_load_failed`` telemetry event), and ``None`` is returned so the
     caller skips this plugin and keeps going. ``KeyboardInterrupt`` /
     ``SystemExit`` still propagate: cancellation is not a plugin failure
-    (2026-08-28 ava_ledger / 2026-09-10 agent-host incidents; user ruling
+    (2026-08-28 meiva_ledger / 2026-09-10 agent-host incidents; user ruling
     2026-09-11).
 
     ``report`` replaces the canonical reporter for this call (default: the canonical one).

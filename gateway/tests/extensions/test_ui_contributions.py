@@ -22,7 +22,7 @@ def _isolate_plugin_paths(
     user.mkdir()
     monkeypatch.setattr(paths, "repo_plugins_dir", lambda: repo)
     monkeypatch.setattr(paths, "plugins_dir", lambda: user)
-    monkeypatch.setenv("AVA_HOME", str(tmp_path / "ava"))
+    monkeypatch.setenv("MEIVA_HOME", str(tmp_path / "meiva"))
 
 
 def _write_plugin(
@@ -36,7 +36,7 @@ def _write_plugin(
     directory.mkdir()
     (directory / "plugin.py").write_text('"""A test plugin."""\n', encoding="utf-8")
     if raw is not None:
-        (directory / "ava-plugin.json").write_text(raw, encoding="utf-8")
+        (directory / "meiva-plugin.json").write_text(raw, encoding="utf-8")
         return
     if not manifest:
         return
@@ -44,10 +44,10 @@ def _write_plugin(
         "apiVersion": 2,
         "name": name.replace("_", "-"),
         "version": "1.0.0",
-        "engines": {"ava": ">=0.1.0"},
+        "engines": {"meiva": ">=0.1.0"},
         "contributions": {} if ui is None else {"ui": ui},
     }
-    (directory / "ava-plugin.json").write_text(json.dumps(manifest_data), encoding="utf-8")
+    (directory / "meiva-plugin.json").write_text(json.dumps(manifest_data), encoding="utf-8")
 
 
 def _themes(client: TestClient) -> list[dict[str, object]]:
@@ -138,7 +138,7 @@ def test_plugin_without_a_manifest_fails_the_endpoint_naming_it() -> None:
         r = client.get("/api/ui/contributions")
     assert r.status_code == 500, r.text
     assert "plain" in r.text
-    assert "ava-plugin.json not found" in r.text
+    assert "meiva-plugin.json not found" in r.text
 
 
 def _stats(client: TestClient) -> list[dict[str, object]]:
@@ -195,7 +195,7 @@ def test_invalid_manifest_names_the_plugin() -> None:
                 "apiVersion": 2,
                 "name": "broken",
                 "version": "1.0.0",
-                "engines": {"ava": ">=0.1.0"},
+                "engines": {"meiva": ">=0.1.0"},
                 "contributions": {"ui": {"themes": [{"name": "x", "tokens": {"--nope": "#fff"}}]}},
             }
         ),

@@ -18,9 +18,9 @@ The observer script never kills peers.
 
 ## Contribution
 
-Workflow selection PR (merged during this work): https://github.com/zhiyuan-zhang0206/Ava/pull/4342
+Workflow selection PR (merged during this work): https://github.com/zhiyuan-zhang0206/Meiva/pull/4342
 
-Follow-up PR: https://github.com/zhiyuan-zhang0206/Ava/pull/4349
+Follow-up PR: https://github.com/zhiyuan-zhang0206/Meiva/pull/4349
 
 Development checkout: `.worktrees/workflow-selection`, branch
 `codex/workflow-usage-reminders`. The follow-up is submitted for review; no merge

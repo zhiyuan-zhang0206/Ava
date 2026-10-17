@@ -85,7 +85,7 @@ def test_docs_layer_without_init_counts(
     for index in range(20):
         _module(package / f"entry_{index}.py")
     (package / "docs").mkdir()
-    (package / "docs" / "package.ava.okf.md").write_text("# doc\n", encoding="utf-8")
+    (package / "docs" / "package.meiva.okf.md").write_text("# doc\n", encoding="utf-8")
     _track(package)
     assert lcs.main([], repo_root=tmp_path, parse_ast=ast.parse) == 1
     assert "tests/package: directory has 21 direct entries" in capsys.readouterr().out

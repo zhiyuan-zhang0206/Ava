@@ -17,7 +17,7 @@ import { FLEX_1, MIN_H_0, MIN_W_0 } from "@/lib/layout/layout";
 import { panelLayoutStorage } from "@/lib/layout/panel-layout-storage";
 import { cn } from "@/lib/format/utils";
 
-export const RUN_TIMELINE_SPLIT_LAYOUT_ID = "ava.run-timeline.split";
+export const RUN_TIMELINE_SPLIT_LAYOUT_ID = "meiva.run-timeline.split";
 const PANEL_MAIN = "panel-run-timeline-main";
 const PANEL_SIDE = "panel-run-timeline-side";
 const RUN_TIMELINE_SPLIT_STORAGE = panelLayoutStorage();

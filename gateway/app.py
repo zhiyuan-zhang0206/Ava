@@ -14,7 +14,7 @@ from fastapi.responses import JSONResponse
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from base import paths, telemetry
-from base.api_contracts.agent_contract import AvaAgentError
+from base.api_contracts.agent_contract import MeivaAgentError
 from base.cluster.machine.boot import machine_from_boot
 from base.cluster.rate_limit import LoginRateLimitConfig, LoginRateLimiter
 from base.config import ConfigBoot, Settings
@@ -69,8 +69,8 @@ from gateway.http.config import GatewayConfig, gateway_config_from_boot
 from gateway.http.middleware import latency, pause_policy, runtime_metrics
 from gateway.http.middleware.error_envelope import error_response, request_trace_middleware
 from gateway.http.middleware.error_handlers import (
-    ava_agent_error_handler,
     http_exception_handler,
+    meiva_agent_error_handler,
     model_catalog_unavailable_handler,
     request_validation_error_handler,
     unhandled_exception_handler,
@@ -225,7 +225,7 @@ async def lifespan(
             app.state.config_authority = ConfigAuthority(
                 runtime=config.view,
                 all_domains=config.view if config.view.profile is None else Settings(profile=None),
-                env_path=paths.ava_home() / ".env",
+                env_path=paths.meiva_home() / ".env",
             )
 
             app.state.started_at = time.time()
@@ -446,7 +446,7 @@ async def cluster_auth_middleware(
     )
 
 
-# ava:ref gateway/docs/error-responses-and-middleware-order.ava.okf.md#error-response-cors
+# meiva:ref gateway/docs/error-responses-and-middleware-order.meiva.okf.md#error-response-cors
 def create_app(
     config: GatewayConfig,
     *,
@@ -457,7 +457,7 @@ def create_app(
     if process_ownership not in {"borrowed", "owned"}:
         raise ValueError("gateway process ownership must be borrowed or owned")
     app = FastAPI(
-        title="Ava",
+        title="Meiva",
         lifespan=partial(lifespan, process=process, process_ownership=process_ownership),
         docs_url=None,
         redoc_url=None,
@@ -482,7 +482,7 @@ def create_app(
 
     app.middleware("http")(request_trace_middleware)
 
-    app.add_exception_handler(AvaAgentError, ava_agent_error_handler)  # type: ignore[arg-type]
+    app.add_exception_handler(MeivaAgentError, meiva_agent_error_handler)  # type: ignore[arg-type]
     app.add_exception_handler(RequestValidationError, request_validation_error_handler)  # type: ignore[arg-type]
     app.add_exception_handler(StarletteHTTPException, http_exception_handler)  # type: ignore[arg-type]
     app.add_exception_handler(Exception, unhandled_exception_handler)

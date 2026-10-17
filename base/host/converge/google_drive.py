@@ -66,7 +66,7 @@ def is_writable(d: Path) -> bool:
     """True if a temp file round-trips (write + read + delete) inside `d`."""
     if not d.is_dir():
         return False
-    probe = d / f".ava_drive_check_{secrets.token_hex(6)}.tmp"
+    probe = d / f".meiva_drive_check_{secrets.token_hex(6)}.tmp"
     try:
         probe.write_text("ok", encoding="utf-8")
         ok = probe.read_text(encoding="utf-8") == "ok"

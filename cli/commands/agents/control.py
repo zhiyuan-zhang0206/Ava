@@ -38,8 +38,8 @@ def _explicit_caller(source: str | None, *, field: str = "source") -> dict[str, 
     """Explicit provenance only — the environment never supplies or vetoes it.
 
     User ruling 2026-09-20: CLI parameters are explicit; the opt-in
-    AVA_CALLER_IDENTITY profile (still consumed by SDK-side stamping, see
-    ``ava.sdk_surface.agent_identity.require_actor``) no longer compensates an omitted ``--source``.
+    MEIVA_CALLER_IDENTITY profile (still consumed by SDK-side stamping, see
+    ``meiva.sdk_surface.agent_identity.require_actor``) no longer compensates an omitted ``--source``.
     """
     if source is None:
         return {}
@@ -47,7 +47,7 @@ def _explicit_caller(source: str | None, *, field: str = "source") -> dict[str, 
 
 
 class _AgentListItem(BaseModel):
-    """The small subset rendered by ``ava agents ls``."""
+    """The small subset rendered by ``meiva agents ls``."""
 
     agent_id: int
     status: str
@@ -108,7 +108,7 @@ _SEND_SOURCE_GUIDE = (
     "                                 distinct from the user (self-asserted, not authenticated)\n"
     "  --source shell:N | watcher:N   a machine notice (N = the producing session id)\n"
     "  --source schedule:N            a gateway schedule\n"
-    "See `ava agents send --help` for the full source set."
+    "See `meiva agents send --help` for the full source set."
 )
 
 
@@ -253,7 +253,7 @@ def cmd_agents_restart(
     *,
     source: str | None = None,
 ) -> int:
-    """`ava agents restart <id> [--config JSON]` — POST /api/agents/{id}/restart.
+    """`meiva agents restart <id> [--config JSON]` — POST /api/agents/{id}/restart.
 
     The agent exits after its current turn and a fresh process is respawned
     attached to the same agent_id (history preserved). `--config` merges a
@@ -297,7 +297,7 @@ def cmd_agents_restart(
 
 
 def cmd_agents_resurrect(agent_id: int, *, source: str | None = None) -> int:
-    """`ava agents resurrect <id>` — POST /api/agents/{id}/resurrect.
+    """`meiva agents resurrect <id>` — POST /api/agents/{id}/resurrect.
 
     Brings a terminated agent back: a fresh process is respawned attached to the
     same agent_id (history preserved). An already-running agent returns
@@ -374,7 +374,7 @@ def _shell_sessions_suffix(shell: dict[str, Any] | None, *, requested: bool) -> 
 def cmd_agents_terminate(
     agent_id: int, *, source: str | None = None, kill_all_shell_sessions: bool = False
 ) -> int:
-    """`ava agents terminate <id>` — graceful stop: the agent exits after
+    """`meiva agents terminate <id>` — graceful stop: the agent exits after
     processing its current turn. For an agent wedged mid-turn (a hung step) that
     cannot reach the graceful exit, use `kill`. A terminated agent is resurrected
     by any new message, including its own shells' and watchers' messages. With
@@ -389,7 +389,7 @@ def cmd_agents_terminate(
 def cmd_agents_kill(
     agent_id: int, *, source: str | None = None, kill_all_shell_sessions: bool = False
 ) -> int:
-    """`ava agents kill <id>` — request forceful interruption. Hosted work may
+    """`meiva agents kill <id>` — request forceful interruption. Hosted work may
     return enqueued while it drains; this is acceptance, not observed exit.
     The response acknowledges the host lifecycle request; completion is asynchronous.
     `--kill-all-shell-sessions` also kills every shell session the agent owns on

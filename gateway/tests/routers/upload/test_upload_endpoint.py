@@ -46,7 +46,7 @@ def _spawn_agent() -> int:
 
 
 def _agent_dir(home: Path, agent_id: int) -> Path:
-    return home / "Downloads" / f"AvaAgent-{agent_id}"
+    return home / "Downloads" / f"MeivaAgent-{agent_id}"
 
 
 def _stored_files(directory: Path) -> list[Path]:

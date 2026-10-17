@@ -6,7 +6,6 @@ import httpx
 import psycopg
 import pytest
 
-from ava.gateway_client import use_client
 from base.api_contracts.agent_contract import GatewayUnavailable
 from base.cluster.machine import MachineIdentity
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
@@ -15,6 +14,7 @@ from base.host.net.tests.retry_waits import retry_waits as retry_waits
 from gateway.agents import creation as agent_creation
 from gateway.tests.lifecycle.creation.test_guarded_creation import HEADERS, SECRET
 from gateway.tests.lifecycle.creation.test_sdk_strong_creation import httpx_response_of, sdk
+from meiva.gateway_client import use_client
 from ops.cluster import rpc
 from ops.lifecycle.launch import validate_launch_row
 from ops.rpc_schemas import LaunchAgentRequest, SpawnedAgent

@@ -1,7 +1,7 @@
 """Process-commit — the commit a *running process* actually loaded.
 
 The other commit signals are **disk** state: ``head_sha`` is what the
-checkout is at right now, ``running_sha`` what ``ava start`` last started on
+checkout is at right now, ``running_sha`` what ``meiva start`` last started on
 (`base.deploy.git.running_sha`). Neither answers "what is this daemon executing?" — a
 bookmark can be rewritten while an already-live process keeps its old code, so
 a daemon can sit on code from days ago while every bookmark reads as current.

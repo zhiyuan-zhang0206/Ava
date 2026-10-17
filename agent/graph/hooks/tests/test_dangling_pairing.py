@@ -176,7 +176,7 @@ def test_repairs_single_dangling_tool_use_at_tail() -> None:
     assert rebuilt[0] is original
     assert isinstance(rebuilt[1], ToolMessage)
     assert rebuilt[1].tool_call_id == "call_abc"
-    assert rebuilt[1].additional_kwargs["ava_msg_type"] == "exec_output"  # pyright: ignore[reportUnknownMemberType]
+    assert rebuilt[1].additional_kwargs["meiva_msg_type"] == "exec_output"  # pyright: ignore[reportUnknownMemberType]
 
 
 def test_repairs_every_dangling_tool_call_at_tail() -> None:
@@ -395,8 +395,8 @@ async def test_hook_synthesizes_unknown_result_for_dangling_tail() -> None:
     synthetic = repaired[1]
     assert isinstance(synthetic, ToolMessage)
     assert synthetic.tool_call_id == "call_x"
-    assert synthetic.additional_kwargs["ava_msg_type"] == "exec_output"  # pyright: ignore[reportUnknownMemberType]
-    assert synthetic.additional_kwargs["ava_exec_status"] == ExecStatus.UNKNOWN.value  # pyright: ignore[reportUnknownMemberType]
+    assert synthetic.additional_kwargs["meiva_msg_type"] == "exec_output"  # pyright: ignore[reportUnknownMemberType]
+    assert synthetic.additional_kwargs["meiva_exec_status"] == ExecStatus.UNKNOWN.value  # pyright: ignore[reportUnknownMemberType]
 
 
 async def test_hook_drops_orphan_tool_result_in_the_5333_shape() -> None:

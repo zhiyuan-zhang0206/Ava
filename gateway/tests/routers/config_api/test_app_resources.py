@@ -40,7 +40,7 @@ def clients(
         cursor = app.state.db_pool.connection.return_value.__enter__.return_value.cursor.return_value.__enter__.return_value
         cursor.fetchone.return_value = (1,)
         env_path = tmp_path / f"{index}.env"
-        env_path.write_text(f"AVA_MODEL=model-{index}\n")
+        env_path.write_text(f"MEIVA_MODEL=model-{index}\n")
         app.state.config_authority = ConfigAuthority(
             config_authority.runtime, config_authority.all_domains, env_path
         )

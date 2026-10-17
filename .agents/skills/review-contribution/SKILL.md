@@ -1,6 +1,6 @@
 ---
 name: review-contribution
-description: "Reviews Ava contributions against project rules. Use before opening a PR or checking a change's design, consumers, and validation."
+description: "Reviews Meiva contributions against project rules. Use before opening a PR or checking a change's design, consumers, and validation."
 ---
 
 # Review your contribution

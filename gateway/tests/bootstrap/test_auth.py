@@ -2,7 +2,7 @@
 
 The auth middleware gates every API route except /api/health, /api/auth/login,
 and /api/auth/check. Two auth methods are accepted:
-1. Session cookie (``ava_session``) — for browser users.
+1. Session cookie (``meiva_session``) — for browser users.
 2. ``Authorization: Bearer <secret>`` — for SDK / agent callers.
 
 An empty cluster secret is the no-auth posture: the middleware passes every
@@ -308,12 +308,12 @@ def test_sessions_list_masks_non_current_ids() -> None:
 def test_sessions_list_labels_managed_browser_sessions() -> None:
     """The managed-browser daemon's login UA marks its session rows."""
     with gateway_test_client() as client:
-        login(client, user_agent="ava-managed-browser")
+        login(client, user_agent="meiva-managed-browser")
         client.cookies.clear()
         login(client, user_agent="test-browser")
         rows = client.get("/api/auth/sessions").json()
 
-    managed = [row for row in rows if row["user_agent"] == "ava-managed-browser"]
+    managed = [row for row in rows if row["user_agent"] == "meiva-managed-browser"]
     normal = [row for row in rows if row["user_agent"] == "test-browser"]
     assert len(managed) == 1 and len(normal) == 1
     assert managed[0]["managed"] is True

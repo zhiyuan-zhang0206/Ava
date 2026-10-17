@@ -5,16 +5,16 @@ enrolled with a gateway URL) fetches the cluster's config from the gateway at
 startup and injects it into os.environ before Settings is built — there is no
 materialized `.env` cache of cluster facts. The
 one cache that does exist is a transient 0600 config snapshot under
-`$AVA_HOME/run/`: a successful fetch writes it, and a later process skips the
+`$MEIVA_HOME/run/`: a successful fetch writes it, and a later process skips the
 fetch while it is fresh, falling back to it (with a warning) when the gateway
 is unreachable — see the snapshot helpers below. A
-gateway-capable unit keeps the cluster's config in its own `$AVA_HOME/.env` and
+gateway-capable unit keeps the cluster's config in its own `$MEIVA_HOME/.env` and
 never fetches; which side a unit is on is derived from its serve flags (see
 `config_source_is_local` / `should_fetch_from_gateway`), not from an env var. A bare checkout with no role flags (CI, lint
 scripts) and a not-yet-enrolled runner resolve locally with no fetch — the preflight gate refuses an unenrolled
-`ava start`, not the Settings import. The
+`meiva start`, not the Settings import. The
 bytes travel the private network; an authenticated gateway requires a bearer,
-which this presents from the unit's machine API token (`AVA_API_TOKEN`, from
+which this presents from the unit's machine API token (`MEIVA_API_TOKEN`, from
 its installed capability); a unit never holds the human cluster secret.
 Intentionally imports nothing from base.config (it runs DURING base.config
 import) — only stdlib and the settings-free EnvBootResult at import;
@@ -85,7 +85,7 @@ def _fetch_backoff(attempt: int) -> float:
 
 
 # The parent config snapshot (P0 #2100): a successful fetch writes the payload
-# to `$AVA_HOME/run/bootstrap-snapshot.json` (0600). A later process on the same
+# to `$MEIVA_HOME/run/bootstrap-snapshot.json` (0600). A later process on the same
 # unit — most importantly the exec child the agent process spawns per turn —
 # SKIPS the fetch while the snapshot is fresh, so a gateway that is down or
 # restarting is no longer a single point that silently kills every execute_code
@@ -123,15 +123,15 @@ def _transport_failures() -> tuple[type[BaseException], ...]:
     )
 
 
-# The maintenance-verb opt-out (settings-lite). `ava stop` / `ava status` / the
+# The maintenance-verb opt-out (settings-lite). `meiva stop` / `meiva status` / the
 # watchdog probe / the thin-client verbs must still construct Settings while the
-# gateway is down, so `cli.main` sets AVA_CONFIG_FETCH=skip for them before any
+# gateway is down, so `cli.main` sets MEIVA_CONFIG_FETCH=skip for them before any
 # settings-loading import. Every other process — start, converge, update, the
 # daemons, the agents — derives its fetch decision purely from the role flag and
 # fetches when it is a pure agent-runner. base.sessions.env_forwarding deliberately does NOT
 # forward this var to spawned processes (a daemon/agent must fetch per its own
 # role, never inherit a CLI verb's opt-out).
-CONFIG_FETCH_ENV = "AVA_CONFIG_FETCH"
+CONFIG_FETCH_ENV = "MEIVA_CONFIG_FETCH"
 CONFIG_FETCH_SKIP = "skip"
 
 _TRUTHY = frozenset({"1", "true", "yes", "on"})
@@ -140,18 +140,18 @@ _FALSY = frozenset({"0", "false", "no", "off"})
 
 def _serve_flag(env_key: str) -> bool:
     """Settings-free mirror of one capability flag's resolution: env
-    `AVA_MACHINE_SERVE_*` > `$AVA_HOME/.env` > False.
+    `MEIVA_MACHINE_SERVE_*` > `$MEIVA_HOME/.env` > False.
 
     Normal config boot has already loaded the `.env` before this function runs,
     so its value is in the environment. Settings-lite maintenance commands do
-    not load it: read the file directly so `ava config --local` correctly sees
+    not load it: read the file directly so `meiva config --local` correctly sees
     a gateway unit without constructing Settings. `base.cluster.machine` reads the
     flag through Settings, which does not exist yet while this module runs. A
     malformed value resolves False here; the real resolver raises on it loudly
     later, so the config-source decision can never silently disagree with the
     machine role.
 
-    The `.env` read resolves `$AVA_HOME` through `base.paths.home.resolve_ava_home()`: at
+    The `.env` read resolves `$MEIVA_HOME` through `base.paths.home.resolve_meiva_home()`: at
     this point in boot the env var may not be pinned yet (see above).
     """
     raw = os.environ.get(env_key)
@@ -166,46 +166,48 @@ def _serve_flag(env_key: str) -> bool:
 
 
 def config_source_is_local() -> bool:
-    """Whether this unit's config source is its own `$AVA_HOME/.env`.
+    """Whether this unit's config source is its own `$MEIVA_HOME/.env`.
 
-    Role-derived (AVA_CONFIG_SOURCE deleted 2026-08-01): a unit that serves the
+    Role-derived (MEIVA_CONFIG_SOURCE deleted 2026-08-01): a unit that serves the
     gateway owns the cluster's config in its own `.env` and never fetches; a
     configured pure agent-runner holds only the bootstrap env (gateway URL +
-    secret, from `ava start`) and fetches the rest from the gateway at every
+    secret, from `meiva start`) and fetches the rest from the gateway at every
     process start (see `should_fetch_from_gateway`). A bare checkout with no
     role flags — CI, lint scripts, dev tools — is not a unit yet and resolves
     locally with no fetch.
 
-    The serve-gateway flag is read settings-free (env > `$AVA_HOME/.env` > False)
+    The serve-gateway flag is read settings-free (env > `$MEIVA_HOME/.env` > False)
     because this runs DURING the Settings import, before base.cluster.machine can
     resolve the role. `cli.main` opts the maintenance verbs out of the fetch with
-    AVA_CONFIG_FETCH=skip (see CONFIG_FETCH_ENV); that is orthogonal to this
+    MEIVA_CONFIG_FETCH=skip (see CONFIG_FETCH_ENV); that is orthogonal to this
     derivation.
     """
-    return _serve_flag("AVA_MACHINE_SERVE_GATEWAY")
+    return _serve_flag("MEIVA_MACHINE_SERVE_GATEWAY")
 
 
 def should_fetch_from_gateway() -> bool:
     """Whether this process's Settings build fetches cluster config from the gateway.
 
     True only for a CONFIGURED pure agent-runner: the serve_agent_runner flag is
-    on (env `AVA_MACHINE_SERVE_AGENT_RUNNER` > `$AVA_HOME/.env` > False) AND a gateway
-    URL is present (`ava start` validates the remote projection before persisting
+    on (env `MEIVA_MACHINE_SERVE_AGENT_RUNNER` > `$MEIVA_HOME/.env` > False) AND a gateway
+    URL is present (`meiva start` validates the remote projection before persisting
     runner identity). Everything else resolves locally:
 
     - a gateway-capable unit (config_source_is_local) never fetches;
     - a bare checkout with no role flags (CI, lint scripts, dev tools) and a
       not-yet-enrolled runner (flag on, no URL) construct Settings from their
-      local env/.env with no fetch and no error — `ava start`'s preflight gate
+      local env/.env with no fetch and no error — `meiva start`'s preflight gate
       is what refuses an unenrolled runner, not the Settings import, so any
       tool that imports base.config keeps working on any machine.
 
-    Reads os.environ only: by the time base.config calls this, load_ava_env
+    Reads os.environ only: by the time base.config calls this, load_meiva_env
     has loaded (and `_enforce_cluster_env_authority` forced) the unit's .env,
     so the flag and the URL are both present in the environment when they
     exist on disk.
     """
-    return _serve_flag("AVA_MACHINE_SERVE_AGENT_RUNNER") and bool(os.environ.get("AVA_GATEWAY_URL"))
+    return _serve_flag("MEIVA_MACHINE_SERVE_AGENT_RUNNER") and bool(
+        os.environ.get("MEIVA_GATEWAY_URL")
+    )
 
 
 class BootstrapFetchError(RuntimeError):
@@ -213,7 +215,7 @@ class BootstrapFetchError(RuntimeError):
     no gateway URL to fetch from, or every fetch attempt failed (unreachable /
     401 / bad body).
 
-    The process must not start with no config. `ava start` exits 1 with this
+    The process must not start with no config. `meiva start` exits 1 with this
     message (the boot policy retries it); a daemon dies at import and the OS
     watchdog probe revives it until the gateway is reachable again — the
     fetch's own retry plus that revive loop is what makes a gateway restart
@@ -268,7 +270,7 @@ def fetch_bootstrap_config(
 
     Presents `Authorization: Bearer <bearer>`: an explicit `bearer` (a joining
     start holding its bundle's token), else this process's machine API token
-    (`AVA_API_TOKEN`, delivered by the launcher or the boot pass), else none (the
+    (`MEIVA_API_TOKEN`, delivered by the launcher or the boot pass), else none (the
     gateway then answers 401). Read from os.environ, not Settings — this runs during the
     Settings import.
 
@@ -308,9 +310,9 @@ def fetch_bootstrap_config(
 
 def snapshot_path() -> Path:
     """The unit's config snapshot path, under this process's home."""
-    from base.paths.home import resolve_ava_home
+    from base.paths.home import resolve_meiva_home
 
-    return resolve_ava_home() / "run" / _SNAPSHOT_NAME
+    return resolve_meiva_home() / "run" / _SNAPSHOT_NAME
 
 
 def read_config_snapshot(base_url: str) -> tuple[dict[str, str], float] | None:
@@ -383,19 +385,19 @@ def _write_config_snapshot(base_url: str, values: dict[str, str]) -> None:
 def apply_bootstrap_values(base_url: str, values: dict[str, str]) -> None:
     """Inject one bootstrap payload into os.environ — the shared tail of the
     fetch path and the snapshot path."""
-    # ``AVA_GATEWAY_HEALTH_URL`` is host-scoped, so the gateway correctly does
+    # ``MEIVA_GATEWAY_HEALTH_URL`` is host-scoped, so the gateway correctly does
     # not serve it in the cluster bootstrap payload.  A pure runner that was
     # enrolled without an explicit override must still probe the gateway it
     # actually fetched from, not ServiceSettings' single-box localhost default.
     # Keep a deliberate host override; otherwise the enrollment base URL is the
     # one reachability fact this process already proved.
-    if not os.environ.get("AVA_GATEWAY_HEALTH_URL"):
-        os.environ["AVA_GATEWAY_HEALTH_URL"] = f"{base_url.rstrip('/')}/api/health"
+    if not os.environ.get("MEIVA_GATEWAY_HEALTH_URL"):
+        os.environ["MEIVA_GATEWAY_HEALTH_URL"] = f"{base_url.rstrip('/')}/api/health"
     from base.host.env.dotenv_boot import is_delivered_unit_login
 
     delivered = is_delivered_unit_login()
     for key, value in values.items():
-        if key == "AVA_DB_URL" and delivered:
+        if key == "MEIVA_DB_URL" and delivered:
             # The launcher's (or this process's consumed) unit login stays; the
             # served value is only the credential-free endpoint.
             continue
@@ -405,17 +407,17 @@ def apply_bootstrap_values(base_url: str, values: dict[str, str]) -> None:
 def _gateway_base_url() -> str:
     """The enrolled gateway to dial, or an actionable failure.
 
-    The gateway URL is AVA_GATEWAY_URL (`ava start` wrote it to `.env`; this
+    The gateway URL is MEIVA_GATEWAY_URL (`meiva start` wrote it to `.env`; this
     runs before Settings, so it is read from the environment directly).
     """
-    base_url = os.environ.get("AVA_GATEWAY_URL") or ""
+    base_url = os.environ.get("MEIVA_GATEWAY_URL") or ""
     if not base_url:
         raise BootstrapFetchError(
-            "this host is a pure agent-runner but has no AVA_GATEWAY_URL — its cluster "
+            "this host is a pure agent-runner but has no MEIVA_GATEWAY_URL — its cluster "
             "config comes from the gateway at startup. Join it to its gateway first:\n"
-            "    set AVA_DB_CAPABILITY_KEY from a non-echoing prompt, then run:\n"
-            "    ava init --serve-agent-runner --no-serve-gateway --gateway-url <url> --machine-name <name> --machine-host "
-            "<this-host-addr> --db-capability <bundle from `ava cluster db-authority issue-unit`>, then ava start"
+            "    set MEIVA_DB_CAPABILITY_KEY from a non-echoing prompt, then run:\n"
+            "    meiva init --serve-agent-runner --no-serve-gateway --gateway-url <url> --machine-name <name> --machine-host "
+            "<this-host-addr> --db-capability <bundle from `meiva cluster db-authority issue-unit`>, then meiva start"
         )
     return base_url
 
@@ -471,7 +473,7 @@ def resolve_bootstrap_values() -> dict[str, str]:
             f"could not fetch cluster config from the gateway at {base_url} ({exc}).\n"
             "    A pure agent-runner fetches GET /api/bootstrap at every process start "
             "(a fresh parent snapshot skips the fetch); this host has no snapshot to "
-            "fall back on. Bring the gateway up (or check AVA_GATEWAY_URL / the "
+            "fall back on. Bring the gateway up (or check MEIVA_GATEWAY_URL / the "
             "unit capability's API token / private-network reachability), then retry."
         ) from exc
     except Exception as exc:
@@ -479,7 +481,7 @@ def resolve_bootstrap_values() -> dict[str, str]:
             f"could not fetch cluster config from the gateway at {base_url} ({exc}).\n"
             "    A pure agent-runner fetches GET /api/bootstrap at every process start "
             "(a fresh parent snapshot skips the fetch). Bring the gateway up (or check "
-            "AVA_GATEWAY_URL / the unit capability's API token / private-network "
+            "MEIVA_GATEWAY_URL / the unit capability's API token / private-network "
             "reachability), then retry."
         ) from exc
     _write_config_snapshot(base_url, values)
@@ -493,13 +495,13 @@ def inject_config_from_gateway() -> EnvBootResult:
     `config_source_is_local`). The fetched values are AUTHORITATIVE: every key
     the gateway serves overwrites os.environ, including a stale value a
     `.env` still carries (`_enforce_cluster_env_authority` forces file values
-    in at `load_ava_env`, and this runs after it) and a
+    in at `load_meiva_env`, and this runs after it) and a
     forwarded copy from a spawning process. The gateway's `.env` is the single
     cluster-wide copy.
 
     The values come from `resolve_bootstrap_values` (fresh snapshot / fetch /
     last-known-snapshot fallback); this wrapper applies them, including the
-    derived `AVA_GATEWAY_HEALTH_URL` for a runner enrolled without an explicit
+    derived `MEIVA_GATEWAY_HEALTH_URL` for a runner enrolled without an explicit
     override. The database login is the one exception to "fetched values are
     authoritative": a delivered unit login is kept, and a process without one
     receives the installed capability only when it runs the admitted runtime

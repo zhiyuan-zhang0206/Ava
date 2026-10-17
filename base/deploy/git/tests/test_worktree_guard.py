@@ -21,13 +21,13 @@ def test_a_pty_session_anchored_under_the_target_is_reported(
     target.mkdir(parents=True)
     elsewhere = unit_home / "workspaces" / "9"
     elsewhere.mkdir(parents=True)
-    new("ava-schedule-1", target)
+    new("meiva-schedule-1", target)
     new("agent-shell", elsewhere)
 
     hits = find_live_anchors(target, run=unit_home / "run")
 
     (reported,) = [hit for hit in hits if hit.startswith("pty session")]
-    assert "ava-schedule-1" in reported and str(target) in reported
+    assert "meiva-schedule-1" in reported and str(target) in reported
     assert not any("agent-shell" in hit for hit in hits)
 
 
@@ -88,7 +88,7 @@ def test_case_alias_spelling_finds_anchors(
         pytest.skip("requires a case-insensitive filesystem (macOS APFS)")
 
     pty_session_cwd = target
-    new("ava-case-alias", pty_session_cwd)
+    new("meiva-case-alias", pty_session_cwd)
     hits = find_live_anchors(alias, run=unit_home / "run")
     assert any("pty session" in h for h in hits), hits
 

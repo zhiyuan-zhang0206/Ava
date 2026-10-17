@@ -94,7 +94,7 @@ _GROUP = ""
 
 
 class OpenNotice(BaseModel):
-    """One open notice from ava.ui.notify() (migration 0053).
+    """One open notice from meiva.ui.notify() (migration 0053).
 
     The agent snapshot's `notices_awaiting_response` carries only the require_response
     subset (the "needs response" worklist); this model also serves the per-agent
@@ -181,7 +181,7 @@ class AgentSnapshot(BaseModel):
     heartbeat_paused_until: datetime | None
 
 
-# ava:ref base/agents/observation/docs/observation.ava.okf.md#agent-capability-projection
+# meiva:ref base/agents/observation/docs/observation.meiva.okf.md#agent-capability-projection
 def agent_supports_vision(
     config_overlay: Any,
     birth_config: Any,

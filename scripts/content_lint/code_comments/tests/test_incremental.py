@@ -112,12 +112,12 @@ def test_global_reference_integrity_survives_legacy_matching(tmp_path: Path, bro
 
     contents = files()
     if broken == "record":
-        contents.pop("pkg/docs/core.ava.okf.md")
+        contents.pop("pkg/docs/core.meiva.okf.md")
     elif broken == "test":
         contents["pkg/tests/test_core.py"] = "def removed_test(): pass\n"
     else:
         contents["pkg/core.py"] = contents["pkg/core.py"].replace(
-            "# ava:ref", "# malformed ava:ref"
+            "# meiva:ref", "# malformed meiva:ref"
         )
     repo = repository(tmp_path, contents)
     path = "pkg/core.py"

@@ -25,8 +25,8 @@ from base.host.system.tests.fake_crontab import FakeCrontab
 _UID = 501
 
 
-def _ava(*, host: Host) -> str:
-    return "/work tree/.venv/bin/ava"
+def _meiva(*, host: Host) -> str:
+    return "/work tree/.venv/bin/meiva"
 
 
 def _path(*, host: Host) -> str:
@@ -54,8 +54,8 @@ def _recorder(calls: list[str], label: str) -> Callable[..., None]:
 @pytest.fixture(autouse=True)
 def _configure_job(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     monkeypatch.setenv("HOME", str(tmp_path))
-    monkeypatch.setattr(cron, "ava_binary_path", _ava)
-    monkeypatch.setattr(cron, "job_home", lambda: str(tmp_path / ".ava"))
+    monkeypatch.setattr(cron, "meiva_binary_path", _meiva)
+    monkeypatch.setattr(cron, "job_home", lambda: str(tmp_path / ".meiva"))
     monkeypatch.setattr(cron, "launchd_path_env", _path)
     monkeypatch.setattr(settings.services, "backup_hour", 3)
 
@@ -84,16 +84,16 @@ def test_launchd_plist_runs_the_tick_command_daily_and_logs_to_walg_log(tmp_path
     root = ET.fromstring(content)  # noqa: S314 — self-generated plist
     values = [element.text for element in root.findall("./dict/array/string")]
 
-    assert "<string>com.ava.walg</string>" in content
-    assert values == ["/bin/sh", "-c", "'/work tree/.venv/bin/ava' backup walg run"]
+    assert "<string>com.meiva.walg</string>" in content
+    assert values == ["/bin/sh", "-c", "'/work tree/.venv/bin/meiva' backup walg run"]
     assert (
         "<key>StartCalendarInterval</key>\n    <dict>\n"
         "            <key>Hour</key>\n            <integer>6</integer>\n"
         "            <key>Minute</key>\n            <integer>25</integer>\n"
     ) in content
     assert "<key>RunAtLoad</key>\n    <false/>" in content
-    assert content.count(f"{tmp_path}/.ava/logs/walg.log") == 2
-    assert f"<string>{tmp_path}/.ava</string>" in content  # AVA_HOME pin
+    assert content.count(f"{tmp_path}/.meiva/logs/walg.log") == 2
+    assert f"<string>{tmp_path}/.meiva</string>" in content  # MEIVA_HOME pin
 
 
 def test_macos_reregistration_rewrites_and_reloads_idempotently() -> None:
@@ -127,8 +127,8 @@ def test_macos_unregister_removes_the_plist_and_is_repeatable() -> None:
 
 
 def test_linux_registration_replaces_only_its_own_line(tmp_path: Path) -> None:
-    other = "40 4 * * * /x/ava logs rotate  # ava-logs-maintenance"
-    old = "25 1 * * * /old/ava backup walg run  # ava-walg"
+    other = "40 4 * * * /x/meiva logs rotate  # meiva-logs-maintenance"
+    old = "25 1 * * * /old/meiva backup walg run  # meiva-walg"
     crontab = FakeCrontab(f"{other}\n\n{old}\n{old}\n")
 
     assert (
@@ -141,14 +141,14 @@ def test_linux_registration_replaces_only_its_own_line(tmp_path: Path) -> None:
     body = crontab.writes[-1]
     assert f"{other}\n\n" in body
     assert old not in body
-    assert body.count("# ava-walg") == 1
-    (line,) = [line for line in body.splitlines() if "# ava-walg" in line]
+    assert body.count("# meiva-walg") == 1
+    (line,) = [line for line in body.splitlines() if "# meiva-walg" in line]
     assert line.startswith("25 6 * * * ")
     # `/bin/sh -c <quoted command>`: the shell word after -c is the command itself.
     command = shlex.split(line.split(" /bin/sh -c ", 1)[1])[0]
-    assert command == "'/work tree/.venv/bin/ava' backup walg run"
-    assert f">> {tmp_path}/.ava/logs/walg.log 2>&1" in line
-    assert line.endswith("  # ava-walg")
+    assert command == "'/work tree/.venv/bin/meiva' backup walg run"
+    assert f">> {tmp_path}/.meiva/logs/walg.log 2>&1" in line
+    assert line.endswith("  # meiva-walg")
 
 
 def test_linux_without_crontab_reports_and_registers_nothing(
@@ -167,8 +167,8 @@ def test_linux_without_crontab_reports_and_registers_nothing(
 
 
 def test_linux_unregister_removes_the_line_and_keeps_the_rest() -> None:
-    other = "40 4 * * * /x/ava logs rotate  # ava-logs-maintenance"
-    crontab = FakeCrontab(f"{other}\n25 6 * * * /x/ava backup walg run  # ava-walg\n")
+    other = "40 4 * * * /x/meiva logs rotate  # meiva-logs-maintenance"
+    crontab = FakeCrontab(f"{other}\n25 6 * * * /x/meiva backup walg run  # meiva-walg\n")
 
     assert job.unregister_linux(host=_linux(crontab)) == 0
 

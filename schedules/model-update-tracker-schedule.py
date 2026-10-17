@@ -9,19 +9,19 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
-import ava
-from ava.agents import AgentStatus as S
+import meiva
+from meiva.agents import AgentStatus as S
 from schedules.agent_status_guard import ensure_agent_status_members
 from schedules.catchup import cluster_timezone, fire_slot_once
-from base.paths import ava_home, repo_root
+from base.paths import meiva_home, repo_root
 from base.daemon.schedules.watcher import next_fire
 from base.daemon.schedules.inputs import ScheduleInputs
 from schedules.entry import fresh_schedule_entry, schedule_entry
 
 
 CRON = "0 6 * * *"
-_REPORT_LABEL = "Ava \u8d1f\u8d23\u4eba"
-_REPORT_AGENT_ENV = "AVA_MODEL_UPDATE_REPORT_AGENT"
+_REPORT_LABEL = "Meiva \u8d1f\u8d23\u4eba"
+_REPORT_AGENT_ENV = "MEIVA_MODEL_UPDATE_REPORT_AGENT"
 _TIMEOUT_SECONDS = 120
 
 
@@ -37,7 +37,7 @@ def _report_agent() -> int:
         return agent_id
     before_id = None
     while True:
-        page = ava.agents.list_agents(scope="all", query=_REPORT_LABEL, before_id=before_id)
+        page = meiva.agents.list_agents(scope="all", query=_REPORT_LABEL, before_id=before_id)
         for agent in page.agents:
             if agent.label == _REPORT_LABEL and agent.status in (S.RUNNING, S.IDLING, S.TERMINATED):
                 return agent.agent_id
@@ -48,7 +48,7 @@ def _report_agent() -> int:
 
 def _send_report(message: str) -> None:
     try:
-        ava.agents.send_message(_report_agent(), message)
+        meiva.agents.send_message(_report_agent(), message)
     except Exception as exc:
         print(f"model update tracker could not notify the P0 lead: {exc}")
         raise
@@ -113,7 +113,7 @@ def _report_from_result(result: subprocess.CompletedProcess[str], report_dir: Pa
 def run_tracker() -> None:
     """Run one detection cycle and notify on candidate, error, or status change."""
     root = repo_root()
-    report_dir = ava_home() / "model-tracker"
+    report_dir = meiva_home() / "model-tracker"
     child_env = os.environ.copy()
     child_env["PYTHONPATH"] = str(root)
     try:
@@ -163,7 +163,7 @@ if __name__ == "__main__":
         {"IDLING", "RUNNING", "TERMINATED"},
         schedule_name="model-update-tracker",
     )
-    entry_inputs = globals().get("AVA_SCHEDULE_INPUTS")
+    entry_inputs = globals().get("MEIVA_SCHEDULE_INPUTS")
     if entry_inputs is None:
         from base.log import prepare_process_logging
 

@@ -78,7 +78,7 @@ SQL_DENIED_KEYWORDS = frozenset(
 
 # Aggregate / scalar functions that are read-only and safe on the agents_meta table.
 # percentile_cont (with WITHIN GROUP) is the ordered-set aggregate used for
-# per-bucket duration percentiles (W18 ava_observability pack).
+# per-bucket duration percentiles (W18 meiva_observability pack).
 SQL_FUNCTIONS = frozenset(
     {
         "COUNT",

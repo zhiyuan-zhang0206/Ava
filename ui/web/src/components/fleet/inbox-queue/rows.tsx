@@ -33,7 +33,7 @@ export function AgentStatusDot({ status }: { status: PublicAgentStatus | null })
   );
 }
 
-// A direct link to an agent's live page (ava.ui.show), opened in a new tab — the
+// A direct link to an agent's live page (meiva.ui.show), opened in a new tab — the
 // inbox's entry point to what the agent is showing. Icon-only on a queue row,
 // icon + title in a detail header. Stops click propagation so opening the page
 // never also selects the row it sits on.

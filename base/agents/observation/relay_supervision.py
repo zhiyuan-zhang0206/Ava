@@ -1,7 +1,7 @@
 """What the native runtime remembers about each agent's bound impersonation relay.
 
 The agent host builds one `RelaySupervision` and holds it: it hands it to the turns it runs
-(`AvaContext.relays`, read by the claim gate) and to its own supervision and activation calls
+(`MeivaContext.relays`, read by the claim gate) and to its own supervision and activation calls
 (`agent.impersonation`). The agent-host service drives several agents in one process, so every
 record is keyed by agent; entries die with the process or are popped when the native agent
 regains control.

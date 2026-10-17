@@ -1,5 +1,5 @@
 # The PR-time dependency audit in ci.yml is informational and nobody reads it. This weekly run
-# turns the same checks (plus the version constants Ava downloads outside the lockfiles) into
+# turns the same checks (plus the version constants Meiva downloads outside the lockfiles) into
 # one tracked issue: opened or updated while a high/critical advisory or a behind pin exists,
 # closed when a run comes back clean. It never changes a pin.
 
@@ -43,9 +43,9 @@ jobs:
       - name: Audit dependencies and pinned binaries
         env:
           GH_TOKEN: ${{ github.token }}
-          AVA_HOME: ${{ runner.temp }}/ava-home
+          MEIVA_HOME: ${{ runner.temp }}/meiva-home
         run: |
-          mkdir -p "$AVA_HOME"
+          mkdir -p "$MEIVA_HOME"
           python3 scripts/ci/dependency_audit.py \
             --out "$RUNNER_TEMP/dependency-audit.md" --sync-issue "$GITHUB_REPOSITORY"
           cat "$RUNNER_TEMP/dependency-audit.md" >> "$GITHUB_STEP_SUMMARY"

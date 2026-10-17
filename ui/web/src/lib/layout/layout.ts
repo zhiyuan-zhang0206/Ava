@@ -1,4 +1,4 @@
-// Shared layout contract for the Ava frontend — the single source of
+// Shared layout contract for the Meiva frontend — the single source of
 // truth for the persistent-bar geometry AND the named layout invariants
 // (I1–I6) that guard it.
 //

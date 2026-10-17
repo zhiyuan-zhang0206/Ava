@@ -129,7 +129,7 @@ export default function DisplaySettingsPage() {
             label="Skin"
             description="A plugin-contributed color pack, applied over the active light/dark palette. Colors it does not set keep following light/dark. A pack marked 'no dark variant' pins the colors it does set across both modes, so the light/dark toggle will not change them"
             options={[
-              { value: "", label: "Default (Ava)" },
+              { value: "", label: "Default (Meiva)" },
               ...themePacks.map((p) => ({
                 value: themePackId(p),
                 // Marked per pack rather than only in the description: a pack

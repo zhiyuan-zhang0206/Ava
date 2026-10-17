@@ -40,11 +40,11 @@ def test_memory_search_tcp_port_follows_settings(monkeypatch: pytest.MonkeyPatch
 
 
 def test_frontend_curl_url_follows_app_port(monkeypatch: pytest.MonkeyPatch) -> None:
-    """The frontend healthcheck probes the Next.js app — AVA_APP_PORT when set,
+    """The frontend healthcheck probes the Next.js app — MEIVA_APP_PORT when set,
     else the entry port + 1 (the entry itself is owned by the gate)."""
     monkeypatch.setattr(settings.services, "frontend_healthcheck_url", "http://localhost:4000")
     # app_port() returns settings.services.app_port when set, else entry + 1 — a
-    # polluted env (AVA_APP_PORT inherited from a sibling cluster's .env) pins
+    # polluted env (MEIVA_APP_PORT inherited from a sibling cluster's .env) pins
     # it and defeats the patch, so force the field back to None.
     monkeypatch.setattr(settings.services, "app_port", None)
     spec = _spec_by_session(build_services(), "frontend")
@@ -59,7 +59,7 @@ def test_frontend_curl_url_uses_explicit_app_port(monkeypatch: pytest.MonkeyPatc
 
 
 def test_frontend_cmd_port_follows_app_port(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Frontend launch cmd passes -p <app port> (AVA_APP_PORT or entry+1)."""
+    """Frontend launch cmd passes -p <app port> (MEIVA_APP_PORT or entry+1)."""
     monkeypatch.setattr(settings.services, "frontend_healthcheck_url", "http://localhost:4000")
     monkeypatch.setattr(settings.services, "app_port", None)  # see test above
     spec = _spec_by_session(build_services(), "frontend")
@@ -77,9 +77,9 @@ def test_frontend_build_injects_gateway_port(monkeypatch: pytest.MonkeyPatch) ->
     """Frontend build cmd must inline NEXT_PUBLIC_GATEWAY_PORT from settings.gateway.gateway_port.
 
     NEXT_PUBLIC_* are baked into the JS bundle at build time and the session
-    only forwards AVA_* env, so the build subprocess never sees a .env-only
+    only forwards MEIVA_* env, so the build subprocess never sees a .env-only
     NEXT_PUBLIC_GATEWAY_PORT — it must be injected on the command line from the
-    single source of truth (AVA_GATEWAY_PORT). The browser then dials the gateway
+    single source of truth (MEIVA_GATEWAY_PORT). The browser then dials the gateway
     on that port (e.g. the prod VPS on 8800).
     """
     monkeypatch.setattr(settings.gateway, "gateway_port", 8800)

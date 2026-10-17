@@ -60,7 +60,7 @@ def test_station_role_renders_full_native_set_without_marker(
     assert (native_dir / "data" / "loki").is_dir()
     assert (native_dir / "data" / "prom").is_dir()
     rendered_loki = (native_dir / "config" / "loki.yaml").read_text(encoding="utf-8")
-    assert "{{AVA_HOME}}" not in rendered_loki
+    assert "{{MEIVA_HOME}}" not in rendered_loki
     assert "{{LGTM_STORAGE_DIR}}" not in rendered_loki
 
 

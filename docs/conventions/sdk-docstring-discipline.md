@@ -15,16 +15,16 @@ What the agent can't see, write however you want.
 
 Specific coverage (**all mandatory**):
 
-- module / class / public function docstrings in the `ava/` modules on the agent surface — a module
-  that declares `__all_for_ava__`, or the module of a namespace listed in `ava/__init__.py`'s
-  `__all_for_ava__` (the `_` prefix plays no part: visibility is the whitelist)
+- module / class / public function docstrings in the `meiva/` modules on the agent surface — a module
+  that declares `__all_for_meiva__`, or the module of a namespace listed in `meiva/__init__.py`'s
+  `__all_for_meiva__` (the `_` prefix plays no part: visibility is the whitelist)
 - module / function / class docstrings in namespaces declared by plugins as `SdkNamespace(name, module)`
   (plugin `_*.py` private modules count too — as long as the namespace exports them to the agent, they're covered)
 - docstrings of callables hung on an existing namespace via `SdkMember(namespace, name, fn)`
-  (e.g. `ava.self.set_label`) — equally agent-facing, rendered under `help(ava.<namespace>)`
+  (e.g. `meiva.self.set_label`) — equally agent-facing, rendered under `help(meiva.<namespace>)`
 - strings returned by the section functions a plugin declares in `contribute()` (including stdout captured from
-  `ava.help(...)` calls inside `fn` — if upstream docstrings are sloppy, they bring violations into the prompt)
-- docstrings of wraps / overrides (`ava.files.read = _wrapped_read` style replacements of original SDK
+  `meiva.help(...)` calls inside `fn` — if upstream docstrings are sloppy, they bring violations into the prompt)
+- docstrings of wraps / overrides (`meiva.files.read = _wrapped_read` style replacements of original SDK
   functions: the wrap function's docstring carries **exactly the same contract**: English,
   contract not "what I did to the original function")
 
@@ -42,14 +42,14 @@ Three hard rules:
 
 Sorted by frequency:
 
-- **System component names**: `LangGraph state field` / `state_handle` / `ava.state` /
+- **System component names**: `LangGraph state field` / `state_handle` / `meiva.state` /
   `checkpoint` / `reducer` / `pg_notify` / `session` / `worker thread` /
   `INSERT inbound` / `envelope wrap`
 - **Deployment topology / infra roles**: `gateway` / `agent-runner` / `gateway` /
   `cluster` / `runner` / `host` — the agent's world is just "machines" (places it runs,
   spawns onto, and reads a `description` for); how the fleet is deployed is not something
   it reasons over. Say "machine(s)". (The operator UI still sees roles via `/api/status`;
-  the agent's `ava.agents.list_machines()` shows only the machines that run agents.)
+  the agent's `meiva.agents.list_machines()` shows only the machines that run agents.)
 - **History pointers**: `PR #191` / `since 2026-05-12 changed to` /
   `legacy: was X, then changed to Y`
 - **Design internals**: `internal read-modify-write, not atomic` / `wrap of X` / `passes through original read` /
@@ -59,7 +59,7 @@ Sorted by frequency:
 - **Ops / multi-agent coordination**: `multi-agent coordination via cron staggered scheduling` /
   `housekeeper and inbox sweep don't overlap` / `cleanup trap` / `pid file`
 - **Dev slogans**: `fail loud not silent` / `fail-fast guard` / `defensive guard`
-- **Setup reminders**: `requires AVA_X env` / `must be called inside turn` —
+- **Setup reminders**: `requires MEIVA_X env` / `must be called inside turn` —
   on violation, `raise` to say so yourself, don't repeat in the docstring
 
 The correct angle is "the system transparently does X" — e.g. `read()` describes "reads a file, returns
@@ -76,7 +76,7 @@ help is generated from typed `api` records; edit that owner and regenerate.
 Writing rules alone doesn't work; rely on mechanism:
 
 - `scripts/lint/agent_docstrings.py` runs in pre-commit — scans
-  `ava/*.py` and `plugins/*/*.py` for module / public function /
+  `meiva/*.py` and `plugins/*/*.py` for module / public function /
   `SdkNamespace`-bound module / declared-system-prompt-section
   return-string-producer; matching CJK characters (`[\u4e00-\u9fff]`) or known impl-detail
   keywords (`state_handle` / `LangGraph` / `POSIX` / `PR #...` etc.)
@@ -85,24 +85,24 @@ Writing rules alone doesn't work; rely on mechanism:
   eyeball-scan the dumped output — pre-commit lint is a backstop, not a substitute for review;
   violations may be new patterns the lint hasn't caught yet.
 
-A module's agent-visible surface is its **`__all_for_ava__`** list (a whitelist;
+A module's agent-visible surface is its **`__all_for_meiva__`** list (a whitelist;
 absent it, non-underscore public names). This is a distinct name from Python's
-`__all__` — agent-surface modules declare `__all_for_ava__` and **do not carry
+`__all__` — agent-surface modules declare `__all_for_meiva__` and **do not carry
 `__all__`** (its absence is their correct static state; nothing star-imports
 them, and re-exports ride redundant-alias imports). Do not re-add `__all__` to an
-`ava` namespace module — it would be an inert, drifting duplicate and would
+`meiva` namespace module — it would be an inert, drifting duplicate and would
 reopen the `reportUnsupportedDunderAll` suppressions the split removed. The one
-source of truth is `ava.agent_visible_names()`; rationale in
-the `__all_for_ava__` split (see git log for design rationale).
+source of truth is `meiva.agent_visible_names()`; rationale in
+the `__all_for_meiva__` split (see git log for design rationale).
 
 `help()` rendered output = `# fqn` Markdown heading + Python stub body. Heading
-depth is computed automatically from the number of dots in the FQN: `ava` → `#`, `ava.shell` → `##`, `ava.shell.run`
-→ `###`. Non-`ava.*` targets (test fake modules etc.) fall back to H1. FQN source:
+depth is computed automatically from the number of dots in the FQN: `meiva` → `#`, `meiva.shell` → `##`, `meiva.shell.run`
+→ `###`. Non-`meiva.*` targets (test fake modules etc.) fall back to H1. FQN source:
 - Container (module / SimpleNamespace) → `_qualname` (injected into a plugin namespace
   by the SDK install) takes priority, otherwise `__name__`
 - Element (function) → `__module__ + . + __name__`; functions wrapped by a plugin
-  (e.g. `ava.files.read` replaced by ava_code) go through `_search_ava_for_function_
-  binding` scanning `ava.*` to find the binding, and the heading is restored to `ava.files.read`
+  (e.g. `meiva.files.read` replaced by meiva_code) go through `_search_meiva_for_function_
+  binding` scanning `meiva.*` to find the binding, and the heading is restored to `meiva.files.read`
 
 Body rules:
 - Container target → `"""docstring"""` + each child rendered in stub form (function
@@ -152,9 +152,9 @@ Python surfaces, so they keep heading form rather than stub form).
      `## AGENT_ID: int` H2 child. **Suitable for**: values that may be assigned at runtime
      (e.g. `AGENT_ID` resolved from the active turn context); constants no one will pass directly to
      `help(value)`.
-   - **`ava.const(value, doc=...)` wrap** (opt-in) — `PATH = ava.const(
-     Path.home() / ".ava" / "memory", doc="...")`, returns a `type(value)` subclass
-     instance with `__doc__`. **Suitable for**: values that don't change + the agent may directly `help(ava.X.Y)`
+   - **`meiva.const(value, doc=...)` wrap** (opt-in) — `PATH = meiva.const(
+     Path.home() / ".meiva" / "memory", doc="...")`, returns a `type(value)` subclass
+     instance with `__doc__`. **Suitable for**: values that don't change + the agent may directly `help(meiva.X.Y)`
      to drill into the docs. Cost: `type(x) is base` fails (use `isinstance` not
      `type ==`); arithmetic / comparison / stream propagation still follow base behavior; `bool`/`NoneType`
      can't be subclassed and will raise.
@@ -165,8 +165,8 @@ Python surfaces, so they keep heading form rather than stub form).
    - Parent + subclass design (like ENOENT vs EBUSY): coarse catch uses the parent
      (`except ResurrectError`), fine catch uses the subclass (`except AgentNotFound`)
    - Subclasses correspond to distinguishable "why fail"
-   - Re-exported via the SDK namespace (`ava.agents.AgentNotFound`), and kept
-     importable via redundant-alias imports — but **out of `__all_for_ava__`**
+   - Re-exported via the SDK namespace (`meiva.agents.AgentNotFound`), and kept
+     importable via redundant-alias imports — but **out of `__all_for_meiva__`**
      (the agent-visible surface, split out from Python's `__all__`): a rare
      failure must not occupy every agent's prompt; its traceback names it
      clearly on the rare occasion it fires.
@@ -175,12 +175,12 @@ Python surfaces, so they keep heading form rather than stub form).
      the error is common and actionable. This inverts the pre-2026-06-10 rule
      ("Raises must be written").
 7. **No SDK<->skill coupling** — an SDK docstring never references a skill;
-   skill discovery belongs to the skills index section. `ava/skills/__init__.py` is the
+   skill discovery belongs to the skills index section. `meiva/skills/__init__.py` is the
    one exempt module (enforced by `agent_docstrings`).
 
 8. **Record-shaped returns are a type, not prose** — when a function returns a
-   record, return a `NamedTuple` that is listed in `__all_for_ava__` and describe
+   record, return a `NamedTuple` that is listed in `__all_for_meiva__` and describe
    the fields in its class docstring; `Returns:` then only names the type. See
    [SDK return shapes](python-conventions.md#sdk-return-shapes).
 
-Every other `ava/` module — framework code such as `ava/sdk_surface/wraps.py` or `base/packages/plugins/loading/plugin_loader.py`, whatever its name — is out of scope (audience is the framework or plugin authors, not the agent) and may keep the dev perspective.
+Every other `meiva/` module — framework code such as `meiva/sdk_surface/wraps.py` or `base/packages/plugins/loading/plugin_loader.py`, whatever its name — is out of scope (audience is the framework or plugin authors, not the agent) and may keep the dev perspective.

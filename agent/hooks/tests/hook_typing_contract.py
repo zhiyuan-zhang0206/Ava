@@ -28,7 +28,7 @@ from langgraph.runtime import Runtime
 
 from agent.hooks import Hook
 from agent.state import AgentState
-from base.agents.context import AvaContext
+from base.agents.context import MeivaContext
 
 
 class _Ok(Hook):
@@ -37,7 +37,7 @@ class _Ok(Hook):
     async def __call__(
         self,
         state: AgentState,
-        runtime: Runtime[AvaContext],
+        runtime: Runtime[MeivaContext],
         config: RunnableConfig,
         /,
     ) -> dict | None:
@@ -50,7 +50,7 @@ class _BadParamType(Hook):
     async def __call__(  # pyright: ignore[reportIncompatibleMethodOverride]
         self,
         state: int,
-        runtime: Runtime[AvaContext],
+        runtime: Runtime[MeivaContext],
         config: RunnableConfig,
         /,
     ) -> dict | None:
@@ -63,7 +63,7 @@ class _BadReturn(Hook):
     async def __call__(  # pyright: ignore[reportIncompatibleMethodOverride]
         self,
         state: AgentState,
-        runtime: Runtime[AvaContext],
+        runtime: Runtime[MeivaContext],
         config: RunnableConfig,
         /,
     ) -> object:
@@ -76,7 +76,7 @@ class _BadArity(Hook):
     async def __call__(  # pyright: ignore[reportIncompatibleMethodOverride]
         self,
         state: AgentState,
-        runtime: Runtime[AvaContext],
+        runtime: Runtime[MeivaContext],
         /,
     ) -> dict | None:
         return None

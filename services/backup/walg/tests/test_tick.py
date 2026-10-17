@@ -36,8 +36,8 @@ FULL_4 = "base_0000000100000006000000C0"
 T0 = datetime(2026, 10, 2, 6, 25, 0, tzinfo=UTC)
 
 PG_DATA = Path("/pg/data")
-DATABASE = "ava_main"
-ADMIN_URL = "postgresql://tester@/postgres?host=/sockets/ava-pg-home&port=5433"
+DATABASE = "meiva_main"
+ADMIN_URL = "postgresql://tester@/postgres?host=/sockets/meiva-pg-home&port=5433"
 
 
 class Clock:
@@ -159,7 +159,7 @@ def test_backup_push_gets_the_chain_limit_and_the_owner_only_socket(sandbox: San
     _run()
 
     assert sandbox.env_log() == [
-        "PGHOST=/sockets/ava-pg-home PGPORT=5433 PGUSER=tester WALG_DELTA_MAX_STEPS=6"
+        "PGHOST=/sockets/meiva-pg-home PGPORT=5433 PGUSER=tester WALG_DELTA_MAX_STEPS=6"
     ]
 
 
@@ -167,7 +167,7 @@ def test_wal_verify_gets_the_owner_only_socket_like_backup_push(sandbox: Sandbox
     """Without the connection variables WAL-G dials libpq's default socket and fails."""
     _run()
 
-    assert sandbox.verify_env_log() == ["PGHOST=/sockets/ava-pg-home PGPORT=5433 PGUSER=tester"]
+    assert sandbox.verify_env_log() == ["PGHOST=/sockets/meiva-pg-home PGPORT=5433 PGUSER=tester"]
 
 
 def test_every_step_leaves_its_record_in_the_state_file(sandbox: Sandbox) -> None:
@@ -687,7 +687,7 @@ def test_drill_now_refuses_without_a_backup(sandbox: Sandbox, due_drill: FakeDri
         )
         == 1
     )
-    assert lines == ["failed: no backup exists yet; run `ava backup walg run` first"]
+    assert lines == ["failed: no backup exists yet; run `meiva backup walg run` first"]
     assert due_drill.backups == []
 
 

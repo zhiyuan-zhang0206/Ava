@@ -39,7 +39,7 @@ FIXTURES = Path(__file__).with_name("fixtures")
 ACCESS_KEY_ID = "LTAI-test-access-key-id"
 ACCESS_KEY_SECRET = "test-access-key-secret-0123456789"  # noqa: S105 — a fixture value
 KEY_HEX = "ab" * 32
-PREFIX = "oss://ava-backups/ava-walg/test-home/pg17/gen1/"
+PREFIX = "oss://meiva-backups/meiva-walg/test-home/pg17/gen1/"
 SECRETS = (ACCESS_KEY_ID, ACCESS_KEY_SECRET, KEY_HEX)
 
 
@@ -109,7 +109,7 @@ def valid_config(key_file: Path, **overrides: Any) -> dict[str, Any]:
 def make_sandbox(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, *, enabled: bool = True
 ) -> Sandbox:
-    home = tmp_path / "ava home%p"
+    home = tmp_path / "meiva home%p"
     store_dir = home / "secrets" / "walg"
     store_dir.mkdir(parents=True)
     key_file = store_dir / "libsodium.key"
@@ -122,7 +122,7 @@ def make_sandbox(
     shutil.copy(FAKE_WALG, binary)
     binary.chmod(0o755)
 
-    monkeypatch.setenv("AVA_HOME", str(home))
+    monkeypatch.setenv("MEIVA_HOME", str(home))
     # The fake is not the pinned build; everything else (path, argv, config) is real.
     monkeypatch.setattr(walg_binary, "installed_problem", lambda: None)
     sandbox = Sandbox(home, store_dir, config_file, key_file)
@@ -142,7 +142,7 @@ class PgInstance:
 
     def connect(self) -> psycopg.Connection[Any]:
         return psycopg.connect(
-            host=str(self.root), port=self.port, user="ava", dbname="postgres", autocommit=True
+            host=str(self.root), port=self.port, user="meiva", dbname="postgres", autocommit=True
         )
 
 
@@ -172,7 +172,7 @@ def archiving_postgres(*extra_args: str) -> Generator[PgInstance]:
     The socket directory is short (`/tmp`), the data is disposable (fsync off), and
     shutdown is immediate: a test never waits for a hung archive command.
     """
-    root = Path(tempfile.mkdtemp(prefix="ava-walgpg-", dir="/tmp"))
+    root = Path(tempfile.mkdtemp(prefix="meiva-walgpg-", dir="/tmp"))
     data = root / "data"
     instance = PgInstance(root=root, data=data, port=_free_port())
     process: subprocess.Popen[bytes] | None = None
@@ -183,7 +183,7 @@ def archiving_postgres(*extra_args: str) -> Generator[PgInstance]:
                 "-D",
                 str(data),
                 "-U",
-                "ava",
+                "meiva",
                 "-A",
                 "trust",
                 "--no-sync",
@@ -275,7 +275,7 @@ def take_basebackup(sandbox: Sandbox, pg: PgInstance, name: str) -> str:
             "-p",
             str(pg.port),
             "-U",
-            "ava",
+            "meiva",
             "-X",
             "none",
             "--checkpoint=fast",

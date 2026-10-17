@@ -4,9 +4,9 @@ exports = ["test_maintenance_readiness.py"]
 "test_maintenance_readiness.py#patch.dict os.environ" = 1
 
 [debt.first-party-patch]
-"test_ava_root_glue_manifests.py#monkeypatch.setattr base.config.settings.gateway.gateway_graceful_shutdown_timeout_seconds" = 1
-"test_ava_root_glue_manifests.py#monkeypatch.setattr base.paths.ava_home" = 1
-"test_ava_root_glue_manifests.py#monkeypatch.setattr services.supervision.roster.ava_home" = 1
+"test_meiva_root_glue_manifests.py#monkeypatch.setattr base.config.settings.gateway.gateway_graceful_shutdown_timeout_seconds" = 1
+"test_meiva_root_glue_manifests.py#monkeypatch.setattr base.paths.meiva_home" = 1
+"test_meiva_root_glue_manifests.py#monkeypatch.setattr services.supervision.roster.meiva_home" = 1
 "test_gate_root.py#assignment services.entrypoints.gate.tests.test_gate.FakeGateway.down" = 1
 "test_gate_root.py#monkeypatch.setattr base.config.settings.services.frontend_healthcheck_url" = 1
 "test_gate_root.py#monkeypatch.setattr services.supervision.healthchecks.gate.urllib.request.urlopen" = 1
@@ -18,4 +18,4 @@ exports = ["test_maintenance_readiness.py"]
 "test_maintenance_readiness.py#monkeypatch.setattr ops.agent_pause.host_running" = 1
 
 [debt.restricted-python]
-"test_maintenance_readiness.py#string patch target 'base.paths.ava_home'" = 1
+"test_maintenance_readiness.py#string patch target 'base.paths.meiva_home'" = 1

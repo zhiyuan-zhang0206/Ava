@@ -35,26 +35,26 @@ def test_ensure_creates_enabled_channel_scoped_user(redis_access: None) -> None:
         with redis.Redis.from_url(admin_url, decode_responses=True) as admin:  # pyright: ignore[reportUnknownMemberType] — test double or third-party stubs
             directory = Path(str(admin.config_get("dir")["dir"]))  # pyright: ignore[reportUnknownMemberType] — test double or third-party stubs
         ensure_cluster_redis_acl(
-            "ava_feat_x",
+            "meiva_feat_x",
             redis_admin_url=admin_url,
             runtime_password=_SECRET,
-            channel_prefix="ava:feat-x",
+            channel_prefix="meiva:feat-x",
             expected_data_dir=directory,
         )
         users = _acl_users(admin_url)
-        line = next((u for u in users if "ava_feat_x" in u), None)
+        line = next((u for u in users if "meiva_feat_x" in u), None)
         assert line is not None and " on " in f" {line} ", "ACL user must exist + be enabled"
-        assert "ava:feat-x:*" in line, "channel scope must be the cluster prefix"
+        assert "meiva:feat-x:*" in line, "channel scope must be the cluster prefix"
 
         # The user authenticates with the cluster secret and may publish to its own
         # channel, but NOT to another cluster's channel (the isolation that matters).
-        user_url = url_with_userinfo(admin_url, "ava_feat_x", _SECRET)
+        user_url = url_with_userinfo(admin_url, "meiva_feat_x", _SECRET)
         with redis.Redis.from_url(user_url, decode_responses=True) as r:  # pyright: ignore[reportUnknownMemberType]
             assert (
-                r.publish("ava:feat-x:events", "ok") == 0  # pyright: ignore[reportUnknownMemberType]
+                r.publish("meiva:feat-x:events", "ok") == 0  # pyright: ignore[reportUnknownMemberType]
             )  # delivered to 0 subscribers, allowed
             with pytest.raises(NoPermissionError):
-                r.publish("ava:other:events", "denied")  # pyright: ignore[reportUnknownMemberType]
+                r.publish("meiva:other:events", "denied")  # pyright: ignore[reportUnknownMemberType]
 
 
 def test_owned_acl_refuses_reconnect_before_mutation(
@@ -85,10 +85,10 @@ def test_owned_acl_refuses_reconnect_before_mutation(
             patch.setattr(port_preflight, "require_listener", disconnect_after_observation)
             with pytest.raises(RuntimeError, match="connection changed"):
                 ensure_cluster_redis_acl(
-                    "ava_unverified",
+                    "meiva_unverified",
                     redis_admin_url=url,
                     runtime_password=_SECRET,
-                    channel_prefix="ava:test",
+                    channel_prefix="meiva:test",
                     expected_data_dir=directory,
                 )
         assert _acl_users(url) == before
@@ -102,15 +102,15 @@ def test_ensure_grants_the_hosted_dispatcher_psubscribe_pattern(redis_access: No
     pattern subscription must be allowed (DRYRUN, version-independent)."""
     with redis_server() as admin_url:
         ensure_cluster_redis_acl(
-            "ava_feat_x",
+            "meiva_feat_x",
             redis_admin_url=admin_url,
             runtime_password=_SECRET,
-            channel_prefix="ava:feat-x",
+            channel_prefix="meiva:feat-x",
         )
         with redis.Redis.from_url(admin_url, decode_responses=True) as admin:  # pyright: ignore[reportUnknownMemberType]
             assert (
                 admin.execute_command(  # pyright: ignore[reportUnknownMemberType]
-                    "ACL", "DRYRUN", "ava_feat_x", "PSUBSCRIBE", "ava:feat-x:inbound:*"
+                    "ACL", "DRYRUN", "meiva_feat_x", "PSUBSCRIBE", "meiva:feat-x:inbound:*"
                 )
                 == "OK"
             )
@@ -118,7 +118,7 @@ def test_ensure_grants_the_hosted_dispatcher_psubscribe_pattern(redis_access: No
             # working under the same grant.
             assert (
                 admin.execute_command(  # pyright: ignore[reportUnknownMemberType]
-                    "ACL", "DRYRUN", "ava_feat_x", "SUBSCRIBE", "ava:feat-x:inbound:42"
+                    "ACL", "DRYRUN", "meiva_feat_x", "SUBSCRIBE", "meiva:feat-x:inbound:42"
                 )
                 == "OK"
             )
@@ -128,12 +128,12 @@ def test_ensure_is_idempotent(redis_access: None) -> None:
     with redis_server() as admin_url:
         for _ in range(2):
             ensure_cluster_redis_acl(
-                "ava_feat_x",
+                "meiva_feat_x",
                 redis_admin_url=admin_url,
                 runtime_password=_SECRET,
-                channel_prefix="ava:feat-x",
+                channel_prefix="meiva:feat-x",
             )
-        assert sum("ava_feat_x" in u for u in _acl_users(admin_url)) == 1
+        assert sum("meiva_feat_x" in u for u in _acl_users(admin_url)) == 1
 
 
 def test_ensure_invalidates_the_previous_secret_on_rotation(redis_access: None) -> None:
@@ -142,21 +142,21 @@ def test_ensure_invalidates_the_previous_secret_on_rotation(redis_access: None) 
     still drop the old one, or a "rotated" secret keeps working forever."""
     with redis_server() as admin_url:
         ensure_cluster_redis_acl(
-            "ava_feat_x",
+            "meiva_feat_x",
             redis_admin_url=admin_url,
             runtime_password=_SECRET,
-            channel_prefix="ava:feat-x",
+            channel_prefix="meiva:feat-x",
         )
-        old_user_url = url_with_userinfo(admin_url, "ava_feat_x", _SECRET)
+        old_user_url = url_with_userinfo(admin_url, "meiva_feat_x", _SECRET)
         with redis.Redis.from_url(old_user_url, decode_responses=True) as r:  # pyright: ignore[reportUnknownMemberType]
             assert r.ping()  # pyright: ignore[reportUnknownMemberType]
 
         new_secret = "rotated-" + _SECRET
         ensure_cluster_redis_acl(
-            "ava_feat_x",
+            "meiva_feat_x",
             redis_admin_url=admin_url,
             runtime_password=new_secret,
-            channel_prefix="ava:feat-x",
+            channel_prefix="meiva:feat-x",
         )
 
         with (
@@ -164,7 +164,7 @@ def test_ensure_invalidates_the_previous_secret_on_rotation(redis_access: None) 
             redis.Redis.from_url(old_user_url, decode_responses=True) as r,  # pyright: ignore[reportUnknownMemberType]
         ):
             r.ping()  # pyright: ignore[reportUnknownMemberType]
-        new_user_url = url_with_userinfo(admin_url, "ava_feat_x", new_secret)
+        new_user_url = url_with_userinfo(admin_url, "meiva_feat_x", new_secret)
         with redis.Redis.from_url(new_user_url, decode_responses=True) as r:  # pyright: ignore[reportUnknownMemberType]
             assert r.ping()  # pyright: ignore[reportUnknownMemberType]
 
@@ -176,42 +176,42 @@ def test_ensure_refuses_empty_runtime_password(redis_access: None) -> None:
         before = _acl_users(admin_url)
         with pytest.raises(ValueError, match="runtime password"):
             ensure_cluster_redis_acl(
-                "ava_feat_x",
+                "meiva_feat_x",
                 redis_admin_url=admin_url,
                 runtime_password="",
-                channel_prefix="ava:feat-x",
+                channel_prefix="meiva:feat-x",
             )
         assert _acl_users(admin_url) == before
 
 
 def test_runtime_user_is_confined_to_cluster_data_and_channel_prefix(redis_access: None) -> None:
     """The runtime identity reads and writes this cluster's own instance keyspace
-    (every cluster owns its Redis, and `ava.REDIS` plus the gateway caches use
+    (every cluster owns its Redis, and `meiva.REDIS` plus the gateway caches use
     unprefixed keys) and publishes only under its channel prefix; it cannot
     reach another prefix, administer the instance, or become the admin user."""
     with redis_server() as admin_url:
         ensure_cluster_redis_acl(
-            "ava_feat_x",
+            "meiva_feat_x",
             redis_admin_url=admin_url,
             runtime_password=_SECRET,
-            channel_prefix="ava:feat-x",
+            channel_prefix="meiva:feat-x",
         )
-        user_url = url_with_userinfo(admin_url, "ava_feat_x", _SECRET)
+        user_url = url_with_userinfo(admin_url, "meiva_feat_x", _SECRET)
         with redis.Redis.from_url(user_url, decode_responses=True) as r:  # pyright: ignore[reportUnknownMemberType]
-            assert r.set("ava:feat-x:probe:1", "1", ex=60)  # pyright: ignore[reportUnknownMemberType]
+            assert r.set("meiva:feat-x:probe:1", "1", ex=60)  # pyright: ignore[reportUnknownMemberType]
             assert r.set("fleet_graph:cache", "v", ex=60)  # pyright: ignore[reportUnknownMemberType]
             assert r.get("fleet_graph:cache") == "v"  # pyright: ignore[reportUnknownMemberType]
-            assert r.publish("ava:feat-x:events", "ok") == 0  # pyright: ignore[reportUnknownMemberType]
+            assert r.publish("meiva:feat-x:events", "ok") == 0  # pyright: ignore[reportUnknownMemberType]
             with pytest.raises(NoPermissionError):
-                r.publish("ava:other:events", "denied")  # pyright: ignore[reportUnknownMemberType]
+                r.publish("meiva:other:events", "denied")  # pyright: ignore[reportUnknownMemberType]
             with pytest.raises(NoPermissionError):
                 r.config_get("requirepass")  # pyright: ignore[reportUnknownMemberType]
         with redis.Redis.from_url(admin_url, decode_responses=True) as admin:  # pyright: ignore[reportUnknownMemberType]
             for command in (
                 ("FLUSHALL",),
                 ("SHUTDOWN",),
-                ("ACL", "SETUSER", "ava_feat_x", "~*", "&*"),
-                ("PSUBSCRIBE", "ava:other:inbound:*"),
+                ("ACL", "SETUSER", "meiva_feat_x", "~*", "&*"),
+                ("PSUBSCRIBE", "meiva:other:inbound:*"),
             ):
-                verdict = admin.execute_command("ACL", "DRYRUN", "ava_feat_x", *command)  # pyright: ignore[reportUnknownMemberType]
+                verdict = admin.execute_command("ACL", "DRYRUN", "meiva_feat_x", *command)  # pyright: ignore[reportUnknownMemberType]
                 assert verdict != "OK", command

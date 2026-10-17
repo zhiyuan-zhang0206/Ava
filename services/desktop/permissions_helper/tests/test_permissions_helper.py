@@ -97,7 +97,7 @@ def fake_helper():
     ) -> str:
         # Keep the path short: AF_UNIX sun_path caps near 104 chars, well under
         # what pytest's tmp_path would produce.
-        path = f"/tmp/avah{os.getpid()}-{len(servers)}.sock"  # noqa: S108
+        path = f"/tmp/meivah{os.getpid()}-{len(servers)}.sock"  # noqa: S108
         Path(path).unlink(missing_ok=True)
         servers.append(FakeHelper(path, handler, raw))
         paths.append(path)
@@ -152,24 +152,24 @@ def test_user_abort_reply_raises_its_own_error(fake_helper) -> None:
 
 def test_unreachable_socket_raises() -> None:
     with pytest.raises(PermissionsHelperError, match="not reachable"):
-        PermissionsHelperClient("/tmp/ava-native-does-not-exist.sock").ping()  # noqa: S108 — nonexistent path, asserts the unreachable error
+        PermissionsHelperClient("/tmp/meiva-native-does-not-exist.sock").ping()  # noqa: S108 — nonexistent path, asserts the unreachable error
 
 
 def test_socket_path_keyed_on_port(monkeypatch: pytest.MonkeyPatch) -> None:
     from base import paths
 
     assert (
-        paths.permissions_helper_socket(paths.ava_home(), 9999).name
+        paths.permissions_helper_socket(paths.meiva_home(), 9999).name
         == "permissions-helper.9999.sock"
     )
 
 
-def test_permissions_helper_app_dir_is_stable_under_ava_home(
+def test_permissions_helper_app_dir_is_stable_under_meiva_home(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     from base import paths
 
-    monkeypatch.setenv("AVA_HOME", str(tmp_path / "home"))
+    monkeypatch.setenv("MEIVA_HOME", str(tmp_path / "home"))
     assert paths.permissions_helper_app_dir() == tmp_path / "home" / "helper"
 
 
@@ -230,10 +230,10 @@ def test_nursery_method_requests_and_results(fake_helper) -> None:
     assert PermissionsHelperClient(path).spawn_process(  # pyright: ignore[reportUnknownArgumentType]
         "agent-demo",
         ["/usr/bin/env", "python"],
-        {"AVA_HOME": "/Users/ava/.ava"},
-        "/Users/ava/work",
-        "/Users/ava/logs/stdout.log",
-        "/Users/ava/logs/stderr.log",
+        {"MEIVA_HOME": "/Users/meiva/.meiva"},
+        "/Users/meiva/work",
+        "/Users/meiva/logs/stdout.log",
+        "/Users/meiva/logs/stderr.log",
     ) == {"pid": 4123, "reused": False}
     assert PermissionsHelperClient(path).session_list("agent-") == [  # pyright: ignore[reportUnknownArgumentType]
         {"name": "agent-demo", "pid": 4123, "alive": True}
@@ -247,10 +247,10 @@ def test_nursery_method_requests_and_results(fake_helper) -> None:
             "method": "spawn",
             "name": "agent-demo",
             "argv": ["/usr/bin/env", "python"],
-            "env": {"AVA_HOME": "/Users/ava/.ava"},
-            "cwd": "/Users/ava/work",
-            "stdout": "/Users/ava/logs/stdout.log",
-            "stderr": "/Users/ava/logs/stderr.log",
+            "env": {"MEIVA_HOME": "/Users/meiva/.meiva"},
+            "cwd": "/Users/meiva/work",
+            "stdout": "/Users/meiva/logs/stdout.log",
+            "stderr": "/Users/meiva/logs/stderr.log",
         },
         {"method": "session_list", "prefix": "agent-"},
         {"method": "session_has", "name": "agent-demo"},
@@ -267,9 +267,9 @@ def test_spawn_process_preserves_reused_result(fake_helper) -> None:
         "agent-demo",
         ["/usr/bin/env", "python"],
         {},
-        "/Users/ava/work",
-        "/Users/ava/logs/stdout.log",
-        "/Users/ava/logs/stderr.log",
+        "/Users/meiva/work",
+        "/Users/meiva/logs/stdout.log",
+        "/Users/meiva/logs/stderr.log",
     ) == {"pid": 4123, "reused": True}
 
 
@@ -296,7 +296,7 @@ def test_spawn_core_resets_child_signal_state() -> None:
     # Children inherit the calling thread's signal mask through posix_spawn, and
     # the root keeper spawns from a GCD worker thread where libdispatch blocks
     # most signals including SIGTERM. Without the reset below, a keeper-spawned
-    # ava-root never receives SIGTERM (confirmed empirically 2026-09-12).
+    # meiva-root never receives SIGTERM (confirmed empirically 2026-09-12).
     assert "POSIX_SPAWN_SETSIGMASK" in spawn_source
     assert "posix_spawnattr_setsigmask(&attributes, &emptySignalMask)" in spawn_source
     assert "POSIX_SPAWN_SETSIGDEF" in spawn_source
@@ -308,7 +308,7 @@ def _assert_spawn_core_and_lock_file_pinned(keeper_source: str) -> None:
     assert "session boundary only" in keeper_source
     assert "ppid unchanged, no reparent" in keeper_source
     # Single instance rides on the root's own lock file, probed non-blockingly.
-    assert '(runDir as NSString).appendingPathComponent("ava-root.lock")' in keeper_source
+    assert '(runDir as NSString).appendingPathComponent("meiva-root.lock")' in keeper_source
     assert "flock(fd, LOCK_EX | LOCK_NB)" in keeper_source
     # Root goes through the shared detached-child spawn core, never the
     # session table.
@@ -322,7 +322,7 @@ def _assert_stop_seed_and_wiring_pinned(keeper_source: str, source: str) -> None
     # The SIGCHLD drain uses one ownership boundary for both child owners.
     assert "rootKeeper.reapExitedChildLocked()" in source
     # Startup seeding is opt-in via the seed environment; absent = dormant.
-    assert 'rootSeedEnvironment = "AVA_PERMISSIONS_HELPER_ROOT_SEED"' in source
+    assert 'rootSeedEnvironment = "MEIVA_PERMISSIONS_HELPER_ROOT_SEED"' in source
     assert "rootKeeper.startIfConfigured()" in source
     # The wire surface is wired into dispatch.
     for method in ("root_seed", "root_status", "root_stop"):
@@ -448,16 +448,16 @@ def stage_bundle(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, *, exe_present
     entitlements = tmp_path / "helper.entitlements"
     entitlements.write_bytes(b"<plist/>")
     build = tmp_path / "installed-helper"
-    app = build / "AvaPermissionsHelper.app"
+    app = build / "MeivaPermissionsHelper.app"
     if exe_present:
-        exe = app / "Contents" / "MacOS" / "AvaPermissionsHelper"
+        exe = app / "Contents" / "MacOS" / "MeivaPermissionsHelper"
         exe.parent.mkdir(parents=True)
         exe.write_bytes(b"\x00")  # written last, so its mtime is at least the sources'
         monkeypatch.setattr(launchd_job, "helper_job_loaded", lambda: True)  # its home runs it
     locales = tmp_path / "locales"
     en_lproj = locales / "en.lproj"
     en_lproj.mkdir(parents=True)
-    (en_lproj / "Localizable.strings").write_text('"panel.title" = "Ava Permissions Helper";')
+    (en_lproj / "Localizable.strings").write_text('"panel.title" = "Meiva Permissions Helper";')
     zh_lproj = locales / "zh-Hans.lproj"
     zh_lproj.mkdir()
     (zh_lproj / "Localizable.strings").write_text('"panel.title" = "zh";')
@@ -471,7 +471,7 @@ def stage_bundle(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, *, exe_present
 
 def test_dr() -> str:
     return (
-        'identifier "com.ava.permissions-helper" and certificate leaf = '
+        'identifier "com.meiva.permissions-helper" and certificate leaf = '
         f'H"{TEST_CERT_SHA1.lower()}"'
     )
 
@@ -663,17 +663,17 @@ def install_env(
 
     from services.desktop.permissions_helper import lifecycle
 
-    app = tmp_path / "helper" / "AvaPermissionsHelper.app"
-    exe = app / "Contents" / "MacOS" / "AvaPermissionsHelper"
+    app = tmp_path / "helper" / "MeivaPermissionsHelper.app"
+    exe = app / "Contents" / "MacOS" / "MeivaPermissionsHelper"
     exe.parent.mkdir(parents=True)
     exe.write_bytes(b"signed helper")
     agents = tmp_path / "LaunchAgents"
-    plist_path = agents / "com.ava.permissions-helper.test.plist"
+    plist_path = agents / "com.meiva.permissions-helper.test.plist"
     log = tmp_path / "logs" / "permissions-helper.log"
     socket_path = tmp_path / "run" / "permissions-helper.sock"
-    monkeypatch.setattr(lifecycle.base.paths, "ava_home", lambda: tmp_path)
+    monkeypatch.setattr(lifecycle.base.paths, "meiva_home", lambda: tmp_path)
     monkeypatch.setattr(lifecycle, "refuse_foreign_label_jobs", lambda: None)
-    monkeypatch.setattr(lifecycle, "label", lambda: "com.ava.permissions-helper.test")
+    monkeypatch.setattr(lifecycle, "label", lambda: "com.meiva.permissions-helper.test")
     monkeypatch.setattr(lifecycle, "launchd_domain", lambda: "gui/501")
     monkeypatch.setattr(lifecycle, "plist_path", lambda: plist_path)
     monkeypatch.setattr(lifecycle, "is_loaded", lambda: loaded)
@@ -696,12 +696,12 @@ def install_env(
         plist_path.write_bytes(
             plistlib.dumps(
                 {
-                    "Label": "com.ava.permissions-helper.test",
+                    "Label": "com.meiva.permissions-helper.test",
                     "ProgramArguments": [str(exe)],
                     "EnvironmentVariables": {
-                        "AVA_PERMISSIONS_HELPER_SOCKET": str(socket_path),
-                        "AVA_PERMISSIONS_HELPER_ROOT_SEED": str(
-                            lifecycle.base.paths.root_run_dir(lifecycle.base.paths.ava_home())
+                        "MEIVA_PERMISSIONS_HELPER_SOCKET": str(socket_path),
+                        "MEIVA_PERMISSIONS_HELPER_ROOT_SEED": str(
+                            lifecycle.base.paths.root_run_dir(lifecycle.base.paths.meiva_home())
                             / "seed.json"
                         ),
                     },
@@ -725,7 +725,7 @@ def _skip_sleep(_seconds: float) -> None:
 
 
 def write_agent_plist(
-    agents: Path, label: str, sock: str, env_key: str = "AVA_PERMISSIONS_HELPER_SOCKET"
+    agents: Path, label: str, sock: str, env_key: str = "MEIVA_PERMISSIONS_HELPER_SOCKET"
 ) -> Path:
     p = agents / f"{label}.plist"
     p.write_bytes(

@@ -13,7 +13,7 @@ from psycopg_pool import AsyncConnectionPool
 from agent import state as states
 from agent.impersonation_handoff import flush_checkpoint
 from agent.startup import wrap_saver_writes_with_nstep_interval
-from base.agents.context import AvaContext
+from base.agents.context import MeivaContext
 from base.agents.history.delta_read_compat import wrap_saver_reads_with_delta_reconstruction
 from base.agents.inbox.insert import insert_inbound_message
 from base.cluster.machine import MachineIdentity
@@ -63,7 +63,7 @@ async def _failed_turn(
     saver = AsyncPostgresSaver(pool)
     await saver.setup()
     wrap_saver_writes_with_nstep_interval(saver, 100)
-    builder: Any = StateGraph(states.AgentState, context_schema=AvaContext)
+    builder: Any = StateGraph(states.AgentState, context_schema=MeivaContext)
     builder.add_node("save", save)
     builder.add_node("fail", fail)
     builder.add_edge(START, "save")
@@ -88,7 +88,7 @@ async def _failed_turn(
     )
     monkeypatch.setattr(host, "_runtime_for", AsyncMock(return_value=object()))
     monkeypatch.setattr(runtime_module, "validate_model_config", MagicMock())
-    ctx = AvaContext(
+    ctx = MeivaContext(
         ops_pool=pool,
         event_publisher=MagicMock(),
         agent=AgentSlices.resolve(default_reader=configured_policy().default_reader),

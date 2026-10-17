@@ -1,4 +1,4 @@
-# ava:ref base/lm/docs/model-configuration.ava.okf.md#model-tuning-registry
+# meiva:ref base/lm/docs/model-configuration.meiva.okf.md#model-tuning-registry
 from __future__ import annotations
 
 from collections.abc import Collection, Mapping

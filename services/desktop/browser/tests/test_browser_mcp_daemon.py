@@ -286,7 +286,7 @@ def _short_sock_dir() -> tuple[Any, Any, Any]:
     import shutil
     import tempfile
 
-    d = Path(tempfile.mkdtemp(prefix="ava-mcp-", dir="/tmp"))
+    d = Path(tempfile.mkdtemp(prefix="meiva-mcp-", dir="/tmp"))
     sock = d / "mcp.sock"
     return d, sock, shutil.rmtree
 
@@ -385,7 +385,7 @@ async def test_handle_client_agent_id_adopts_agent_page(tmp_path: Path) -> None:
 
     up = FakeUpstream()
     daemon_ref: list[ChromeMcpDaemon | None] = [new_daemon(up)]
-    sock_path = Path(tempfile.gettempdir()) / f"ava-bmd-{uuid4().hex}.sock"
+    sock_path = Path(tempfile.gettempdir()) / f"meiva-bmd-{uuid4().hex}.sock"
     server = await asyncio.start_unix_server(
         lambda r, w: handle_client(r, w, daemon_ref), path=sock_path
     )
@@ -472,7 +472,7 @@ async def test_release_agent_page_wire_method() -> None:
 
     up = FakeUpstream()
     daemon_ref: list[ChromeMcpDaemon | None] = [new_daemon(up)]
-    sock_path = Path(tempfile.gettempdir()) / f"ava-bmd-{uuid4().hex}.sock"
+    sock_path = Path(tempfile.gettempdir()) / f"meiva-bmd-{uuid4().hex}.sock"
     server = await asyncio.start_unix_server(
         lambda r, w: handle_client(r, w, daemon_ref), path=sock_path
     )

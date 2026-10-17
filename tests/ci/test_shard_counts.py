@@ -53,8 +53,8 @@ def _case(file: str, name: str = "test_it", outcome: str = "") -> str:
         ("base/packages/tests/test_a.py", "base/packages/tests"),
         ("base/packages/tests/area/test_b.py", "base/packages/tests"),
         (
-            "ava_builtins/skills/integrations/gmail/scripts/tests/test_g.py",
-            "ava_builtins/skills/integrations/gmail/scripts/tests",
+            "meiva_builtins/skills/integrations/gmail/scripts/tests/test_g.py",
+            "meiva_builtins/skills/integrations/gmail/scripts/tests",
         ),
         ("base/x/tests/tests/test_nested.py", "base/x/tests"),
     ],
@@ -428,7 +428,7 @@ def _annotation(log: str) -> list[str]:
 def test_the_guards_properties_are_counted_with_the_test_that_carries_them(tmp_path: Path) -> None:
     report = _junit(
         tmp_path / "r.xml",
-        _guarded("tests/a/test_x.py", "test_1", ("leak_guard", "env: AVA_X was added")),
+        _guarded("tests/a/test_x.py", "test_1", ("leak_guard", "env: MEIVA_X was added")),
         _guarded("tests/a/test_x.py", "test_2[p]", ("leak_guard_note", "sys.path: added ['/p']")),
         _guarded("tests/a/test_y.py", "test_3", ("leak_guard_fault", "snapshot: KeyError: 'x'")),
         _case("tests/a/test_y.py", "test_4"),
@@ -436,7 +436,7 @@ def test_the_guards_properties_are_counted_with_the_test_that_carries_them(tmp_p
     counted = shard_counts.count_junit(report)
     assert counted["tests"] == 4
     assert counted["leaks"] == [
-        {"test": "tests/a/test_x.py::test_1", "kind": "env", "detail": "AVA_X was added"}
+        {"test": "tests/a/test_x.py::test_1", "kind": "env", "detail": "MEIVA_X was added"}
     ]
     assert counted["notes"] == [
         {"test": "tests/a/test_x.py::test_2[p]", "kind": "sys.path", "detail": "added ['/p']"}
@@ -468,7 +468,7 @@ def test_the_shard_step_reports_the_findings_and_still_passes(
 ) -> None:
     _junit(
         tmp_path / "junit-1-a1.xml",
-        _guarded("tests/a/test_x.py", "test_1", ("leak_guard", "env: AVA_X was added")),
+        _guarded("tests/a/test_x.py", "test_1", ("leak_guard", "env: MEIVA_X was added")),
         _guarded("tests/a/test_x.py", "test_2", ("leak_guard_fault", "compare: OSError: gone")),
     )
     out = tmp_path / "c.json"
@@ -505,7 +505,7 @@ def test_the_total_raises_one_annotation_with_a_line_per_file_kind_and_thing(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
     counts = tmp_path / "counts"
-    env = ("leak_guard", "env: AVA_X was added")
+    env = ("leak_guard", "env: MEIVA_X was added")
     signal = ("leak_guard", "signal: SIGINT handler SIG_DFL -> handler")
     _leaks_in(
         counts,
@@ -527,7 +527,7 @@ def test_the_total_raises_one_annotation_with_a_line_per_file_kind_and_thing(
     assert lines[1] == "  by kind: cwd=1, env=3, signal=1"
     assert lines[2:] == [  # sorted by file, then kind, then thing
         "  tests/a/test_a.py  [signal] SIGINT  x1 test(s), e.g. test_3",
-        "  tests/a/test_x.py  [env] AVA_X  x3 test(s), e.g. test_1",
+        "  tests/a/test_x.py  [env] MEIVA_X  x3 test(s), e.g. test_1",
         "  tests/z/test_z.py  [cwd] /a  x1 test(s), e.g. test_4",
     ]
     assert "### Leak guard" in summary.read_text()

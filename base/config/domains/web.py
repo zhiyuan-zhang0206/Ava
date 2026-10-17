@@ -8,7 +8,7 @@ from base.config.base import EnvSettings
 class WebSettings(EnvSettings):
     web_search_timeout_seconds: float = Field(
         default=10.0,
-        alias="AVA_WEB_SEARCH_TIMEOUT_SECONDS",
+        alias="MEIVA_WEB_SEARCH_TIMEOUT_SECONDS",
         description="Brave search HTTP timeout (seconds). Typical response < 1s; 10s covers occasional jitter.",
         json_schema_extra={
             "restart_required": "agent",
@@ -20,7 +20,7 @@ class WebSettings(EnvSettings):
 
     web_fetch_timeout_seconds: float = Field(
         default=30.0,
-        alias="AVA_WEB_FETCH_TIMEOUT_SECONDS",
+        alias="MEIVA_WEB_FETCH_TIMEOUT_SECONDS",
         description="Jina Reader fetch HTTP timeout (seconds). Headless browser + JS rendering is slow; 30s covers heavy SPA cold starts.",
         json_schema_extra={
             "restart_required": "agent",
@@ -32,7 +32,7 @@ class WebSettings(EnvSettings):
 
     web_max_search_results: int = Field(
         default=20,
-        alias="AVA_WEB_MAX_RESULTS",
+        alias="MEIVA_WEB_MAX_RESULTS",
         description="Brave search max results per call (free tier caps at 20; higher values are rejected with 422).",
         json_schema_extra={
             "restart_required": "agent",
@@ -44,8 +44,8 @@ class WebSettings(EnvSettings):
 
     web_brave_search_endpoint: str = Field(
         default="https://api.search.brave.com/res/v1/web/search",
-        alias="AVA_WEB_BRAVE_SEARCH_ENDPOINT",
-        description="Brave Search API endpoint used by `ava.web.search`. Override to point at a different search endpoint (e.g. a self-hosted relay or a provider mirror) without code changes. A custom endpoint receives the same auth as Brave: `X-Subscription-Token` with BRAVE_API_KEY.",
+        alias="MEIVA_WEB_BRAVE_SEARCH_ENDPOINT",
+        description="Brave Search API endpoint used by `meiva.web.search`. Override to point at a different search endpoint (e.g. a self-hosted relay or a provider mirror) without code changes. A custom endpoint receives the same auth as Brave: `X-Subscription-Token` with BRAVE_API_KEY.",
         json_schema_extra={
             "restart_required": "agent",
             "writable": True,
@@ -56,8 +56,8 @@ class WebSettings(EnvSettings):
 
     web_jina_reader_base: str = Field(
         default="https://r.jina.ai/",
-        alias="AVA_WEB_JINA_BASE_URL",
-        description="Jina Reader base URL used by `ava.web.fetch` (the target URL is appended after it). Must end with `/` — it is concatenated with the encoded target URL. Override to point at a different reader endpoint (e.g. a self-hosted mirror) without code changes. A custom endpoint receives the same auth as Jina: `Authorization: Bearer` with JINA_API_KEY.",
+        alias="MEIVA_WEB_JINA_BASE_URL",
+        description="Jina Reader base URL used by `meiva.web.fetch` (the target URL is appended after it). Must end with `/` — it is concatenated with the encoded target URL. Override to point at a different reader endpoint (e.g. a self-hosted mirror) without code changes. A custom endpoint receives the same auth as Jina: `Authorization: Bearer` with JINA_API_KEY.",
         json_schema_extra={
             "restart_required": "agent",
             "writable": True,
@@ -69,7 +69,7 @@ class WebSettings(EnvSettings):
     brave_api_key: SecretStr | None = Field(
         default=None,
         alias="BRAVE_API_KEY",
-        description="Brave Search API key, used by `ava.web.search`.",
+        description="Brave Search API key, used by `meiva.web.search`.",
         json_schema_extra={
             "restart_required": "agent",
             "writable": True,
@@ -80,8 +80,8 @@ class WebSettings(EnvSettings):
 
     web_fetch_model: str = Field(
         default="deepseek-flash",
-        alias="AVA_WEB_FETCH_MODEL",
-        description="Model for `ava.web.fetch` page-content summarization. Separate from `understand_text_model` so the cheap fetch path does not use the agent's main model.",
+        alias="MEIVA_WEB_FETCH_MODEL",
+        description="Model for `meiva.web.fetch` page-content summarization. Separate from `understand_text_model` so the cheap fetch path does not use the agent's main model.",
         json_schema_extra={
             "restart_required": "agent",
             "writable": True,
@@ -92,8 +92,8 @@ class WebSettings(EnvSettings):
 
     web_fetch_reasoning: str = Field(
         default="none",
-        alias="AVA_WEB_FETCH_REASONING",
-        description="Reasoning effort for the `ava.web.fetch` summarization model. `none` skips reasoning entirely since the summarization prompt is simple.",
+        alias="MEIVA_WEB_FETCH_REASONING",
+        description="Reasoning effort for the `meiva.web.fetch` summarization model. `none` skips reasoning entirely since the summarization prompt is simple.",
         json_schema_extra={
             "restart_required": "agent",
             "writable": True,
@@ -104,8 +104,8 @@ class WebSettings(EnvSettings):
 
     web_fetch_injection_check_enabled: bool = Field(
         default=True,
-        alias="AVA_WEB_FETCH_INJECTION_CHECK_ENABLED",
-        description="Check the page text `ava.web.fetch` reads for instructions aimed at an AI reader, using a decision model, and attach a SECURITY note to the turn when the page looks like prompt injection. The page and its summary are never altered. The check only adds a warning: if the decision model is unavailable the fetch still succeeds. Needs `security_scan_enabled` and the decision model's API key.",
+        alias="MEIVA_WEB_FETCH_INJECTION_CHECK_ENABLED",
+        description="Check the page text `meiva.web.fetch` reads for instructions aimed at an AI reader, using a decision model, and attach a SECURITY note to the turn when the page looks like prompt injection. The page and its summary are never altered. The check only adds a warning: if the decision model is unavailable the fetch still succeeds. Needs `security_scan_enabled` and the decision model's API key.",
         json_schema_extra={
             "restart_required": "agent",
             "writable": True,
@@ -116,8 +116,8 @@ class WebSettings(EnvSettings):
 
     web_fetch_injection_model: str = Field(
         default="jev-1.13.0",
-        alias="AVA_WEB_FETCH_INJECTION_MODEL",
-        description="Decision model (an id from the decision-model catalog, not a chat model) that judges fetched page text for `web_fetch_injection_check_enabled`. An id the catalog does not list makes `ava.web.fetch` fail instead of silently skipping the check.",
+        alias="MEIVA_WEB_FETCH_INJECTION_MODEL",
+        description="Decision model (an id from the decision-model catalog, not a chat model) that judges fetched page text for `web_fetch_injection_check_enabled`. An id the catalog does not list makes `meiva.web.fetch` fail instead of silently skipping the check.",
         json_schema_extra={
             "restart_required": "agent",
             "writable": True,
@@ -130,8 +130,8 @@ class WebSettings(EnvSettings):
         default=0.4,
         gt=0.0,
         lt=1.0,
-        alias="AVA_WEB_FETCH_INJECTION_THRESHOLD",
-        description="Probability (exclusive 0..1) at or above which a fetched page is reported as likely prompt injection. The page is judged in chunks; the highest chunk probability is compared. Lower values warn more often. The default 0.4 was calibrated together with the hijack-intent question wording of `ava/sdk_surface/injection_check.py` (0 false positives on 209 benign pages, all 35 synthetic injections caught); recalibrate if either changes.",
+        alias="MEIVA_WEB_FETCH_INJECTION_THRESHOLD",
+        description="Probability (exclusive 0..1) at or above which a fetched page is reported as likely prompt injection. The page is judged in chunks; the highest chunk probability is compared. Lower values warn more often. The default 0.4 was calibrated together with the hijack-intent question wording of `meiva/sdk_surface/injection_check.py` (0 false positives on 209 benign pages, all 35 synthetic injections caught); recalibrate if either changes.",
         json_schema_extra={
             "restart_required": "agent",
             "writable": True,
@@ -143,7 +143,7 @@ class WebSettings(EnvSettings):
     jina_api_key: SecretStr | None = Field(
         default=None,
         alias="JINA_API_KEY",
-        description="Jina Reader API key (optional), used by `ava.web.fetch`. Empty = anonymous tier (20 RPM); with key = 500 RPM.",
+        description="Jina Reader API key (optional), used by `meiva.web.fetch`. Empty = anonymous tier (20 RPM); with key = 500 RPM.",
         json_schema_extra={
             "restart_required": "agent",
             "writable": True,

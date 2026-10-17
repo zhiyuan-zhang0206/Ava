@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
 """Rotate the gateway's human cluster secret (the control-plane bearer).
 
-``AVA_CLUSTER_SECRET`` authenticates human and operator callers of the gateway
+``MEIVA_CLUSTER_SECRET`` authenticates human and operator callers of the gateway
 API and the frontend login. Remote units never hold it: they authenticate with
 their write generation's machine API token. Only their telemetry relay token,
 derived from this secret, changes with it, so every remote unit needs a newly
-issued capability bundle afterwards (``ava cluster db-authority issue-unit``).
+issued capability bundle afterwards (``meiva cluster db-authority issue-unit``).
 The rotation never changes Postgres, Redis, their ACLs or PgBouncer.
 
 Run this script only after a bearer leak. It drives ``advance``, which
@@ -25,7 +25,7 @@ fingerprints):
 A crash resumes from the journal: an unpinned passphrase is derived only from
 the recorded pre-rotation secret, a pinned one is only verified against its
 recorded fingerprint, and the ``.env`` value must be exactly the old or the
-staged secret. Restart the gateway afterwards (``ava start``).
+staged secret. Restart the gateway afterwards (``meiva start``).
 """
 
 from __future__ import annotations
@@ -49,7 +49,7 @@ from ops.env_audit import EnvWriteAudit
 from services.backup.artifact import passphrase
 
 _TOKEN_BYTES = 32
-_SECRET_ENV = "AVA_CLUSTER_SECRET"  # noqa: S105 — env key name, not a credential
+_SECRET_ENV = "MEIVA_CLUSTER_SECRET"  # noqa: S105 — env key name, not a credential
 _AUDIT = "rotate_cluster_secret"
 
 State = Literal["pinning", "pinned", "done"]
@@ -87,7 +87,7 @@ def mint_secret() -> str:
 
 def bearer_fingerprint(secret: str) -> str:
     """A journal-safe digest of a bearer, distinct from its derived passphrase."""
-    return hashlib.sha256(b"ava-bearer-fingerprint\0" + secret.encode()).hexdigest()
+    return hashlib.sha256(b"meiva-bearer-fingerprint\0" + secret.encode()).hexdigest()
 
 
 def rotation_dir(home: Path) -> Path:
@@ -111,7 +111,7 @@ def _begin(home: Path) -> tuple[Rotation, str]:
     """Stage the next secret (a crash-left staged secret is adopted)."""
     current = _current_secret(home)
     if not current:
-        raise RotationRefusedError("this home has no AVA_CLUSTER_SECRET to rotate")
+        raise RotationRefusedError("this home has no MEIVA_CLUSTER_SECRET to rotate")
     staged = _staged(home)
     if staged is None or staged == current:
         staged = mint_secret()
@@ -205,13 +205,13 @@ def _save(home: Path) -> Callable[[Rotation], None]:
 
 
 def main(argv: list[str] | None = None) -> int:
-    from base.paths import ava_home
+    from base.paths import meiva_home
 
-    parser = argparse.ArgumentParser(description="Rotate the gateway's AVA_CLUSTER_SECRET.")
+    parser = argparse.ArgumentParser(description="Rotate the gateway's MEIVA_CLUSTER_SECRET.")
     parser.add_argument("--execute", action="store_true", help="perform the rotation")
     parser.add_argument("--yes", action="store_true", help="skip the confirmation prompt")
     args = parser.parse_args(argv)
-    home = ava_home().resolve()
+    home = meiva_home().resolve()
     recorded = read_journal(home)
     resuming = recorded is not None and recorded.state != "done"
     print(f"home: {home}")
@@ -231,8 +231,8 @@ def main(argv: list[str] | None = None) -> int:
         return 1
     print("✓ the gateway .env holds the new bearer; the logical-backup passphrase is pinned")
     print(f"  ({passphrase.pin_path(home)} is backup-critical: keep it with the backup keys).")
-    print("NEXT: restart the gateway (`ava start`), then issue every remote unit a new")
-    print("capability bundle (`ava cluster db-authority issue-unit`): its telemetry token")
+    print("NEXT: restart the gateway (`meiva start`), then issue every remote unit a new")
+    print("capability bundle (`meiva cluster db-authority issue-unit`): its telemetry token")
     print("derives from the bearer. New browser logins use the new secret.")
     return 0
 

@@ -1,0 +1,16 @@
+[uses]
+"test_gateway_client_base_url.py" = ["child_get_context.py"]
+"test_strong_creation.py" = ["test_gateway_client.py"]
+
+[debt.env-patch]
+"test_gateway_client.py#monkeypatch.delenv os.environ.MEIVA_AGENT_ID" = 3
+"test_gateway_client_base_url.py#monkeypatch.delenv os.environ.MEIVA_API_TOKEN" = 2
+"test_gateway_client_base_url.py#monkeypatch.setenv os.environ.MEIVA_API_TOKEN" = 1
+"test_gateway_client_base_url.py#monkeypatch.setenv os.environ.MEIVA_PROCESS_PROFILE" = 2
+
+[debt.first-party-patch]
+"test_gateway_client.py#monkeypatch.setattr meiva.__plugin_installation__" = 1
+"test_gateway_client_base_url.py#assignment meiva.context" = 1
+"test_gateway_client_base_url.py#del meiva.context" = 1
+"test_transport_inputs.py#monkeypatch.delattr meiva.__plugin_installation__" = 1
+"test_transport_inputs.py#monkeypatch.delattr meiva.context" = 1

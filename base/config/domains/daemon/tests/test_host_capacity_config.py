@@ -11,9 +11,9 @@ def test_default_admission_does_not_limit_waiting_agents() -> None:
 @pytest.mark.parametrize("limit", [0, 1, 1000])
 def test_admission_does_not_resize_database_pools(limit: int) -> None:
     config = DaemonSettings(
-        AVA_HOST_MAX_CONCURRENT_TURNS=limit,
-        AVA_HOST_DB_POOL_MAX_SIZE=64,
-        AVA_HOST_CONTROL_POOL_MAX_SIZE=8,
+        MEIVA_HOST_MAX_CONCURRENT_TURNS=limit,
+        MEIVA_HOST_DB_POOL_MAX_SIZE=64,
+        MEIVA_HOST_CONTROL_POOL_MAX_SIZE=8,
     )
     assert config.host_max_concurrent_turns == limit
     assert config.host_db_pool_max_size == 64
@@ -23,11 +23,11 @@ def test_admission_does_not_resize_database_pools(limit: int) -> None:
 @pytest.mark.parametrize(
     ("alias", "value"),
     [
-        ("AVA_HOST_MAX_CONCURRENT_TURNS", -1),
-        ("AVA_HOST_DB_POOL_MAX_SIZE", 0),
-        ("AVA_HOST_DB_POOL_MAX_SIZE", -1),
-        ("AVA_HOST_CONTROL_POOL_MAX_SIZE", 0),
-        ("AVA_HOST_CONTROL_POOL_MAX_SIZE", -1),
+        ("MEIVA_HOST_MAX_CONCURRENT_TURNS", -1),
+        ("MEIVA_HOST_DB_POOL_MAX_SIZE", 0),
+        ("MEIVA_HOST_DB_POOL_MAX_SIZE", -1),
+        ("MEIVA_HOST_CONTROL_POOL_MAX_SIZE", 0),
+        ("MEIVA_HOST_CONTROL_POOL_MAX_SIZE", -1),
     ],
 )
 def test_invalid_capacity_fails_at_configuration_load(alias: str, value: int) -> None:

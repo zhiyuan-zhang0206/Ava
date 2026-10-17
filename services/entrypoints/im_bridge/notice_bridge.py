@@ -1,6 +1,6 @@
 """Telegram notice bridge (Task #884).
 
-Reads new fleet notices (an agent's ``ava.ui.notify`` -> agent_notices rows)
+Reads new fleet notices (an agent's ``meiva.ui.notify`` -> agent_notices rows)
 and durably accepts normal pushes for the Telegram owner chat — a channel independent of the /switch conversation flow. Pushed notices
 carry inline buttons:
 
@@ -12,7 +12,7 @@ carry inline buttons:
 - [OK] / [Close] resolve an FYI as read or dismiss a response-required notice.
 
 A ``/notice filter`` command restricts what gets pushed (minimum priority
-and/or a single agent). Filters persist under ``$AVA_HOME/state/im_bridge/``;
+and/or a single agent). Filters persist under ``$MEIVA_HOME/state/im_bridge/``;
 normal-poll source receipts and the immutable cutover live in Postgres.
 """
 
@@ -33,7 +33,7 @@ from psycopg_pool import PoolTimeout
 from base.api_contracts.idempotency import keyed_headers
 from base.api_contracts.notice_question import parse_question, question_instructions
 from base.db.transaction import write_transaction
-from base.paths import ava_home
+from base.paths import meiva_home
 from services.entrypoints.im_bridge import copy
 from services.entrypoints.im_bridge.config import ImBridgeConfig
 from services.entrypoints.im_bridge.notice_poll_store import NoticePollStore
@@ -55,7 +55,7 @@ _PRIORITY_RANK = {"P0": 0, "P1": 1, "P2": 2, "P3": 3}
 
 
 def state_dir() -> Path:
-    return ava_home() / "state" / "im_bridge"
+    return meiva_home() / "state" / "im_bridge"
 
 
 # Direct-DB reads (R3 door ④, decision 2): the notice bridge reads

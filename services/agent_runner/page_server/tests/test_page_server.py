@@ -70,7 +70,7 @@ def test_directory_without_index_returns_placeholder(tmp_path: Path) -> None:
 
     assert status == 403
     assert content_type == "text/html; charset=utf-8"
-    assert b"Directory listings are disabled for ava.ui.serve pages." in body
+    assert b"Directory listings are disabled for meiva.ui.serve pages." in body
     assert b"Create an <code>index.html</code>" in body
     assert b"index.html" in body
     assert b"secret.txt" not in body
@@ -122,5 +122,5 @@ def test_subdirectory_without_index_returns_placeholder(tmp_path: Path) -> None:
 
     assert status == 403
     assert content_type == "text/html; charset=utf-8"
-    assert b"Directory listings are disabled for ava.ui.serve pages." in body
+    assert b"Directory listings are disabled for meiva.ui.serve pages." in body
     assert b"nested-secret.txt" not in body

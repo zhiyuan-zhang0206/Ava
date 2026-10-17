@@ -1,18 +1,18 @@
-"""Ava-flavored message constructors — build plain LangChain HumanMessage /
+"""Meiva-flavored message constructors — build plain LangChain HumanMessage /
 ToolMessage with `additional_kwargs` metadata.
 
 The read side (timeline endpoint / hooks etc.) uniformly classifies via
-`read_ava_kwargs(msg).get("ava_msg_type")` — **not isinstance**, so no need to
-subclass. The metadata keys + the `ava_msg_type` / `ava_note_tag` value sets are
-the typed contract in `base/agents/messages/kwargs.py` (`AvaMessageKwargs` TypedDict +
-`AvaMsgType` / `NoteTag` StrEnums); these helpers centralize the writes.
+`read_meiva_kwargs(msg).get("meiva_msg_type")` — **not isinstance**, so no need to
+subclass. The metadata keys + the `meiva_msg_type` / `meiva_note_tag` value sets are
+the typed contract in `base/agents/messages/kwargs.py` (`MeivaMessageKwargs` TypedDict +
+`MeivaMsgType` / `NoteTag` StrEnums); these helpers centralize the writes.
 
 Convention for adding a new metadata type:
     1. helper function name `<purpose>_message`
-    2. add the discriminator to `AvaMsgType` and stuff `ava_msg_type: <member>.value`
+    2. add the discriminator to `MeivaMsgType` and stuff `meiva_msg_type: <member>.value`
        so the read side dispatches
-    3. metadata keys use the `ava_` prefix (to avoid colliding with other framework
-       metadata) and are declared in `AvaMessageKwargs` — the exec_output's
+    3. metadata keys use the `meiva_` prefix (to avoid colliding with other framework
+       metadata) and are declared in `MeivaMessageKwargs` — the exec_output's
        `sdk_calls` is the one frozen exception: an unprefixed cross-process wire
        name shared with the exec child and the timeline projection
 
@@ -42,24 +42,24 @@ from langchain_core.messages import (
 from base.agents.messages.kwargs import (
     COMPACT_SUMMARY_HEADER as COMPACT_SUMMARY_HEADER,  # public: the header's owner is the base leaf
 )
-from base.agents.messages.kwargs import AvaMsgType, ExecStatus, NoteTag, read_ava_kwargs
+from base.agents.messages.kwargs import ExecStatus, MeivaMsgType, NoteTag, read_meiva_kwargs
 
 
 def _stamp_picked_up(kwargs: dict[str, object]) -> dict[str, object]:
-    """Add `ava_picked_up_at`: the moment this injected message is put into the
+    """Add `meiva_picked_up_at`: the moment this injected message is put into the
     LLM context (builders run at the injection point). Distinct from
-    `ava_created_at`, which for an inbound is its arrival time. AIMessage and
-    tool output are produced inside the context, so their `ava_created_at`
-    already is the read time and they carry no `ava_picked_up_at`."""
-    kwargs["ava_picked_up_at"] = datetime.now(UTC).isoformat()
+    `meiva_created_at`, which for an inbound is its arrival time. AIMessage and
+    tool output are produced inside the context, so their `meiva_created_at`
+    already is the read time and they carry no `meiva_picked_up_at`."""
+    kwargs["meiva_picked_up_at"] = datetime.now(UTC).isoformat()
     return kwargs
 
 
 def _stamp_created_at(kwargs: dict[str, object], created_at: datetime | None) -> dict[str, object]:
-    """Add the ISO-8601 `ava_created_at` when a creation time is supplied.
+    """Add the ISO-8601 `meiva_created_at` when a creation time is supplied.
     Omitting it (created_at None) leaves the message without a creation time."""
     if created_at is not None:
-        kwargs["ava_created_at"] = created_at.isoformat()
+        kwargs["meiva_created_at"] = created_at.isoformat()
     return kwargs
 
 
@@ -87,32 +87,32 @@ def inbound_message(
     deterministic one (the consent request is deduplicated by it).
 
     additional_kwargs:
-        ava_msg_type: "inbound"
-        ava_source: original source string ("system" / "agent:N" / "user")
-        ava_inbound_id: inbound_messages.id of the source row — history
+        meiva_msg_type: "inbound"
+        meiva_source: original source string ("system" / "agent:N" / "user")
+        meiva_inbound_id: inbound_messages.id of the source row — history
             readers (timeline, run timeline) correlate a message with its
             queue row through it (see agent/db/__init__.py:claim_inbound_batch).
             Omitted when the inbound has no queue row.
-        ava_inbound_body_start: index in the (first text block of) `content` where the
+        meiva_inbound_body_start: index in the (first text block of) `content` where the
             sender's content begins, after the envelope header (`inbound_head`).
-        ava_created_at: ISO-8601 wall-clock the inbound entered the conversation
+        meiva_created_at: ISO-8601 wall-clock the inbound entered the conversation
             (the source row's stored created_at, i.e. its ARRIVAL time).
             Omitted when not supplied.
-        ava_picked_up_at: ISO-8601 wall-clock the inbound was put into the LLM
+        meiva_picked_up_at: ISO-8601 wall-clock the inbound was put into the LLM
             context (claim time) — the time the model reads it. Timeline and
             history render by this, not by arrival.
-        ava_image_urls: reference urls of any inlined images (timeline render).
+        meiva_image_urls: reference urls of any inlined images (timeline render).
             Omitted when the inbound carries no image.
     """
     kwargs: dict[str, object] = {
-        "ava_msg_type": AvaMsgType.INBOUND.value,
-        "ava_source": source,
-        "ava_inbound_body_start": body_start,
+        "meiva_msg_type": MeivaMsgType.INBOUND.value,
+        "meiva_source": source,
+        "meiva_inbound_body_start": body_start,
     }
     if inbound_id is not None:
-        kwargs["ava_inbound_id"] = inbound_id
+        kwargs["meiva_inbound_id"] = inbound_id
     if image_urls:
-        kwargs["ava_image_urls"] = image_urls
+        kwargs["meiva_image_urls"] = image_urls
     # langchain types content as str | list[str | dict]; our block list is a
     # subset it accepts at runtime (a leading text block + native image blocks).
     return HumanMessage(
@@ -131,26 +131,26 @@ def system_note_message(
     transitions (terminate / restart-complete / resurrect / fork identity) —
     `tag` distinguishes which. Not tied to an inbound row.
 
-    Distinguished from inbound_message by `ava_msg_type='system_note'`; the
+    Distinguished from inbound_message by `meiva_msg_type='system_note'`; the
     timeline read side renders it as a system_marker keyed on `tag`. Carries no
     inbound id. `tag` is a NoteTag —
     pyright statically catches a wrong/typo'd value.
 
     additional_kwargs:
-        ava_msg_type: "system_note"
-        ava_note_tag: the NoteTag value (drives the timeline chip)
-        ava_task_id: task attribution for a task-driven turn. Omitted otherwise.
-        ava_created_at: ISO-8601 wall-clock the note was produced. Omitted when
+        meiva_msg_type: "system_note"
+        meiva_note_tag: the NoteTag value (drives the timeline chip)
+        meiva_task_id: task attribution for a task-driven turn. Omitted otherwise.
+        meiva_created_at: ISO-8601 wall-clock the note was produced. Omitted when
             not supplied.
-        ava_picked_up_at: ISO-8601 wall-clock the note was put into the LLM
+        meiva_picked_up_at: ISO-8601 wall-clock the note was put into the LLM
             context.
     """
     kwargs: dict[str, object] = {
-        "ava_msg_type": AvaMsgType.SYSTEM_NOTE.value,
-        "ava_note_tag": tag.value,
+        "meiva_msg_type": MeivaMsgType.SYSTEM_NOTE.value,
+        "meiva_note_tag": tag.value,
     }
     if task_id is not None:
-        kwargs["ava_task_id"] = task_id
+        kwargs["meiva_task_id"] = task_id
     return HumanMessage(
         content=f"[system] {content}",
         additional_kwargs=_stamp_created_at(_stamp_picked_up(kwargs), created_at),
@@ -193,7 +193,7 @@ def attach_message(
     return HumanMessage(
         content=cast("str | list[str | dict[str, Any]]", content_blocks),
         additional_kwargs=_stamp_created_at(
-            _stamp_picked_up({"ava_msg_type": AvaMsgType.ATTACH.value}), created_at
+            _stamp_picked_up({"meiva_msg_type": MeivaMsgType.ATTACH.value}), created_at
         ),
     )
 
@@ -221,28 +221,28 @@ def exec_output_message(
     for the model only and no code parses it.
 
     additional_kwargs:
-        ava_msg_type: "exec_output"
-        ava_exec_status: ExecStatus value, how the call ended.
-        ava_exec_started_at: ISO-8601 wall-clock the run began (None when it never ran);
-            the end is `ava_created_at`.
-        ava_exec_body_start: index in `content` where the output body begins, after
+        meiva_msg_type: "exec_output"
+        meiva_exec_status: ExecStatus value, how the call ended.
+        meiva_exec_started_at: ISO-8601 wall-clock the run began (None when it never ran);
+            the end is `meiva_created_at`.
+        meiva_exec_body_start: index in `content` where the output body begins, after
             the envelope header (0 when there is no header).
-        ava_exec_ms: int (wall-clock the code ran; surfaced on the code_output
+        meiva_exec_ms: int (wall-clock the code ran; surfaced on the code_output
             timeline item so the collapsed chip can read "ran in 1.3s")
         sdk_calls: the run's real SDK-call tally, `[{"method": ..., "count": N},
             ...]` (from the exec child; surfaced on the agent_code timeline item
             as the collapsed-code chip). Omitted when unknown — a boot-crashed
             child — while `[]` means "ran, called no SDK".
-        ava_created_at: ISO-8601 wall-clock the output was produced. Omitted when
+        meiva_created_at: ISO-8601 wall-clock the output was produced. Omitted when
             not supplied. Produced inside the context, so this is also its read
-            time (no `ava_picked_up_at`).
+            time (no `meiva_picked_up_at`).
     """
     kwargs: dict[str, object] = {
-        "ava_msg_type": AvaMsgType.EXEC_OUTPUT.value,
-        "ava_exec_ms": exec_ms,
-        "ava_exec_status": status.value,
-        "ava_exec_started_at": started_at.isoformat() if started_at is not None else None,
-        "ava_exec_body_start": body_start,
+        "meiva_msg_type": MeivaMsgType.EXEC_OUTPUT.value,
+        "meiva_exec_ms": exec_ms,
+        "meiva_exec_status": status.value,
+        "meiva_exec_started_at": started_at.isoformat() if started_at is not None else None,
+        "meiva_exec_body_start": body_start,
     }
     if sdk_calls is not None:
         kwargs["sdk_calls"] = sdk_calls
@@ -254,12 +254,12 @@ def exec_output_message(
 
 
 def _tail_inbound_sources(messages: list[AnyMessage]) -> list[str]:
-    """The `ava_source` of every inbound added since the last assistant turn.
+    """The `meiva_source` of every inbound added since the last assistant turn.
 
     Scans backward from the end, stopping at the most recent AIMessage (the
     boundary of the current incoming batch), and collects the source of each
-    `ava_msg_type="inbound"` HumanMessage. `inbound_message()` always sets
-    ava_source (contract field), so it is indexed rather than `.get()`-ed — a
+    `meiva_msg_type="inbound"` HumanMessage. `inbound_message()` always sets
+    meiva_source (contract field), so it is indexed rather than `.get()`-ed — a
     missing source on an "inbound"-typed message surfaces as a KeyError instead
     of being silently dropped.
     """
@@ -269,12 +269,12 @@ def _tail_inbound_sources(messages: list[AnyMessage]) -> list[str]:
             break
         if not isinstance(msg, HumanMessage):
             continue
-        if read_ava_kwargs(msg).get("ava_msg_type") != AvaMsgType.INBOUND:
+        if read_meiva_kwargs(msg).get("meiva_msg_type") != MeivaMsgType.INBOUND:
             continue
-        # ava_source is indexed (not `.get`) off the raw bag so a missing source
+        # meiva_source is indexed (not `.get`) off the raw bag so a missing source
         # on an "inbound"-typed message surfaces as a KeyError rather than being
         # silently dropped — see the docstring.
-        source = msg.additional_kwargs["ava_source"]  # pyright: ignore[reportUnknownMemberType]
+        source = msg.additional_kwargs["meiva_source"]  # pyright: ignore[reportUnknownMemberType]
         if isinstance(source, str):
             sources.append(source)
     return sources
@@ -282,7 +282,7 @@ def _tail_inbound_sources(messages: list[AnyMessage]) -> list[str]:
 
 def tail_has_agent_inbound(messages: list[AnyMessage]) -> bool:
     """Whether the messages added since the last assistant turn include an
-    inbound from another agent (`ava_source` starts with "agent:").
+    inbound from another agent (`meiva_source` starts with "agent:").
 
     The read-side counterpart to `inbound_message`, so it lives here rather than
     in any one plugin. Used by before_llm hooks that must coordinate the single
@@ -307,7 +307,7 @@ def has_conversation(messages: list[AnyMessage]) -> bool:
     """
     return any(
         not isinstance(m, SystemMessage)
-        and read_ava_kwargs(m).get("ava_msg_type") != AvaMsgType.SYSTEM_NOTE
+        and read_meiva_kwargs(m).get("meiva_msg_type") != MeivaMsgType.SYSTEM_NOTE
         for m in messages
     )
 

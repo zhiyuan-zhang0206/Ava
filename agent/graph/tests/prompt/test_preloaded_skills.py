@@ -9,7 +9,7 @@ Two surfaces:
 
 Skills are faked by running in a per-test unit home (`unit_home`) and treating
 every dir under `<home>/skills` as an enabled overlay entry — same shape as
-ava/tests/skills/test_skills.py.
+meiva/tests/skills/test_skills.py.
 """
 
 from __future__ import annotations
@@ -20,7 +20,7 @@ import pytest
 
 from agent.graph.prompt.capabilities import resolve_prompt_skills
 from agent.graph.prompt.context_notes import preloaded_skills_note
-from base.agents.context import AvaContext
+from base.agents.context import MeivaContext
 from base.agents.messages.kwargs import NoteTag
 from base.clock import Clock
 from base.config import settings
@@ -28,7 +28,7 @@ from base.host.env.agent_slices import AgentSlices
 from base.packages.extensions import install_registry
 from base.packages.plugin_providers import build_model_catalog
 from base.packages.skills.tree import identifier
-from base.paths import ava_home, skills_dir
+from base.paths import meiva_home, skills_dir
 
 
 @pytest.fixture(autouse=True)
@@ -37,7 +37,7 @@ def _isolate_load_dir(unit_home: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     the real ~/.agents/skills/ never leaks into a scan; fake_skills_dir creates it."""
 
     def _all_enabled() -> set[str]:
-        d = skills_dir(ava_home())
+        d = skills_dir(meiva_home())
         return {p.name for p in d.iterdir() if p.is_dir()} if d.is_dir() else set()
 
     monkeypatch.setattr(install_registry, "loadable_skill_names", _all_enabled)
@@ -45,7 +45,7 @@ def _isolate_load_dir(unit_home: Path, monkeypatch: pytest.MonkeyPatch) -> None:
 
 @pytest.fixture
 def fake_skills_dir(unit_home: Path) -> Path:
-    d = skills_dir(ava_home())
+    d = skills_dir(meiva_home())
     d.mkdir()
     return d
 
@@ -80,46 +80,46 @@ def test_resolve_by_bare_name(fake_skills_dir: Path) -> None:
 
 def test_resolve_by_dotted_identifier(fake_skills_dir: Path) -> None:
     """A namespaced skill resolves by its `.`-identifier, not just bare name."""
-    parent = fake_skills_dir / "ava-memory"
+    parent = fake_skills_dir / "meiva-memory"
     _write_skill(parent, "consolidation", "name: consolidation\ndescription: merge notes")
     resolved = resolve_prompt_skills(
-        ["ava-memory.consolidation"],
+        ["meiva-memory.consolidation"],
         AgentSlices.resolve(
             default_reader=lambda domain, field: getattr(getattr(settings, domain), field)
         ).prompt.sdk_disable,
         config_field="skills_to_expand_at_start",
     )
-    assert [identifier(s) for s in resolved] == ["ava-memory:consolidation"]
+    assert [identifier(s) for s in resolved] == ["meiva-memory:consolidation"]
 
 
 def test_resolve_accepts_the_python_spelling_of_a_dash_skill(fake_skills_dir: Path) -> None:
     """A config value still written in the underscore (Python) form resolves to
     the dash-named skill — the backcompat that keeps a preset row written before
     the rename working."""
-    parent = fake_skills_dir / "ava-memory"
+    parent = fake_skills_dir / "meiva-memory"
     _write_skill(parent, "consolidation", "name: consolidation\ndescription: merge notes")
     resolved = resolve_prompt_skills(
-        ["ava_memory.consolidation"],
+        ["meiva_memory.consolidation"],
         AgentSlices.resolve(
             default_reader=lambda domain, field: getattr(getattr(settings, domain), field)
         ).prompt.sdk_disable,
         config_field="skills_to_expand_at_start",
     )
-    assert [identifier(s) for s in resolved] == ["ava-memory:consolidation"]
+    assert [identifier(s) for s in resolved] == ["meiva-memory:consolidation"]
 
 
 def test_resolve_accepts_the_plugin_colon_spelling(fake_skills_dir: Path) -> None:
     """An ecosystem-style `plugin:skill` reference folds to the `.` form."""
-    parent = fake_skills_dir / "ava-memory"
+    parent = fake_skills_dir / "meiva-memory"
     _write_skill(parent, "consolidation", "name: consolidation\ndescription: merge notes")
     resolved = resolve_prompt_skills(
-        ["ava-memory:consolidation"],
+        ["meiva-memory:consolidation"],
         AgentSlices.resolve(
             default_reader=lambda domain, field: getattr(getattr(settings, domain), field)
         ).prompt.sdk_disable,
         config_field="skills_to_expand_at_start",
     )
-    assert [identifier(s) for s in resolved] == ["ava-memory:consolidation"]
+    assert [identifier(s) for s in resolved] == ["meiva-memory:consolidation"]
 
 
 def test_resolve_wildcard_selects_whole_catalog(fake_skills_dir: Path) -> None:
@@ -193,7 +193,7 @@ def test_note_none_when_config_empty(
     _expand(monkeypatch, [])
     assert (
         preloaded_skills_note(
-            AvaContext(
+            MeivaContext(
                 agent=AgentSlices.resolve(
                     default_reader=lambda domain, field: getattr(getattr(settings, domain), field)
                 ),
@@ -212,7 +212,7 @@ def test_note_none_when_nothing_resolves(
     _expand(monkeypatch, ["ghost"])
     assert (
         preloaded_skills_note(
-            AvaContext(
+            MeivaContext(
                 agent=AgentSlices.resolve(
                     default_reader=lambda domain, field: getattr(getattr(settings, domain), field)
                 ),
@@ -234,7 +234,7 @@ def test_note_carries_full_body_and_tag(
     _expand(monkeypatch, ["ultra_speed"])
 
     note = preloaded_skills_note(
-        AvaContext(
+        MeivaContext(
             agent=AgentSlices.resolve(
                 default_reader=lambda domain, field: getattr(getattr(settings, domain), field)
             ),
@@ -247,10 +247,10 @@ def test_note_carries_full_body_and_tag(
     content = note.content
     # system_note_message prefixes "[system] "; framing + PRELOADED_SKILLS tag.
     assert content.startswith("[system] Preloaded skills")
-    assert note.additional_kwargs["ava_note_tag"] == NoteTag.PRELOADED_SKILLS.value  # pyright: ignore[reportUnknownMemberType]
+    assert note.additional_kwargs["meiva_note_tag"] == NoteTag.PRELOADED_SKILLS.value  # pyright: ignore[reportUnknownMemberType]
     # The access-path heading + the full SKILL.md body (frontmatter included, as
-    # ava.help renders a skill) are both present.
-    assert "## ava.skills.ultra_speed" in content
+    # meiva.help renders a skill) are both present.
+    assert "## meiva.skills.ultra_speed" in content
     assert "Do the fast thing. Never dawdle." in content
     assert "description: go fast" in content  # frontmatter is part of the full text
 
@@ -263,7 +263,7 @@ def test_note_merges_multiple_skills_in_order(
     _expand(monkeypatch, ["second", "first"])  # explicit order preserved
 
     note = preloaded_skills_note(
-        AvaContext(
+        MeivaContext(
             agent=AgentSlices.resolve(
                 default_reader=lambda domain, field: getattr(getattr(settings, domain), field)
             ),
@@ -278,24 +278,24 @@ def test_note_merges_multiple_skills_in_order(
     assert "AAA body" in content and "BBB body" in content
     assert "\n---\n" in content
     # Requested order (second before first) is the render order.
-    assert content.index("## ava.skills.second") < content.index("## ava.skills.first")
+    assert content.index("## meiva.skills.second") < content.index("## meiva.skills.first")
 
 
 def test_note_heading_uses_dotted_access_path(
     fake_skills_dir: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """A namespaced skill's heading is its ava.skills access path (attr form)."""
-    parent = fake_skills_dir / "ava_memory"
+    """A namespaced skill's heading is its meiva.skills access path (attr form)."""
+    parent = fake_skills_dir / "meiva_memory"
     _write_skill(
         parent,
         "consolidation",
         "name: consolidation\ndescription: merge notes",
         body="consolidation playbook",
     )
-    _expand(monkeypatch, ["ava_memory.consolidation"])
+    _expand(monkeypatch, ["meiva_memory.consolidation"])
 
     note = preloaded_skills_note(
-        AvaContext(
+        MeivaContext(
             agent=AgentSlices.resolve(
                 default_reader=lambda domain, field: getattr(getattr(settings, domain), field)
             ),
@@ -305,5 +305,5 @@ def test_note_heading_uses_dotted_access_path(
     )
     assert note is not None
     assert isinstance(note.content, str)  # pyright: ignore[reportUnknownMemberType]
-    assert "## ava.skills.ava_memory.consolidation" in note.content
+    assert "## meiva.skills.meiva_memory.consolidation" in note.content
     assert "consolidation playbook" in note.content

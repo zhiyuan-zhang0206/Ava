@@ -1,4 +1,4 @@
-"""`base.lm.usage` contract tests for Ava's v1 billing span schema."""
+"""`base.lm.usage` contract tests for Meiva's v1 billing span schema."""
 
 from __future__ import annotations
 
@@ -72,20 +72,22 @@ def test_emit_billing_event_records_schema_v1_attributes(monkeypatch: pytest.Mon
 
     assert len(tracer.spans) == 1
     span = tracer.spans[0]
-    assert span.name == "ava.billing.call"
+    assert span.name == "meiva.billing.call"
     assert span.start_time == 123_456
     assert span.ended is True
-    assert {key: value for key, value in span.attributes.items() if key != "ava.billing.ts"} == {
-        "ava.billing.line": "ava",
-        "ava.billing.vendor": "deepseek",
-        "ava.billing.model": "deepseek-v4-pro",
-        "ava.billing.tokens_in": 1_000,
-        "ava.billing.tokens_out": 100,
-        "ava.billing.cost": 0.000348,
-        "ava.billing.usage_kind": "agent",
-        "ava.billing.cache_read_tokens": 800,
+    assert {key: value for key, value in span.attributes.items() if key != "meiva.billing.ts"} == {
+        "meiva.billing.line": "meiva",
+        "meiva.billing.vendor": "deepseek",
+        "meiva.billing.model": "deepseek-v4-pro",
+        "meiva.billing.tokens_in": 1_000,
+        "meiva.billing.tokens_out": 100,
+        "meiva.billing.cost": 0.000348,
+        "meiva.billing.usage_kind": "agent",
+        "meiva.billing.cache_read_tokens": 800,
     }
-    assert re.fullmatch(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z", span.attributes["ava.billing.ts"])
+    assert re.fullmatch(
+        r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z", span.attributes["meiva.billing.ts"]
+    )
 
 
 @pytest.mark.parametrize("path", ["message", "durable"])
@@ -120,9 +122,9 @@ def test_message_billing_accounts_for_both_cache_write_ttls(
         )
     assert len(tracer.spans) == 1
     attrs = tracer.spans[0].attributes
-    assert attrs["ava.billing.cache_write_5m_tokens"] == 300
-    assert attrs["ava.billing.cache_write_1h_tokens"] == 400
-    assert attrs["ava.billing.cost"] == pytest.approx(0.00614)
+    assert attrs["meiva.billing.cache_write_5m_tokens"] == 300
+    assert attrs["meiva.billing.cache_write_1h_tokens"] == 400
+    assert attrs["meiva.billing.cost"] == pytest.approx(0.00614)
 
 
 def test_emit_billing_from_message_marks_unpriced_model(
@@ -146,9 +148,9 @@ def test_emit_billing_from_message_marks_unpriced_model(
     )
 
     assert len(tracer.spans) == 1
-    assert tracer.spans[0].attributes["ava.billing.vendor"] == "deepseek"
-    assert tracer.spans[0].attributes["ava.billing.cost"] == 0.0
-    assert tracer.spans[0].attributes["ava.billing.unpriced"] is True
+    assert tracer.spans[0].attributes["meiva.billing.vendor"] == "deepseek"
+    assert tracer.spans[0].attributes["meiva.billing.cost"] == 0.0
+    assert tracer.spans[0].attributes["meiva.billing.unpriced"] is True
 
 
 def test_emit_billing_from_message_skips_missing_usage_metadata(
@@ -307,9 +309,9 @@ def test_billing_distinguishes_unmetered_cache_from_reported_zero(
             message, model="deepseek-flash", usage_kind="chat", catalog=model_catalog
         )
     [span] = tracer.spans
-    assert span.attributes["ava.billing.tokens_in"] == 1000
-    assert span.attributes["ava.billing.cost"] > 0
+    assert span.attributes["meiva.billing.tokens_in"] == 1000
+    assert span.attributes["meiva.billing.cost"] > 0
     if cached is None:
-        assert "ava.billing.cache_read_tokens" not in span.attributes
+        assert "meiva.billing.cache_read_tokens" not in span.attributes
     else:
-        assert span.attributes["ava.billing.cache_read_tokens"] == 0
+        assert span.attributes["meiva.billing.cache_read_tokens"] == 0

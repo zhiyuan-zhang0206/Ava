@@ -8,13 +8,15 @@ from base.host.system.tests.fake_commands import FakeCommands, Reply, fake_host
 
 
 def test_slug_parses_ssh_form(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(gp, "memory_remote", lambda: "git@github.com:example-org/AvaMemory.git")
-    assert gp.memory_repo_slug() == "example-org/AvaMemory"
+    monkeypatch.setattr(gp, "memory_remote", lambda: "git@github.com:example-org/MeivaMemory.git")
+    assert gp.memory_repo_slug() == "example-org/MeivaMemory"
 
 
 def test_slug_parses_https_form_with_git_suffix(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(gp, "memory_remote", lambda: "https://github.com/example-org/AvaMemory.git")
-    assert gp.memory_repo_slug() == "example-org/AvaMemory"
+    monkeypatch.setattr(
+        gp, "memory_remote", lambda: "https://github.com/example-org/MeivaMemory.git"
+    )
+    assert gp.memory_repo_slug() == "example-org/MeivaMemory"
 
 
 def test_slug_parses_https_form_without_git_suffix(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -33,7 +35,7 @@ def _host(commands: FakeCommands, *, gh: str | None = "/usr/bin/gh") -> Host:
 
 
 def _patch_slug(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(gp, "memory_remote", lambda: "git@github.com:owner/AvaMemory.git")
+    monkeypatch.setattr(gp, "memory_remote", lambda: "git@github.com:owner/MeivaMemory.git")
 
 
 def _authenticated(permission: Reply) -> FakeCommands:
@@ -53,7 +55,7 @@ def test_blocker_none_when_all_checks_pass(monkeypatch: pytest.MonkeyPatch) -> N
             "gh",
             "repo",
             "view",
-            "owner/AvaMemory",
+            "owner/MeivaMemory",
             "--json",
             "viewerPermission",
             "-q",
@@ -84,7 +86,7 @@ def test_blocker_read_only_permission(monkeypatch: pytest.MonkeyPatch) -> None:
     commands = _authenticated(Reply(stdout="READ\n"))
     assert (
         gp.github_pr_blocker(host=_host(commands))
-        == "gh account lacks write access to owner/AvaMemory (viewerPermission='READ')"
+        == "gh account lacks write access to owner/MeivaMemory (viewerPermission='READ')"
     )
 
 
@@ -93,7 +95,7 @@ def test_blocker_permission_read_fails(monkeypatch: pytest.MonkeyPatch) -> None:
     commands = _authenticated(Reply(returncode=1))
     assert (
         gp.github_pr_blocker(host=_host(commands))
-        == "could not read permission on owner/AvaMemory via gh"
+        == "could not read permission on owner/MeivaMemory via gh"
     )
 
 

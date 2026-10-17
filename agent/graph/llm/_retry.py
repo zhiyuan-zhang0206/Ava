@@ -21,7 +21,7 @@ from base.lm.catalog import ModelCatalog
 from base.lm.errors import is_retryable_provider_error
 
 RETRY_JITTER_SPAN_S = 10.0
-RETRY_REMAINING_ATTR = "_ava_retry_budget_remaining_seconds"
+RETRY_REMAINING_ATTR = "_meiva_retry_budget_remaining_seconds"
 # The backoff factor the transient schedule was tuned with (every incident validated base 2).
 _BACKOFF_FACTOR = 2.0
 NEVER_RETRIED = (FatalLLMStreamError, FatalProviderError, CompactionFailedError)

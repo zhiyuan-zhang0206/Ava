@@ -68,7 +68,7 @@ def stats_route(host: AgentHost, scheduler: TurnScheduler) -> RouteHandler:
             **host.admission.payload(),
             "maintenance_protocol": 1,
             "runtime_owner": str(host.runtime_owner),
-            "home": str(paths.ava_home()),
+            "home": str(paths.meiva_home()),
             "pid": os.getpid(),
             "active_agents": sorted(scheduler.active_agents),
             "active_progress": active_progress,

@@ -198,7 +198,7 @@ def test_workflow_runs_only_trusted_main_code_with_write_permissions() -> None:
     assert (
         "python scripts/model_registry/update_model_pricing.py --sync-plugins --write" in workflow
     )
-    assert "ava_builtins/plugins/lm_*/provider.py" in workflow
+    assert "meiva_builtins/plugins/lm_*/provider.py" in workflow
     assert "bot sync → human review of the PR" in workflow
     assert "model-pricing-future-windows.md" in workflow
     assert 'cd "$CANDIDATE"' not in workflow

@@ -57,7 +57,7 @@ counts or write volume). The write switch runs in the next user-supervised windo
 - Durability: default `"async"` — one checkpoint row per super-step
   (node boundary); a turn spans several super-steps.
 - N-step wrapper `wrap_saver_writes_with_nstep_interval` (`agent/startup/__init__.py:212`,
-  interval = `AVA_CHECKPOINT_INTERVAL`, default 4):
+  interval = `MEIVA_CHECKPOINT_INTERVAL`, default 4):
   - retained steps (`step % 4 == 0`) and non-`loop`/`update` sources (input, fork) write;
     skipped steps write nothing.
   - On retained/flush writes it merges the checkpoint's full `channel_versions` into
@@ -66,7 +66,7 @@ counts or write volume). The write switch runs in the next user-supervised windo
     `channel_values`), **each retained checkpoint persists the current full value of every
     channel whose version changed since the last write** — this fixed a dangling-reference bug but is exactly the full-rewrite
     amplifier.
-  - A turn ends with `_ava_nstep_flush(thread_id)` persisting the last skipped checkpoint.
+  - A turn ends with `_meiva_nstep_flush(thread_id)` persisting the last skipped checkpoint.
     Per-thread locks serialize writes and flushes.
   - A delta-bearing thread (checkpoint metadata `counters_since_delta_snapshot`, or a
     `_DeltaSnapshot` value in `channel_values`) retires the throttle: every super-step and
@@ -160,7 +160,7 @@ channels violate that, which is exactly why they carry the explicit predicate ab
 
 ### 1.5 Mitigation status — the guard was reverted; the mutation guard meets delta
 
-PR #2226 (task #3096 / #6094) added `AVA_CHECKPOINT_MAX_BLOB_BYTES` (default 16 MiB),
+PR #2226 (task #3096 / #6094) added `MEIVA_CHECKPOINT_MAX_BLOB_BYTES` (default 16 MiB),
 attach-image downscaling and per-agent overrides. The Trunk queue landed it at
 2026-09-11T17:51:21Z (squash 740627d06) — one second before the recall; the user thereupon
 ruled caps/downscaling wrong for this problem and task #3139 reverted the whole PR (guard,
@@ -362,7 +362,7 @@ shapes throughout):
    saver-level injection fold delta threads at read time. Coverage: pool saver
    `get_tuple`/`aget_tuple` (folded values injected); `base/agents/history/checkpoint.py` readers
    (messages / count with reconstruct fallback / segment / full / by-trace);
-   `ava/external/state.py:load_snapshot`; fork chain copy (`copy_checkpoint_chain` (`base.agents.history.checkpoint_copy`), writes
+   `meiva/external/state.py:load_snapshot`; fork chain copy (`copy_checkpoint_chain` (`base.agents.history.checkpoint_copy`), writes
    chain included); `agent/startup/__init__.py` inbound reconciliation; `services/backup/restore_drill.py`;
    the self-evolution recorder.
 2. **Wrapper retirement (PR #2322).** Delta threads bypass the N-step

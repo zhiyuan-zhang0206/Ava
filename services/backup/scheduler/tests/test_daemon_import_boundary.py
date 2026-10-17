@@ -24,8 +24,8 @@ _PROBE = Path(__file__).with_name("child_import_probe.py")
 
 
 def _fresh(args: list[str], home: Path) -> subprocess.CompletedProcess[str]:
-    env = {key: value for key, value in os.environ.items() if not key.startswith("AVA_")}
-    env.update(AVA_HOME=str(home), AVA_CONFIG_FETCH="skip", AVA_PROCESS_PROFILE="gateway")
+    env = {key: value for key, value in os.environ.items() if not key.startswith("MEIVA_")}
+    env.update(MEIVA_HOME=str(home), MEIVA_CONFIG_FETCH="skip", MEIVA_PROCESS_PROFILE="gateway")
     return subprocess.run(  # noqa: S603 — fixed argv, sys.executable is trusted
         [sys.executable, "-X", "utf8", str(_PROBE), *args],
         cwd=_REPO_ROOT,

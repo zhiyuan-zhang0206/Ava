@@ -4,11 +4,11 @@ exports = ["memory_checkouts.py"]
 "test_memory_repo.py" = ["memory_checkouts.py"]
 
 [debt.env-patch]
-"test_cluster_drift.py#monkeypatch.setenv os.environ.AVA_HOME" = 5
+"test_cluster_drift.py#monkeypatch.setenv os.environ.MEIVA_HOME" = 5
 
 [debt.first-party-patch]
 "test_cluster_drift.py#monkeypatch.setattr base.deploy.git.cluster_drift.prod_source_dir" = 2
-"test_cluster_drift.py#monkeypatch.setattr base.paths.ava_home" = 1
+"test_cluster_drift.py#monkeypatch.setattr base.paths.meiva_home" = 1
 "test_github_pr.py#monkeypatch.setattr base.deploy.git.github_pr.memory_remote" = 5
 "test_memory_repo.py#monkeypatch.setattr base.deploy.git.memory_repo.gateway_is_initialized" = 4
 "test_memory_repo.py#monkeypatch.setattr base.deploy.git.memory_repo.is_initialized" = 6
@@ -28,7 +28,7 @@ exports = ["memory_checkouts.py"]
 "test_memory_repo_bootstrap.py#monkeypatch.setattr base.deploy.git.memory_repo.run_git" = 1
 "test_memory_repo_pool_snapshot.py#monkeypatch.setattr base.deploy.git.memory_repo.POOL_SNAPSHOT_MAX_BYTES" = 2
 "test_source_tree_guard.py#monkeypatch.setattr base.deploy.git.source_tree_guard.git" = 2
-"test_source_tree_guard.py#monkeypatch.setattr base.paths.ava_home" = 10
+"test_source_tree_guard.py#monkeypatch.setattr base.paths.meiva_home" = 10
 
 [debt.restricted-python]
 "test_worktree_guard.py#python -c" = 2

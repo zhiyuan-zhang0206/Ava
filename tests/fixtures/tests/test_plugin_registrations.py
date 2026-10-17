@@ -8,7 +8,7 @@ from pathlib import Path
 
 import pytest
 
-import ava
+import meiva
 
 _GATE_CHILD = Path(__file__).with_name("child_gate_without_agent_layer.py")
 
@@ -35,8 +35,8 @@ def test_a_plugin_load_leaves_no_namespace_behind(
     leaves namespaces and members removed together.
     """
     from agent.state import plugin_state_schema
-    from ava.sdk_surface.extensions import load_extensions
-    from ava.sdk_surface.installation import installed
+    from meiva.sdk_surface.extensions import load_extensions
+    from meiva.sdk_surface.installation import installed
     from tests.fixtures.plugin_registrations import (
         drop_plugin_registrations,
         plugin_registrations_present,
@@ -52,11 +52,11 @@ def test_a_plugin_load_leaves_no_namespace_behind(
     names = [ns.name for _p, c in installation.registry.plugins for ns in c.sdk_namespaces]
     assert "cwd" in names, "the leak this guards is gone"
     # The install stamps `_qualname` on each namespace module, which outlives the test.
-    stamped = [vars(ava)[name] for name in names]
+    stamped = [vars(meiva)[name] for name in names]
     assert all("_qualname" in vars(module) for module in stamped)
 
     drop_plugin_registrations()  # the guard's action, made observable
     assert not plugin_registrations_present()
     assert installed() is None
-    assert not any(hasattr(ava, name) for name in names)
+    assert not any(hasattr(meiva, name) for name in names)
     assert not any("_qualname" in vars(module) for module in stamped)

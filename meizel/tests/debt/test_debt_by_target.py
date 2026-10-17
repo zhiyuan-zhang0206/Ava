@@ -31,7 +31,7 @@ AFTER = (
 
 
 def repo(make_repo: RepoFactory) -> Path:
-    root = make_repo({"a/__init__.py": "", "a/meizel.toml": BASE, "ava/__init__.py": ""})
+    root = make_repo({"a/__init__.py": "", "a/meizel.toml": BASE, "meiva/__init__.py": ""})
     commit(root)
     write(root, {"a/meizel.toml": AFTER})
     return root

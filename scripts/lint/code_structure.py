@@ -33,7 +33,7 @@ owner's role() and retain the single gateway routing contract (issue #216).
 
 Reaching another package's `_`-prefixed module or name is reported by meizel
 (`private-name`, `private-module`, with the `meizel.toml` exports deciding what is a
-public door); see `meizel/docs/checker/checker.ava.okf.md`. This script no longer measures it.
+public door); see `meizel/docs/checker/checker.meiva.okf.md`. This script no longer measures it.
 
 ### Rule 5: single decision owners (locality)
 
@@ -49,7 +49,7 @@ bypassing, or no longer exists, fails as stale.
 Rule 5 has no baseline allowance. Every measured decision-owner bypass fails directly. Owner resolution stays in scripts/structure/locality.py and
 the decision contracts live in meizel/owners/decisions.py; see docs/conventions/python-conventions.md.
 
-### Rule 6: no path imports under ava_builtins/ (package doors)
+### Rule 6: no path imports under meiva_builtins/ (package doors)
 
 `meizel/language/path_imports.py`: a skill or plugin module may not edit `sys.path`, call
 `site.addsitedir`, or load a module by file path (`spec_from_file_location`, `SourceFileLoader`,
@@ -222,7 +222,13 @@ def _remap_renamed_keys(entries: dict[str, int], renames: dict[str, str]) -> dic
     remapped: dict[str, int] = {}
     for name, value in entries.items():
         path, separator, target_name = name.partition("::")
-        target = f"{renames.get(path, path)}{separator}{target_name}"
+        new_path = renames.get(path, path)
+        if new_path != path:
+            old_top = path.split("/", 1)[0]
+            new_top = new_path.split("/", 1)[0]
+            if old_top != new_top:
+                target_name = target_name.replace(f":{old_top}.", f":{new_top}.")
+        target = f"{new_path}{separator}{target_name}"
         remapped[target] = min(remapped.get(target, value), value)
     return remapped
 

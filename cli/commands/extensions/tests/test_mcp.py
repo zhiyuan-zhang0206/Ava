@@ -1,5 +1,5 @@
-"""`ava mcp add/list/remove` — edit the machine MCP config at $AVA_HOME/mcp.json.
-`unit_home` isolates ~/.ava per test."""
+"""`meiva mcp add/list/remove` — edit the machine MCP config at $MEIVA_HOME/mcp.json.
+`unit_home` isolates ~/.meiva per test."""
 
 import json
 from pathlib import Path

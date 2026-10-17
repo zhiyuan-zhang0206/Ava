@@ -16,8 +16,8 @@ _ADMIN = "admin-secret"
 def _client(n: int) -> pooler_files.PoolerClient:
     return pooler_files.PoolerClient(
         address=f"10.1.2.{n}:5432",
-        database="ava",
-        user="ava_runner",
+        database="meiva",
+        user="meiva_runner",
         state="idle",
         application="",
     )
@@ -58,7 +58,7 @@ def test_remaining_clients_are_named_in_stderr_and_the_report(
 
     err = capsys.readouterr().err
     assert "2 client(s) still connected when the pooler stops" in err
-    assert "10.1.2.7:5432 db=ava user=ava_runner state=idle" in err
+    assert "10.1.2.7:5432 db=meiva user=meiva_runner state=idle" in err
     assert report == [err.strip().removeprefix("! ")]
 
 

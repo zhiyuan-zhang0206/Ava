@@ -1,5 +1,5 @@
 """Task registry transition rules -- the single owner of the registry's write
-invariants shared by the SDK (`ava_builtins/plugins/ava_fleet/task_registry.py`,
+invariants shared by the SDK (`meiva_builtins/plugins/meiva_fleet/task_registry.py`,
 `_task_update.py`) and the gateway (`gateway/routers/tasks.py`): what counts as
 closed, whether a task may close while a direct child is still open, and
 whether a title is already held by an in_progress task. Both write surfaces

@@ -101,13 +101,13 @@ def run_program(tmp_path: Path, gateway: Gateway, *args: str) -> subprocess.Comp
     home = tmp_path / "home"
     home.mkdir()
     (home / ".env").write_text(
-        f"AVA_GATEWAY_URL={gateway.url}\nAVA_CLUSTER_SECRET={gateway.secret}\nAVA_TIMEZONE=UTC\n"
+        f"MEIVA_GATEWAY_URL={gateway.url}\nMEIVA_CLUSTER_SECRET={gateway.secret}\nMEIVA_TIMEZONE=UTC\n"
     )
     env = {
         "PATH": os.environ["PATH"],
         "HOME": str(tmp_path),
-        "AVA_HOME": str(home),
-        "AVA_CONFIG_FETCH": "skip",
+        "MEIVA_HOME": str(home),
+        "MEIVA_CONFIG_FETCH": "skip",
         "PYTHONDONTWRITEBYTECODE": "1",
     }
     return subprocess.run(

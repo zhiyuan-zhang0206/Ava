@@ -28,7 +28,7 @@ import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-import ava_builtins.plugins as shipped_plugins
+import meiva_builtins.plugins as shipped_plugins
 from base.db import Database
 from base.packages.plugins.data_registry import DeclaredFace, build_data_registry
 from base.packages.plugins.extensions import PluginContributions
@@ -57,7 +57,7 @@ def _widget(**over: Any) -> InspectWidgetSpec:
     }
     data.update(over)
     face = DeclaredFace(
-        "ava_fleet", PluginContributions(inspect_widgets=(InspectWidgetSpec(**data),))
+        "meiva_fleet", PluginContributions(inspect_widgets=(InspectWidgetSpec(**data),))
     )
     registry, refused = build_data_registry([face])
     assert refused == []
@@ -197,7 +197,7 @@ def test_lists_only_the_agents_active_tasks(
     assert len(body) == 1
     widget = body[0]
     assert (widget["plugin"], widget["id"], widget["kind"], widget["order"]) == (
-        "ava_fleet",
+        "meiva_fleet",
         "today-tasks",
         "taskList",
         150,
@@ -312,25 +312,25 @@ def _fixture_plugins_importable(
     monkeypatch.setattr(shipped_plugins, "__path__", [*shipped_path, str(tmp_path)])
 
     def _forget() -> None:
-        for name in [m for m in sys.modules if m.startswith("ava_builtins.plugins.fx_")]:
+        for name in [m for m in sys.modules if m.startswith("meiva_builtins.plugins.fx_")]:
             del sys.modules[name]
 
     request.addfinalizer(_forget)
 
 
 def _fixture_inspector(root: Path, plugin: str, source: str, *, widget_id: str) -> Path:
-    """Write `<root>/<plugin>/inspector.py` (a package, so `ava_builtins.plugins.<plugin>.inspector`
+    """Write `<root>/<plugin>/inspector.py` (a package, so `meiva_builtins.plugins.<plugin>.inspector`
     imports)."""
     plugin_dir = root / plugin
     plugin_dir.mkdir()
     (plugin_dir / "__init__.py").write_text("", encoding="utf-8")
-    (plugin_dir / "ava-plugin.json").write_text(
+    (plugin_dir / "meiva-plugin.json").write_text(
         json.dumps(
             {
                 "apiVersion": 2,
                 "name": plugin,
                 "version": "1.0.0",
-                "engines": {"ava": ">=2026.10.1"},
+                "engines": {"meiva": ">=2026.10.1"},
                 "contributions": {"inspectWidgets": [widget_id]},
             }
         ),
@@ -345,8 +345,8 @@ def _fixture_inspector(root: Path, plugin: str, source: str, *, widget_id: str) 
 
 
 def _shipped_fleet_module() -> Any:
-    path = _plugin_widgets.PLUGINS_DIR / "ava_fleet" / "inspector.py"
-    assert path.is_file(), "ava_fleet must ship inspector.py for this test"
+    path = _plugin_widgets.PLUGINS_DIR / "meiva_fleet" / "inspector.py"
+    assert path.is_file(), "meiva_fleet must ship inspector.py for this test"
     return path
 
 
@@ -356,7 +356,7 @@ def test_loader_imports_shipped_fleet_widget(monkeypatch: pytest.MonkeyPatch) ->
 
     specs = _plugin_widgets.load_inspect_widgets()
     assert [(s.plugin, s.id, s.kind, s.order) for s in specs] == [
-        ("ava_fleet", "today-tasks", "taskList", 150)
+        ("meiva_fleet", "today-tasks", "taskList", 150)
     ]
     assert specs[0].title is None
 
@@ -383,7 +383,7 @@ def test_enabled_modules_skips_a_disabled_plugin(monkeypatch: pytest.MonkeyPatch
     monkeypatch.setattr(
         enable_config,
         "installed_plugin_dirs",
-        lambda: {"ava_fleet": module.parent},
+        lambda: {"meiva_fleet": module.parent},
     )
 
     def _loader(config: enable_config.PluginsConfig) -> Any:
@@ -393,13 +393,13 @@ def test_enabled_modules_skips_a_disabled_plugin(monkeypatch: pytest.MonkeyPatch
         return _load
 
     enabled = enable_config.PluginsConfig(
-        plugins={"ava_fleet": enable_config.PluginEntry(enabled=True)}
+        plugins={"meiva_fleet": enable_config.PluginEntry(enabled=True)}
     )
     monkeypatch.setattr(enable_config, "load_for_runtime", _loader(enabled))
     assert _plugin_widgets.enabled_inspector_modules() == [module]
 
     disabled = enable_config.PluginsConfig(
-        plugins={"ava_fleet": enable_config.PluginEntry(enabled=False)}
+        plugins={"meiva_fleet": enable_config.PluginEntry(enabled=False)}
     )
     monkeypatch.setattr(enable_config, "load_for_runtime", _loader(disabled))
     assert _plugin_widgets.enabled_inspector_modules() == []
@@ -414,7 +414,7 @@ def test_loader_skips_a_plugin_whose_inspector_fails_to_import(
     """Fail-soft (user ruling 2026-09-11): a broken inspector.py is reported
     loudly and skipped — the endpoint keeps serving the remaining widgets.
 
-    The 2026-08-28 ava_ledger incident shape (a sibling import that blows up
+    The 2026-08-28 meiva_ledger incident shape (a sibling import that blows up
     at module import) restated for the inspector surface: the load must not
     raise, the remaining plugin still serves, and the failure is loud on both
     channels (loguru ERROR + the plugin_load_failed telemetry event)."""
@@ -428,12 +428,12 @@ def test_loader_skips_a_plugin_whose_inspector_fails_to_import(
     monkeypatch.setattr(_plugin_widgets, "enabled_inspector_modules", lambda: [bad, good])
 
     # A failed import must not leave the module behind (importlib's own cleanup).
-    leftover = "ava_builtins.plugins.fx_broken_plugin.inspector"
+    leftover = "meiva_builtins.plugins.fx_broken_plugin.inspector"
     specs = _plugin_widgets.load_inspect_widgets()  # must not raise
     assert leftover not in sys.modules
 
     # the healthy plugin still serves; the broken one contributes nothing
-    assert [(s.plugin, s.id) for s in specs] == [("ava_fleet", "today-tasks")]
+    assert [(s.plugin, s.id) for s in specs] == [("meiva_fleet", "today-tasks")]
     # loud: a loguru error naming the plugin
     assert any(
         "fx_broken_plugin" in r["message"] and "fail-soft" in r["message"] for r in loguru_records
@@ -498,7 +498,7 @@ def test_loader_refuses_a_plugin_declaring_a_widget_id_twice(
 def test_widget_plugin_comes_from_the_registry_entry() -> None:
     """A spec claiming another plugin is attributed to the plugin that declared it."""
     face = DeclaredFace(
-        "ava_fleet",
+        "meiva_fleet",
         PluginContributions(
             inspect_widgets=(
                 InspectWidgetSpec(id="w", kind="taskList", order=1, plugin="someone_else"),
@@ -506,4 +506,4 @@ def test_widget_plugin_comes_from_the_registry_entry() -> None:
         ),
     )
     registry, _refused = build_data_registry([face])
-    assert [(s.plugin, s.id) for s in registry.inspect_widgets()] == [("ava_fleet", "w")]
+    assert [(s.plugin, s.id) for s in registry.inspect_widgets()] == [("meiva_fleet", "w")]

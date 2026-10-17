@@ -7,9 +7,9 @@ from pathlib import Path
 from typing import Any
 from zoneinfo import ZoneInfo
 
-import ava
+import meiva
 import base
-from ava.agents import AgentStatus as S
+from meiva.agents import AgentStatus as S
 from schedules.agent_status_guard import ensure_agent_status_members
 from schedules.catchup import cluster_timezone
 from schedules.daily_host import report_agent, run_daily_loop
@@ -18,8 +18,8 @@ from schedules.entry import fresh_schedule_entry, schedule_entry
 
 
 CRON = "20 6 * * *"
-_REPORT_AGENT_ENV = "AVA_CI_METRICS_REPORT_AGENT"
-_REPORT_LABEL = "Ava \u8d1f\u8d23\u4eba"
+_REPORT_AGENT_ENV = "MEIVA_CI_METRICS_REPORT_AGENT"
+_REPORT_LABEL = "Meiva \u8d1f\u8d23\u4eba"
 _REPO_ROOT = Path(base.__file__).resolve().parents[1]
 
 
@@ -31,10 +31,10 @@ def _report_failure(detail: str) -> None:
     message = (
         f"Dev/CI metrics collection failed:\n{detail[-1000:]}\n"
         "Check the schedule log; backfill with `scripts/ci/pull_requests/runs_export.py --repo "
-        "zhiyuan-zhang0206/Ava --print-snapshot`."
+        "zhiyuan-zhang0206/Meiva --print-snapshot`."
     )
     try:
-        ava.agents.send_message(_report_agent(), message)
+        meiva.agents.send_message(_report_agent(), message)
     except Exception as exc:
         print(f"dev-ci-metrics could not notify the P0 lead: {exc}")
         raise
@@ -49,9 +49,9 @@ def _load_exporter() -> Any:
 
 
 def _snapshot(exporter: Any) -> dict[str, Any]:
-    from base.paths import ava_home
+    from base.paths import meiva_home
 
-    path = ava_home() / exporter._STATE_DIR_RELATIVE / "snapshot.json"
+    path = meiva_home() / exporter._STATE_DIR_RELATIVE / "snapshot.json"
     loaded = json.loads(path.read_text(encoding="utf-8"))
     if not isinstance(loaded, dict):
         raise TypeError("CI-run sampler wrote an invalid snapshot")
@@ -65,7 +65,7 @@ def _day_counts(snapshot: dict[str, Any], day: str, repo: str) -> tuple[int, int
 
 
 def _run_exporter(exporter: Any, repo: str) -> None:
-    if exporter.main(["--repo", repo], producer=ava.context.clients.event_pipeline) != 0:
+    if exporter.main(["--repo", repo], producer=meiva.context.clients.event_pipeline) != 0:
         raise RuntimeError("ci-runs-export exited non-zero")
 
 
@@ -95,7 +95,7 @@ if __name__ == "__main__":
     ensure_agent_status_members(
         S, {"IDLING", "RUNNING", "TERMINATED"}, schedule_name="dev-ci-metrics"
     )
-    entry_inputs = globals().get("AVA_SCHEDULE_INPUTS")
+    entry_inputs = globals().get("MEIVA_SCHEDULE_INPUTS")
     if entry_inputs is None:
         from base.log import prepare_process_logging
 

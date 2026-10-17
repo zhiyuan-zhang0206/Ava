@@ -1,9 +1,9 @@
 """The OS-job gates, and what a generated job spec is anchored to.
 
-`AVA_OS_JOBS_ENABLED` stops the suite from arming a job at all; the default-home
+`MEIVA_OS_JOBS_ENABLED` stops the suite from arming a job at all; the default-home
 gate (`owns_os_jobs`) stops any other home from registering or removing one,
 because labels and crontab markers name a job, not a home; and the anchoring makes
-any job that IS armed name the binary and `$AVA_HOME` of the checkout that wrote
+any job that IS armed name the binary and `$MEIVA_HOME` of the checkout that wrote
 it — so no stale job can resolve onto the prod install.
 """
 
@@ -242,9 +242,9 @@ def test_the_default_home_owns_the_jobs_however_it_is_spelled(
     default_home: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     assert cron.owns_os_jobs("autostart")
-    monkeypatch.setenv("AVA_HOME", str(default_home / "elsewhere" / ".." / ".ava"))
+    monkeypatch.setenv("MEIVA_HOME", str(default_home / "elsewhere" / ".." / ".meiva"))
     assert cron.owns_os_jobs("autostart")
-    monkeypatch.setenv("AVA_HOME", str(default_home / ".ava-preview"))
+    monkeypatch.setenv("MEIVA_HOME", str(default_home / ".meiva-preview"))
     assert not cron.owns_os_jobs("autostart")
 
 
@@ -253,44 +253,46 @@ def test_the_default_home_owns_the_jobs_however_it_is_spelled(
 # ---------------------------------------------------------------------------
 
 
-def test_ava_binary_path_prefers_this_checkout_over_path() -> None:
+def test_meiva_binary_path_prefers_this_checkout_over_path() -> None:
     """PATH belongs to whoever launched the process; the job must run the binary
-    of the checkout that owns `$AVA_HOME`. A leaked e2e job named a worktree's
-    `ava` resolved off `uv run`'s PATH — one `shutil.which` hit away from naming
+    of the checkout that owns `$MEIVA_HOME`. A leaked e2e job named a worktree's
+    `meiva` resolved off `uv run`'s PATH — one `shutil.which` hit away from naming
     prod's."""
     resolved = Path(
-        cron.ava_binary_path(host=fake_host(programs={"ava": "/somewhere/else/bin/ava"}))
+        cron.meiva_binary_path(host=fake_host(programs={"meiva": "/somewhere/else/bin/meiva"}))
     )
     assert resolved.parent.parent.parent == Path(__file__).resolve().parents[4]
     assert resolved.parent.parent.name == ".venv"
 
 
-def test_ava_binary_path_falls_back_to_path_without_a_venv(
+def test_meiva_binary_path_falls_back_to_path_without_a_venv(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     monkeypatch.setattr(paths, "repo_root", lambda: tmp_path)
-    host = fake_host(programs={"ava": "/usr/local/bin/ava"})
-    assert cron.ava_binary_path(host=host) == "/usr/local/bin/ava"
+    host = fake_host(programs={"meiva": "/usr/local/bin/meiva"})
+    assert cron.meiva_binary_path(host=host) == "/usr/local/bin/meiva"
 
 
-def test_health_probe_plist_pins_ava_home(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+def test_health_probe_plist_pins_meiva_home(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
     """An OS probe observes its owning home and carries no release policy."""
-    monkeypatch.setenv("AVA_HOME", str(tmp_path / ".ava-x"))
+    monkeypatch.setenv("MEIVA_HOME", str(tmp_path / ".meiva-x"))
 
-    def fake_ava_binary_path(*, host: Host) -> str:
-        return "/x/ava"
+    def fake_meiva_binary_path(*, host: Host) -> str:
+        return "/x/meiva"
 
-    monkeypatch.setattr(cron, "ava_binary_path", fake_ava_binary_path)
+    monkeypatch.setattr(cron, "meiva_binary_path", fake_meiva_binary_path)
     body = cron.launchd_plist_content(300, host=fake_host())
     import plistlib
 
     assert plistlib.loads(body.encode())["ProgramArguments"] == [
-        "/x/ava",
+        "/x/meiva",
         "cluster",
         "health-probe",
     ]
-    assert "<key>AVA_HOME</key>" in body
-    assert f"<string>{tmp_path / '.ava-x'}</string>" in body
+    assert "<key>MEIVA_HOME</key>" in body
+    assert f"<string>{tmp_path / '.meiva-x'}</string>" in body
     assert "<key>PATH</key>" in body
 
 
@@ -300,31 +302,31 @@ def test_health_probe_plist_pins_ava_home(monkeypatch: pytest.MonkeyPatch, tmp_p
         pytest.param(autostart.autostart_plist_content, id="autostart"),
     ],
 )
-def test_every_launchagent_pins_ava_home(
+def test_every_launchagent_pins_meiva_home(
     render: object, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    monkeypatch.setenv("AVA_HOME", str(tmp_path / ".ava-x"))
+    monkeypatch.setenv("MEIVA_HOME", str(tmp_path / ".meiva-x"))
 
-    def fake_ava_binary_path(*, host: Host) -> str:
-        return "/x/ava"
+    def fake_meiva_binary_path(*, host: Host) -> str:
+        return "/x/meiva"
 
-    monkeypatch.setattr(cron, "ava_binary_path", fake_ava_binary_path)
-    monkeypatch.setattr(autostart, "ava_binary_path", fake_ava_binary_path)
+    monkeypatch.setattr(cron, "meiva_binary_path", fake_meiva_binary_path)
+    monkeypatch.setattr(autostart, "meiva_binary_path", fake_meiva_binary_path)
     assert callable(render)
     body = render(host=fake_host())
     assert isinstance(body, str)
-    assert f"<key>AVA_HOME</key>\n        <string>{tmp_path / '.ava-x'}</string>" in body
+    assert f"<key>MEIVA_HOME</key>\n        <string>{tmp_path / '.meiva-x'}</string>" in body
 
 
 def test_cron_env_prefix_scopes_to_one_command(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    """`AVA_HOME=<home> <cmd>` and not a bare `AVA_HOME=` line: cron applies a
+    """`MEIVA_HOME=<home> <cmd>` and not a bare `MEIVA_HOME=` line: cron applies a
     standalone assignment to the WHOLE crontab, which would silently retarget a
     co-located cluster's entries."""
-    monkeypatch.setenv("AVA_HOME", str(tmp_path / ".ava-x"))
+    monkeypatch.setenv("MEIVA_HOME", str(tmp_path / ".meiva-x"))
     prefix = cron.cron_env_prefix()
-    assert prefix == f"AVA_HOME={tmp_path / '.ava-x'} "
+    assert prefix == f"MEIVA_HOME={tmp_path / '.meiva-x'} "
     assert not prefix.startswith("\n")
 
 

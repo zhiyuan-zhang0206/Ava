@@ -89,7 +89,7 @@ def ensure_frontend_deps(repo: Path) -> None:
     adds a dependency: build fails, `npm run build && exec npm run start` short-
     circuits, port 3000 goes dark).
 
-    `node_modules/.ava-lock-hash` stamps the sha256 of the package-lock.json we
+    `node_modules/.meiva-lock-hash` stamps the sha256 of the package-lock.json we
     last installed from; a missing/mismatched stamp means node_modules is stale
     against the current lockfile. Written *after* `npm ci` because `npm ci`
     wipes node_modules first.
@@ -105,7 +105,7 @@ def ensure_frontend_deps(repo: Path) -> None:
     """
     fe = repo / "ui" / "web"
     node_modules = fe / "node_modules"
-    stamp = node_modules / ".ava-lock-hash"
+    stamp = node_modules / ".meiva-lock-hash"
     want = hashlib.sha256((fe / "package-lock.json").read_bytes()).hexdigest()
     if node_modules.is_dir() and stamp.is_file() and stamp.read_text().strip() == want:
         drift = _node_modules_drift(fe, node_modules)
@@ -138,7 +138,7 @@ def assert_schema_current_or_die(db_url: str) -> int:
     except SchemaVersionMismatch as e:
         print(
             f"  ✗ {e}\n"
-            f"    DB is behind the code in this checkout — the apply-migrations step of `ava start` "
+            f"    DB is behind the code in this checkout — the apply-migrations step of `meiva start` "
             f"should have caught up just before this check, so this likely means migrations/ in this "
             f"checkout was edited mid-flight.",
             file=sys.stderr,
@@ -150,7 +150,7 @@ def assert_schema_current_or_die(db_url: str) -> int:
             f"    The central DB is ahead of this code — typically the gateway moved to a newer "
             f"revision while this host stayed on an older one. Bring this host to the gateway's "
             f"revision (a source checkout: check out that commit and `uv sync`), then retry "
-            f"`ava start`.",
+            f"`meiva start`.",
             file=sys.stderr,
         )
         return 1
@@ -219,7 +219,7 @@ def probe_gateway_or_die(gateway_url: str, *, budget_s: float = GATEWAY_PREFLIGH
 
     The agent-runner's ops server is dialed *by* the gateway, but the host
     still reaches the gateway for watchdog self-heal updates and
-    cluster status. Probe at `ava start` time so a broken private-network path
+    cluster status. Probe at `meiva start` time so a broken private-network path
     fails on stdout instead of only surfacing later during a self-heal.
 
     **Both transient shapes get the same bounded budget**: a 5xx (the gateway
@@ -255,7 +255,7 @@ def probe_gateway_or_die(gateway_url: str, *, budget_s: float = GATEWAY_PREFLIGH
                 print(
                     f"  ✗ gateway unreachable at {gateway_url} after {attempt} attempt(s) "
                     f"over {budget_s:.0f}s: {probe.detail}.\n"
-                    f"    Check `AVA_GATEWAY_URL` in ~/.ava/.env and that this host can "
+                    f"    Check `MEIVA_GATEWAY_URL` in ~/.meiva/.env and that this host can "
                     f"reach the gateway over the cluster's private network.",
                     file=sys.stderr,
                 )
@@ -288,14 +288,14 @@ def register_machine_or_die(
 
     Failure modes get targeted hints + non-zero exit (a half-registered host
     silently breaks cross-machine orchestration; we'd rather fail loud on
-    `ava start`). The ops daemon's equivalent call is deliberately non-fatal
+    `meiva start`). The ops daemon's equivalent call is deliberately non-fatal
     instead — see `services/agent_runner/agent_ops/boot.py:register_boot`.
     """
     import psycopg
 
     from base.cluster.machines import LoopbackDialUrlRefused, register_self, unit_dial_url
     from base.daemon.endpoints import ServiceEndpoints
-    from base.paths import ava_home
+    from base.paths import meiva_home
 
     url = unit_dial_url(
         roles,
@@ -312,7 +312,7 @@ def register_machine_or_die(
             name=command.machine.name(),
             roles=roles,
             description=command.machine.description(),
-            home=str(ava_home()),
+            home=str(meiva_home()),
             gateway=command.config.view.gateway.gateway_url,
         )
     except LoopbackDialUrlRefused as e:
@@ -324,7 +324,7 @@ def register_machine_or_die(
     except psycopg.OperationalError as e:
         print(
             f"  ✗ register_self failed: cannot connect to central Postgres ({e}).\n"
-            f"    Check `AVA_DB_URL` in ~/.ava/.env points at the gateway's reachable Postgres "
+            f"    Check `MEIVA_DB_URL` in ~/.meiva/.env points at the gateway's reachable Postgres "
             f"(public TLS endpoint or LAN). On agent-runner, also verify CF Tunnel / private "
             f"network connectivity to the gateway host.",
             file=sys.stderr,
@@ -333,9 +333,9 @@ def register_machine_or_die(
     except psycopg.errors.UndefinedTable as e:
         print(
             f"  ✗ register_self failed: `machines` table does not exist ({e}).\n"
-            f"    Gateway's DB schema is behind — run `ava stop` then `ava start` on the gateway "
+            f"    Gateway's DB schema is behind — run `meiva stop` then `meiva start` on the gateway "
             f"(a source-run gateway applies pending migrations on a cold start), then retry "
-            f"`ava start` here.",
+            f"`meiva start` here.",
             file=sys.stderr,
         )
         return 1
@@ -346,7 +346,7 @@ def register_machine_or_die(
 def preflight_probes(db: Database, *, command: CommandRuntime) -> int:
     """Run gateway and DB reachability checks BEFORE stopping services.
 
-    Designed for `ava restart` and the fleet update (self-update leg): validate
+    Designed for `meiva restart` and the fleet update (self-update leg): validate
     that the host can still reach the gateway *before* killing its own
     services, so a transient gateway outage or network blip does not leave
     the host in a "services dead, can't start" state.

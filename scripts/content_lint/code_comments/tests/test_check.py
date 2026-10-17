@@ -64,7 +64,7 @@ def test_python_shebang_does_not_hide_comments(tmp_path: Path, prefix: str) -> N
         "# type: ignore",
         "# noqa: F821",
         "# lint-docstring: ok required",
-        "# ava:ref pkg/docs/core.ava.okf.md#positive-budget because it is needed",
+        "# meiva:ref pkg/docs/core.meiva.okf.md#positive-budget because it is needed",
     ],
 )
 def test_free_text_and_suppressions_are_not_escape_hatches(tmp_path: Path, comment: str) -> None:
@@ -128,7 +128,7 @@ def test_removing_test_or_symbol_invalidates_unchanged_document(tmp_path: Path) 
 def test_references_cannot_attach_to_an_unrelated_function(tmp_path: Path) -> None:
     source = files()
     source["pkg/core.py"] = (
-        "def budget():\n    return 1\n\n# ava:ref pkg/docs/core.ava.okf.md#positive-budget\ndef unrelated():\n    return 2\n"
+        "def budget():\n    return 1\n\n# meiva:ref pkg/docs/core.meiva.okf.md#positive-budget\ndef unrelated():\n    return 2\n"
     )
     assert any(
         item.code == "comment-owner" for item in check(repository(tmp_path, source)).findings
@@ -138,7 +138,7 @@ def test_references_cannot_attach_to_an_unrelated_function(tmp_path: Path) -> No
 def test_unused_records_and_duplicate_ids_fail(tmp_path: Path) -> None:
     source = files()
     source["pkg/core.py"] = "def budget():\n    return 1\n"
-    source["pkg/docs/core.ava.okf.md"] += record()
+    source["pkg/docs/core.meiva.okf.md"] += record()
     codes = {item.code for item in check(repository(tmp_path, source)).findings}
     assert {"contract-duplicate", "contract-unused"} <= codes
 

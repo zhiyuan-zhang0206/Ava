@@ -1,4 +1,4 @@
-"""ava.ui.show / .close page endpoints + the page reverse proxy.
+"""meiva.ui.show / .close page endpoints + the page reverse proxy.
 
 URLs:
 - `/api/agents/{agent_id}/pages` — list (registry); register / close are the keyed
@@ -170,7 +170,7 @@ _FORWARDED_RESPONSE_HEADERS = frozenset(
 def _absolute_url(request: Request, path: str) -> str:
     """Render a gateway-relative path as the absolute URL the browser dials.
 
-    The base is the configured Gateway URL (`AVA_GATEWAY_URL`), NOT the request's own
+    The base is the configured Gateway URL (`MEIVA_GATEWAY_URL`), NOT the request's own
     Host: the SDK dials the gateway at its local loopback URL on a single box, so
     absolutizing against the request would hand every SDK caller a `localhost` link that
     is unreachable from the user's other devices. The Gateway URL variable is
@@ -219,7 +219,7 @@ async def post_guarded_page_register(
     request: Request,
     key: Annotated[str, Depends(page_acceptance.operation_key)],
 ) -> PageRow:
-    """ava.ui.show / .serve register a page — SDK main entry.
+    """meiva.ui.show / .serve register a page — SDK main entry.
 
     Each agent can have at most one open page. Registering atomically closes any
     existing open page of the agent (the closed pages get individual PageClosed
@@ -274,7 +274,7 @@ async def post_guarded_page_close(
     request: Request,
     key: Annotated[str, Depends(page_acceptance.operation_key)],
 ) -> PageRow:
-    """ava.ui.close a page — closes only the observed row (`expected_page_id`).
+    """meiva.ui.close a page — closes only the observed row (`expected_page_id`).
 
     A newer registration under the same name makes the observation stale (409);
     replay returns the historical acceptance."""

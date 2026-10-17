@@ -41,11 +41,11 @@ The permitted exception classes, with real sites:
 | Class | Why it stays | Examples |
 |---|---|---|
 | Protocol / format specs | the number is the format; changing it breaks the wire | msgpack ext-header bytes (`base/agents/history/checkpoint.py`); short-SHA display width 7 (`base/deploy/git/source_tree_guard.py`); page-registration name/host/path bounds (`gateway/schemas/pages.py`) |
-| External platform caps | the platform dictates it; any other value fails | Telegram caption 1024 (`ava_builtins/skills/integrations/telegram-send-file/scripts/send_file.py`) |
+| External platform caps | the platform dictates it; any other value fails | Telegram caption 1024 (`meiva_builtins/skills/integrations/telegram-send-file/scripts/send_file.py`) |
 | Self-imposed transport / payload guards | bounds one request or read so a single call cannot park unbounded bytes | message content ceiling (`gateway/agents/state.py` — self-imposed, not an external protocol limit); attach ceilings (`base/lm/attach/constants.py`); pty capture clamp (`base/sessions/pty/paths.py`); events `le=1000` / `offset` 10 000 (`gateway/events/router.py`) |
 | Protective security / resource bounds | memory or abuse guard, not a tuning knob | login limiter's tracked-IP cap (`base/cluster/rate_limit.py`); labeler poll batch (`services/derived/labeler/daemon.py`); impersonation maintenance quantities (`base/agents/impersonation/maintenance.py`) |
 | UI micro-details | rendering density or truncation; a design decision per surface | run-timeline node labels and unit previews (`ui/web/src/components/run-timeline/run-timeline-rows.tsx`); memory-graph label truncation (`ui/web/src/app/memory/graph/page.tsx`) |
-| Reference-script / tool defaults | these scripts run standalone; their knobs ARE their parameters — they never read cluster config | skill script defaults such as the gmail/sms query pages (`ava_builtins/skills/`) |
+| Reference-script / tool defaults | these scripts run standalone; their knobs ARE their parameters — they never read cluster config | skill script defaults such as the gmail/sms query pages (`meiva_builtins/skills/`) |
 
 A reference-script default follows the same discipline one level down: it is a
 parameter or a documented constant with a comment stating why that number.
@@ -63,9 +63,9 @@ inheritance, the per-agent index) are config fields with the reason in their
 description; lint and CI gates (OKF nodes, `AGENTS.md`, skills, skill
 descriptions) are repo constants with the reason recorded in their node; the
 memory pool's caps live in the pool's own pre-commit hook — a standalone script
-whose comment states why (`AVA_MEMORY_INDEX_CAP`, 16000 characters ≈ 200
-pointer lines; `AVA_MEMORY_NOTE_CAP`, 8000 — one atomic fact per note). See
-[the component node](../../../base/packages/docs/text-budget.ava.okf.md).
+whose comment states why (`MEIVA_MEMORY_INDEX_CAP`, 16000 characters ≈ 200
+pointer lines; `MEIVA_MEMORY_NOTE_CAP`, 8000 — one atomic fact per note). See
+[the component node](../../../base/packages/docs/text-budget.meiva.okf.md).
 
 ## The review action
 

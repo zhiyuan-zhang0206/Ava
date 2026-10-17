@@ -96,7 +96,7 @@ def test_daemon_restart_adopts_a_healthy_live_page_session(
         database_gate=database_gate,
         machine=machine_identity,
     )
-    page_session = f"ava-agent-{agent_id}-shell-5-page-adopted"
+    page_session = f"meiva-agent-{agent_id}-shell-5-page-adopted"
     backend.sessions.add(page_session)
     insert_page_row(
         db_conn,
@@ -138,7 +138,7 @@ def test_reclaim_preserves_in_session_server_and_kills_detached_orphan(
         machine=machine_identity,
     )
     key = (agent_id, "kept")
-    page_session = f"ava-agent-{agent_id}-shell-6-page-kept"
+    page_session = f"meiva-agent-{agent_id}-shell-6-page-kept"
     backend.sessions.add(page_session)
     insert_page_row(
         db_conn,
@@ -153,8 +153,8 @@ def test_reclaim_preserves_in_session_server_and_kills_detached_orphan(
         psd,
         "page_server_occupants",
         lambda: {
-            12010: (5010, str(psd.ava_home())),
-            12011: (5011, str(psd.ava_home())),
+            12010: (5010, str(psd.meiva_home())),
+            12011: (5011, str(psd.meiva_home())),
         },
     )
     monkeypatch.setattr(psd, "page_session_owner", lambda pid, _pids: key if pid == 5010 else None)  # pyright: ignore[reportUnknownArgumentType]

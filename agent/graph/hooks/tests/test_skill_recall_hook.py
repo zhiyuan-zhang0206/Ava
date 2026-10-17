@@ -28,8 +28,8 @@ from agent.graph.recall.skill_recall import FALSE_IF, STATE_PREAMBLE, TRUE_IF
 from agent.messages import inbound_message
 from agent.state import CompactState, SkillRecallState, build_agent_state
 from base import paths
-from base.agents.context import AvaContext
-from base.agents.messages.kwargs import NoteTag, read_ava_kwargs
+from base.agents.context import MeivaContext
+from base.agents.messages.kwargs import NoteTag, read_meiva_kwargs
 from base.clock import Clock
 from base.config import settings
 from base.db import Database
@@ -104,9 +104,9 @@ def _reader(domain: str, field: str) -> Any:
     return getattr(getattr(settings, domain), field)
 
 
-def _runtime(database: Database, catalog: ModelCatalog, **pins: Any) -> Runtime[AvaContext]:
+def _runtime(database: Database, catalog: ModelCatalog, **pins: Any) -> Runtime[MeivaContext]:
     return Runtime(
-        context=AvaContext(
+        context=MeivaContext(
             ops_pool=MagicMock(),
             llm=MagicMock(),
             event_publisher=MagicMock(),
@@ -121,7 +121,7 @@ def _runtime(database: Database, catalog: ModelCatalog, **pins: Any) -> Runtime[
 
 @pytest.fixture
 def skills_dir(unit_home: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
-    d = paths.skills_dir(paths.ava_home())
+    d = paths.skills_dir(paths.meiva_home())
     d.mkdir()
     monkeypatch.setattr(
         install_registry,
@@ -190,9 +190,9 @@ def _offered(update: dict[str, Any] | None) -> list[str]:
     assert update is not None
     (note,) = update["messages"]
     return [
-        line.split("`")[1].removeprefix("ava.skills.")
+        line.split("`")[1].removeprefix("meiva.skills.")
         for line in note.content.splitlines()
-        if line.startswith("- `ava.skills.")
+        if line.startswith("- `meiva.skills.")
     ]
 
 
@@ -222,7 +222,7 @@ async def test_fires_on_a_person_or_a_schedule(
     assert _offered(update) == ["beta"]
     assert update is not None
     note: HumanMessage = update["messages"][0]
-    assert read_ava_kwargs(note).get("ava_note_tag") == NoteTag.SKILL_RECALL.value
+    assert read_meiva_kwargs(note).get("meiva_note_tag") == NoteTag.SKILL_RECALL.value
 
 
 @pytest.mark.parametrize("source", ["agent:402", "system", "system:update", "watcher:3", "shell:9"])
@@ -288,7 +288,7 @@ async def test_one_request_one_yes_no_question_per_skill(
     assert set(questions) == {"alpha", "beta", "gamma"}
     for identifier, question in questions.items():
         assert isinstance(question, YesNo)
-        assert f"ava.skills.{identifier}" in question.question
+        assert f"meiva.skills.{identifier}" in question.question
         assert f"{identifier} desc" in question.question
         assert question.true_if == TRUE_IF
         assert question.false_if == FALSE_IF
@@ -364,7 +364,7 @@ async def test_sub_skills_are_scored_by_display_identifier_and_offered_by_loadab
     update = await _run(database, _state(_tail("user")), scorer)
 
     assert set(scorer.calls[0][1]) == {"alpha", "grp:beta"}
-    assert _offered(update) == ["grp.beta"]  # the note spells the path `ava.help` takes
+    assert _offered(update) == ["grp.beta"]  # the note spells the path `meiva.help` takes
 
 
 async def test_no_candidates_means_no_call(three_skills: Path, database: Database) -> None:
@@ -442,8 +442,8 @@ async def test_the_note_lists_each_skill_in_the_index_line_shape(
 
     assert update is not None
     (note,) = update["messages"]
-    assert "- `ava.skills.alpha` — Alpha does alpha things" in note.content
-    assert "ava.help(ava.skills.<path>)" in note.content
+    assert "- `meiva.skills.alpha` — Alpha does alpha things" in note.content
+    assert "meiva.help(meiva.skills.<path>)" in note.content
 
 
 async def test_one_note_however_many_skills(three_skills: Path, database: Database) -> None:

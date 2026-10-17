@@ -6,7 +6,7 @@ the injected pgvector extension files work end to end, with no host Postgres:
 download the pinned zonky PG (ensure_pg_binaries) -> inject the pinned pgvector
 files (ensure_pgvector) -> start a throwaway cluster on the vendored binaries ->
 CREATE EXTENSION vector + distance queries -> NOSUPERUSER semantics (the
-extension is listed to a NOSUPERUSER role, and once `ava start`'s superuser
+extension is listed to a NOSUPERUSER role, and once `meiva start`'s superuser
 connection has pre-created it, that role's CREATE EXTENSION IF NOT EXISTS is a
 harmless no-op, not a privilege error — verified empirically on a real
 injected tree).
@@ -86,7 +86,7 @@ def main() -> int:
                 raise RuntimeError(f"cosine distance mismatch: {cosine}")
             # NOSUPERUSER semantics the runtime relies on (see module docstring).
             conn.execute("CREATE ROLE smoke_nosuper LOGIN NOSUPERUSER")
-        with psycopg.connect(f"postgresql://smoke_nosuper@127.0.0.1:{port}/ava_citest") as conn:
+        with psycopg.connect(f"postgresql://smoke_nosuper@127.0.0.1:{port}/meiva_citest") as conn:
             row = conn.execute(
                 "SELECT count(*) FROM pg_available_extensions WHERE name = 'vector'"
             ).fetchone()

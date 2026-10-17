@@ -25,7 +25,7 @@ def _schedule_inputs() -> tuple[Callable[[], Any], Any]:
     from base.db.code_version_gate import ProcessDbGate
     from base.native_process.code_version import CodeVersion
     from base.native_process.loaded_commit import LoadedCommit
-    from base.paths import ava_home
+    from base.paths import meiva_home
     from base.telemetry.pipeline_build import build_pipeline
 
     config = ConfigBoot()
@@ -37,7 +37,7 @@ def _schedule_inputs() -> tuple[Callable[[], Any], Any]:
     clients = ClientSet(
         database=database,
         pipeline_factory=partial(
-            build_pipeline, database=database, machine=machine, home=ava_home()
+            build_pipeline, database=database, machine=machine, home=meiva_home()
         ),
     )
     inputs = ScheduleInputs(database, clients.event_pipeline, image, machine=machine)
@@ -90,14 +90,14 @@ def run_runner(root: Path, schedule_id: int, mode: str) -> None:
         _delay_record_error(root)
     elif mode == "delayed-completion":
         _delay_completion()
-    import ava
+    import meiva
     from base.config import settings
     from services.wake.schedule_manager import (
         engine,  # noqa: F401  # pyright: ignore[reportUnusedImport]
     )
     from services.wake.schedule_manager.runner import run
 
-    ava.ensure_plugins_loaded = lambda **_inputs: None
+    meiva.ensure_plugins_loaded = lambda **_inputs: None
     settings.gateway.schedule_stall_timeout_seconds = 0.15
     raise SystemExit(run(schedule_id))
 
@@ -129,7 +129,7 @@ def completion_during_stall(root: Path) -> None:
     """The script returns while a real stall recorder is blocked; hard exit still wins."""
 
     database, inputs = _schedule_inputs()
-    import ava
+    import meiva
     from services.wake.schedule_manager import engine as r
 
     r.settings.gateway.schedule_stall_timeout_seconds = 0.04
@@ -139,7 +139,7 @@ def completion_during_stall(root: Path) -> None:
     r.record_run_start = lambda *_args: 1
     r.base.host.proc.kill_process_tree = lambda *_args, **_kwargs: None  # pyright: ignore[reportAttributeAccessIssue]
     r.StallGuard._sample = lambda _self: ("script.py", 1, "blocked")  # pyright: ignore[reportAttributeAccessIssue]
-    ava.ensure_plugins_loaded = lambda: None
+    meiva.ensure_plugins_loaded = lambda: None
 
     def record_error(*_args: Any) -> None:
         (root / "started").write_text(str(time.monotonic()))
@@ -158,7 +158,7 @@ def completion_during_stall(root: Path) -> None:
             database(),
             1,
             bind_actor=_ignore,
-            load_plugins=ava.ensure_plugins_loaded,
+            load_plugins=meiva.ensure_plugins_loaded,
             inputs=inputs,
         )
     )

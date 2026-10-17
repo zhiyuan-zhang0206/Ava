@@ -1,7 +1,7 @@
-"""`ava` CLI argparse surface — per-domain parser builders + their `_h_*` handlers.
+"""`meiva` CLI argparse surface — per-domain parser builders + their `_h_*` handlers.
 
 `cli.main` imports this package at module level (settings-free: nothing here
-imports runtime command modules / ``base.config``, so ``ava --help`` builds the tree
+imports runtime command modules / ``base.config``, so ``meiva --help`` builds the tree
 on a host with no .env) and calls :func:`build_parser` from ``main()``. Each
 builder binds its own module's handler directly (``set_defaults(func=_h_x)``);
 a test that fakes a handler patches the parser module that defines it, before
@@ -59,14 +59,14 @@ def build_parser(
     *,
     retained_children: list[subprocess.Popen[bytes]] | None = None,
 ) -> argparse.ArgumentParser:
-    """Build the full `ava` argparse tree; each subparser binds ``func=`` here.
+    """Build the full `meiva` argparse tree; each subparser binds ``func=`` here.
 
-    The registration order below IS the `ava --help` listing order — keep it in
+    The registration order below IS the `meiva --help` listing order — keep it in
     sync with the command surface.
     """
     parser = argparse.ArgumentParser(
-        prog="ava",
-        description="Ava cluster ops: native pg/redis + service sessions + cron healthchecks.",
+        prog="meiva",
+        description="Meiva cluster ops: native pg/redis + service sessions + cron healthchecks.",
     )
     sub = parser.add_subparsers(dest="cmd", required=True)
 
@@ -112,7 +112,7 @@ def parse_args(
 
 
 def command_options() -> dict[tuple[str, ...], set[str]]:
-    """Long options accepted at each command path, including the `ava` root.
+    """Long options accepted at each command path, including the `meiva` root.
 
     Aliases have their own paths. Options belong only to the parser accepting
     them, so a start option never certifies the same spelling on stop. Return a
@@ -120,7 +120,7 @@ def command_options() -> dict[tuple[str, ...], set[str]]:
     """
     root = build_parser()
     by_path: dict[tuple[str, ...], set[str]] = {}
-    pending: list[tuple[tuple[str, ...], argparse.ArgumentParser]] = [(("ava",), root)]
+    pending: list[tuple[tuple[str, ...], argparse.ArgumentParser]] = [(("meiva",), root)]
     while pending:
         path, parser = pending.pop()
         by_path[path] = {

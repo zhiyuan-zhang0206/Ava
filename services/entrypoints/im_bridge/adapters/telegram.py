@@ -2,7 +2,7 @@
 
 One adapter per IM platform; this one speaks Telegram's Bot API directly:
 ``getUpdates`` long-polling (50s window, offset persisted atomically under
-``$AVA_HOME/state/im_bridge``) for inbound messages, ``sendMessage`` (with
+``$MEIVA_HOME/state/im_bridge``) for inbound messages, ``sendMessage`` (with
 4096-char segmentation) for outbound. Only the configured owner's chat is
 handled; messages from anyone else are consumed (the offset moves past them)
 but never surfaced.
@@ -26,7 +26,7 @@ from typing import Any, cast
 import httpx
 
 from base.log import logger
-from base.paths import ava_home
+from base.paths import meiva_home
 from services.entrypoints.im_bridge.config import TelegramCredentialsConfig
 from services.entrypoints.im_bridge.types import (
     NETWORK_ERRORS,
@@ -91,7 +91,7 @@ def _to_html(text: str) -> str:
 
 
 # Poll window / reconnect backoff are configurable via
-# AVA_TELEGRAM_POLL_TIMEOUT_SECONDS / AVA_TELEGRAM_RECONNECT_*_DELAY_SECONDS
+# MEIVA_TELEGRAM_POLL_TIMEOUT_SECONDS / MEIVA_TELEGRAM_RECONNECT_*_DELAY_SECONDS
 # (task #698 G8). Telegram caps the getUpdates long-poll window around 50s.
 # Idle pause between polls when a batch completes with no work to do. A real
 # getUpdates long-poll blocks up to the configured poll window, so this only
@@ -152,14 +152,14 @@ class TelegramAdapter(IMAdapter):
         return self._client
 
     def _offset_path(self) -> Path:
-        return ava_home() / "state" / "im_bridge" / "telegram_offset"
+        return meiva_home() / "state" / "im_bridge" / "telegram_offset"
 
     # -- lifecycle -------------------------------------------------------
 
     async def start(self, tasks: asyncio.TaskGroup) -> None:
         # Unconfigured = skip with a log, like the weixin/feishu adapters — the
         # daemon must stay up either way (a fresh install has no bot token, and
-        # a raise here kills the session, failing `ava start`'s readiness gate).
+        # a raise here kills the session, failing `meiva start`'s readiness gate).
         if not self._token or self._owner_id == 0:
             logger.info("telegram not configured (no bot token / owner id), skipping")
             return
@@ -499,7 +499,7 @@ class TelegramAdapter(IMAdapter):
 
         owner = self._owner_id
         if not owner:
-            raise RuntimeError("telegram owner chat not configured (AVA_TELEGRAM_OWNER_ID)")
+            raise RuntimeError("telegram owner chat not configured (MEIVA_TELEGRAM_OWNER_ID)")
         await self.send(str(owner), text, markdown=markdown, buttons=buttons)
 
     async def _send_message(

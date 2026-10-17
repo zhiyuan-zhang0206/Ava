@@ -1,4 +1,4 @@
-# Ava Testing Guidelines
+# Meiva Testing Guidelines
 
 ## Quick Start
 
@@ -13,12 +13,12 @@
 
 # Run tests + coverage report
 .venv/bin/pytest --ignore=tests/e2e -q \
-  --cov=agent --cov=ava --cov=gateway --cov=base --cov=ui \
+  --cov=agent --cov=meiva --cov=gateway --cov=base --cov=ui \
   --cov-report=term-missing
 
 # Generate HTML coverage report
 .venv/bin/pytest --ignore=tests/e2e -q \
-  --cov=agent --cov=ava --cov=gateway --cov=base --cov=ui \
+  --cov=agent --cov=meiva --cov=gateway --cov=base --cov=ui \
   --cov-report=html
 open htmlcov/index.html
 ```
@@ -74,11 +74,11 @@ all); a test moved elsewhere gets its file named in the destination directory's 
 | `base/packages/plugins/manifest.py` | `base/packages/plugins/tests/test_manifest.py` |
 | `agent/graph/exec/node.py` | `agent/graph/exec/tests/test_exec_output.py` |
 | `gateway/agents/history/timeline.py` | `gateway/tests/history/test_timeline.py` |
-| `ava/shell.py` | `ava/tests/namespaces/shell/test_shell.py` |
+| `meiva/shell.py` | `meiva/tests/namespaces/shell/test_shell.py` |
 
-If adding a new sub-module (e.g., `ava/new_module.py`), create `test_new_module.py` in
-the package's own `tests/` directory when it has one (`ava/tests/`), otherwise under
-`tests/components/ava/`.
+If adding a new sub-module (e.g., `meiva/new_module.py`), create `test_new_module.py` in
+the package's own `tests/` directory when it has one (`meiva/tests/`), otherwise under
+`tests/components/meiva/`.
 
 ## Test Naming
 
@@ -203,10 +203,10 @@ Actions cache; no pull request is involved.
 The repo-root `conftest.py` loads the suite's global fixtures as plugins from `tests/fixtures/`
 (`env_bootstrap.py` first, then `provisioning.py`, `guards.py`, ...), so they apply to every test in the
 repository. Together they redirect every host resource the suite could otherwise
-share with the operator's live cluster: `$AVA_HOME` (tmpfs), the database and
+share with the operator's live cluster: `$MEIVA_HOME` (tmpfs), the database and
 Redis (throwaway per-worker instances), every daemon health port, and the
 session home (the vendored runtime, initdb template and PTY freeze live in the
-home, so `$AVA_HOME` redirects them too). Each of those works because the resource is addressed
+home, so `$MEIVA_HOME` redirects them too). Each of those works because the resource is addressed
 by a value the process reads — redirect the value, redirect the resource. Env
 vars are set in `os.environ`, not only on the settings singleton, so subprocesses
 (the e2e gateway / ops / restarter) inherit them.
@@ -214,13 +214,13 @@ vars are set in `os.environ`, not only on the settings singleton, so subprocesse
 **The OS scheduler is the exception, because it cannot be redirected.** launchd
 reads one `~/Library/LaunchAgents` per user, and `crontab` edits one table per user.
 So the suite does not redirect it — it
-refuses to write to it at all, via `AVA_OS_JOBS_ENABLED=false`
+refuses to write to it at all, via `MEIVA_OS_JOBS_ENABLED=false`
 (`base.host.system.cron.os_jobs_enabled` gates all five registrars). Labels and
 crontab markers name a job, not a home, so a second gate covers both directions:
-only the default home (`~/.ava`) may register or remove a job
+only the default home (`~/.meiva`) may register or remove a job
 (`base.host.system.cron.owns_os_jobs`), and a test of a registrar takes the
 `default_home` fixture to be that home. `pytest_sessionfinish` then diffs the
-host's Ava jobs (plist contents included) against a snapshot taken when the
+host's Meiva jobs (plist contents included) against a snapshot taken when the
 provisioning plugin is imported and fails the run on anything new or changed. It
 removes nothing: a leaked job replaced the host's real one.
 
@@ -241,7 +241,7 @@ keeps running with the layered values. Enforced by
    (`os.environ`, a `settings` field, a module global). That plugin is the one
    exemption — the repo-root conftest loads it once per process, so "the session" and "my directory" are the same blast radius,
    but resource lifetime does not require permanent URL delivery: `provisioned_db`
-   owns the instance, while the requesting function restores `AVA_DB_URL`, Settings
+   owns the instance, while the requesting function restores `MEIVA_DB_URL`, Settings
    and the private `.env` on teardown. Deeper
    than that, narrow the scope or return the owned value. A session
    fixture that owns only an expensive resource (`playwright_browser`,

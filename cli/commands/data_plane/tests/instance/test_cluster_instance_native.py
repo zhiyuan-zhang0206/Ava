@@ -1,11 +1,11 @@
 """Real bring-up of a per-cluster Postgres+Redis instance.
 
 Exercises cli.commands.data_plane.cluster_instance end to end: initdb a fresh per-cluster
-Postgres under a temp $AVA_HOME, start it on an ephemeral port with the
+Postgres under a temp $MEIVA_HOME, start it on an ephemeral port with the
 always-authenticated posture (peer for the OS user on the owner-only socket,
 SCRAM for every other role), start a per-cluster Redis with requirepass = an
 independent Redis-admin password, provision the NOLOGIN owner + db + schema
-(the `ava_tinst` identifier here, passed as data — names-as-data), and check
+(the `meiva_tinst` identifier here, passed as data — names-as-data), and check
 the runtime Redis identity. Write generations and the pooler are covered by
 cli/commands/tests/test_single_box.py; the rest of the suite mocks
 the bring-up out.
@@ -32,7 +32,7 @@ from base import cluster
 from base.cluster import provision_database
 from base.cluster.machine import MachineIdentity
 from base.config import settings
-from base.paths.home import resolve_ava_home
+from base.paths.home import resolve_meiva_home
 from cli.commands.data_plane import cluster_instance as ci
 from cli.commands.data_plane.bringup import ensure_gateway_data_plane
 from cli.commands.data_plane.config import DataPlaneConfig, data_plane_config_from_settings
@@ -49,17 +49,17 @@ _REDIS_RUNTIME = "test_redis_runtime_abc123"
 def _gateway_config(monkeypatch: pytest.MonkeyPatch, ports: tuple[int, int]) -> Path:
     """Configure a born gateway with different Postgres and Redis usernames."""
     pg_port, redis_port = ports
-    home = resolve_ava_home()
+    home = resolve_meiva_home()
     values = {
-        "AVA_DB_URL": f"postgresql://ava_main@127.0.0.1:{pg_port}/ava_main",
-        "AVA_REDIS_URL": f"redis://ava:{_REDIS_RUNTIME}@127.0.0.1:{redis_port}/0",
-        "AVA_REDIS_ADMIN_PASSWORD": _REDIS_ADMIN,
-        "AVA_REDIS_PASSWORD": _REDIS_RUNTIME,
+        "MEIVA_DB_URL": f"postgresql://meiva_main@127.0.0.1:{pg_port}/meiva_main",
+        "MEIVA_REDIS_URL": f"redis://meiva:{_REDIS_RUNTIME}@127.0.0.1:{redis_port}/0",
+        "MEIVA_REDIS_ADMIN_PASSWORD": _REDIS_ADMIN,
+        "MEIVA_REDIS_PASSWORD": _REDIS_RUNTIME,
     }
     for key, value in values.items():
         monkeypatch.setenv(key, value)
     for field in ("db_url", "redis_url", "redis_admin_password"):
-        monkeypatch.setattr(settings.data_plane, field, values[f"AVA_{field.upper()}"])
+        monkeypatch.setattr(settings.data_plane, field, values[f"MEIVA_{field.upper()}"])
     monkeypatch.setattr(settings.data_plane, "pgbouncer_enabled", False)
     record = cluster.ClusterRecord(
         ports=cast(
@@ -118,25 +118,25 @@ def isolated_cluster(
     redis_access: None,
     homes_get_their_own_ports: None,
 ) -> Iterator[tuple[int, int]]:
-    """A temp $AVA_HOME + cluster identity, yielding (pg_port,
+    """A temp $MEIVA_HOME + cluster identity, yielding (pg_port,
     redis_port). Tears the instance down on exit."""
     home = tmp_path / "home"
     home.mkdir()
-    monkeypatch.setenv("AVA_HOME", str(home))
+    monkeypatch.setenv("MEIVA_HOME", str(home))
     monkeypatch.setattr(settings.data_plane, "cluster_secret", _BEARER)
     monkeypatch.setattr(settings.data_plane, "redis_admin_password", _REDIS_ADMIN)
-    monkeypatch.setattr(settings.data_plane, "events_channel", "ava:tinst:events")
+    monkeypatch.setattr(settings.data_plane, "events_channel", "meiva:tinst:events")
     pg_port, redis_port = _free_port(), _free_port()
     try:
         yield pg_port, redis_port
     finally:
         # Stop the pooler first (no-op if a test never enabled it). Unlike the pg
         # and redis teardowns below — which address captured locals, a temp data
-        # dir and an ephemeral port — `stop_pgbouncer` re-resolves ava_home() at
+        # dir and an ephemeral port — `stop_pgbouncer` re-resolves meiva_home() at
         # call time. Re-pin it rather than assume the setup patch is still in
         # force: a body that unwound it would aim this at the operator's real
-        # `~/.ava` and take down the production pooler.
-        monkeypatch.setenv("AVA_HOME", str(home))
+        # `~/.meiva` and take down the production pooler.
+        monkeypatch.setenv("MEIVA_HOME", str(home))
         stop_pgbouncer()
         subprocess.run(
             [ci.pg_bin("pg_ctl"), "-D", str(home / "pg"), "-m", "immediate", "stop"],
@@ -186,7 +186,7 @@ def test_per_cluster_instance_bringup(
         pg_port=pg_port,
         redis_port=redis_port,
         redis_password=_REDIS_RUNTIME,
-        redis_user="ava_tinst",
+        redis_user="meiva_tinst",
         retained_children=retained_children,
         machine=command_machine,
     )
@@ -196,21 +196,21 @@ def test_per_cluster_instance_bringup(
     # instance, as the administrator over its owner-only socket. The
     # identifier is passed as data.
     provision_database(
-        "ava_tinst",
+        "meiva_tinst",
         base_admin_url=ci.pg_admin_url(pg_port),
-        expected_data_dir=resolve_ava_home() / "pg",
+        expected_data_dir=resolve_meiva_home() / "pg",
     )
     cluster.ensure_checkpoint_schema(
-        "ava_tinst",
+        "meiva_tinst",
         base_admin_url=ci.pg_admin_url(pg_port),
         database_created=True,
-        expected_data_dir=resolve_ava_home() / "pg",
+        expected_data_dir=resolve_meiva_home() / "pg",
     )
 
-    with _admin(pg_port, "ava_tinst") as conn:
+    with _admin(pg_port, "meiva_tinst") as conn:
         # The owner can never log in and carries no password.
         assert conn.execute(
-            "SELECT rolcanlogin, rolpassword IS NULL FROM pg_authid WHERE rolname = 'ava_tinst'"
+            "SELECT rolcanlogin, rolpassword IS NULL FROM pg_authid WHERE rolname = 'meiva_tinst'"
         ).fetchone() == (False, True)
         # mmap-backed shared memory pinned by `start_pg` (Task #1263): the main
         # region and dynamic segments live in files under the data dir, not POSIX
@@ -227,22 +227,22 @@ def test_per_cluster_instance_bringup(
         ).fetchone()
 
     # No password-less or owner door over TCP (the lock that keeps other clusters out).
-    for user, password in (("ava_tinst", ""), ("ava_tinst", "wrong"), (getpass.getuser(), "")):
+    for user, password in (("meiva_tinst", ""), ("meiva_tinst", "wrong"), (getpass.getuser(), "")):
         with pytest.raises(psycopg.OperationalError):
             psycopg.connect(
-                host="127.0.0.1", port=pg_port, user=user, password=password, dbname="ava_tinst"
+                host="127.0.0.1", port=pg_port, user=user, password=password, dbname="meiva_tinst"
             )
 
-    # Runtime Redis identity: the ava_tinst ACL user.
+    # Runtime Redis identity: the meiva_tinst ACL user.
     # redis-py's from_url carries **kwargs: Unknown in its stub.
     r = redis.Redis.from_url(  # pyright: ignore[reportUnknownMemberType]
-        f"redis://ava_tinst:{_REDIS_RUNTIME}@127.0.0.1:{redis_port}/0"
+        f"redis://meiva_tinst:{_REDIS_RUNTIME}@127.0.0.1:{redis_port}/0"
     )
     assert r.ping()  # pyright: ignore[reportUnknownMemberType]
     r.close()
     with (
         redis.Redis.from_url(  # pyright: ignore[reportUnknownMemberType]
-            f"redis://ava_tinst:{bearer}@127.0.0.1:{redis_port}/0"
+            f"redis://meiva_tinst:{bearer}@127.0.0.1:{redis_port}/0"
         ) as wrong_bearer,
         pytest.raises(redis.AuthenticationError),
     ):
@@ -257,7 +257,7 @@ def test_bringup_is_idempotent(
     data_plane_config: DataPlaneConfig,
 ) -> None:
     """A second ensure on an already-running instance is a no-op success (the warm
-    `ava start` path)."""
+    `meiva start` path)."""
     pg_port, redis_port = isolated_cluster
     for _ in range(2):
         assert (
@@ -266,7 +266,7 @@ def test_bringup_is_idempotent(
                 pg_port=pg_port,
                 redis_port=redis_port,
                 redis_password=_REDIS_RUNTIME,
-                redis_user="ava_tinst",
+                redis_user="meiva_tinst",
                 retained_children=retained_children,
                 machine=command_machine,
             )
@@ -296,9 +296,9 @@ def test_gateway_cold_start_restores_redis_url_identity(
         )
         == 0
     )
-    provision_database("ava_main", base_admin_url=ci.pg_admin_url(pg_port))
-    with _admin(pg_port, "ava_main") as conn:
-        assert conn.execute("SELECT current_database()").fetchone() == ("ava_main",)
+    provision_database("meiva_main", base_admin_url=ci.pg_admin_url(pg_port))
+    with _admin(pg_port, "meiva_main") as conn:
+        assert conn.execute("SELECT current_database()").fetchone() == ("meiva_main",)
     with redis.Redis.from_url(settings.data_plane.redis_url) as client:  # pyright: ignore[reportUnknownMemberType]
         assert client.ping()  # pyright: ignore[reportUnknownMemberType]
         assert client.set("continuation", "pending")  # pyright: ignore[reportUnknownMemberType]
@@ -321,8 +321,8 @@ def test_gateway_cold_start_restores_redis_url_identity(
     with redis.Redis.from_url(settings.data_plane.redis_url) as client:  # pyright: ignore[reportUnknownMemberType]
         assert client.get("continuation") == b"pending"  # pyright: ignore[reportUnknownMemberType]
     with redis.Redis(port=redis_port, password=_REDIS_ADMIN) as admin:
-        assert admin.acl_getuser("ava") is not None  # pyright: ignore[reportUnknownMemberType]
-        assert admin.acl_getuser("ava_main") is None  # pyright: ignore[reportUnknownMemberType]
+        assert admin.acl_getuser("meiva") is not None  # pyright: ignore[reportUnknownMemberType]
+        assert admin.acl_getuser("meiva_main") is None  # pyright: ignore[reportUnknownMemberType]
 
 
 def test_fresh_single_box_redis_refuses_unauthenticated_connections(
@@ -340,7 +340,7 @@ def test_fresh_single_box_redis_refuses_unauthenticated_connections(
     from cli.start_identity import IdentityInput, gateway_values
 
     pg_port, redis_port = isolated_cluster
-    home = resolve_ava_home()
+    home = resolve_meiva_home()
     ports = cluster.new_home_ports()
     ports.update(postgres=pg_port, redis=redis_port, pgbouncer=_free_port())
     record = cluster.ClusterRecord(ports=ports, gateway_home=str(home), created_at="test")
@@ -350,17 +350,17 @@ def test_fresh_single_box_redis_refuses_unauthenticated_connections(
             home,
             tmp_path,
             frozenset({"gateway", "agent-runner"}),
-            {"AVA_PGBOUNCER_ENABLED": "false"},
+            {"MEIVA_PGBOUNCER_ENABLED": "false"},
         ),
     )
-    assert values["AVA_CLUSTER_SECRET"]
-    admin = values["AVA_REDIS_ADMIN_PASSWORD"]
+    assert values["MEIVA_CLUSTER_SECRET"]
+    admin = values["MEIVA_REDIS_ADMIN_PASSWORD"]
     (home / ".env").write_text("".join(f"{key}={value}\n" for key, value in values.items()))
-    monkeypatch.setattr(settings.data_plane, "cluster_secret", values["AVA_CLUSTER_SECRET"])
-    monkeypatch.setattr(settings.data_plane, "db_url", values["AVA_DB_URL"])
-    monkeypatch.setattr(settings.data_plane, "redis_url", values["AVA_REDIS_URL"])
+    monkeypatch.setattr(settings.data_plane, "cluster_secret", values["MEIVA_CLUSTER_SECRET"])
+    monkeypatch.setattr(settings.data_plane, "db_url", values["MEIVA_DB_URL"])
+    monkeypatch.setattr(settings.data_plane, "redis_url", values["MEIVA_REDIS_URL"])
     monkeypatch.setattr(settings.data_plane, "redis_admin_password", admin)
-    monkeypatch.setattr(settings.data_plane, "events_channel", values["AVA_EVENTS_CHANNEL"])
+    monkeypatch.setattr(settings.data_plane, "events_channel", values["MEIVA_EVENTS_CHANNEL"])
 
     def _record(_home: Path) -> cluster.ClusterRecord:
         return record
@@ -383,7 +383,7 @@ def test_fresh_single_box_redis_refuses_unauthenticated_connections(
             pytest.raises(redis.AuthenticationError),
         ):
             anonymous.ping()  # pyright: ignore[reportUnknownMemberType]
-        with redis.Redis.from_url(values["AVA_REDIS_URL"]) as runtime:  # pyright: ignore[reportUnknownMemberType]
+        with redis.Redis.from_url(values["MEIVA_REDIS_URL"]) as runtime:  # pyright: ignore[reportUnknownMemberType]
             assert runtime.ping()  # pyright: ignore[reportUnknownMemberType]
         with redis.Redis(port=redis_port, password=admin) as administrator:
             assert administrator.ping()  # pyright: ignore[reportUnknownMemberType]
@@ -412,8 +412,8 @@ def test_unix_only_foreign_postgres_same_port_cannot_receive_provisioning(
         )
         == 0
     )
-    owned_data = resolve_ava_home() / "pg"
-    with tempfile.TemporaryDirectory(prefix="ava-pg-foreign-", dir="/tmp") as temporary:
+    owned_data = resolve_meiva_home() / "pg"
+    with tempfile.TemporaryDirectory(prefix="meiva-pg-foreign-", dir="/tmp") as temporary:
         directory = Path(temporary)
         data = directory / "data"
         ci.initdb(data)
@@ -513,7 +513,7 @@ def test_birth_hba_of_a_single_box_has_loopback_lines_only(
         pg_port=pg_port,
         redis_port=redis_port,
         redis_password=_REDIS_RUNTIME,
-        redis_user="ava_tinst",
+        redis_user="meiva_tinst",
         retained_children=retained_children,
         machine=command_machine,
     )
@@ -543,7 +543,7 @@ def test_rewritten_hba_is_reloaded_into_running_server(
         )
         == 0
     )
-    data = resolve_ava_home() / "pg"
+    data = resolve_meiva_home() / "pg"
     # A legacy postmaster: trust everywhere, reloaded into the running server.
     (data / "pg_hba.conf").write_text("local all all trust\nhost all all 127.0.0.1/32 trust\n")
     with psycopg.connect(ci.pg_admin_url(pg_port), autocommit=True) as conn:
@@ -589,7 +589,7 @@ def test_hba_proof_refuses_a_postmaster_still_serving_trust(
         == 0
     )
     ci.require_authenticated_hba(pg_port, "127.0.0.1")
-    data = resolve_ava_home() / "pg"
+    data = resolve_meiva_home() / "pg"
     (data / "pg_hba.conf").write_text("local all all trust\nhost all all 127.0.0.1/32 trust\n")
     with psycopg.connect(ci.pg_admin_url(pg_port), autocommit=True) as conn:
         conn.execute("SELECT pg_reload_conf()")

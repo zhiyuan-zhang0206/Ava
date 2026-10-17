@@ -1,4 +1,4 @@
-"""Ava fleet plugin cases: dismissing response notice refreshes inspector snapshot."""
+"""Meiva fleet plugin cases: dismissing response notice refreshes inspector snapshot."""
 
 from __future__ import annotations
 
@@ -8,8 +8,7 @@ from uuid import uuid4
 import psycopg
 import pytest
 
-import ava
-from ava.tests.fixtures.pin_agent import pin_agent
+import meiva
 from base.agents.observation.snapshot import select_one
 from base.config import settings
 from base.lm.catalog import ModelCatalog
@@ -20,6 +19,7 @@ from gateway.tests.extensions.fleet.test_fleet_notices_via_gateway import (
     sdk_via_inprocess_gateway as sdk_via_inprocess_gateway,
 )
 from gateway.tests.extensions.fleet.test_fleet_notices_via_gateway import seed_agent
+from meiva.tests.fixtures.pin_agent import pin_agent
 from ops import lifecycle
 
 
@@ -51,8 +51,8 @@ def test_dismissing_response_notice_refreshes_inspector_snapshot(
 
     agent_id = seed_agent(db_conn)
     pin_agent(agent_id)
-    ava.ui.notify("decision needed", require_response=True, idempotency_key=str(uuid4()))  # type: ignore[attr-defined]
-    ava.ui.dismiss_notice()  # type: ignore[attr-defined]
+    meiva.ui.notify("decision needed", require_response=True, idempotency_key=str(uuid4()))  # type: ignore[attr-defined]
+    meiva.ui.dismiss_notice()  # type: ignore[attr-defined]
 
     # The first snapshot announces the newly posted question. Dismissal
     # must publish a second, now-empty snapshot for the inspector.
@@ -97,9 +97,9 @@ def test_cross_type_supersede_refreshes_inbox_and_inspector_projections(
 
     agent_id = seed_agent(db_conn)
     pin_agent(agent_id)
-    ava.ui.notify("FYI old", idempotency_key=str(uuid4()))  # type: ignore[attr-defined]
-    ava.ui.notify("question", require_response=True, idempotency_key=str(uuid4()))  # type: ignore[attr-defined]
-    ava.ui.notify("FYI new", idempotency_key=str(uuid4()))  # type: ignore[attr-defined]
+    meiva.ui.notify("FYI old", idempotency_key=str(uuid4()))  # type: ignore[attr-defined]
+    meiva.ui.notify("question", require_response=True, idempotency_key=str(uuid4()))  # type: ignore[attr-defined]
+    meiva.ui.notify("FYI new", idempotency_key=str(uuid4()))  # type: ignore[attr-defined]
 
     db_conn.rollback()
     with db_conn.cursor() as cur:
@@ -128,14 +128,16 @@ def test_notice_return_int_and_edit_dismiss_take_no_id(
     open notice with no id argument."""
     agent_id = seed_agent(db_conn)
     pin_agent(agent_id)
-    notice = ava.ui.notify("hold this", content="body", priority="P2", idempotency_key=str(uuid4()))  # type: ignore[attr-defined]
+    notice = meiva.ui.notify(
+        "hold this", content="body", priority="P2", idempotency_key=str(uuid4())
+    )  # type: ignore[attr-defined]
     assert isinstance(notice, int)
     assert int(notice) == notice  # int conversion gives the id
 
     # edit acts on the open notice — no id passed.
-    ava.ui.edit_notice(title="updated title")  # type: ignore[attr-defined]
+    meiva.ui.edit_notice(title="updated title")  # type: ignore[attr-defined]
     # dismiss acts on the open notice — no id passed.
-    ava.ui.dismiss_notice()  # type: ignore[attr-defined]
+    meiva.ui.dismiss_notice()  # type: ignore[attr-defined]
 
     db_conn.rollback()
     with db_conn.cursor() as cur:
@@ -150,7 +152,7 @@ def test_notice_return_int_and_edit_dismiss_take_no_id(
     assert row[2] == "withdrawn"
 
     # After dismissal, new notify should show pending_count = 1 (the fresh one)
-    nid2 = ava.ui.notify("fresh fyi", idempotency_key=str(uuid4()))  # type: ignore[attr-defined]
+    nid2 = meiva.ui.notify("fresh fyi", idempotency_key=str(uuid4()))  # type: ignore[attr-defined]
     assert nid2.pending_count == 1  # pyright: ignore[reportAttributeAccessIssue, reportUnknownMemberType]
     assert nid2.pending_notices[0]["id"] == nid2  # pyright: ignore[reportAttributeAccessIssue, reportUnknownMemberType]
 
@@ -163,7 +165,7 @@ def test_notify_with_expire_at_valid(
     agent_id = seed_agent(db_conn)
     pin_agent(agent_id)
     # timedelta
-    nid1 = ava.ui.notify(
+    nid1 = meiva.ui.notify(
         "expires in 1h", expire_at=timedelta(hours=1), idempotency_key=str(uuid4())
     )  # type: ignore[attr-defined]
     with db_conn.cursor() as cur:
@@ -177,7 +179,7 @@ def test_notify_with_expire_at_valid(
 
     # ISO string
     target = (datetime.now(UTC) + timedelta(hours=2)).isoformat()
-    nid2 = ava.ui.notify("expires at ISO", expire_at=target, idempotency_key=str(uuid4()))  # type: ignore[attr-defined]
+    nid2 = meiva.ui.notify("expires at ISO", expire_at=target, idempotency_key=str(uuid4()))  # type: ignore[attr-defined]
     with db_conn.cursor() as cur:
         cur.execute(
             "SELECT expire_at FROM agent_notices WHERE agent_id = %s AND local_id = %s",
@@ -196,4 +198,4 @@ def test_notify_with_expire_at_in_past_raises_value_error(
     pin_agent(agent_id)
     past = datetime.now(UTC) - timedelta(minutes=5)
     with pytest.raises(ValueError, match="expire_at is in the past"):
-        ava.ui.notify("past notice", expire_at=past, idempotency_key=str(uuid4()))  # type: ignore[attr-defined]
+        meiva.ui.notify("past notice", expire_at=past, idempotency_key=str(uuid4()))  # type: ignore[attr-defined]

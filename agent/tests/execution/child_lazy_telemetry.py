@@ -56,7 +56,7 @@ def identity_child_record() -> dict[str, Any]:
     )  # the real arm path (task #3816 M4b)
     # The boot clock is all the record reads; the SDK modules stay unimported.
     child = exec_child.ChildContext(
-        ava=None,  # pyright: ignore[reportArgumentType]
+        meiva=None,  # pyright: ignore[reportArgumentType]
         boot_started_at=time.perf_counter(),
     )
     exec_child.emit_child_boot_timing(child, clients=clients)

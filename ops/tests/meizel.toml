@@ -4,7 +4,7 @@ exports = ["pool_support.py"]
 "test_env_audit.py" = ["_env_audit_projection_child.py"]
 
 [debt.first-party-patch]
-"test_agent_skill_view.py#monkeypatch.setattr ava.mcps.config.load_mcp_config" = 3
+"test_agent_skill_view.py#monkeypatch.setattr meiva.mcps.config.load_mcp_config" = 3
 "test_agent_skill_view.py#monkeypatch.setattr base.packages.composer_commands.external_plugin_read_root" = 1
 "test_agent_skill_view.py#monkeypatch.setattr base.packages.composer_commands.repo_plugins_dir" = 1
 "test_agent_skill_view.py#monkeypatch.setattr base.packages.composer_commands.repo_root" = 1
@@ -38,8 +38,8 @@ exports = ["pool_support.py"]
 "test_env_audit.py#monkeypatch.setattr ops.env_audit.load_alias_metadata" = 5
 "test_env_audit.py#monkeypatch.setattr ops.env_audit.psutil.Process" = 1
 "test_hosted_lifecycle_agent.py#monkeypatch.setattr ops.cluster_status.kill_agent_shells" = 1
-"test_inventory_ops.py#monkeypatch.setattr ava.mcps.config.display_available" = 1
-"test_inventory_ops.py#monkeypatch.setattr ava.mcps.config.load_mcp_config" = 1
+"test_inventory_ops.py#monkeypatch.setattr meiva.mcps.config.display_available" = 1
+"test_inventory_ops.py#monkeypatch.setattr meiva.mcps.config.load_mcp_config" = 1
 "test_operations_config.py#monkeypatch.setattr base.host.config_validators.read_time_capability" = 2
 "test_operations_config.py#monkeypatch.setattr base.host.config_validators.validate" = 7
 "test_operations_config.py#monkeypatch.setattr base.host.env.dotenv_file.unit_home" = 1

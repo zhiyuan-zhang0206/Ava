@@ -59,7 +59,7 @@ def alert(
     fingerprint: str = "abc123",
     notify_im: str | None = None,
 ) -> dict[str, Any]:
-    labels = {"alertname": alertname, "team": "ava-ops"}
+    labels = {"alertname": alertname, "team": "meiva-ops"}
     if severity:
         labels["severity"] = severity
     if notify_im is not None:
@@ -311,7 +311,7 @@ def test_ingest_notify_im_false_stores_and_publishes_without_im(
 
     assert len(published) == 1
     channel, frame = published[0]
-    assert channel == "ava:alerts"
+    assert channel == "meiva:alerts"
     assert json.loads(frame)["status"] == "unresolved"
 
 
@@ -529,7 +529,7 @@ def test_ingest_computes_fingerprint_when_absent(db_conn: psycopg.Connection) ->
     assert n == 1
     from base.telemetry.alerts import fingerprint as compute_fp
 
-    assert fp == compute_fp({"alertname": "test-rule", "team": "ava-ops", "severity": "error"})
+    assert fp == compute_fp({"alertname": "test-rule", "team": "meiva-ops", "severity": "error"})
 
 
 def test_ingest_alertmanager_v4_envelope_tolerated(db_conn: psycopg.Connection) -> None:
@@ -540,7 +540,7 @@ def test_ingest_alertmanager_v4_envelope_tolerated(db_conn: psycopg.Connection) 
         "version": "4",
         "groupKey": '{}/{}:{{alertname="test-rule"}}',
         "truncatedAlerts": 0,
-        "receiver": "ava-alerts-webhook",
+        "receiver": "meiva-alerts-webhook",
         "groupLabels": {"alertname": "test-rule"},
         "commonLabels": {"alertname": "test-rule"},
         "commonAnnotations": {"summary": "test summary"},
@@ -582,7 +582,7 @@ def test_ingest_grafana_flat_payload_tolerated(db_conn: psycopg.Connection) -> N
 def test_ingest_publishes_sse_frames(
     db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Every ingested row is published to the ava:alerts Redis channel as one
+    """Every ingested row is published to the meiva:alerts Redis channel as one
     AlertRow JSON frame (the SSE stream's payload)."""
 
     published: list[tuple[str, str]] = []
@@ -597,7 +597,7 @@ def test_ingest_publishes_sse_frames(
 
     assert len(published) == 3
     for channel, frame in published:
-        assert channel == "ava:alerts"
+        assert channel == "meiva:alerts"
         parsed = json.loads(frame)
         assert parsed["id"] > 0
         assert parsed["fingerprint"] in ("p1", "p2", "abc123")

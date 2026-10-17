@@ -1,16 +1,16 @@
-"""OKF knowledge-graph: parse `*.ava.okf.md` bundles into D3 graph data, and
+"""OKF knowledge-graph: parse `*.meiva.okf.md` bundles into D3 graph data, and
 render that data into the self-contained D3 visualization page.
 
 Two consumers share this module:
   - `scripts/codegen/build_okf_data.py` — CLI, writes `graph_data.json` to disk (the
-    manually-refreshed convention described in `index.ava.okf.md`, used for
+    manually-refreshed convention described in `index.meiva.okf.md`, used for
     reviewing doc-bundle changes as a diff).
   - `gateway/inspect/okf_graph.py` — serves the rendered page live over
     `GET /api/okf/graph`, rebuilt fresh from the current tree on every
     request. It never reads the checked-in `graph_data.json`, so the served
     graph cannot go stale between manual rebuilds.
 
-See `index.ava.okf.md` for the OKF format itself (frontmatter, [[wikilinks]],
+See `index.meiva.okf.md` for the OKF format itself (frontmatter, [[wikilinks]],
 filesystem-derived hierarchy, the transparent `docs/` layer).
 """
 
@@ -26,7 +26,7 @@ from typing import Any
 from base.packages.docs.frontmatter import parse_frontmatter_typed
 from base.packages.docs.notes import normalize_tags
 
-EXT = ".ava.okf.md"
+EXT = ".meiva.okf.md"
 ROOT_NAME = f"index{EXT}"
 # A package keeps its OKF nodes in a `docs/` directory: the layer is invisible
 # to the hierarchy (see `logical_path`).
@@ -46,7 +46,7 @@ def find_files(bundle_dir: str | Path) -> list[str]:
     out: list[str] = []
     for root, dirs, files in os.walk(bundle_dir):
         # `.github/` is walked despite being hidden: its overview node lives
-        # inside it (`.github/.github.ava.okf.md`). Every other hidden dir
+        # inside it (`.github/.github.meiva.okf.md`). Every other hidden dir
         # (`.git`, `.venv`, `.claude`, worktrees, ...) stays excluded.
         dirs[:] = [d for d in dirs if (not d.startswith(".") or d == ".github") and d != ".git"]
         for f in files:
@@ -69,13 +69,13 @@ def parse_frontmatter(text: str) -> tuple[dict[str, Any], str]:
 
 
 def find_root(all_paths: Iterable[str]) -> str | None:
-    """The bundle's single root node — the `index.ava.okf.md` closest to the top.
+    """The bundle's single root node — the `index.meiva.okf.md` closest to the top.
 
-    In this repo the apex lives in the index layer (`docs/index.ava.okf.md`),
+    In this repo the apex lives in the index layer (`docs/index.meiva.okf.md`),
     which holds only cross-domain nodes — the domain overviews live with their
     code, in the `docs/` layer of the directory they describe
-    (`agent/docs/agent.ava.okf.md`, logical path `agent/agent.ava.okf.md`,
-    for `agent/`). The shallowest `*/index.ava.okf.md`
+    (`agent/docs/agent.meiva.okf.md`, logical path `agent/agent.meiva.okf.md`,
+    for `agent/`). The shallowest `*/index.meiva.okf.md`
     wins; ties break lexically, keeping the choice deterministic.
 
     `None` when a bundle carries no index at all — every node is then a root of
@@ -93,12 +93,12 @@ def logical_path(path: str) -> str:
     A package keeps its OKF nodes in a `docs/` directory beside its code, and
     that directory is transparent to the hierarchy: the last directory segment
     named `docs` is dropped (the file name never counts as a segment). So
-    `agent/graph/docs/graph.ava.okf.md` sits at `agent/graph/graph.ava.okf.md`,
+    `agent/graph/docs/graph.meiva.okf.md` sits at `agent/graph/graph.meiva.okf.md`,
     and the layer of a Python package named `docs`
-    (`base/packages/docs/docs/x.ava.okf.md`) sits at
-    `base/packages/docs/x.ava.okf.md`. Directories below the layer are kept
-    (`agent/graph/docs/notes/x.ava.okf.md` sits at
-    `agent/graph/notes/x.ava.okf.md`); a path with no `docs` segment is its own
+    (`base/packages/docs/docs/x.meiva.okf.md`) sits at
+    `base/packages/docs/x.meiva.okf.md`. Directories below the layer are kept
+    (`agent/graph/docs/notes/x.meiva.okf.md` sits at
+    `agent/graph/notes/x.meiva.okf.md`); a path with no `docs` segment is its own
     logical path. Pure string function, no filesystem access.
     """
     *directories, name = path.split("/")
@@ -111,14 +111,14 @@ def logical_path(path: str) -> str:
 def compute_parent(path: str, all_paths: set[str], root: str | None) -> str | None:
     """Hierarchy parent of `path`, resolved against the paths that actually exist.
 
-    The rule is purely filesystem-derived, as `index.ava.okf.md` documents,
+    The rule is purely filesystem-derived, as `index.meiva.okf.md` documents,
     and runs on logical paths (`logical_path`): a directory's overview node is
-    the same-named file **inside** the directory (`<dir>/<dir>.ava.okf.md`),
-    so `a/b/c.ava.okf.md` parents to the nearest ancestor overview, starting
-    with `a/b/b.ava.okf.md` and then `a/a.ava.okf.md`. An overview skips itself
+    the same-named file **inside** the directory (`<dir>/<dir>.meiva.okf.md`),
+    so `a/b/c.meiva.okf.md` parents to the nearest ancestor overview, starting
+    with `a/b/b.meiva.okf.md` and then `a/a.meiva.okf.md`. An overview skips itself
     and searches above its directory. Either node may sit in a `docs/` layer.
     Nodes with no ancestor overview fall back to `root` (the apex,
-    `docs/index.ava.okf.md`), including top-level cross-domain index nodes.
+    `docs/index.meiva.okf.md`), including top-level cross-domain index nodes.
 
     The result is the **physical** path of the parent, looked up among
     `all_paths`. Every returned parent is a path that exists, which is what
@@ -161,7 +161,7 @@ def resolve_wikilink(current_path: str, target: str, all_paths: set[str]) -> str
     # Exact match
     if target in all_paths:
         return target
-    # Add .ava.okf.md extension
+    # Add .meiva.okf.md extension
     if not target.endswith(EXT):
         candidates.append(target + EXT)
     # Relative from current file's directory
@@ -220,7 +220,7 @@ def build_graph_data(
     *,
     raw_links_out: list[tuple[str, str, str | None]] | None = None,
 ) -> dict[str, Any]:
-    """Parse every `.ava.okf.md` file under `bundle_dir` into D3 graph data:
+    """Parse every `.meiva.okf.md` file under `bundle_dir` into D3 graph data:
     nodes, tree edges (from the filesystem hierarchy), cross edges (from
     resolved `[[wikilinks]]`, deduplicated + weighted), and the set of all tags.
 

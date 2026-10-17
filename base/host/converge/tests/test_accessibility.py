@@ -69,7 +69,7 @@ class TestAccessibilityStatus:
 
 class TestStatusFile:
     def test_write_read_clear_cycle(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
-        monkeypatch.setattr(accessibility, "ava_home", lambda: tmp_path)
+        monkeypatch.setattr(accessibility, "meiva_home", lambda: tmp_path)
         write_status(AccessibilityStatus(state=AccessibilityState.NOT_GRANTED, diagnostic="test"))
 
         assert status_file_path().exists()

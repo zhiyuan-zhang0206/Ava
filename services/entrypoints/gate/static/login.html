@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<title>Ava — Sign in</title>
+<title>Meiva — Sign in</title>
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <script>/*__THEME_JS__*/</script>
 <style>
@@ -115,7 +115,7 @@ button:disabled {
 <body>
   <div class="card stack">
     <div class="card-head stack">
-      <h1>Ava</h1>
+      <h1>Meiva</h1>
       <p class="muted" data-i18n="enterPassword">Enter the cluster password to continue</p>
     </div>
     <form class="stack" id="form">
@@ -137,7 +137,7 @@ button:disabled {
     // defaults; the Chinese table is written as \uXXXX escapes because the
     // repo-wide no-CJK gate exempts only locale files, and this page must
     // stay a dependency-free single asset (see the gate daemon header).
-    var AVA_I18N_ZH = {
+    var MEIVA_I18N_ZH = {
       "enterPassword": "\u8f93\u5165\u96c6\u7fa4\u5bc6\u7801\u4ee5\u7ee7\u7eed",
       "username": "\u7528\u6237\u540d",
       "password": "\u5bc6\u7801",
@@ -149,12 +149,12 @@ button:disabled {
       "signInFailed": "\u767b\u5f55\u5931\u8d25\uff08",
       "ticketRejected": "\u767b\u5f55\u94fe\u63a5\u5df2\u8fc7\u671f\u6216\u5df2\u88ab\u4f7f\u7528\u2014\u2014\u8bf7\u4f7f\u7528\u96c6\u7fa4\u5bc6\u7801\u767b\u5f55"
     };
-    var AVA_LOCALE = (navigator.language || "en").toLowerCase().startsWith("zh") ? "zh" : "en";
+    var MEIVA_LOCALE = (navigator.language || "en").toLowerCase().startsWith("zh") ? "zh" : "en";
     function t(key) {
-      return AVA_LOCALE === "zh" && AVA_I18N_ZH[key] ? AVA_I18N_ZH[key] : null;
+      return MEIVA_LOCALE === "zh" && MEIVA_I18N_ZH[key] ? MEIVA_I18N_ZH[key] : null;
     }
     function applyI18n() {
-      if (AVA_LOCALE !== "zh") return;
+      if (MEIVA_LOCALE !== "zh") return;
       document.documentElement.lang = "zh-CN";
       var nodes = document.querySelectorAll("[data-i18n]");
       for (var i = 0; i < nodes.length; i++) {
@@ -228,7 +228,7 @@ button:disabled {
       else fail((t("signInFailed") || "Sign-in failed (") + response.status + ")");
     });
 
-    // A one-time login link (`/#ticket=<ticket>`, printed by `ava start`): the
+    // A one-time login link (`/#ticket=<ticket>`, printed by `meiva start`): the
     // fragment is removed from the address bar before the ticket is sent, then
     // the gateway spends the ticket and sets the same session cookie a password
     // login does. A refused ticket leaves the password form usable.

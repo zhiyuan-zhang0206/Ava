@@ -1,7 +1,7 @@
 """A failed background loop exits the host, and cannot skip turn drain or ownership release.
 
 The loops share one `TaskGroup` with the wake dispatcher: a loop that raises
-cancels the dispatcher and its siblings, and `run` raises so `ava-root` restarts
+cancels the dispatcher and its siblings, and `run` raises so `meiva-root` restarts
 the process after the turns drain.
 
 The sweep's bounded-exit regression (task #4224) rides the shared child-process
@@ -379,7 +379,7 @@ async def test_stop_releases_ownership_within_a_bound_when_postgres_is_unreachab
     machine_identity: MachineIdentity,
 ) -> None:
     """A/B/A run 6: with the pooler gone, the stop path's ownership release waited
-    out the control pool's 30 s acquire timeout, so ava-root's 10 s TERM window
+    out the control pool's 30 s acquire timeout, so meiva-root's 10 s TERM window
     expired first and root retained custody of the still-exiting agent-host."""
     from .... import host as host_mod
 

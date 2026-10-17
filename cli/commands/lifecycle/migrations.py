@@ -1,6 +1,6 @@
-"""Pending-migration applier — a step of `ava start`, not a standalone command.
+"""Pending-migration applier — a step of `meiva start`, not a standalone command.
 
-There is no `ava migrations` CLI surface. `cmd_migrations_apply` is called by
+There is no `meiva migrations` CLI surface. `cmd_migrations_apply` is called by
 `cli/commands/lifecycle/start.py` early in boot (after pg is up, before the schema-current
 assertion); long-running daemons additionally call `assert_schema_current` on
 their own entry points.
@@ -19,21 +19,21 @@ from base.agents.context.clients import DatabaseFactory
 def cmd_migrations_apply(
     *, database_factory: DatabaseFactory, machine_name: Callable[[], str]
 ) -> list[str]:
-    """Apply Ava migrations and verify checkpoint schema; `ava start` step 2.5.
+    """Apply Meiva migrations and verify checkpoint schema; `meiva start` step 2.5.
 
-    Ava SQL files run on every host (a runner normally has nothing pending and
+    Meiva SQL files run on every host (a runner normally has nothing pending and
     the authority guard refuses it if it does). Every host then verifies the
     complete LangGraph checkpoint migration set read-only. Runtime checkpoint
-    readers and agent boot may dial as ``ava_runner`` and never perform DDL.
+    readers and agent boot may dial as ``meiva_runner`` and never perform DDL.
 
-    Each Ava migration runs in a single transaction. `ava start` invokes this
+    Each Meiva migration runs in a single transaction. `meiva start` invokes this
     after pg is ready; on the gateway the fleet update reaches it through
-    the trailing `ava start`.
+    the trailing `meiva start`.
 
     Returns the names applied, NOT an exit code — the `cmd_` prefix is
-    vestigial here (see the module docstring: there is no `ava migrations`
+    vestigial here (see the module docstring: there is no `meiva migrations`
     verb, and this is never wired to a parser). Its caller needs the set,
-    because a migration that created a table is the moment `ava_runner`'s
+    because a migration that created a table is the moment `meiva_runner`'s
     point-in-time read grant went stale; failure is raised, not returned.
     """
     from base import cluster
@@ -42,8 +42,8 @@ def cmd_migrations_apply(
     from base.deploy.schema.migration_layout import required_migration_set
 
     # Dependency drift is a pre-DB gate: a new upstream checkpoint migration
-    # must first be mirrored in an Ava migration. Failing before
-    # Ava SQL runs keeps update recovery on the old code + old schema.
+    # must first be mirrored in an Meiva migration. Failing before
+    # Meiva SQL runs keeps update recovery on the old code + old schema.
     cluster.assert_checkpoint_dependency_pinned(required_migration_set())
 
     # Both dials bypass PgBouncer — the ONE sanctioned data-plane exemption

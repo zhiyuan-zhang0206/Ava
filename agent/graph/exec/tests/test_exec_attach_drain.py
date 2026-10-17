@@ -14,9 +14,8 @@ from agent.graph.exec._result import ExecDone
 from agent.graph.exec.node import _exec_node_impl
 from agent.hooks.tests.fakes import make_fake_ops_pool
 from agent.state import AgentState, AttachState
-from ava.tests.fixtures.pin_agent import hosted_resources as hosted_resources
-from base.agents.context import AvaContext
-from base.agents.messages.kwargs import AvaMsgType
+from base.agents.context import MeivaContext
+from base.agents.messages.kwargs import MeivaMsgType
 from base.clock import Clock
 from base.config.tests.configuration import defaults
 from base.db import Database
@@ -25,6 +24,7 @@ from base.events.live.bus import EventBus
 from base.host.env.agent_slices import AgentSlices
 from base.native_process.turn_identity import HostedTurnResources
 from base.packages.plugin_providers import build_model_catalog
+from meiva.tests.fixtures.pin_agent import hosted_resources as hosted_resources
 
 _CONFIG: RunnableConfig = {"configurable": {"thread_id": "7"}}
 
@@ -49,7 +49,7 @@ def _make_runtime(
     model_name: str | None = None,
     *,
     database_gate: ProcessDbGate,
-) -> Runtime[AvaContext]:
+) -> Runtime[MeivaContext]:
     from types import SimpleNamespace
     from typing import cast
 
@@ -58,7 +58,7 @@ def _make_runtime(
     llm = None
     if model_name is not None:
         llm = cast("BaseChatModel", SimpleNamespace(model_name=model_name))
-    ctx = AvaContext(
+    ctx = MeivaContext(
         hosted_resources=hosted_resources,
         ops_pool=make_fake_ops_pool(),
         llm=llm,
@@ -112,7 +112,7 @@ async def test_exec_drains_attachment_right_after_output(
     assert isinstance(msgs[0], ToolMessage)
     assert msgs[0].additional_kwargs["sdk_calls"] == [{"method": "files.read", "count": 3}]
     assert isinstance(msgs[1], HumanMessage)
-    assert msgs[1].additional_kwargs["ava_msg_type"] == AvaMsgType.ATTACH.value
+    assert msgs[1].additional_kwargs["meiva_msg_type"] == MeivaMsgType.ATTACH.value
     assert update["attach"] == AttachState()
     content = msgs[1].content
     assert isinstance(content, list)

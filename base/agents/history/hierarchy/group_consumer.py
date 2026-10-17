@@ -5,13 +5,13 @@ writes level-2 nodes, which can make level 2 due, and so on up. `run_group_check
 walks up from level 1 and stops at the first level that closed nothing.
 
 A level is checked when its open nodes (no parent) number at least `check_threshold(level)` more
-than at its previous check: `AVA_UNDERSTANDING_GROUP_CHECK_OPEN` (60) for level 1, divided by
-`AVA_UNDERSTANDING_GROUP_CHECK_DECAY` (3) once per level above, never below `MIN_CHECK_OPEN` (6):
+than at its previous check: `MEIVA_UNDERSTANDING_GROUP_CHECK_OPEN` (60) for level 1, divided by
+`MEIVA_UNDERSTANDING_GROUP_CHECK_DECAY` (3) once per level above, never below `MIN_CHECK_OPEN` (6):
 60, 20, 7, 6, ... The previous
 count being durable (`understanding_group_state`), so one count is never checked
 twice; when groups close, the count that remains open becomes the new baseline.
 A check is one conversation (`group.generate_groups`); the model is
-`AVA_UNDERSTANDING_GROUP_MODEL`, else the agent's own. A failed check (provider
+`MEIVA_UNDERSTANDING_GROUP_MODEL`, else the agent's own. A failed check (provider
 error, a reply still refused after the corrections) is the gap the design
 accepts: the `understanding_group_failed` event, the open count recorded as
 checked, and the level is looked at again after that many more nodes. Never raises into

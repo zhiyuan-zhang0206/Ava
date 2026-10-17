@@ -12,10 +12,10 @@ from cli.commands.converge.spec import ConvergeCtx
 
 
 def collect_ownership_warnings(ctx: ConvergeCtx) -> list[str]:
-    """Return non-user-owned key $AVA_HOME paths."""
+    """Return non-user-owned key $MEIVA_HOME paths."""
     current_uid = os.getuid()
     warnings: list[str] = []
-    for path in _key_paths(ctx.ava_home):
+    for path in _key_paths(ctx.meiva_home):
         owner_uid = path_owner_uid(path)
         if owner_uid == current_uid:
             continue
@@ -37,7 +37,7 @@ def ensure_ownership_preflight(ctx: ConvergeCtx) -> None:
         return
 
     print(
-        "\n⚠  OWNERSHIP PREFLIGHT — $AVA_HOME paths belong to another user (start continues):",
+        "\n⚠  OWNERSHIP PREFLIGHT — $MEIVA_HOME paths belong to another user (start continues):",
         file=sys.stderr,
     )
     for warning in warnings:
@@ -46,17 +46,17 @@ def ensure_ownership_preflight(ctx: ConvergeCtx) -> None:
         "    Repair these paths before the next start; this warning never blocks converge.",
         file=sys.stderr,
     )
-    _append_warnings(ctx.ava_home / "logs" / "ownership_preflight.log", warnings)
+    _append_warnings(ctx.meiva_home / "logs" / "ownership_preflight.log", warnings)
 
 
-def _key_paths(ava_home: Path) -> tuple[Path, ...]:
+def _key_paths(meiva_home: Path) -> tuple[Path, ...]:
     paths = (
-        ava_home,
-        ava_home / ".env",
-        ava_home / "logs",
-        ava_home / "configs",
-        ava_home / "secrets",
-        ava_home / "source",
+        meiva_home,
+        meiva_home / ".env",
+        meiva_home / "logs",
+        meiva_home / "configs",
+        meiva_home / "secrets",
+        meiva_home / "source",
     )
     return tuple(path for path in paths if path.exists())
 

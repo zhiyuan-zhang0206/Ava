@@ -226,15 +226,15 @@ def test_is_lgtm_host_accepts_station_capability(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path, *, machine_identity: MachineIdentity
 ) -> None:
     """The declarative observability-station capability designates the host
-    exactly like the marker — the watchdog keepalive and `ava status` gate on
+    exactly like the marker — the watchdog keepalive and `meiva status` gate on
     either form."""
     home = tmp_path / "station"
     home.mkdir()
     # is_lgtm_host() dials the home twice: the name bound in this module
-    # (from base.paths import ava_home) AND the fresh lookup inside
+    # (from base.paths import meiva_home) AND the fresh lookup inside
     # home_is_observability_station — patch both.
-    monkeypatch.setattr(hc, "ava_home", lambda: home)
-    monkeypatch.setattr(paths, "ava_home", lambda: home)
+    monkeypatch.setattr(hc, "meiva_home", lambda: home)
+    monkeypatch.setattr(paths, "meiva_home", lambda: home)
 
     # No marker, no capability -> not the station.
     assert hc.is_lgtm_host(machine=machine_identity) is False

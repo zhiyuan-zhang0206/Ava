@@ -2,7 +2,7 @@
 
 `# Capabilities` is rendered into the SystemMessage, and `init_context` lays that
 message down only when a context window is established — an agent's first wake,
-and the turn after each compaction. `ava.skills` underneath it is an uncached
+and the turn after each compaction. `meiva.skills` underneath it is an uncached
 filesystem scan. So the index is a snapshot of something live, and a skill
 installed mid-window is reachable by name while absent from the one listing the
 prompt tells the agent to match every task against — until a compaction happens
@@ -14,7 +14,7 @@ membership is diffed against that record, and whatever appeared since is named i
 one system note using the same line shape the index uses. Drift is the trigger,
 not a timer, and the snapshot advances with the note, so one install produces one
 note regardless of who installed it: this agent's own code, another agent on the
-box, or an operator running `ava skill install`.
+box, or an operator running `meiva skill install`.
 
 A narrowed agent (`skills_to_inject_into_system_prompt` naming specific skills
 rather than `*`) is served by the same diff without a special case — membership
@@ -41,7 +41,7 @@ from agent.graph.prompt.capabilities import index_drift, new_skills_note_text, s
 from agent.hooks import Hook
 from agent.messages import NoteTag, system_note_message
 from agent.state import CapabilitiesState
-from base.agents.context import AvaContext
+from base.agents.context import MeivaContext
 from base.log import logger
 
 
@@ -57,7 +57,7 @@ class _NewlyInstalledSkillsHook(Hook):
     async def __call__(
         self,
         state: _state.AgentState,
-        runtime: Runtime[AvaContext],
+        runtime: Runtime[MeivaContext],
         _config: RunnableConfig,
         /,
     ) -> dict | None:

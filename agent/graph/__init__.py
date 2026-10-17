@@ -22,7 +22,7 @@ and standing context notes) and `recall/` (passive memory recall):
   - `llm/goto.py`        — the node names the llm node may route to
   - `llm/_chunk.py`      — llm chunk assembly + final-message validation
   - `llm_errors.py`      — llm stream error taxonomy + failure ledger
-  - `prompt/_base_prompt.py` — immutable base system prompt + lazily captured `ava` SDK overview
+  - `prompt/_base_prompt.py` — immutable base system prompt + lazily captured `meiva` SDK overview
   - `exec/node.py`      — exec node (one disposable subprocess per execute_code call)
   - `exec/output.py`    — code execution output envelope: format / truncate / overflow-to-file
   - `exec/protocol.py`  — exec child request/result envelopes (shared with `agent/execution/child.py`)
@@ -73,7 +73,7 @@ __all__ = [
 
 # False until this module finishes importing (set True at the very bottom).
 # Attribute lookups during that window must fall through to the standard
-# submodule machinery — the same re-entrancy guard as `ava/__init__.py`'s
+# submodule machinery — the same re-entrancy guard as `meiva/__init__.py`'s
 # `_init_complete` latch, and the inert posture if a future edit re-adds a
 # submodule import to this package's body.
 _init_complete = False

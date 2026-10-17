@@ -7,10 +7,10 @@
 # Without sudo: a Linux host that already carries the whole data plane
 # (pg17 binaries under /usr/lib/postgresql/17/bin, redis-server, pgbouncer)
 # skips apt entirely — the keyring/apt-sources writes need root, and the
-# runtime provisions its own per-cluster instance under $AVA_HOME/pg from a
+# runtime provisions its own per-cluster instance under $MEIVA_HOME/pg from a
 # cached template (cli/commands/data_plane/cluster_instance.py:ensure_pg_data), so there
 # is no system data dir to bootstrap. The former `--initdb` block that initdb'd
-# /var/lib/postgresql/17/data (a legacy path `ava start` never reads) is
+# /var/lib/postgresql/17/data (a legacy path `meiva start` never reads) is
 # removed. An apt failure degrades to a warning; the packages can be installed
 # later via `sudo apt-get install ...`.
 . "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/_lib.sh"
@@ -30,7 +30,7 @@ case "$OS" in
   linux)
     # Presence gate: skip apt when the data plane is already installed. The
     # runtime needs the server binaries only; per-cluster data dirs are
-    # provisioned under $AVA_HOME by `ava start`.
+    # provisioned under $MEIVA_HOME by `meiva start`.
     if [ -x /usr/lib/postgresql/17/bin/initdb ] \
         && command -v redis-server >/dev/null 2>&1 \
         && command -v pgbouncer >/dev/null 2>&1 \
@@ -56,13 +56,13 @@ case "$OS" in
 
       # Postgres 17 server via the official PGDG repo (Ubuntu 24.04 ships 16).
       # initdb/pg_ctl land in /usr/lib/postgresql/17/bin (not on PATH; the test
-      # fixture + ava start resolve them there). Client tools (psql/pg_dump)
+      # fixture + meiva start resolve them there). Client tools (psql/pg_dump)
       # ride along as a dependency.
       prov_apt_install postgresql-common
       prov_sudo /usr/share/postgresql-common/pgdg/apt.postgresql.org.sh -y
 
       # PgBouncer transaction pooler (per-cluster data plane, on by default;
-      # AVA_PGBOUNCER_ENABLED=false is the kill-switch), pinned to the pgdg build
+      # MEIVA_PGBOUNCER_ENABLED=false is the kill-switch), pinned to the pgdg build
       # CI tests against (.github/actions/install-pg-redis) and held so an apt
       # upgrade cannot move it: its releases change pooled-session semantics.
       # Installed after the pgdg repo is added — Ubuntu's own archive ships an
@@ -76,7 +76,7 @@ case "$OS" in
     ;;
   macos)
     # brew runs initdb for postgresql@17 with the current user as the bootstrap
-    # superuser; ava start provisions the per-cluster role + db on first boot
+    # superuser; meiva start provisions the per-cluster role + db on first boot
     # (cli/commands/data_plane/cluster_instance.py) and drives pg via pg_ctl, not brew
     # services.
     brew install postgresql@17 redis@8.2 pgbouncer pgvector

@@ -1,9 +1,9 @@
 """Reclaim TTL-expired persistent shell sessions on their home machines.
 
 The 2026-08-27 ruling makes a TTL mandatory for every persistent shell session
-created via ``ava.shell.sessions.new(ttl=)`` / ``run_background(ttl=)``; the TTL
+created via ``meiva.shell.sessions.new(ttl=)`` / ``run_background(ttl=)``; the TTL
 is the only reclamation mechanism. Every session — a plain shell or a watcher
-(``ava.watcher.at/cron/launch``), which is just a shell session running a
+(``meiva.watcher.at/cron/launch``), which is just a shell session running a
 generated script with no registry or deadline of its own
 (docs/decisions/runtime/updates/recovery/2026-09-27-watchers-are-never-restarted.md) — carries one
 ``agent_shell_ttls`` row, and every expired row is reclaimed the same way: a
@@ -21,7 +21,7 @@ concurrently, the rows of one machine one after another, so a slow machine holds
 up only its own rows. Each dispatch runs under a deadline sized from the RPC
 client's own budget.
 
-The owner's ``ava.shell.sessions.renew()`` extends a live session's deadline
+The owner's ``meiva.shell.sessions.renew()`` extends a live session's deadline
 before it passes; each kill dispatch re-checks the row is still expired first
 (renewal's own ``expires_at > clock_timestamp()`` guard makes the pair airtight),
 so a renewed session is never killed.

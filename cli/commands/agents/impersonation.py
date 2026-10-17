@@ -30,10 +30,10 @@ from base.log import logger
 def relay_token_from_env() -> str:
     """Read the scoped relay credential the controller received at request time."""
     # env-ok: external relay credential handoff, not cluster configuration
-    token = os.environ.get("AVA_IMPERSONATION_RELAY_TOKEN")
+    token = os.environ.get("MEIVA_IMPERSONATION_RELAY_TOKEN")
     if not token:
         raise ValueError(
-            "set AVA_IMPERSONATION_RELAY_TOKEN to the request's relay token "
+            "set MEIVA_IMPERSONATION_RELAY_TOKEN to the request's relay token "
             "(printed once in the request response)"
         )
     return token
@@ -69,7 +69,7 @@ def write_relay_stub(
     """Write the resident-relay credential stub the session plugin consumes once.
 
     A dsh request uses the per-session path its dsh plugin exports
-    (``DSH_AVA_RELAY_STUB``) and names the relay interpreter. The plugin deletes
+    (``DSH_MEIVA_RELAY_STUB``) and names the relay interpreter. The plugin deletes
     the file immediately after loading it into the relay's environment. The file
     is created 0600 (``fchmod`` defeats the umask): the credential is never
     briefly world-readable between create and write.
@@ -81,10 +81,10 @@ def write_relay_stub(
         with os.fdopen(fd, "w", encoding="utf-8") as stream:
             fd = -1
             stream.write(
-                f"SID={session_id}\nAGENT={agent_id}\nAVA_IMPERSONATION_RELAY_TOKEN={token}\n"
+                f"SID={session_id}\nAGENT={agent_id}\nMEIVA_IMPERSONATION_RELAY_TOKEN={token}\n"
             )
             if interpreter is not None:
-                stream.write(f"AVA_IMPERSONATION_RELAY_PY={interpreter}\n")
+                stream.write(f"MEIVA_IMPERSONATION_RELAY_PY={interpreter}\n")
     except BaseException:
         if fd != -1:
             os.close(fd)
@@ -99,8 +99,8 @@ def write_relay_stub(
 def _print_claude_relay_instructions() -> None:
     """Name the claude relay start-up path."""
     print(
-        "Start the claude relay (ava impersonate relay) inside the controller "
-        "session immediately, with AVA_IMPERSONATION_RELAY_TOKEN set to the "
+        "Start the claude relay (meiva impersonate relay) inside the controller "
+        "session immediately, with MEIVA_IMPERSONATION_RELAY_TOKEN set to the "
         "relay token printed above; arm it as a Monitor watch with timeout_ms "
         "1800000 and re-arm on each expiry notice (see the host conventions). "
         "Preparation fails without its heartbeat.",
@@ -109,7 +109,7 @@ def _print_claude_relay_instructions() -> None:
 
 
 def _dsh_relay_stub() -> Path:
-    """The stub path the dsh session's ava-relay plugin exports to its shell commands.
+    """The stub path the dsh session's meiva-relay plugin exports to its shell commands.
 
     Checked before the request creates a lease: without the plugin nothing
     would start the relay. DeepSeek Harness uploads session logs with its
@@ -117,12 +117,12 @@ def _dsh_relay_stub() -> Path:
     per-session stub instead of the printed response.
     """
     # env-ok: per-session relay stub handoff from the dsh plugin, not cluster configuration
-    stub = os.environ.get("DSH_AVA_RELAY_STUB")
+    stub = os.environ.get("DSH_MEIVA_RELAY_STUB")
     if not stub:
         raise ValueError(
-            "the dsh relay needs the Ava relay plugin (ava-relay.mjs) loaded into this "
+            "the dsh relay needs the Meiva relay plugin (meiva-relay.mjs) loaded into this "
             "DeepSeek Harness session and the request run from that session's shell tool "
-            "(DSH_AVA_RELAY_STUB is unset; see the host conventions)"
+            "(DSH_MEIVA_RELAY_STUB is unset; see the host conventions)"
         )
     return Path(stub)
 
@@ -169,7 +169,7 @@ async def _wait_inbox(
 
 
 def _run_local(args: argparse.Namespace) -> int:
-    import ava
+    import meiva
 
     code = (
         sys.stdin.read()
@@ -178,10 +178,10 @@ def _run_local(args: argparse.Namespace) -> int:
     )
     if not code.strip():
         raise ValueError("Python input must be nonempty")
-    with ava.impersonation.attach(args.session_id, agent_id=args.agent_id):
+    with meiva.impersonation.attach(args.session_id, agent_id=args.agent_id):
         exec(
-            compile(code, args.file or "<ava-external>", "exec"),
-            {"__name__": "__main__", "ava": ava},
+            compile(code, args.file or "<meiva-external>", "exec"),
+            {"__name__": "__main__", "meiva": meiva},
         )
     return 0
 
@@ -214,7 +214,7 @@ def _request(args: argparse.Namespace, *, database_factory: DatabaseFactory) -> 
     from base.config import Settings, settings
     from base.config.service_read import ConfigAuthority
     from base.native_process.ownership import process_metadata
-    from base.paths import ava_home
+    from base.paths import meiva_home
 
     dsh_stub = _dsh_relay_stub() if args.relay_provider == "dsh" else None
     endpoint = args.relay_codex_remote
@@ -239,7 +239,7 @@ def _request(args: argparse.Namespace, *, database_factory: DatabaseFactory) -> 
         authority=ConfigAuthority(
             runtime=settings,
             all_domains=settings if settings.profile is None else Settings(profile=None),
-            env_path=ava_home() / ".env",
+            env_path=meiva_home() / ".env",
         ),
         name=args.name,
         executor_name=args.caller,
@@ -263,7 +263,7 @@ def _request(args: argparse.Namespace, *, database_factory: DatabaseFactory) -> 
     _emit(response)
     if dsh_stub is not None:
         print(
-            "The Ava relay plugin in this DeepSeek Harness session starts the dsh "
+            "The Meiva relay plugin in this DeepSeek Harness session starts the dsh "
             f"relay automatically from its credential stub ({dsh_stub}) and pushes "
             "each inbound batch into this session as steering input. If no relay "
             "heartbeat starts, preparation fails and the takeover is rejected.",

@@ -27,7 +27,7 @@ def test_managed_service_path_preserves_tools_across_callers(
     bindir = venv / env_forwarding.get_backend().venv_bin_dir_name()
     tools = tmp_path / "admitted-tools"
     tools.mkdir()
-    command = tools / "ava-proof"
+    command = tools / "meiva-proof"
     command.write_bytes(b"proof")
     command.chmod(0o700)
     monkeypatch.setattr(runtime_interpreter, "runtime_venv", lambda: venv)
@@ -39,7 +39,7 @@ def test_managed_service_path_preserves_tools_across_callers(
     assert interactive == manager
     assert manager["PATH"].split(os.pathsep)[:2] == [str(bindir), str(tools)]
     assert manager["PATH"].split(os.pathsep).count(str(bindir)) == 1
-    assert manager["AVA_SERVICE_PATH"] == str(tools)
+    assert manager["MEIVA_SERVICE_PATH"] == str(tools)
     assert shutil.which(command.name, path=manager["PATH"]) == str(command)
     assert env_forwarding.managed_service_env(str(tmp_path / "changed")) != manager
 
@@ -78,31 +78,31 @@ def test_venv_activation_prefix_omits_an_empty_path_entry() -> None:
 
 
 def test_forward_env_dict_drops_cluster_scope(monkeypatch: pytest.MonkeyPatch) -> None:
-    """`forward_env_dict` (the `ava start` daemon child env)
+    """`forward_env_dict` (the `meiva start` daemon child env)
     drops the cluster-scope keys too — same policy as the env-file prefix it
     replaced, and it keeps the whole-env copy's PATH the child genuinely needs."""
     monkeypatch.setattr(
         os,
         "environ",
         {
-            "AVA_HOME": "/tmp/ava-home",  # noqa: S108 — a literal env value, never opened
-            "AVA_GATEWAY_URL": "http://gw:9000",
-            "AVA_DB_URL": "postgresql://x/db",
-            "AVA_REDIS_URL": "redis://x/0",
+            "MEIVA_HOME": "/tmp/meiva-home",  # noqa: S108 — a literal env value, never opened
+            "MEIVA_GATEWAY_URL": "http://gw:9000",
+            "MEIVA_DB_URL": "postgresql://x/db",
+            "MEIVA_REDIS_URL": "redis://x/0",
             "DEEPSEEK_API_KEY": "sk-x",
-            "AVA_CONFIG_FETCH": "skip",
+            "MEIVA_CONFIG_FETCH": "skip",
             "PATH": "/usr/bin",
         },
     )
     env = env_forwarding.forward_env_dict()
-    assert env["AVA_HOME"] == "/tmp/ava-home"  # noqa: S108 — literal, never opened
-    assert env["AVA_GATEWAY_URL"] == "http://gw:9000"
+    assert env["MEIVA_HOME"] == "/tmp/meiva-home"  # noqa: S108 — literal, never opened
+    assert env["MEIVA_GATEWAY_URL"] == "http://gw:9000"
     assert "/usr/bin" in env["PATH"]  # whole-env copy keeps PATH (venv-prefixed)
-    assert "AVA_DB_URL" not in env
-    assert "AVA_REDIS_URL" not in env
+    assert "MEIVA_DB_URL" not in env
+    assert "MEIVA_REDIS_URL" not in env
     assert "DEEPSEEK_API_KEY" not in env
-    assert "AVA_CONFIG_FETCH" not in env
-    assert "AVA_CONFIG_SOURCE" not in env
+    assert "MEIVA_CONFIG_FETCH" not in env
+    assert "MEIVA_CONFIG_SOURCE" not in env
 
 
 def test_forward_env_dict_without_venv_activation_keeps_path_but_omits_virtual_env(
@@ -113,7 +113,7 @@ def test_forward_env_dict_without_venv_activation_keeps_path_but_omits_virtual_e
     monkeypatch.setattr(
         os,
         "environ",
-        {"AVA_HOME": "/tmp/ava-home", "PATH": "/usr/bin"},  # noqa: S108 — literal env only
+        {"MEIVA_HOME": "/tmp/meiva-home", "PATH": "/usr/bin"},  # noqa: S108 — literal env only
     )
 
     env = env_forwarding.forward_env_dict(activate_venv=False)
@@ -130,7 +130,7 @@ def test_forward_env_dict_carries_temp_dir(
         os,
         "environ",
         {
-            "AVA_HOME": "/tmp/ava-home",  # noqa: S108 — a literal env value, never opened
+            "MEIVA_HOME": "/tmp/meiva-home",  # noqa: S108 — a literal env value, never opened
             "PATH": "/usr/bin",
             "TMPDIR": "/tmp",  # noqa: S108 — a literal env value, never opened
         },
@@ -144,7 +144,7 @@ def test_forward_env_dict_carries_the_machine_proxy_configuration(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Issue #2095: the service/session child env carries the machine's proxy
-    configuration (`ava start` and the watchdog respawn both hand this dict to
+    configuration (`meiva start` and the watchdog respawn both hand this dict to
     the session backend). The frontend's `npm run build` fetches Google Fonts for
     next/font through it, so a host whose egress is proxy-only produced a build
     that could never download a font. The value's only home is the machine's own
@@ -154,7 +154,7 @@ def test_forward_env_dict_carries_the_machine_proxy_configuration(
         os,
         "environ",
         {
-            "AVA_HOME": "/tmp/ava-home",  # noqa: S108 — a literal env value, never opened
+            "MEIVA_HOME": "/tmp/meiva-home",  # noqa: S108 — a literal env value, never opened
             "PATH": "/usr/bin",
             "HTTPS_PROXY": "http://127.0.0.1:7897",
             "no_proxy": "localhost,127.0.0.1",

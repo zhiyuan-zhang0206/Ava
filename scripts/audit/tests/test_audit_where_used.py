@@ -21,7 +21,7 @@ FILES = {
     "pkg/sub/__init__.py": "",
     "pkg/sub/deep.py": "from .. import engine\nfrom ..engine import run\n",
     "pkg/tests/test_engine_extra.py": "from pkg.engine import Motor\n",
-    "pkg/docs/pkg.ava.okf.md": "The engine lives in `pkg/engine.py`.\n",
+    "pkg/docs/pkg.meiva.okf.md": "The engine lives in `pkg/engine.py`.\n",
     "app/main.py": (
         "from pkg import run\nimport pkg.engine as eng\n\n\n"
         "def f() -> None:\n    from pkg.engine import Motor\n    eng.run()\n    run()\n"
@@ -158,7 +158,7 @@ def test_docs_resolve_links_and_match_file_names_docstrings_and_comments() -> No
     assert kinds == {
         ("docs/guide.md", 1): "link",
         ("notes.md", 1): "mention (file name)",
-        ("pkg/docs/pkg.ava.okf.md", 1): "mention",
+        ("pkg/docs/pkg.meiva.okf.md", 1): "mention",
         ("pkg/helpers.py", 1): "docstring",
         ("pkg/helpers.py", 8): "comment",
     }
@@ -193,7 +193,7 @@ def test_a_package_hides_its_own_modules_but_not_its_tests_and_docs() -> None:
 
     assert _paths(report, "imports") == {"app/main.py", "app/other.py", "app/star.py"}
     assert _paths(report, "tests") >= {"pkg/tests/test_engine_extra.py", "tests/test_engine.py"}
-    assert "pkg/docs/pkg.ava.okf.md" in _paths(report, "docs")
+    assert "pkg/docs/pkg.meiva.okf.md" in _paths(report, "docs")
     assert report.hidden > 0
     assert not any(
         path.startswith("pkg/") and path.endswith(".py") for path in _paths(report, "imports")

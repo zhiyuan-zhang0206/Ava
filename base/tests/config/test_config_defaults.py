@@ -20,7 +20,7 @@ def test_sdk_code_reminder_cadence_config_contract(authority: ConfigAuthority) -
     extra = field.json_schema_extra
     assert isinstance(extra, dict)
     assert field.default == "once_per_compaction"
-    assert field.alias == "AVA_SDK_CODE_REMINDER_CADENCE"
+    assert field.alias == "MEIVA_SDK_CODE_REMINDER_CADENCE"
     assert extra["per_agent"] is True
     assert extra["lifecycle"] == "live"
     meta = next(
@@ -36,7 +36,7 @@ def test_sdk_nameerror_hint_enabled_config_contract() -> None:
     extra = field.json_schema_extra
     assert isinstance(extra, dict)
     assert field.default is True
-    assert field.alias == "AVA_SDK_NAMEERROR_HINT_ENABLED"
+    assert field.alias == "MEIVA_SDK_NAMEERROR_HINT_ENABLED"
     assert extra["per_agent"] is True
     assert extra["lifecycle"] == "live"
 
@@ -67,7 +67,7 @@ def test_timeline_compact_history_config_contract() -> None:
     extra = field.json_schema_extra
 
     assert GatewaySettings().timeline_compact_history == 1
-    assert field_alias_map()["timeline_compact_history"] == "AVA_TIMELINE_COMPACT_HISTORY"
+    assert field_alias_map()["timeline_compact_history"] == "MEIVA_TIMELINE_COMPACT_HISTORY"
     assert isinstance(extra, dict)
     assert extra["restart_required"] == "gateway"
     assert extra["writable"] is True

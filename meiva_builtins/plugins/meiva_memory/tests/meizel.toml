@@ -1,0 +1,51 @@
+[uses]
+"test_meiva_memory_pool_ops_home.py" = ["child_pool_ops.py"]
+"test_process_boot.py" = ["child_eval_isolation.py"]
+
+[debt.env-patch]
+"test_meiva_memory_notes.py#monkeypatch.delenv os.environ.MEIVA_AGENT_ID" = 1
+"test_meiva_memory_notes.py#patch.dict os.environ" = 1
+"test_meiva_memory_steward_guard.py#monkeypatch.setenv os.environ.MEIVA_HOME" = 1
+"test_memory_home_follows_variable.py#monkeypatch.setenv os.environ.MEIVA_HOME" = 4
+"test_template_validate.py#monkeypatch.setenv os.environ.MEIVA_MEMORY_NOTE_CAP" = 1
+
+[debt.first-party-patch]
+"child_eval_isolation.py#assignment meiva.context" = 2
+"child_eval_isolation.py#assignment meiva.tasks" = 1
+"child_eval_isolation.py#assignment base.config.settings.agent.eval_isolation" = 3
+"child_eval_isolation.py#assignment base.config.settings.agent.eval_network_allowlist" = 2
+"test_meiva_memory_inherit.py#monkeypatch.setattr meiva.gateway_client.get_born_chain" = 1
+"test_meiva_memory_inherit.py#monkeypatch.setattr base.config.settings.agent.eval_isolation" = 2
+"test_meiva_memory_inherit.py#monkeypatch.setattr base.config.settings.agent.memory_inherit_depth" = 7
+"test_meiva_memory_inherit.py#monkeypatch.setattr base.config.settings.agent.memory_inherit_max_block_chars" = 3
+"test_meiva_memory_inherit.py#monkeypatch.setattr base.config.settings.agent.memory_inherit_max_total_chars" = 3
+"test_meiva_memory_notes.py#monkeypatch.setattr meiva_builtins.plugins.meiva_memory.notes.memory_dir" = 3
+"test_meiva_memory_notes.py#monkeypatch.setattr meiva_builtins.plugins.meiva_memory.notes.workspace_dir" = 2
+"test_meiva_memory_notes.py#monkeypatch.setattr base.config.settings.agent.eval_isolation" = 1
+"test_meiva_memory_notes.py#monkeypatch.setattr base.config.settings.agent.memory_index_inject_enabled" = 3
+"test_meiva_memory_notes.py#monkeypatch.setattr base.config.settings.agent.memory_per_agent_inject_enabled" = 4
+"test_meiva_memory_recall_hook.py#monkeypatch.setattr base.config.settings.agent.memory_recall_deadline_seconds" = 1
+"test_meiva_memory_recall_hook.py#monkeypatch.setattr base.config.settings.agent.passive_memory_recall_enabled" = 3
+"test_claim_memory_index.py#monkeypatch.setattr meiva_builtins.plugins.meiva_memory.notes.memory_dir" = 2
+"test_claim_memory_index.py#monkeypatch.setattr base.config.settings.agent.memory_index_inject_enabled" = 3
+"test_external_integration_memory.py#monkeypatch.setattr meiva.__plugin_installation__" = 1
+"test_external_integration_memory.py#monkeypatch.setattr meiva.ensure_plugins_loaded" = 1
+"test_external_integration_memory.py#monkeypatch.setattr meiva_builtins.plugins.meiva_memory.notes.workspace_dir" = 1
+"test_external_integration_memory.py#monkeypatch.setattr base.config.settings.agent.memory_per_agent_inject_enabled" = 1
+"test_external_integration_memory.py#monkeypatch.setattr base.packages.plugins.loading.registry.build_registry" = 1
+"test_external_integration_memory.py#monkeypatch.setattr base.paths.workspace_dir" = 2
+"test_indexer_service_config.py#monkeypatch.setattr base.config.settings.agent.memory_index_inject_enabled" = 2
+"test_indexer_service_config.py#monkeypatch.setattr base.packages.plugins.enable_config.installed_plugin_dirs" = 1
+"test_indexer_service_config.py#monkeypatch.setattr base.packages.plugins.load_report.report_plugin_load_failure" = 1
+"test_memory.py#monkeypatch.setattr base.agents.sdk.call_policy.policy" = 1
+"test_memory_write_wraps.py#assignment meiva.state" = 1
+"test_memory_write_wraps.py#assignment meiva.state_update" = 2
+"test_memory_write_wraps.py#monkeypatch.setattr base.agents.sdk.call_policy.policy" = 1
+
+[debt.restricted-python]
+"test_meiva_memory_steward_guard.py#python subprocess that runs something other than a literal repository file" = 1
+"test_memory_write_wraps.py#python -c" = 1
+
+[debt.unresolved-patch]
+"test_meiva_memory_recall_hook.py#monkeypatch.setattr _loaded.auto_compact_will_fire" = 3
+"test_meiva_memory_recall_hook.py#monkeypatch.setattr _loaded.passive_memory_recall" = 2

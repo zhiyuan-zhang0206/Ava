@@ -1,0 +1,57 @@
+---
+type: doc
+title: "Base Library"
+description: "Foundational cross-process libraries: contracts, LLM providers, cluster primitives, logging, and metrics."
+tags:
+- base
+- library
+- cross-cutting
+---
+
+# Base Library
+
+## What it is
+
+`base/` is the foundational library layer shared by all subsystems in the Meiva project. It defines cross-process data contracts, a unified abstraction for LLM providers, cluster management primitives, structured logging, and system-level metrics. According to the layering in the root manifest, `base` is the bottom layer—agent, gateway, cli can all import it, but it does not import any upper-layer modules.
+
+## Core responsibilities
+
+- **LLM provider abstraction** (`base/lm/`): model construction, billing, content normalization, and stop classification for Anthropic / DeepSeek / Google / OpenAI / Xiaomi / Moonshot / Zhipu / Alibaba. Validates model/key configuration and resolves explicit temporary withdrawals at spawn boundaries.
+- **Agent cross-process contract** (`base/api_contracts/agent_contract.py`): AgentStatus enum, exception hierarchy, wire error protocol (HTTP error transmission between gateway ↔ agent SDK).
+- **Message-level contract** (`base/agents/messages/kwargs.py`): supplements the above — `MeivaMsgType`/`MeivaMessageKwargs` (strongly-typed view of `meiva_*` metadata in `additional_kwargs`). Gateway message inserts also carry nullable server-owned audit facts — [[base/agents/messages/docs/inbound-provenance.meiva.okf.md]].
+- **Structured logging + metrics** (`base/log/__init__.py` + typed startup in `base/log/process.py`, `base/telemetry/metrics/report.py`): one loguru singleton over stderr / JSONL file / the unified event pipeline, plus the metrics core (`base/telemetry/metrics/aggregate.py`) — the digest behind `/api/metrics` reads `telemetry_events`. The unified emitter (`base/telemetry/emitter.py`) mirrors events to JSONL, projects compact numeric observations through `base/telemetry/metrics/observed_metrics.py`, and exports to OTLP ([[base/telemetry/otlp/docs/telemetry-otlp/telemetry-otlp.meiva.okf.md|OTLP exporter]] — Loki logs + Prometheus metrics). Telemetry and log events are recorded in `telemetry_events` (`base/telemetry/event_store.py`, from the drain thread); the old `events` archive was dropped (task #1281/#1823); the projected observations contain no log or checkpoint bodies. Projection is best-effort, deduplicated by source event identity, and transactionally updates daily sums. Upstream loss remains possible, so ingestion freshness and successful replay never certify completeness. `base/telemetry/audit_events.py` is the audit entry point.
+- **Cluster management** (`base/cluster*.py`): **path-only identity** — clusters have no name, identity is the `$MEIVA_HOME` path (label = its basename, display only). Each home's own record (its start intent; no host-level cluster list), auth. New clusters take the fixed `DATA_PLANE_IDENTITY` (`"meiva"`); existing ones keep their historical identifier, never re-derived.
+- **Deploy & unit lifecycle** (`base/deploy/`): updater evidence, maintenance holds, serving state, deploy state, git provenance, the clock lattice.
+- **Clock and timers** ([[base/clock/docs/clock.meiva.okf.md]]): the injected cluster wall clock and the `Timers` port for elapsed time and waiting that a `Clock` carries, with its system implementation and a test double.
+- **Host substrate** (`base/host/`): OS integration (`system/`), process and file primitives, converge helpers.
+- **Deploy state & liveness (R1)** — the explicit-model state (host_deploy_state posture, home lifecycle mutex, pause capability, agent alive predicate): [[base/deploy/state/docs/state.meiva.okf.md]].
+- **HTTP/RPC API contracts** (`base/api_contracts/`): gateway↔cli HTTP response types (`ConfigFieldView`/`ConfigSectionView` etc.), route idempotency/pause declarations (`contracts.py`) and the runner RPC envelope (`op_envelope.py`). Route templates are converted per lookup and rely on Python's `re.compile` pattern cache without an additional application cache.
+- **Converge status files** (`base/host/converge/_status_file.py`): shared JSON/file framing for screen capture and accessibility status; each caller owns its state and notice text.
+- **Configuration & bootstrapping** ([[base/docs/configuration/configuration.meiva.okf.md]]): per-domain runtime settings, settings-free field metadata, bootstrap, transport-encryption precondition, and `.env` integrity — [[ops/docs/env-audit.meiva.okf.md]].
+- **Infrastructure utilities** (`base/db/__init__.py`, `base/agents/inbox/chat_delivery.py`, `base/events/live/redis_client.py`, `base/pg_*.py`): Postgres/Redis client wrappers, the transaction-level message identity, the never-raise publish primitive, the streaming live events, and the long-lived pub/sub listener — [[infrastructure-utilities.meiva.okf.md]].
+- **Canonical Python lock** (`base/deploy/release/python_lock.py`): stdlib-only source validation used by the packaged installer and the dependency-free CI lint entry point; see [[../../cli/docs/python-install.meiva.okf.md]].
+- **Installation & paths** (`base/packages/extensions/install_registry.py`, `base/paths/__init__.py`, `base/deploy/release/editable_install.py`, `base/packages/plugins/enable_config.py`, `base/host/private_storage.py`): the machine-local package registry that gates the skill scanner, per-machine plugin enable state, `$MEIVA_HOME` path resolution, and the read-only editable-install inspection: each exec spawn verifies its current interpreter's records and refuses on a violation, without caching the small file-stat cost. Also provides owner-only storage with atomic local bytes writes for secrets and uploads — see the child nodes below.
+- **Process supervision**: native service/orchestration/agent sessions, agent shells held by the pty-sessions service, start-serving readiness gating, and daemon health/liveness — [[process-supervision.meiva.okf.md]].
+- **Health envelope** (`base/daemon/health_schema.py`, `base/daemon/health.py`): daemon `/healthz` and gateway `/api/health` return identity, liveness, readiness, components, and reasons; a degraded component is HTTP 503 for watchdog recovery.
+- **Native process identity** (`base/native_process/`): dependency-free boot scope and birth keys are separate from process observation and signaling. Linux requires exact start ticks; reconstructed wall timestamps are diagnostic. Independent observations use native keys while retained receipt bytes remain exact. Descendant enumeration is a hint: capture validates each current ancestry edge against native generations before accepting a member. Repeated captures preserve the original receipt per birth. Linux signals retain a pidfd through identity verification and delivery; a stdlib-only libc adapter serves it, independent of optional Python build bindings; unknown identity never grants cleanup or recovery authority.
+
+The graph groups component documentation under the existing `base/` package
+directories. Expand these package overviews to inspect their local contracts.
+
+## Key dependencies
+
+The domain dependency map lives in [[dependencies.meiva.okf.md]].
+
+## Entry points
+The base-layer public entry points: [[base/docs/entry-points.meiva.okf.md]].
+
+## Notes
+
+- `base/host/system/macos_firewall.py` — declarative macOS Application Firewall manifest,
+  audit, status renderer, and rootless-first reconciliation with bounded
+  `sudo -n` / manual-command fallback; see
+  [[base/sessions/docs/session-backend.meiva.okf.md|session backend]].
+- `base` is the bottom import layer; which package may import which is in
+  [`docs/conventions/import-layering.md`](../../docs/conventions/import-layering.md). There is no
+  internal layer restriction within base.
+- File line budget: hard limit 800 (enforced by lint)

@@ -37,8 +37,8 @@ class Note:
     description: str | None
     tags: tuple[str, ...]
     timestamp: str | None
-    ava_agent: str | None
-    ava_machine: str | None
+    meiva_agent: str | None
+    meiva_machine: str | None
     body: str
     fm: dict[str, Any]
 
@@ -79,8 +79,8 @@ def parse_note(text: str, rel: str) -> Note | None:
         description=description,
         tags=normalize_tags(fm.get("tags")),
         timestamp=str(fm["timestamp"]) if fm.get("timestamp") else None,
-        ava_agent=str(fm["ava_agent"]) if fm.get("ava_agent") else None,
-        ava_machine=str(fm["ava_machine"]) if fm.get("ava_machine") else None,
+        meiva_agent=str(fm["meiva_agent"]) if fm.get("meiva_agent") else None,
+        meiva_machine=str(fm["meiva_machine"]) if fm.get("meiva_machine") else None,
         body=body,
         fm=fm,
     )

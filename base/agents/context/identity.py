@@ -1,9 +1,9 @@
-"""Who a process acts as — the identity part of `AvaContext`.
+"""Who a process acts as — the identity part of `MeivaContext`.
 
 `AgentIdentity` is a frozen value. The agent host builds one for a turn it serves, the exec child
 and a script an agent launched build theirs from a description, and an external controller derives
-one carrying its lease. Each identity belongs to its `AvaContext`: host turns pass it explicitly,
-and an execution child exposes one context through `ava.context`.
+one carrying its lease. Each identity belongs to its `MeivaContext`: host turns pass it explicitly,
+and an execution child exposes one context through `meiva.context`.
 """
 
 from __future__ import annotations

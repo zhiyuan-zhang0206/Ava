@@ -132,7 +132,7 @@ def resolve(
 
 
 def set_actor(conn: psycopg.Connection, actor: str) -> None:
-    conn.execute("SELECT set_config('ava.impersonation_actor',%s,true)", (actor,))
+    conn.execute("SELECT set_config('meiva.impersonation_actor',%s,true)", (actor,))
 
 
 def _event_content(payload: dict[str, Any]) -> tuple[Any, ...]:

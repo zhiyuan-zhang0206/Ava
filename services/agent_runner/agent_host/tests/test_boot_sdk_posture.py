@@ -7,9 +7,9 @@ from unittest.mock import Mock, patch
 import pytest
 
 from agent.state import plugin_state_schema
-from ava.sdk_surface import install, process_context
-from ava.sdk_surface.extensions import load_extensions
 from base import config
+from meiva.sdk_surface import install, process_context
+from meiva.sdk_surface.extensions import load_extensions
 from services.agent_runner.agent_host import daemon
 from services.agent_runner.agent_host.lifecycle.configuration import load_installation
 
@@ -64,7 +64,7 @@ def test_profiled_host_defers_complete_model_until_first_service_read(
 
 def _assert_profiled_host_defers_complete_model(monkeypatch: pytest.MonkeyPatch) -> None:
     settings_type = config.Settings
-    monkeypatch.setenv("AVA_PROCESS_PROFILE", "agent")
+    monkeypatch.setenv("MEIVA_PROCESS_PROFILE", "agent")
     boot = config.ConfigBoot()
     boot.boot()
     runtime = boot.view

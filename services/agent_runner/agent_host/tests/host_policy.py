@@ -35,7 +35,7 @@ def configured_machine(*, name: str | None = None) -> MachineIdentity:
 
 
 def assert_sdk_context(expected: object | None, *, bound: bool) -> None:
-    import ava
+    import meiva
 
-    assert getattr(ava, "context", None) is expected
-    assert hasattr(ava, "context") is bound
+    assert getattr(meiva, "context", None) is expected
+    assert hasattr(meiva, "context") is bound

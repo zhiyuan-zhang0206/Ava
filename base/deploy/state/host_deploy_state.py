@@ -2,8 +2,8 @@
 
 One row per machine in `host_deploy_state` records that machine's **posture** —
 `idle` or `paused`. `paused` is the window in which this host is stopped or held
-by maintenance (`ava stop`, `ava restart`); `ava start` returns
-it to `idle`. The gateway's 503 middleware and `ava status` read this host's
+by maintenance (`meiva stop`, `meiva restart`); `meiva start` returns
+it to `idle`. The gateway's 503 middleware and `meiva status` read this host's
 posture, and `ops.deploy_window` reads every machine's row to tell a health-probe
 alert that a transition is under way.
 
@@ -98,7 +98,7 @@ def read_all(db: Database) -> dict[str, HostDeployState]:
 def set_posture(db: Database, posture: str, *, machine: str) -> None:
     """Transition THIS host's posture (idle/paused).
 
-    Called by the pause/unpause lifecycle (`ops.cluster_status.pause`) and the `ava
+    Called by the pause/unpause lifecycle (`ops.cluster_status.pause`) and the `meiva
     start` tail. A DB write failure raises (the caller decides).
     """
     if posture not in _VALID_POSTURES:

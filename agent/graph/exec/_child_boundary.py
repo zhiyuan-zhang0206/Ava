@@ -63,10 +63,10 @@ def build_child_env(
     ):
         env.pop("VIRTUAL_ENV", None)
     if agent_id is not None:
-        env["AVA_AGENT_ID"] = str(agent_id)
-    env["AVA_PROCESS_PROFILE"] = "agent"
-    env["AVA_EXEC_REQUEST_FILE"] = str(request_path)
-    env["AVA_EXEC_RESULT_FILE"] = str(result_path)
+        env["MEIVA_AGENT_ID"] = str(agent_id)
+    env["MEIVA_PROCESS_PROFILE"] = "agent"
+    env["MEIVA_EXEC_REQUEST_FILE"] = str(request_path)
+    env["MEIVA_EXEC_RESULT_FILE"] = str(result_path)
     if config_overlay:
         env[AGENT_CONFIG_OVERLAY_ENV] = json.dumps(config_overlay, sort_keys=True)
     if birth_config:

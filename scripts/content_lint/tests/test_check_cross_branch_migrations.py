@@ -34,8 +34,8 @@ def test_breach_detected(branch: str) -> None:
     "branch",
     [
         "main",
-        "ava-2201-lint-gate",  # ordinary feature branch — numerous, short-lived
-        "ava-2203-migration-gates",
+        "meiva-2201-lint-gate",  # ordinary feature branch — numerous, short-lived
+        "meiva-2203-migration-gates",
         "developer-notes",  # contains 'develop', is not that branch
         "release-notes",  # 'release' without the '/' — not a release line
     ],
@@ -52,7 +52,7 @@ def test_ordinary_branches_are_not_breaches(branch: str) -> None:
 
 def test_passes_on_single_branch_model(monkeypatch: pytest.MonkeyPatch, capsys) -> None:
     """The premise holding is reported, not silently assumed."""
-    monkeypatch.setattr(mod, "remote_branches", lambda **_kw: ["main", "ava-1-x"])
+    monkeypatch.setattr(mod, "remote_branches", lambda **_kw: ["main", "meiva-1-x"])
     assert mod.main(host=fake_host()) == 0
     assert "single-branch premise holds" in capsys.readouterr().out
 

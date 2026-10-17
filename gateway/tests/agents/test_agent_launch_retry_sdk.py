@@ -5,7 +5,7 @@ from __future__ import annotations
 import psycopg
 import pytest
 
-import ava
+import meiva
 from base.cluster.machine import MachineIdentity
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from base.config.service_read import ConfigAuthority
@@ -26,9 +26,9 @@ def test_retry_launch_requires_observed_operation_identity(
         database_gate=database_gate,
         local_machine=machine_identity,
     )
-    prior = ava.agents.get_launch_attempt(agent_id)
+    prior = meiva.agents.get_launch_attempt(agent_id)
     with pytest.raises(TypeError):
-        ava.agents.retry_launch(agent_id)  # pyright: ignore[reportCallIssue]
+        meiva.agents.retry_launch(agent_id)  # pyright: ignore[reportCallIssue]
     row = db_conn.execute(
         "SELECT last_launch_attempt_id FROM agents_meta WHERE id=%s", (agent_id,)
     ).fetchone()

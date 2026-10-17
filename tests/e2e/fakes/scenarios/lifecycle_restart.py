@@ -15,7 +15,7 @@ RESTART_SCRIPT: tuple[AIMessage, ...] = (
             {
                 "id": "call_restart",
                 "name": "execute_code",
-                "args": {"code": "import ava\nava.self.restart()"},
+                "args": {"code": "import meiva\nmeiva.self.restart()"},
             }
         ],
         usage_metadata=_USAGE,

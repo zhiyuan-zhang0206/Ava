@@ -13,12 +13,12 @@ def stop_permissions_helper(*, force: bool = False, timeout_s: float = 30.0) -> 
     from base.config import settings
     from base.host.permissions_helper.client import PermissionsHelperClient
     from base.native_process.os_platform import is_macos
-    from base.paths import ava_home
+    from base.paths import meiva_home
     from services.desktop.permissions_helper.launchd_job import unregister_helper
 
     if is_macos():
         unregister_helper(
-            ava_home(),
+            meiva_home(),
             helper_port=settings.services.permissions_helper_port,
             connect=PermissionsHelperClient,
             force=force,

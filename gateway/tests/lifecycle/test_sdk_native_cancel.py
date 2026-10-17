@@ -8,12 +8,12 @@ import psycopg
 import pytest
 from psycopg_pool import AsyncConnectionPool
 
-from ava.agents import work
-from ava.gateway_client import use_client
 from base.api_contracts.agent_contract import GatewayUnavailable
 from base.config import settings
 from base.db.code_version_gate import ProcessDbGate
 from base.host.net.tests.retry_waits import retry_waits as retry_waits
+from meiva.agents import work
+from meiva.gateway_client import use_client
 from services.agent_runner.agent_host.tests.managed_work import managed_work
 from tests.fixtures.gateway_config import gateway_test_client
 

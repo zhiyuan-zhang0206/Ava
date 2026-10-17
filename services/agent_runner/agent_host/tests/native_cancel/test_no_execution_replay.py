@@ -14,7 +14,7 @@ from langgraph.types import Command
 from psycopg_pool import AsyncConnectionPool
 
 from agent.state import AgentState, BaseAgentState
-from base.agents.context import AvaContext
+from base.agents.context import MeivaContext
 from base.agents.observation.relay_supervision import RelaySupervision
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
@@ -74,7 +74,7 @@ async def test_checkpoint_failure_after_subprocess_does_not_replay_on_fresh_wake
         return await original_put(*args, **kwargs)
 
     monkeypatch.setattr(saver, "aput", faulted_put)
-    builder = cast(Any, StateGraph(AgentState, context_schema=AvaContext))
+    builder = cast(Any, StateGraph(AgentState, context_schema=MeivaContext))
     builder.add_node("claim", claim, destinations=("exec", END))
     builder.add_node("exec", execute)
     builder.add_edge(START, "claim")
@@ -84,7 +84,7 @@ async def test_checkpoint_failure_after_subprocess_does_not_replay_on_fresh_wake
     config: RunnableConfig = {"configurable": {"thread_id": str(incarnation.agent_id)}}
     bus = EventBus.from_settings()
     async with hosted_scope() as resources:
-        ctx = AvaContext(
+        ctx = MeivaContext(
             original_incarnation=incarnation,
             hosted_resources=resources,
             ops_pool=aops_pool,
@@ -92,7 +92,7 @@ async def test_checkpoint_failure_after_subprocess_does_not_replay_on_fresh_wake
             bus=bus,
         )
 
-        async def run(context: AvaContext, update: dict[str, object]) -> Any:
+        async def run(context: MeivaContext, update: dict[str, object]) -> Any:
             return await graph.ainvoke(update, config, context=context)
 
         async def invoke() -> Any:

@@ -5,7 +5,7 @@ import type { SavedScroll } from "@/lib/layout/scroll-memory";
 import { materializeBeforeAnchor } from "./materialize-prefix";
 import { resolveSavedTimelineAnchor } from "./use-timeline-window";
 
-// ava:ref ui/web/src/docs/frontend-components/timeline-view/continuous-segments.ava.okf.md#restore-settles-its-anchor
+// meiva:ref ui/web/src/docs/frontend-components/timeline-view/continuous-segments.meiva.okf.md#restore-settles-its-anchor
 export function settleSavedTimelineScroll(
   viewport: HTMLElement,
   saved: SavedScroll,

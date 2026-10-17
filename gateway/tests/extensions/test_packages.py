@@ -1,10 +1,10 @@
 """POST /api/keyed/v1/packages/draft — the skill / plugin / MCP install entry.
 
-Spawns an ava-package-installer agent for a natural-language "I want a
+Spawns an meiva-package-installer agent for a natural-language "I want a
 capability like X" request. The spawn is stubbed so the tests assert only the
-wiring: the prompt points at `ava.skills.ava_guide.packages.install`, carries the
+wiring: the prompt points at `meiva.skills.meiva_guide.packages.install`, carries the
 user's request verbatim and which kind the entry point was for, labels the agent
-`ava-package-installer`, and the spawned id comes back as agent_id. There is no
+`meiva-package-installer`, and the spawned id comes back as agent_id. There is no
 URL/spec field by design — every install goes through the agent.
 """
 
@@ -76,9 +76,9 @@ def test_draft_spawns_installer_for_each_kind(
     )
     assert r.status_code == 200, r.text
     assert r.json()["agent_id"] == 901
-    assert spawn_calls["label"] == "ava-package-installer"
+    assert spawn_calls["label"] == "meiva-package-installer"
     prompt = str(spawn_calls["prompt"])
-    assert "ava.skills.ava_guide.packages.install" in prompt
+    assert "meiva.skills.meiva_guide.packages.install" in prompt
     assert "something that reads my Obsidian vault" in prompt
     assert f"Kind: {kind}" in prompt
     assert brief_marker in prompt

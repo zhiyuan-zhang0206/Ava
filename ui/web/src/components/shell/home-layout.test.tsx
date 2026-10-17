@@ -289,8 +289,8 @@ describe("HomeLayout frame contract", () => {
     expect(screen.getByTestId("inspector-panel").parentElement).not.toBe(groups[0]);
 
     clickDirect(groups[0], "layout-commit-drag");
-    expect(localStorage.getItem("react-resizable-panels:ava.home.columns.mobile")).not.toBeNull();
-    expect(localStorage.getItem("react-resizable-panels:ava.home.columns.context")).toBeNull();
+    expect(localStorage.getItem("react-resizable-panels:meiva.home.columns.mobile")).not.toBeNull();
+    expect(localStorage.getItem("react-resizable-panels:meiva.home.columns.context")).toBeNull();
   });
 
   it("remounts onto the independent frame when the breakpoint flips", () => {
@@ -336,7 +336,7 @@ describe("HomeLayout frame contract", () => {
     for (const group of groups) {
       clickDirect(group, "layout-commit-drag");
     }
-    expect(localStorage.getItem("react-resizable-panels:ava.home.columns.context")).not.toBeNull();
-    expect(localStorage.getItem("react-resizable-panels:ava.home.context.desktop")).not.toBeNull();
+    expect(localStorage.getItem("react-resizable-panels:meiva.home.columns.context")).not.toBeNull();
+    expect(localStorage.getItem("react-resizable-panels:meiva.home.context.desktop")).not.toBeNull();
   });
 });

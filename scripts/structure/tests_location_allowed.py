@@ -37,17 +37,17 @@ BY_DESIGN: dict[str, str] = {
 ALLOWED: dict[str, tuple[Category, str]] = {
     "tests/components/agent/test_compact_contract.py": (
         "contract",
-        "the compaction triggers point at the ava.self.compact contract in ava_builtins/commands/compact.md",
+        "the compaction triggers point at the meiva.self.compact contract in meiva_builtins/commands/compact.md",
     ),
     "tests/components/agent/test_maintenance_legacy_cold.py": (
         "integration",
         "maintenance classifies persisted agent ENDs that ops lifecycle rows decide: spans agent, base, ops, no one of which may import all the others",
     ),
-    "tests/components/ava/test_migration_baseline.py": (
+    "tests/components/meiva/test_migration_baseline.py": (
         "contract",
         "asserts the baseline schema and trigger contracts of db/schema.sql and migrations/",
     ),
-    "tests/components/ava/test_self_evolution_schedules.py": (
+    "tests/components/meiva/test_self_evolution_schedules.py": (
         "contract",
         "loads schedules/*.py and locks the weekly schedule's /api/events contract",
     ),
@@ -55,9 +55,9 @@ ALLOWED: dict[str, tuple[Category, str]] = {
         "contract",
         "asserts the agents_meta spawner-lineage constraints the schema enforces",
     ),
-    "tests/components/base/test_bare_ava_contract.py": (
+    "tests/components/base/test_bare_meiva_contract.py": (
         "contract",
-        "the host converge step wires the bare ava launcher script, scripts/ava-launcher.sh",
+        "the host converge step wires the bare meiva launcher script, scripts/meiva-launcher.sh",
     ),
     "tests/components/base/test_config_contract.py": (
         "contract",
@@ -89,7 +89,7 @@ ALLOWED: dict[str, tuple[Category, str]] = {
     ),
     "tests/components/base/test_shutdown.py": (
         "integration",
-        "signal registration proven against real supervised daemons of agent host, agent ops and ava-root: spans base, services.agent_runner.agent_host, services.agent_runner.agent_ops, services.supervision.ava_root, no one of which may import all the others",
+        "signal registration proven against real supervised daemons of agent host, agent ops and meiva-root: spans base, services.agent_runner.agent_host, services.agent_runner.agent_ops, services.supervision.meiva_root, no one of which may import all the others",
     ),
     "tests/components/base/test_ui_contributions_contract.py": (
         "contract",
@@ -169,7 +169,7 @@ ALLOWED: dict[str, tuple[Category, str]] = {
     ),
     "tests/components/gateway/test_okf_graph_contract.py": (
         "contract",
-        "every .ava.okf.md bundle of the repository parses identically through the adapter and the legacy parser",
+        "every .meiva.okf.md bundle of the repository parses identically through the adapter and the legacy parser",
     ),
     "tests/integration/test_impersonation_audit_root_inventory.py": (
         "contract",
@@ -185,7 +185,7 @@ ALLOWED: dict[str, tuple[Category, str]] = {
     ),
     "tests/components/plugins/test_grafana_dashboard_render.py": (
         "contract",
-        "compares the rendered dashboard with deploy/lgtm/config/grafana/provisioning/dashboards/ava-ops-main.json",
+        "compares the rendered dashboard with deploy/lgtm/config/grafana/provisioning/dashboards/meiva-ops-main.json",
     ),
     "tests/components/plugins/test_plugin_metrics_logql.py": (
         "contract",
@@ -251,7 +251,7 @@ ALLOWED: dict[str, tuple[Category, str]] = {
         "contract",
         "runs scripts/worktree.sh clean as a process against throwaway repositories",
     ),
-    "tests/components/services/test_ava_root_custody_contract.py": (
+    "tests/components/services/test_meiva_root_custody_contract.py": (
         "contract",
         "compiles the permissions helper's Swift source with tests/components/services/helper_child_custody.swift and checks the native reaper cannot race owned signal delivery",
     ),
@@ -293,7 +293,7 @@ ALLOWED: dict[str, tuple[Category, str]] = {
     ),
     "tests/components/schedules/test_goal_watch_filter.py": (
         "contract",
-        "tests the watch_idle reference snippets of the ava-goal, long-running-agent and ava-fleet skills",
+        "tests the watch_idle reference snippets of the meiva-goal, long-running-agent and meiva-fleet skills",
     ),
     "tests/contracts/test_lint_contextvars_allowlist.py": (
         "contract",

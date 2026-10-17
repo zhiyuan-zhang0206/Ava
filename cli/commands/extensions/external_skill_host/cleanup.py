@@ -22,7 +22,7 @@ from cli.commands.extensions.external_skill_host.ledger import SKILL_NAME, write
 def transaction_path(
     skills_root: Path, kind: str, generation_id: str, *, skill_name: str = SKILL_NAME
 ) -> Path:
-    return skills_root / f".{skill_name}.ava-{kind}-{generation_id}"
+    return skills_root / f".{skill_name}.meiva-{kind}-{generation_id}"
 
 
 def _prepared_path(ledger_path: Path, generation_id: str) -> Path:
@@ -41,7 +41,7 @@ def _file_claims(manifest: list[dict[str, Any]]) -> list[dict[str, str]]:
         relative = str(item["path"])
         path = Path(relative)
         suffix = hashlib.sha256(relative.encode()).hexdigest()[:16]
-        quarantine = path.with_name(f".{path.name}.ava-retained-{suffix}").as_posix()
+        quarantine = path.with_name(f".{path.name}.meiva-retained-{suffix}").as_posix()
         claims.append({"path": relative, "quarantine": quarantine, "state": "source"})
     return claims
 
@@ -145,12 +145,12 @@ def _preserve_file_claim(
             return
         # A crash left the rename outcome ambiguous. The write-ahead record
         # names both paths, but path shape or matching bytes cannot establish
-        # that the destination is the object Ava moved. Preserve both.
+        # that the destination is the object Meiva moved. Preserve both.
         claim["state"] = "retained"
         write_ledger(ledger_path, ledger)
         return
     if claim["state"] == "quarantine":
-        # The root is already isolated under Ava's private ledger. A changed
+        # The root is already isolated under Meiva's private ledger. A changed
         # pathname is never retried or adopted for deletion.
         with suppress(OSError, ClientConflictError):
             verify_cleanup_file(quarantine, expected)

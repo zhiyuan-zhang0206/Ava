@@ -12,22 +12,22 @@ from base.host.system.tests.fake_crontab import FakeCrontab
 _UNRELATED = "0 3 * * * /usr/local/bin/backup"
 
 _MARKERS = (
-    "# ava-logs-maintenance",
-    "# ava-packages-refresh",
-    "# ava-pr-flow",
-    "# ava-health-probe",
+    "# meiva-logs-maintenance",
+    "# meiva-packages-refresh",
+    "# meiva-pr-flow",
+    "# meiva-health-probe",
 )
-_WALG_MARKER = "# ava-walg"
-_OPERATOR_AVA = "/home/operator/.ava/source/.venv/bin/ava"
+_WALG_MARKER = "# meiva-walg"
+_OPERATOR_MEIVA = "/home/operator/.meiva/source/.venv/bin/meiva"
 
 
-def _operator_ava(*, host: Host) -> str:
-    return _OPERATOR_AVA
+def _operator_meiva(*, host: Host) -> str:
+    return _OPERATOR_MEIVA
 
 
 @pytest.fixture
 def crontab(default_home: Path, monkeypatch: pytest.MonkeyPatch) -> FakeCrontab:
-    monkeypatch.setattr(cron, "ava_binary_path", _operator_ava)
+    monkeypatch.setattr(cron, "meiva_binary_path", _operator_meiva)
     return FakeCrontab(_UNRELATED + "\n")
 
 
@@ -62,7 +62,7 @@ def test_registering_again_changes_nothing(crontab: FakeCrontab) -> None:
     assert sorted(crontab.lines) == first
 
 
-def test_unregister_removes_the_ava_lines_and_only_them(crontab: FakeCrontab) -> None:
+def test_unregister_removes_the_meiva_lines_and_only_them(crontab: FakeCrontab) -> None:
     _register_all(crontab)
 
     host = _linux(crontab)

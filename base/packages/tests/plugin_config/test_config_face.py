@@ -37,7 +37,7 @@ def _isolate_paths(
     user.mkdir()
     monkeypatch.setattr(paths, "repo_plugins_dir", lambda: repo)
     monkeypatch.setattr(paths, "plugins_dir", lambda: user)
-    monkeypatch.setattr(paths, "ava_home", lambda: tmp_path)
+    monkeypatch.setattr(paths, "meiva_home", lambda: tmp_path)
 
 
 def _plugin(name: str, face: str | None) -> Path:
@@ -132,7 +132,7 @@ def test_pure_admission_rejects_sensitive_and_unknown_core_dependencies(key: str
 
 @pytest.fixture
 def bootstrap_authority_home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("AVA_HOME", str(tmp_path))
+    monkeypatch.setenv("MEIVA_HOME", str(tmp_path))
 
 
 def _cluster_face(*, sensitive: bool = False) -> str:

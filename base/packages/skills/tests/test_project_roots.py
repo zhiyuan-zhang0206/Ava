@@ -35,19 +35,19 @@ def test_git_root_reresolves_after_git_init(tmp_path: Path):
     assert git_root(d) == d
 
 
-def test_project_skill_roots_order_claude_agents_ava(tmp_path: Path):
+def test_project_skill_roots_order_claude_agents_meiva(tmp_path: Path):
     root = tmp_path / "repo"
     root.mkdir()
     _make_git_repo(root)
     (root / ".claude" / "skills").mkdir(parents=True)
     (root / ".agents" / "skills").mkdir(parents=True)
-    (root / ".ava" / "skills").mkdir(parents=True)
+    (root / ".meiva" / "skills").mkdir(parents=True)
 
     roots = project_skill_roots(root)
-    assert [r.parent.name for r in roots] == [".claude", ".agents", ".ava"]
+    assert [r.parent.name for r in roots] == [".claude", ".agents", ".meiva"]
 
 
-def test_project_skill_roots_agents_joins_claude_ava(tmp_path: Path):
+def test_project_skill_roots_agents_joins_claude_meiva(tmp_path: Path):
     root = tmp_path / "repo"
     root.mkdir()
     _make_git_repo(root)
@@ -66,11 +66,11 @@ def test_project_skill_roots_follows_links_back_to_agents(tmp_path: Path):
     _make_git_repo(root)
     (root / ".agents" / "skills").mkdir(parents=True)
     (root / ".claude").mkdir()
-    (root / ".ava").mkdir()
+    (root / ".meiva").mkdir()
     (root / ".claude" / "skills").symlink_to("../.agents/skills")
-    (root / ".ava" / "skills").symlink_to("../.agents/skills")
+    (root / ".meiva" / "skills").symlink_to("../.agents/skills")
 
     roots = project_skill_roots(root)
-    assert [r.parent.name for r in roots] == [".claude", ".agents", ".ava"]
+    assert [r.parent.name for r in roots] == [".claude", ".agents", ".meiva"]
     assert all(r.is_dir() for r in roots)
     assert [r.resolve() for r in roots] == [root / ".agents" / "skills"] * 3

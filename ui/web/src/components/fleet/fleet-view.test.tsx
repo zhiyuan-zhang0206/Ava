@@ -360,7 +360,7 @@ describe("FleetView (mobile)", () => {
   });
 
   it("persists mobile tab selection across remounts", () => {
-    localStorage.setItem("ava.fleet.mobileTab", "inbox");
+    localStorage.setItem("meiva.fleet.mobileTab", "inbox");
     agentsMock.mockReturnValue([makeAgent({ agent_id: 1, label: "lead", unread_notice_count: 1 })]);
     wrap(<FleetView />);
     // Should restore to the Inbox tab.

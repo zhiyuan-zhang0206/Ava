@@ -132,7 +132,7 @@ def _load_healthcheck_lint(
     monkeypatch.setattr(lint, "build_services", fake_services)
     monkeypatch.setattr(lint, "directory_healthchecks", lambda: directory)
     monkeypatch.setattr(lint, "diagnostic_healthchecks", lambda: hand_added)
-    roster = tmp_path / "check-roster.ava.okf.md"
+    roster = tmp_path / "check-roster.meiva.okf.md"
     roster.write_text(table_text, encoding="utf-8")
     monkeypatch.setattr(lint, "HEALTHCHECK_ROSTER", roster)
     return lint

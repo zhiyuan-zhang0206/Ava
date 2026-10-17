@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
-  "name": "Ava Tab Groups",
+  "name": "Meiva Tab Groups",
   "version": "1",
-  "description": "Files the pages an Ava agent opens into one tab group per agent.",
+  "description": "Files the pages an Meiva agent opens into one tab group per agent.",
   "permissions": [
     "tabs",
     "tabGroups",

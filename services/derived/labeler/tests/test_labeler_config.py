@@ -153,7 +153,7 @@ def _assert_gate_matches_image(
             gates[0].application_name()
         assert reads == []
     else:
-        assert gates[0].application_name() == gates[1].application_name() == "ava:labeler:v42"
+        assert gates[0].application_name() == gates[1].application_name() == "meiva:labeler:v42"
         assert reads == [(image.source_root, image.sha)]
 
 

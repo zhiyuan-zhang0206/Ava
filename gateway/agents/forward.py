@@ -51,12 +51,12 @@ class LaunchForwardError(Exception):
 
 
 def _raise_proxied_wire_error_from_payload(payload: dict[str, object]) -> None:
-    """Reconstruct + raise the target-side AvaAgentError from a failed
+    """Reconstruct + raise the target-side MeivaAgentError from a failed
     `/ops` result payload.
 
     The ops server's `_dispatch` returns an OpFailure-shaped result on failure
     (`{error, detail, reason}`). If a recognized wire `reason` is present,
-    reconstruct the matching AvaAgentError subclass so the original semantics
+    reconstruct the matching MeivaAgentError subclass so the original semantics
     survive the cross-machine boundary unchanged. Otherwise fall back to a
     generic `CrossMachineGatewayUnavailable` carrying the op's error string.
     """
@@ -98,7 +98,7 @@ async def forward_to_home_machine(
     box is just the special case where the ops server is reachable at
     127.0.0.1.
 
-    The target machine's ava-ops server executes the op in-process via
+    The target machine's meiva-ops server executes the op in-process via
     `ops.lifecycle.lifecycle_op` — no cross-machine forwarding inside the
     op, no risk of a forwarding loop.
 
@@ -106,7 +106,7 @@ async def forward_to_home_machine(
         AgentNotFound: agent_id does not exist (no agents_meta row).
         CrossMachineGatewayUnavailable: the target machine's ops server was
             unreachable (offline / not yet registered / timed out).
-        Other AvaAgentError subclasses: business errors raised by the
+        Other MeivaAgentError subclasses: business errors raised by the
             target machine's op are passed through.
     """
     target = await asyncio.to_thread(_home_machine_blocking, pool, agent_id)
@@ -120,7 +120,7 @@ async def enqueue_lifecycle(
 ) -> dict:
     """POST a 'lifecycle' op to the target machine's ops server, return its result.
 
-    Translates a 'failed' outcome (target machine's op raised an AvaAgentError)
+    Translates a 'failed' outcome (target machine's op raised an MeivaAgentError)
     into the wire-protocol exception so the gateway's handler re-emits the
     original semantics.
     """
@@ -154,7 +154,7 @@ async def forward_spawn_to_remote(
 ) -> SpawnedAgent:
     """POST a launch op to the target machine's ops server.
 
-    The target machine's ava-ops server dispatches in-process to
+    The target machine's meiva-ops server dispatches in-process to
     `ops.lifecycle.launch_agent_op`. The gateway already committed the
     agent row and first prompt; the runner validates the attempt, wakes the
     hosted agent, and returns the SpawnedAgent dict.

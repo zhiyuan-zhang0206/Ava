@@ -18,7 +18,7 @@ import { cn } from "@/lib/format/utils";
 const DEFAULT_MODEL_QUERY_KEY = ["default-model"] as const;
 const MODELS_QUERY_KEY = ["models"] as const;
 
-// ava:ref ui/web/src/app/control/config/docs/configuration.ava.okf.md#model-failure-keeps-config-editable
+// meiva:ref ui/web/src/app/control/config/docs/configuration.meiva.okf.md#model-failure-keeps-config-editable
 export function DefaultModelPanel({ id }: { id: string }) {
   const t = useTranslations("config");
   const visible = useSectionVisible();

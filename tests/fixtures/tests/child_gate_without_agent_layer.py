@@ -1,12 +1,12 @@
 import sys
 from types import SimpleNamespace
 
-from ava.sdk_surface import install
 from base.packages.plugins.extensions import (
     ExtensionRegistry,
     PluginContributions,
     SdkNamespace,
 )
+from meiva.sdk_surface import install
 from tests.fixtures.plugin_registrations import plugin_registrations_present
 
 assert "agent.state" not in sys.modules, "the fresh interpreter must start without the agent layer"

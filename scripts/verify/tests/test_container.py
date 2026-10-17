@@ -23,7 +23,7 @@ _DOCKERFILE = _REPO_ROOT / "scripts/verify/Dockerfile"
 
 
 def _run_argv(objects: Path) -> list[str]:
-    return container.docker_run_argv("ava-verify-test", "ava-verify:test", objects, "8g", "1g")
+    return container.docker_run_argv("meiva-verify-test", "meiva-verify:test", objects, "8g", "1g")
 
 
 def _git(repo: Path, *args: str) -> str:
@@ -40,13 +40,13 @@ def _git(repo: Path, *args: str) -> str:
 
 @pytest.mark.parametrize(
     "relative",
-    [".", "..", ".ava", ".ava/source", ".ssh", ".gnupg", ".aws", ".docker"],
+    [".", "..", ".meiva", ".meiva/source", ".ssh", ".gnupg", ".aws", ".docker"],
 )
 def test_host_home_and_its_sealed_directories_are_refused(
     relative: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     home = tmp_path / "home"
-    (home / ".ava/source").mkdir(parents=True)
+    (home / ".meiva/source").mkdir(parents=True)
     for name in (".ssh", ".gnupg", ".aws", ".docker"):
         (home / name).mkdir()
     monkeypatch.setenv("HOME", str(home))
@@ -68,7 +68,7 @@ def test_a_repository_object_store_inside_home_is_allowed(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     home = tmp_path / "home"
-    objects = home / "Ava/.git/objects"
+    objects = home / "Meiva/.git/objects"
     objects.mkdir(parents=True)
     monkeypatch.setenv("HOME", str(home))
 
@@ -93,7 +93,7 @@ def test_the_run_publishes_nothing_and_carries_no_environment_or_credential(
     assert "--privileged" not in argv
     assert "docker.sock" not in joined
     assert ".ssh" not in joined
-    assert ".ava" not in joined
+    assert ".meiva" not in joined
     assert argv[argv.index("--cap-drop") + 1] == "ALL"
 
 
@@ -148,12 +148,12 @@ def test_the_image_runs_as_an_ordinary_user() -> None:
 
 
 def test_the_image_user_is_not_named_like_the_schema_owner_role() -> None:
-    # initdb makes the OS user the bootstrap superuser; `ava start` refuses it when its
-    # name is the schema owner role `ava`.
+    # initdb makes the OS user the bootstrap superuser; `meiva start` refuses it when its
+    # name is the schema owner role `meiva`.
     lines = _dockerfile_lines()
     (create,) = (line for line in lines if line.startswith("RUN useradd "))
     user = create.split()[-1]
-    assert user != "ava"
+    assert user != "meiva"
     assert f"USER {user}" in lines
     assert f"/home/{user}" == container.CONTAINER_HOME
 
@@ -198,7 +198,7 @@ def test_the_image_tag_follows_what_the_build_can_see(tmp_path: Path) -> None:
 
 def test_the_profile_admits_no_provider_key_and_only_known_configuration() -> None:
     assert not [key for key in boundary.PROFILE if re.search(r"KEY|TOKEN|SECRET|PASSWORD", key)]
-    # `ava init --config-file` refuses any key that is not a Settings field alias.
+    # `meiva init --config-file` refuses any key that is not a Settings field alias.
     assert set(boundary.PROFILE) <= set(FIELD_ALIASES.values())
 
 
@@ -216,12 +216,12 @@ def test_the_start_selects_the_services_the_observer_checks() -> None:
 
 
 def test_init_records_the_identity_and_start_takes_only_the_selection() -> None:
-    """The recipe runs `ava init` (machine, capabilities, profile) and then `ava start`
+    """The recipe runs `meiva init` (machine, capabilities, profile) and then `meiva start`
     with nothing but the service selection: the same split the CLI parsers enforce."""
     from cli.parsers import build_parser
 
-    assert container.INIT_ARGV[:2] == [".venv/bin/ava", "init"]
-    assert container.START_ARGV[:2] == [".venv/bin/ava", "start"]
+    assert container.INIT_ARGV[:2] == [".venv/bin/meiva", "init"]
+    assert container.START_ARGV[:2] == [".venv/bin/meiva", "start"]
     parser = build_parser()
     init = parser.parse_args(container.INIT_ARGV[1:])
     assert init.machine_name == boundary.MACHINE_NAME

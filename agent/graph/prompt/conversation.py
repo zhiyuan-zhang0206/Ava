@@ -1,4 +1,4 @@
-# ava:ref agent/graph/prompt/docs/composition.ava.okf.md#conversation-policy
+# meiva:ref agent/graph/prompt/docs/composition.meiva.okf.md#conversation-policy
 from base.host.env.agent_slices import AgentSlices
 
 
@@ -73,7 +73,7 @@ def user_reply_section(_slices: AgentSlices) -> str:
 
 _NOTIFICATION_GUIDANCE = (
     "For results, completed work and decisions the user must see outside a live "
-    "dialog, use `ava.ui.notify` to reach the aggregated notification feed. "
+    "dialog, use `meiva.ui.notify` to reach the aggregated notification feed. "
     "A reply already delivered in the live dialog does not need a duplicate notification."
 )
 
@@ -101,7 +101,7 @@ _SILENT_BODY = (
     "When human-requested work is finished, give one complete report: what you did, what "
     "you found, what you changed, and anything you could not do. It has to "
     "stand alone — the user did not watch you get there, so do not lean on "
-    "context they never saw. Send it through `ava.ui.notify` if it is a "
+    "context they never saw. Send it through `meiva.ui.notify` if it is a "
     "result or a decision they must see outside a live dialog.\n\n"
     "Two things override the silence: a blocker you cannot resolve yourself, "
     "and a question only the user can answer. Raise those immediately — "

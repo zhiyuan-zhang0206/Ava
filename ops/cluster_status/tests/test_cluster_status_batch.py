@@ -116,8 +116,8 @@ class _BatchOnlyBackend:
 
 def test_collect_sessions_batches_timestamp_reads(monkeypatch: pytest.MonkeyPatch) -> None:
     """Each backend receives one timestamp batch, never one read per session."""
-    service = _BatchOnlyBackend("ava-main-agent-host")
-    shell = _BatchOnlyBackend("ava-main-agent-7-shell-0")
+    service = _BatchOnlyBackend("meiva-main-agent-host")
+    shell = _BatchOnlyBackend("meiva-main-agent-7-shell-0")
     monkeypatch.setattr(backend, "get_backend", lambda: service)
     monkeypatch.setattr(backend, "get_shell_backend", lambda: shell)
 
@@ -136,7 +136,7 @@ def test_collect_sessions_stamps_cluster_zone(monkeypatch: pytest.MonkeyPatch) -
     import datetime as dt
     from zoneinfo import ZoneInfo
 
-    service = _BatchOnlyBackend("ava-main-agent-host")
+    service = _BatchOnlyBackend("meiva-main-agent-host")
     monkeypatch.setattr(backend, "get_backend", lambda: service)
     monkeypatch.setattr(backend, "get_shell_backend", lambda: _BatchOnlyBackend("x"))
     from base.config import settings

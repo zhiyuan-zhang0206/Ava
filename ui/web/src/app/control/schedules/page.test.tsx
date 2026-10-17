@@ -202,7 +202,7 @@ describe("SchedulesPage", () => {
   });
 
   it("hovering or focusing the expand button warms the code-highlighter chunk (intent prefetch)", async () => {
-    // Regression coverage for the P2 adversarial-review finding on Ava #3463:
+    // Regression coverage for the P2 adversarial-review finding on Meiva #3463:
     // this wiring had no assertion that pointer-enter/focus actually invokes
     // the prefetch, only that a mocked no-op didn't blow up.
     vi.spyOn(api, "listSchedules").mockResolvedValue([SCHEDULE]);

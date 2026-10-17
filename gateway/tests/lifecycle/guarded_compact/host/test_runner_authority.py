@@ -42,7 +42,7 @@ async def test_real_runner_login_closes_compact_without_admission_or_metadata_in
                 sql.Identifier(role), sql.Literal(password)
             )
         )
-        admin.execute(sql.SQL("GRANT ava_runner TO {}").format(sql.Identifier(role)))
+        admin.execute(sql.SQL("GRANT meiva_runner TO {}").format(sql.Identifier(role)))
     dsn = make_conninfo(db_conn.info.dsn, user=role, password=password)
     model = SummaryModel(responses=["Original source summary. " * 100])
     binding = model_catalog.bindings["gpt-"]

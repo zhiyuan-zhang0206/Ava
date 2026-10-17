@@ -41,7 +41,7 @@ def test_strip_content_removes_llm_content_keeps_metadata():
 
     otlp = otlp_with_attrs(
         {
-            "gen_ai.task.input": '{"inputs": {"messages": ["you are ava..."]}}',
+            "gen_ai.task.input": '{"inputs": {"messages": ["you are meiva..."]}}',
             "gen_ai.task.output": "the full completion...",
             "traceloop.entity.input": '{"inputs": {...}}',
             "traceloop.entity.output": '{"outputs": {...}}',
@@ -157,8 +157,8 @@ def test_exporter_posts_stripped_line(monkeypatch: pytest.MonkeyPatch, tmp_path:
     provider.add_span_processor(
         SimpleSpanProcessor(OtlpJsonHttpSpanExporter(endpoint="http://127.0.0.1:4318"))
     )
-    tracer = provider.get_tracer("ava.session")
-    with tracer.start_as_current_span("ava-agent-7") as root:
+    tracer = provider.get_tracer("meiva.session")
+    with tracer.start_as_current_span("meiva-agent-7") as root:
         root.set_attribute("session.id", "7")
         root.set_attribute("gen_ai.task.input", "secret prompt")
         root.set_attribute("traceloop.association.properties.agent_id", "7")
@@ -202,7 +202,7 @@ def test_exporter_strip_opt_out_keeps_content(monkeypatch: pytest.MonkeyPatch, t
     provider.add_span_processor(
         SimpleSpanProcessor(OtlpJsonHttpSpanExporter(endpoint="http://127.0.0.1:4318"))
     )
-    tracer = provider.get_tracer("ava.session")
+    tracer = provider.get_tracer("meiva.session")
     with tracer.start_as_current_span("root"):
         pass
     provider.shutdown()

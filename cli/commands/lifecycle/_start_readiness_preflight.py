@@ -1,4 +1,4 @@
-"""Read-only `ava start` state checks, run before a stop that a start must follow.
+"""Read-only `meiva start` state checks, run before a stop that a start must follow.
 
 Restart checks the coming start's prerequisites while the current services still
 serve. A local-state refusal leaves the running generation intact.
@@ -9,7 +9,7 @@ the stop while the host still serves.
 
 What it forwards (each item read-only; nothing here repairs or launches):
 
-- the `$AVA_HOME` private-tree skeleton — a `logs` / `workspaces` / `memory`
+- the `$MEIVA_HOME` private-tree skeleton — a `logs` / `workspaces` / `memory`
   root that converge would ABORT on (a symlink, or not a directory), and the
   `logs/.metadata_never_index` marker whose converge write requires a regular
   file. Non-regular nodes INSIDE the trees (sockets, FIFOs, devices) are
@@ -22,7 +22,7 @@ What it forwards (each item read-only; nothing here repairs or launches):
   (`validate_migrations_at_ref`) vets names only;
 - the two start prerequisites no other pre-stop gate covers: the
   prod-checkout anchoring rule, and the venv entry points — `.venv/bin/python`
-  (what every service session launches through) always, `.venv/bin/ava` (what
+  (what every service session launches through) always, `.venv/bin/meiva` (what
   an external start process executes) only when
   the caller's start would exec it (`check_launcher`).
 
@@ -59,18 +59,18 @@ def preflight_start_readiness(
     machine: MachineIdentity,
     host: Host,
 ) -> int:
-    """Vet the local state the coming `ava start` needs, before the stop.
+    """Vet the local state the coming `meiva start` needs, before the stop.
 
     0 = proceed (any observations are printed); 1 = refuse, with every finding
     printed. See the module docstring for what is checked and why.
 
-    `check_launcher=False` drops the `.venv/bin/ava` entry-point check for a
-    caller whose start runs in-process and never execs it (`ava restart`);
+    `check_launcher=False` drops the `.venv/bin/meiva` entry-point check for a
+    caller whose start runs in-process and never execs it (`meiva restart`);
     development's `.venv/bin/python` is still checked.
     """
-    from base.paths import ava_home
+    from base.paths import meiva_home
 
-    home = ava_home()
+    home = meiva_home()
     if runtime is not None:
         runtime.validate()
     fatal: list[str] = []
@@ -101,7 +101,7 @@ def preflight_start_readiness(
 
 
 def _prod_checkout_problem(repo: Path) -> str | None:
-    """`ava start`'s first refusal — a home that carries its own `source` checkout
+    """`meiva start`'s first refusal — a home that carries its own `source` checkout
     may only launch from it (`base.paths.prod_service_checkout_error`) — moved
     ahead of the stop. Cheap and read-only; a home with no `source` of its own
     always passes it."""
@@ -128,7 +128,7 @@ def _port_findings(
     roles: MachineRoles, *, machine: MachineIdentity, host: Host
 ) -> tuple[list[str], list[str]]:
     """(fatal, observations) for the health-port gate, checked on the roster that
-    the update's own `ava start` will launch with.
+    the update's own `meiva start` will launch with.
 
     The fatal layer is the blocking pre-bind gate (#977): a daemon health port
     answered by another home's daemon refuses the whole start, and after the stop
@@ -153,7 +153,7 @@ def _port_findings(
         return [], [f"health-port check skipped: {exc}"]
 
     fatal = [
-        f"{port.spec.session}: health port answered by {port.detail} — `ava start` "
+        f"{port.spec.session}: health port answered by {port.detail} — `meiva start` "
         "refuses the whole launch on this (#977); after the stop that refusal leaves "
         "no host serving. Stop the other home's daemon that holds the port"
         for port in occupied
@@ -195,7 +195,7 @@ def _private_tree_findings(home: Path) -> tuple[list[str], list[str]]:
             )
 
     # `configs` / `secrets`: converge only mkdirs these (the same
-    # `ensure_ava_home_dirs` step), so a path that exists but is not a
+    # `ensure_meiva_home_dirs` step), so a path that exists but is not a
     # directory makes that mkdir raise AFTER the stop — the same class as the
     # three tree roots above, under mkdir's own rule: a symlink TO a directory
     # is tolerated (`mkdir(exist_ok=True)`), a file or a dangling link is not.
@@ -231,7 +231,7 @@ def _migration_findings() -> list[str]:
     except MigrationLayoutError as exc:
         return [f"migrations/ cannot be enumerated: {exc}"]
     return [
-        f"migrations/{name} is not readable ({error}) — `ava start`'s apply would "
+        f"migrations/{name} is not readable ({error}) — `meiva start`'s apply would "
         "fail on the stopped host; fix its mode, or restore the file"
         for name, error in problems
     ]
@@ -242,15 +242,15 @@ def _venv_findings(repo: Path, *, check_launcher: bool) -> list[str]:
 
     - `.venv/bin/python` — the interpreter every service session launches
       through (`services/supervision/roster/__init__.py` builds `<venv>/bin/python -m ...`). Checked for
-      every caller: `ava restart` has no `uv sync` verification behind it, so a
+      every caller: `meiva restart` has no `uv sync` verification behind it, so a
       damaged venv is exactly the "stopped and cannot come back" class this
       gate exists for.
-    - `.venv/bin/ava` — the launcher the update leg's step 5 execs: a file that
+    - `.venv/bin/meiva` — the launcher the update leg's step 5 execs: a file that
       exists but cannot be executed makes its `subprocess.run` raise
       PermissionError (the OSError handler's "vanished (or is not executable)
       inside the stop window"). Step 3.5 vets presence; this adds the exec bit.
       Skipped where the start is in-process (`check_launcher=False`): an
-      `ava restart` never execs it, and refusing a bounce over an entry point it
+      `meiva restart` never execs it, and refusing a bounce over an entry point it
       does not use would block a viable restart.
     """
     from base.host.system.backend import get_backend
@@ -262,10 +262,10 @@ def _venv_findings(repo: Path, *, check_launcher: bool) -> list[str]:
         fix="re-run `uv sync`",
     )
     if check_launcher:
-        ava_bin = backend.venv_launcher("ava", root=repo)
-        if ava_bin.is_file():  # a missing launcher is step 3.5's report
+        meiva_bin = backend.venv_launcher("meiva", root=repo)
+        if meiva_bin.is_file():  # a missing launcher is step 3.5's report
             findings += _entrypoint_findings(
-                ava_bin,
+                meiva_bin,
                 label="the launcher the update leg execs next",
                 fix="`chmod +x` it, or re-run `uv sync`",
             )
@@ -289,7 +289,7 @@ def _report(fatal: list[str], observations: list[str]) -> int:
     if fatal:
         print(
             f"\n✗ start-readiness preflight: {len(fatal)} problem(s) would fail "
-            "`ava start` only after the stop:",
+            "`meiva start` only after the stop:",
             file=sys.stderr,
         )
         for line in fatal:

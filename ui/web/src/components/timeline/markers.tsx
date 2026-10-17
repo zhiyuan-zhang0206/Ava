@@ -20,7 +20,7 @@ export function isLifecycleTag(s: string): s is LifecycleTag {
   return (LIFECYCLE_TAGS as readonly string[]).includes(s);
 }
 
-// ava:ref ui/web/src/docs/frontend-components/timeline-view/markers.ava.okf.md#marker-dispatch-sets
+// meiva:ref ui/web/src/docs/frontend-components/timeline-view/markers.meiva.okf.md#marker-dispatch-sets
 export const MEMORY_SOURCES = new Set(["memory", "agent_memory", "inherited_memory"]);
 
 export type MarkerClass =
@@ -159,7 +159,7 @@ function EphemeralMarker({ label, isError = false }: { label: string; isError?: 
   );
 }
 
-// ava:ref ui/web/src/docs/frontend-components/timeline-view/markers.ava.okf.md#ephemeral-marker-testids
+// meiva:ref ui/web/src/docs/frontend-components/timeline-view/markers.meiva.okf.md#ephemeral-marker-testids
 export function EphemeralSystemMarker({
   source,
   payload,

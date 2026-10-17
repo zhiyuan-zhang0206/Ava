@@ -20,7 +20,7 @@ from base.telemetry import report_sink_failure
 
 
 def usage_model(msg: AIMessage, requested_model: str, *, catalog: ModelCatalog) -> str:
-    """Resolve the billable Ava ID from a Fast call's actual service receipt.
+    """Resolve the billable Meiva ID from a Fast call's actual service receipt.
 
     Preserve the requested ID for ordinary services. An explicit standard
     downgrade uses the standard ID; a missing or unknown Fast receipt raises
@@ -63,8 +63,8 @@ def log_usage_from_message(
 ) -> tuple[int, float] | None:
     """Log one completed LangChain message's token usage and price snapshot.
 
-    `stamp_message` also writes the logged figures onto `msg.additional_kwargs["ava_usage"]`
-    (`AvaUsage`): the one `quote` result feeds the event and the message alike.
+    `stamp_message` also writes the logged figures onto `msg.additional_kwargs["meiva_usage"]`
+    (`MeivaUsage`): the one `quote` result feeds the event and the message alike.
     """
 
     if not isinstance(msg, AIMessage):
@@ -108,7 +108,7 @@ def log_usage_from_message(
         catalog=catalog,
     )
     if stamp_message:
-        message_addl_kwargs(msg)["ava_usage"] = record
+        message_addl_kwargs(msg)["meiva_usage"] = record
     return logged
 
 
@@ -268,18 +268,18 @@ def _log_usage(
 
 # ── billing spans ──
 
-AVA_BILLING_ATTR_LINE = "ava.billing.line"
-AVA_BILLING_ATTR_VENDOR = "ava.billing.vendor"
-AVA_BILLING_ATTR_MODEL = "ava.billing.model"
-AVA_BILLING_ATTR_TOKENS_IN = "ava.billing.tokens_in"
-AVA_BILLING_ATTR_TOKENS_OUT = "ava.billing.tokens_out"
-AVA_BILLING_ATTR_COST = "ava.billing.cost"
-AVA_BILLING_ATTR_USAGE_KIND = "ava.billing.usage_kind"
-AVA_BILLING_ATTR_TS = "ava.billing.ts"
-AVA_BILLING_ATTR_CACHE_READ_TOKENS = "ava.billing.cache_read_tokens"
-AVA_BILLING_ATTR_CACHE_WRITE_5M_TOKENS = "ava.billing.cache_write_5m_tokens"
-AVA_BILLING_ATTR_CACHE_WRITE_1H_TOKENS = "ava.billing.cache_write_1h_tokens"
-AVA_BILLING_ATTR_UNPRICED = "ava.billing.unpriced"
+MEIVA_BILLING_ATTR_LINE = "meiva.billing.line"
+MEIVA_BILLING_ATTR_VENDOR = "meiva.billing.vendor"
+MEIVA_BILLING_ATTR_MODEL = "meiva.billing.model"
+MEIVA_BILLING_ATTR_TOKENS_IN = "meiva.billing.tokens_in"
+MEIVA_BILLING_ATTR_TOKENS_OUT = "meiva.billing.tokens_out"
+MEIVA_BILLING_ATTR_COST = "meiva.billing.cost"
+MEIVA_BILLING_ATTR_USAGE_KIND = "meiva.billing.usage_kind"
+MEIVA_BILLING_ATTR_TS = "meiva.billing.ts"
+MEIVA_BILLING_ATTR_CACHE_READ_TOKENS = "meiva.billing.cache_read_tokens"
+MEIVA_BILLING_ATTR_CACHE_WRITE_5M_TOKENS = "meiva.billing.cache_write_5m_tokens"
+MEIVA_BILLING_ATTR_CACHE_WRITE_1H_TOKENS = "meiva.billing.cache_write_1h_tokens"
+MEIVA_BILLING_ATTR_UNPRICED = "meiva.billing.unpriced"
 
 _CORE_VENDOR_PREFIXES: tuple[tuple[str, str], ...] = ()
 
@@ -322,7 +322,7 @@ def emit_billing_event(
     tok_out: int,
     cost_usd: float,
     usage_kind: str,
-    line: str = "ava",
+    line: str = "meiva",
     tok_cached: int | None = None,
     cache_write_5m: int = 0,
     cache_write_1h: int = 0,
@@ -346,26 +346,26 @@ def emit_billing_event(
 
         from opentelemetry import trace as otel_trace
 
-        span = otel_trace.get_tracer("ava.billing").start_span(
-            "ava.billing.call",
+        span = otel_trace.get_tracer("meiva.billing").start_span(
+            "meiva.billing.call",
             start_time=start_time_ns,
         )
-        span.set_attribute(AVA_BILLING_ATTR_LINE, line)
-        span.set_attribute(AVA_BILLING_ATTR_VENDOR, vendor)
-        span.set_attribute(AVA_BILLING_ATTR_MODEL, model)
-        span.set_attribute(AVA_BILLING_ATTR_TOKENS_IN, int(tok_in))
-        span.set_attribute(AVA_BILLING_ATTR_TOKENS_OUT, int(tok_out))
-        span.set_attribute(AVA_BILLING_ATTR_COST, round(float(cost_usd), 6))
-        span.set_attribute(AVA_BILLING_ATTR_USAGE_KIND, usage_kind)
-        span.set_attribute(AVA_BILLING_ATTR_TS, _utc_timestamp())
+        span.set_attribute(MEIVA_BILLING_ATTR_LINE, line)
+        span.set_attribute(MEIVA_BILLING_ATTR_VENDOR, vendor)
+        span.set_attribute(MEIVA_BILLING_ATTR_MODEL, model)
+        span.set_attribute(MEIVA_BILLING_ATTR_TOKENS_IN, int(tok_in))
+        span.set_attribute(MEIVA_BILLING_ATTR_TOKENS_OUT, int(tok_out))
+        span.set_attribute(MEIVA_BILLING_ATTR_COST, round(float(cost_usd), 6))
+        span.set_attribute(MEIVA_BILLING_ATTR_USAGE_KIND, usage_kind)
+        span.set_attribute(MEIVA_BILLING_ATTR_TS, _utc_timestamp())
         if tok_cached is not None:
-            span.set_attribute(AVA_BILLING_ATTR_CACHE_READ_TOKENS, int(tok_cached))
+            span.set_attribute(MEIVA_BILLING_ATTR_CACHE_READ_TOKENS, int(tok_cached))
         if cache_write_5m:
-            span.set_attribute(AVA_BILLING_ATTR_CACHE_WRITE_5M_TOKENS, cache_write_5m)
+            span.set_attribute(MEIVA_BILLING_ATTR_CACHE_WRITE_5M_TOKENS, cache_write_5m)
         if cache_write_1h:
-            span.set_attribute(AVA_BILLING_ATTR_CACHE_WRITE_1H_TOKENS, cache_write_1h)
+            span.set_attribute(MEIVA_BILLING_ATTR_CACHE_WRITE_1H_TOKENS, cache_write_1h)
         if unpriced:
-            span.set_attribute(AVA_BILLING_ATTR_UNPRICED, unpriced)
+            span.set_attribute(MEIVA_BILLING_ATTR_UNPRICED, unpriced)
         span.end()
     except Exception as exc:
         report_sink_failure("billing span emission (the span is dropped)", exc)
@@ -376,7 +376,7 @@ def emit_billing_from_message(
     *,
     model: str,
     usage_kind: str,
-    line: str = "ava",
+    line: str = "meiva",
     start_time_ns: int | None = None,
     vendor: str | None = None,
     catalog: ModelCatalog,

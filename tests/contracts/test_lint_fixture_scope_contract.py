@@ -22,7 +22,7 @@ def test_the_real_e2e_conftest_in_its_pre_fix_shape_is_flagged() -> None:
     found = _lint.findings_in_source(pre_fix, "tests/e2e/conftest.py", has_package_init=True)
     assert len(found) == 1
     assert "e2e_process_env" in found[0][1]
-    for key in ("AVA_HOME", "AVA_GATEWAY_URL"):
+    for key in ("MEIVA_HOME", "MEIVA_GATEWAY_URL"):
         assert f"os.environ['{key}']" in found[0][1]
 
 

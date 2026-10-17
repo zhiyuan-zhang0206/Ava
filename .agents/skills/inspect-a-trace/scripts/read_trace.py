@@ -8,7 +8,7 @@ a text summary on stdout.
       "trace_id": "<hex-32>",
       "source": "mirror" | "tempo",
       "agent_id": "<session.id>" | null,
-      "checkpoint_id": "<ava.checkpoint_id>" | null  (null on post-#1964 traces; resolve via --with-content),
+      "checkpoint_id": "<meiva.checkpoint_id>" | null  (null on post-#1964 traces; resolve via --with-content),
       "workflow_name": str | null,
       "span_count": int, "duration_ms": int,
       "started_at": "<ISO-8601>",
@@ -30,15 +30,15 @@ a text summary on stdout.
   `telemetry_events` table keeps only the events a reader queries (and anything at warning or
   above), so this is a subset of the chain. `--with-events` also reads Loki for the same
   trace id (`events_loki`), which holds every event of its 84-hour window; a trace older than
-  that is complete only in the JSONL event mirror (`$AVA_HOME/logs/events-*.jsonl`).
+  that is complete only in the JSONL event mirror (`$MEIVA_HOME/logs/events-*.jsonl`).
 
 Gateway auth: `Authorization: Bearer <token>` — the process's machine API token
-(`AVA_API_TOKEN`, set in every launched service and agent), else
-`AVA_CLUSTER_SECRET` from the environment or `$AVA_HOME/.env` (the gateway
-home). `$AVA_HOME` is
-resolved the way every other Ava process resolves it (see `_common.source_root`
-/ `base.paths.home.resolve_ava_home`): the variable when set, else
-`~/.ava`. The gateway listens on :8000.
+(`MEIVA_API_TOKEN`, set in every launched service and agent), else
+`MEIVA_CLUSTER_SECRET` from the environment or `$MEIVA_HOME/.env` (the gateway
+home). `$MEIVA_HOME` is
+resolved the way every other Meiva process resolves it (see `_common.source_root`
+/ `base.paths.home.resolve_meiva_home`): the variable when set, else
+`~/.meiva`. The gateway listens on :8000.
 
 LLM span detection: span name ends with `.chat`, or attribute
 `gen_ai.operation.name` == "chat". Model comes from
@@ -60,10 +60,10 @@ from _common import source_root
 
 sys.path.insert(0, str(source_root()))
 
-from base.paths.home import resolve_ava_home
+from base.paths.home import resolve_meiva_home
 
 _AGENT_ATTR = "session.id"
-_CHECKPOINT_ATTR = "ava.checkpoint_id"
+_CHECKPOINT_ATTR = "meiva.checkpoint_id"
 _WORKFLOW_ATTR = "traceloop.workflow.name"
 _MODEL_ATTR = "traceloop.association.properties.ls_model_name"
 _NODE_ATTR = "traceloop.association.properties.langgraph_node"
@@ -81,7 +81,7 @@ def _load_raw(path: Path) -> dict:
 def _root_meta(spans: list[dict]) -> dict:
     """Root span (no parent) attributes → agent / checkpoint / workflow.
 
-    `checkpoint_id` is read from the root's `ava.checkpoint_id` attribute —
+    `checkpoint_id` is read from the root's `meiva.checkpoint_id` attribute —
     only present on pre-#1964 traces; the root is a placeholder ended at turn
     start since then, so the attribute no longer lands. Resolve it via
     `--with-content` (checkpoints table through the gateway) on new traces.
@@ -179,8 +179,8 @@ def _node_sequence(spans: list[dict], start_ns: int) -> list[dict]:
 def _cluster_secret(home: Path) -> str:
     """Bearer token for the gateway: the process's machine API token, else the
     explicit env var, else the resolved home's `.env`."""
-    env = os.environ.get("AVA_CLUSTER_SECRET")
-    token = os.environ.get("AVA_API_TOKEN")
+    env = os.environ.get("MEIVA_CLUSTER_SECRET")
+    token = os.environ.get("MEIVA_API_TOKEN")
     if token:
         return token  # a launched process's machine API token
     if env is not None:
@@ -189,7 +189,7 @@ def _cluster_secret(home: Path) -> str:
     if not env_file.exists():
         return ""
     for line in env_file.read_text(encoding="utf-8").splitlines():
-        m = re.match(r"AVA_CLUSTER_SECRET=(.+)", line.strip())
+        m = re.match(r"MEIVA_CLUSTER_SECRET=(.+)", line.strip())
         if m:
             return m.group(1).strip().strip('"').strip("'")
     return ""
@@ -202,7 +202,7 @@ def _gateway_get(gateway: str, path: str) -> dict:
     if not url.startswith(("http://", "https://")):
         raise ValueError(f"refusing non-http(s) gateway URL: {url[:60]!r}")
     headers = {}
-    secret = _cluster_secret(resolve_ava_home())
+    secret = _cluster_secret(resolve_meiva_home())
     if secret:
         headers["Authorization"] = f"Bearer {secret}"
     req = urllib.request.Request(url, headers=headers)
@@ -311,12 +311,12 @@ def main() -> int:
     )
     ap.add_argument(
         "--gateway",
-        default=os.environ.get("AVA_GATEWAY_URL", "http://localhost:8000"),
+        default=os.environ.get("MEIVA_GATEWAY_URL", "http://localhost:8000"),
         help="gateway base URL for content/events joins",
     )
     ap.add_argument(
         "--loki-url",
-        default=os.environ.get("AVA_LOKI_URL", "http://127.0.0.1:3100"),
+        default=os.environ.get("MEIVA_LOKI_URL", "http://127.0.0.1:3100"),
         help="Loki base URL for the full-chain read of --with-events",
     )
     args = ap.parse_args()
@@ -373,7 +373,7 @@ def main() -> int:
             else:
                 # The gateway resolves the checkpoint from the checkpoints
                 # table by trace_id — the authoritative link since #1964, when
-                # the root stopped carrying ava.checkpoint_id.
+                # the root stopped carrying meiva.checkpoint_id.
                 if out["checkpoint_id"] is None and out["content"].get("checkpoint_id"):
                     out["checkpoint_id"] = out["content"]["checkpoint_id"]
     if args.with_events:

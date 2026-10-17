@@ -8,7 +8,7 @@ the gateway reverse-proxies it, so nothing needs it on the network).
 `/health` answers `ok:<token>` with the per-launch token the daemon
 generated, so the daemon's liveness poll can prove the server on the port
 is the one it just spawned — a stale occupant from an earlier launch can
-never satisfy it (the reclaim logic that used to live in ava.ui now lives
+never satisfy it (the reclaim logic that used to live in meiva.ui now lives
 here, in the supervisor).
 
 Usage (spawned by the daemon, never by hand):
@@ -57,9 +57,9 @@ class PageHandler(http.server.SimpleHTTPRequestHandler):
 <body>
   <main>
     <h1>This directory is not browsable</h1>
-    <p>Directory listings are disabled for ava.ui.serve pages.</p>
+    <p>Directory listings are disabled for meiva.ui.serve pages.</p>
     <p>Create an <code>index.html</code> in the served directory. For Markdown,
-      render it to a self-contained HTML page first with the ava-ui markdown widget.</p>
+      render it to a self-contained HTML page first with the meiva-ui markdown widget.</p>
   </main>
 </body>
 </html>
@@ -100,7 +100,7 @@ def configure_handler(token: str) -> None:
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Ava page server (R3 doorplate 3)")
+    parser = argparse.ArgumentParser(description="Meiva page server (R3 doorplate 3)")
     parser.add_argument("--port", type=int, required=True)
     parser.add_argument("--host", required=True)
     parser.add_argument("--dir", required=True)

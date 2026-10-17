@@ -8,9 +8,9 @@ exports = ["health_probe_inputs.py", "test_cluster_health.py"]
 
 [debt.env-patch]
 "health_probe_inputs.py#patch.dict os.environ" = 1
-"test_cluster_lifecycle.py#monkeypatch.setenv os.environ.AVA_HOME" = 1
-"test_cluster_service_probes.py#monkeypatch.delitem os.environ.AVA_TELEMETRY_OTLP_ENDPOINT" = 1
-"test_cluster_service_probes.py#monkeypatch.setitem os.environ.AVA_TELEMETRY_OTLP_ENDPOINT" = 1
+"test_cluster_lifecycle.py#monkeypatch.setenv os.environ.MEIVA_HOME" = 1
+"test_cluster_service_probes.py#monkeypatch.delitem os.environ.MEIVA_TELEMETRY_OTLP_ENDPOINT" = 1
+"test_cluster_service_probes.py#monkeypatch.setitem os.environ.MEIVA_TELEMETRY_OTLP_ENDPOINT" = 1
 
 [debt.first-party-patch]
 "health_probe_inputs.py#monkeypatch.setattr cli.commands.cluster.health.agent_population" = 1
@@ -71,8 +71,8 @@ exports = ["health_probe_inputs.py", "test_cluster_health.py"]
 "test_commands_cluster_status.py#monkeypatch.setattr base.cluster.machine.gateway_auth_headers" = 1
 "test_commands_cluster_status.py#monkeypatch.setattr base.config.settings.gateway.status_probe_timeout_seconds" = 3
 "test_commands_cluster_status.py#monkeypatch.setattr base.host.net.http_dial.post" = 1
-"test_health_probe_maintenance.py#monkeypatch.setattr base.deploy.lifecycle.service_selection.ava_home" = 1
-"test_health_probe_maintenance.py#monkeypatch.setattr base.paths.ava_home" = 1
+"test_health_probe_maintenance.py#monkeypatch.setattr base.deploy.lifecycle.service_selection.meiva_home" = 1
+"test_health_probe_maintenance.py#monkeypatch.setattr base.paths.meiva_home" = 1
 "test_health_probe_maintenance.py#monkeypatch.setattr cli.commands.cluster.health.data_plane_abnormal" = 1
 "test_health_probe_maintenance.py#monkeypatch.setattr cli.commands.cluster.health.disk_usage_failure" = 1
 "test_health_probe_maintenance.py#monkeypatch.setattr cli.commands.cluster.health.gateway_liveness_with_retry" = 2

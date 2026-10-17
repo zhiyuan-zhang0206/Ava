@@ -1,6 +1,6 @@
-"""`ava mcp enable/disable` write the per-machine MCP-enable overlay, and
-`ava mcp list` still shows defined-but-disabled servers with a marker.
-`unit_home` isolates ~/.ava per test."""
+"""`meiva mcp enable/disable` write the per-machine MCP-enable overlay, and
+`meiva mcp list` still shows defined-but-disabled servers with a marker.
+`unit_home` isolates ~/.meiva per test."""
 
 import json
 from pathlib import Path
@@ -22,7 +22,7 @@ def test_enable_then_disable_writes_overlay(unit_home: Path) -> None:
 
 
 def test_disable_filters_from_default_load(unit_home: Path) -> None:
-    from ava.mcps.config import load_mcp_config
+    from meiva.mcps.config import load_mcp_config
 
     cmd_mcp_add("foo", None, "npx", ["-y", "server-foo"], [])
     assert "foo" in load_mcp_config()
@@ -91,7 +91,7 @@ def test_disable_preserves_invalid_requirements_as_a_close_operation(unit_home: 
 def test_enable_and_list_validate_declarations_without_host_probes(
     unit_home: Path, requires: object, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    import ava.mcps.config as cfg_mod
+    import meiva.mcps.config as cfg_mod
     from base.packages.plugins.mcp_enabled import read_enabled
 
     def unexpected_probe(*, host: Host) -> bool:

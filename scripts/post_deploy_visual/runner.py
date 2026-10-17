@@ -115,19 +115,19 @@ def _demo(browser: Browser, base_url: str, captures: Path) -> dict[str, object]:
             raise
         page.evaluate(
             """() => {
-              const style = document.createElement('style'); style.id = 'ava-demo-overflow-style';
+              const style = document.createElement('style'); style.id = 'meiva-demo-overflow-style';
               style.nonce = document.querySelector('[nonce]')?.nonce || '';
-              style.textContent = '#ava-demo-overflow{position:absolute;left:0;top:0;width:520px;height:2px}';
+              style.textContent = '#meiva-demo-overflow{position:absolute;left:0;top:0;width:520px;height:2px}';
               document.head.appendChild(style);
-              const node = document.createElement('div'); node.id = 'ava-demo-overflow';
+              const node = document.createElement('div'); node.id = 'meiva-demo-overflow';
               document.body.appendChild(node);
             }"""
         )
         overflow_red = structural_failures(page)
         wait_for_layout_settled(page, ready)
         page.screenshot(path=captures / "demo-overflow-red.png", animations="disabled")
-        page.locator("#ava-demo-overflow").evaluate(
-            "node => { node.remove(); document.querySelector('#ava-demo-overflow-style').remove(); }"
+        page.locator("#meiva-demo-overflow").evaluate(
+            "node => { node.remove(); document.querySelector('#meiva-demo-overflow-style').remove(); }"
         )
         overflow_green = structural_failures(page)
 
@@ -135,11 +135,11 @@ def _demo(browser: Browser, base_url: str, captures: Path) -> dict[str, object]:
             """() => {
               const target = document.querySelector('[data-testid="composer-input"]');
               const rect = target.getBoundingClientRect(); const node = document.createElement('div');
-              const style = document.createElement('style'); style.id = 'ava-demo-overlay-style';
+              const style = document.createElement('style'); style.id = 'meiva-demo-overlay-style';
               style.nonce = document.querySelector('[nonce]')?.nonce || '';
-              style.textContent = `#ava-demo-overlay{position:fixed;z-index:2147483647;
+              style.textContent = `#meiva-demo-overlay{position:fixed;z-index:2147483647;
                 left:${rect.left}px;top:${rect.top}px;width:${rect.width}px;height:${rect.height}px;background:red}`;
-              document.head.appendChild(style); node.id = 'ava-demo-overlay';
+              document.head.appendChild(style); node.id = 'meiva-demo-overlay';
               document.body.appendChild(node);
             }"""
         )
@@ -148,8 +148,8 @@ def _demo(browser: Browser, base_url: str, captures: Path) -> dict[str, object]:
         )
         wait_for_layout_settled(page, ready)
         page.screenshot(path=captures / "demo-overlay-red.png", animations="disabled")
-        page.locator("#ava-demo-overlay").evaluate(
-            "node => { node.remove(); document.querySelector('#ava-demo-overlay-style').remove(); }"
+        page.locator("#meiva-demo-overlay").evaluate(
+            "node => { node.remove(); document.querySelector('#meiva-demo-overlay-style').remove(); }"
         )
         overlay_green = structural_failures(
             page, control_selectors=("[data-testid='composer-input']",)
@@ -317,8 +317,8 @@ def run_browser_gate(
         "artifacts": str(wave_dir),
     }
     if decision.severity == "P0":
-        print(f"AVA_VISUAL_P0={json.dumps(summary, sort_keys=True)}")
-    print(f"AVA_VISUAL_RESULT={json.dumps(summary, sort_keys=True)}")
+        print(f"MEIVA_VISUAL_P0={json.dumps(summary, sort_keys=True)}")
+    print(f"MEIVA_VISUAL_RESULT={json.dumps(summary, sort_keys=True)}")
     if decision.severity == "P0":
         return P0_EXIT_CODE
     if decision.severity == "P2":

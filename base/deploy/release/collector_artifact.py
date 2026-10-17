@@ -37,7 +37,7 @@ _DOWNLOAD_URL = (
 VERSION_MARKER = "version"
 
 # Download fetch discipline (issue #172): the tarball is on the critical path
-# of `ava start`, so a slow or dead mirror must fail the converge step in
+# of `meiva start`, so a slow or dead mirror must fail the converge step in
 # bounded time and say so — never stall bring-up indefinitely. Per-read socket
 # timeout catches a wedged connection; a total wall-clock cap per attempt
 # catches a mirror that trickles forever; a bounded retry rides out transient
@@ -89,7 +89,7 @@ def binary_name() -> str:
     return "otelcol-contrib"
 
 
-# ava:ref base/deploy/release/docs/collector-artifact.ava.okf.md#bounded-download-attempt
+# meiva:ref base/deploy/release/docs/collector-artifact.meiva.okf.md#bounded-download-attempt
 def stream_download(
     url: str,
     dest: Path,
@@ -134,7 +134,7 @@ def stream_download(
     )
 
 
-# ava:ref base/deploy/release/docs/collector-artifact.ava.okf.md#download-wait-closure
+# meiva:ref base/deploy/release/docs/collector-artifact.meiva.okf.md#download-wait-closure
 def download_with_retry(url: str, tarball: Path, *, open_url: UrlOpener, timers: Timers) -> None:
     started = timers.monotonic()
     attempt = 0

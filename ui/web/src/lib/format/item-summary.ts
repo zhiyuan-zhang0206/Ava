@@ -7,7 +7,7 @@
 // parsing stays vitest-testable and memoizable.
 
 /** One SDK method's call count in a code block, e.g.
- *  `{ method: "files.read", count: 3 }` for `ava.files.read(...)` ×3. */
+ *  `{ method: "files.read", count: 3 }` for `meiva.files.read(...)` ×3. */
 export interface SdkCall {
   readonly method: string;
   readonly count: number;
@@ -16,12 +16,12 @@ export interface SdkCall {
 export interface CodeSummary {
   /** Per-method call counts as recorded by the executing run, grouped by
    *  namespace alphabetically, then descending by count and method name.
-   *  `method` is the full dotted path after `ava.`
+   *  `method` is the full dotted path after `meiva.`
    *  (e.g. `files.read`, `self.log`) so reads and writes on the same
    *  namespace stay distinct. Empty when none were recorded (plain Python,
    *  or the field is absent while streaming). */
   readonly calls: readonly SdkCall[];
-  /** Total `ava.*` call sites (sum of `calls[].count`). */
+  /** Total `meiva.*` call sites (sum of `calls[].count`). */
   readonly totalCalls: number;
   /** Non-blank line count of the snippet — shown when there are no recorded
    *  calls. */

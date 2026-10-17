@@ -268,7 +268,7 @@ class TestEventsApi:
         self, fake_events: _FakeEvents, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         """The implicit window is ``settings.display.events_default_limit``
-        (``AVA_EVENTS_DEFAULT_LIMIT``); the literal 100 is only that field's
+        (``MEIVA_EVENTS_DEFAULT_LIMIT``); the literal 100 is only that field's
         default, not a hard-coded page size. The meta echo reports the
         resolved window, not the raw None."""
         from base.config import settings

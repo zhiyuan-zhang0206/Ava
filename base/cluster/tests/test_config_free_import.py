@@ -18,7 +18,7 @@ def test_cluster_package_modules_do_not_load_settings_or_create_the_home(tmp_pat
     subprocess.run(  # noqa: S603 -- isolated local import boundary, fixed child script and captured repo.
         [sys.executable, "-I", "-B", str(Path(__file__).resolve()), str(repo)],
         check=True,
-        env={**os.environ, "AVA_HOME": str(tmp_path / "never-created")},
+        env={**os.environ, "MEIVA_HOME": str(tmp_path / "never-created")},
     )
 
 
@@ -33,7 +33,7 @@ def _cluster_package_modules() -> None:
     assert not loaded, loaded
     # `base.paths` may load (the private-directory primitive lives there), but the home it
     # names must be neither resolved into existence nor created by the import.
-    home = os.environ["AVA_HOME"]
+    home = os.environ["MEIVA_HOME"]
     assert not Path(home).exists(), f"importing the cluster package created the home {home}"
 
 

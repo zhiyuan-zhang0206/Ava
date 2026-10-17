@@ -182,8 +182,8 @@ def _compact_history(world: World) -> list[str]:
             HumanMessage(
                 content="summary",
                 additional_kwargs={
-                    "ava_msg_type": "compact_summary",
-                    "ava_created_at": "2026-10-10T12:00:00+00:00",
+                    "meiva_msg_type": "compact_summary",
+                    "meiva_created_at": "2026-10-10T12:00:00+00:00",
                 },
             )
         ],
@@ -296,7 +296,7 @@ async def test_daemon_binds_live_rendering_to_its_configuration_owner(
     await daemon.run(home=short_dir, config=boot, database=lambda: cast(Database, db))
 
     assert len(apps) == 1
-    assert short_dir != Path(os.environ["AVA_HOME"])
+    assert short_dir != Path(os.environ["MEIVA_HOME"])
     assert TestClient(apps[0]).get("/healthz").json() == {
         "name": "insights",
         "pid": os.getpid(),
@@ -333,7 +333,7 @@ def _assert_gate_matches_image(
             gates[0].application_name()
         assert reads == []
     else:
-        assert gates[0].application_name() == gates[1].application_name() == "ava:insights:v42"
+        assert gates[0].application_name() == gates[1].application_name() == "meiva:insights:v42"
         assert reads == [(image.source_root, image.sha)]
 
 

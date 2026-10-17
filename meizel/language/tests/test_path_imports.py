@@ -6,7 +6,7 @@ import pytest
 
 from meizel.language import path_imports
 
-_SKILL = "ava_builtins/skills/demo/reference/run.py"
+_SKILL = "meiva_builtins/skills/demo/reference/run.py"
 
 
 def _sites(source: str, rel_path: str = _SKILL) -> dict[str, list[int]]:
@@ -59,10 +59,10 @@ def test_reading_sys_path_and_unrelated_calls_are_not_sites(source: str) -> None
     assert _sites(source) == {}
 
 
-def test_only_ava_builtins_is_in_scope() -> None:
+def test_only_meiva_builtins_is_in_scope() -> None:
     source = "import sys\nsys.path.insert(0, 'x')\n"
     assert _sites(source, "cli/python_install.py") == {}
-    assert _sites(source, "ava/shell/coding_tools/claude.py") == {}
+    assert _sites(source, "meiva/shell/coding_tools/claude.py") == {}
 
 
 @pytest.mark.parametrize(
@@ -71,32 +71,32 @@ def test_only_ava_builtins_is_in_scope() -> None:
         (
             "import sys\nfrom pathlib import Path\n"
             "sys.path.insert(0, str(Path(__file__).resolve().parent))\n",
-            "ava_builtins/skills/integrations/gmail/scripts/feed.py",
+            "meiva_builtins/skills/integrations/gmail/scripts/feed.py",
         ),
         (
             "import sys, os\nsys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))\n",
-            "ava_builtins/skills/platform/ava-self-evolution/scripts/daily_scan.py",
+            "meiva_builtins/skills/platform/meiva-self-evolution/scripts/daily_scan.py",
         ),
         (
             "import sys\nfrom pathlib import Path\n"
             "sys.path.append(str(Path(__file__).resolve().parent))\n",
-            "ava_builtins/skills/integrations/gmail/scripts/feed.py",
+            "meiva_builtins/skills/integrations/gmail/scripts/feed.py",
         ),
         (
             "import sys\nfrom pathlib import Path\n"
             "sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent / 'scripts'))\n",
-            "ava_builtins/skills/integrations/web-ai/console/scripts/ask.py",
+            "meiva_builtins/skills/integrations/web-ai/console/scripts/ask.py",
         ),
         (
             "import sys, os\n"
             "sys.path.insert(0, os.path.join("
             "os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'scripts'))\n",
-            "ava_builtins/skills/integrations/web-ai/console/scripts/ask.py",
+            "meiva_builtins/skills/integrations/web-ai/console/scripts/ask.py",
         ),
         (
             "import sys\nfrom pathlib import Path\n"
             "sys.path.insert(0, str(Path(__file__).resolve().parent.parent))\n",
-            "ava_builtins/skills/integrations/gmail/scripts/feed.py",
+            "meiva_builtins/skills/integrations/gmail/scripts/feed.py",
         ),
     ],
 )
@@ -111,27 +111,27 @@ def test_the_within_skill_file_guard_is_not_a_site(source: str, rel_path: str) -
             "import sys\nfrom pathlib import Path\n"
             "sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent.parent "
             "/ 'audio-transcribe' / 'scripts'))\n",
-            "ava_builtins/skills/integrations/web-sources/youtube/scripts/feed.py",
+            "meiva_builtins/skills/integrations/web-sources/youtube/scripts/feed.py",
         ),
         (
             "import sys\nfrom pathlib import Path\n"
             "sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))\n",
-            "ava_builtins/skills/integrations/gmail/scripts/feed.py",
+            "meiva_builtins/skills/integrations/gmail/scripts/feed.py",
         ),
         (
             "import sys\nfrom pathlib import Path\n"
             "sys.path.insert(0, str(Path(__file__).resolve().parent))\n",
-            "ava_builtins/plugins/ava_code/foo.py",
+            "meiva_builtins/plugins/meiva_code/foo.py",
         ),
         (
             "import sys\nfrom pathlib import Path\n"
             "sys.path.extend([str(Path(__file__).resolve().parent)])\n",
-            "ava_builtins/skills/integrations/gmail/scripts/feed.py",
+            "meiva_builtins/skills/integrations/gmail/scripts/feed.py",
         ),
         (
             "import sys\nfrom pathlib import Path\n"
             "sys.path.insert(1, str(Path(__file__).resolve().parent))\n",
-            "ava_builtins/skills/integrations/gmail/scripts/feed.py",
+            "meiva_builtins/skills/integrations/gmail/scripts/feed.py",
         ),
     ],
 )
@@ -145,8 +145,8 @@ def test_a_file_loader_is_still_a_site_even_with_an_in_skill_file_derived_argume
         "importlib.util.spec_from_file_location("
         "'m', str(Path(__file__).resolve().parent / 'x.py'))\n"
     )
-    assert _sites(source, "ava_builtins/skills/integrations/gmail/scripts/feed.py") == {
-        "ava_builtins/skills/integrations/gmail/scripts/feed.py::importlib.util.spec_from_file_location": [
+    assert _sites(source, "meiva_builtins/skills/integrations/gmail/scripts/feed.py") == {
+        "meiva_builtins/skills/integrations/gmail/scripts/feed.py::importlib.util.spec_from_file_location": [
             3
         ]
     }

@@ -33,7 +33,7 @@ def _assert_gate_matches_image(
             gates[0].application_name()
         assert reads == []
     else:
-        assert gates[0].application_name() == gates[1].application_name() == "ava:page_server:v42"
+        assert gates[0].application_name() == gates[1].application_name() == "meiva:page_server:v42"
         assert reads == [(image.source_root, image.sha)]
 
 
@@ -136,7 +136,7 @@ def test_resources_follow_the_entry_owner_at_each_original_lookup(
     domain = field_domain("page_server_health_port")
     fields = getattr(config.view, domain)
     monkeypatch.setattr(fields, "page_server_health_port", 26101)
-    monkeypatch.setenv("AVA_HOME", str(tmp_path / "a-later-home"))
+    monkeypatch.setenv("MEIVA_HOME", str(tmp_path / "a-later-home"))
 
     first = resources.endpoint(config, runtime=runtime)
     monkeypatch.setattr(fields, "page_server_health_port", 26102)

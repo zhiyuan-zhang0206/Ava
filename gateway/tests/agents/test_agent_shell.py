@@ -25,7 +25,7 @@ async def _ok_dispatch(
     _db: object, target_machine: str, kind: str, payload: dict[str, object], **kwargs: object
 ) -> dict[str, object]:
     return {
-        "session_name": f"ava-agent-{payload['agent_id']}-shell-3-watcher",
+        "session_name": f"meiva-agent-{payload['agent_id']}-shell-3-watcher",
         "lines": ["line one", "line two"],
     }
 
@@ -83,7 +83,7 @@ def test_shell_capture_success(
     assert body == {
         "agent_id": aid,
         "session_id": 3,
-        "session_name": f"ava-agent-{aid}-shell-3-watcher",
+        "session_name": f"meiva-agent-{aid}-shell-3-watcher",
         "lines": ["line one", "line two"],
         "created_at": None,
         "uptime_seconds": 0,
@@ -161,7 +161,7 @@ def test_shell_capture_carries_created_at_and_ttl_deadline(
         _db: object, target_machine: str, kind: str, payload: dict[str, object], **kwargs: object
     ) -> dict[str, object]:
         return {
-            "session_name": f"ava-agent-{aid}-shell-3-dev",
+            "session_name": f"meiva-agent-{aid}-shell-3-dev",
             "lines": ["line one"],
             "created_at": launched.isoformat(),
             "uptime_seconds": 1800,
@@ -192,7 +192,7 @@ def test_shell_capture_without_row_has_no_deadline(
         _db: object, target_machine: str, kind: str, payload: dict[str, object], **kwargs: object
     ) -> dict[str, object]:
         return {
-            "session_name": f"ava-agent-{aid}-shell-7-{name}",
+            "session_name": f"meiva-agent-{aid}-shell-7-{name}",
             "lines": ["hello"],
             "created_at": launched.isoformat(),
             "uptime_seconds": 10800,
@@ -218,7 +218,7 @@ def test_shell_capture_without_row_and_epoch_keeps_no_deadline(
         _db: object, target_machine: str, kind: str, payload: dict[str, object], **kwargs: object
     ) -> dict[str, object]:
         return {
-            "session_name": f"ava-agent-{aid}-shell-8",
+            "session_name": f"meiva-agent-{aid}-shell-8",
             "lines": ["hello"],
             "created_at": None,
             "uptime_seconds": 0,
@@ -250,7 +250,7 @@ def test_shell_capture_returns_recorded_deadline(
         _db: object, target_machine: str, kind: str, payload: dict[str, object], **kwargs: object
     ) -> dict[str, object]:
         return {
-            "session_name": f"ava-agent-{aid}-shell-9",
+            "session_name": f"meiva-agent-{aid}-shell-9",
             "lines": ["hello"],
             "created_at": launched.isoformat(),
             "uptime_seconds": 300,

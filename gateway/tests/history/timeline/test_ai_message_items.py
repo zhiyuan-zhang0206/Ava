@@ -100,7 +100,7 @@ class TestAiMessageItems:
                 {"type": "thinking", "thinking": "ponder", "index": 0},
                 {"type": "text", "text": "done", "index": 1},
             ],
-            additional_kwargs={"ava_reasoning_ms_by_block": {"0": 8200}},
+            additional_kwargs={"meiva_reasoning_ms_by_block": {"0": 8200}},
             usage_metadata={
                 "input_tokens": 100,
                 "output_tokens": 50,
@@ -124,7 +124,7 @@ class TestAiMessageItems:
                 {"type": "thinking", "thinking": "first", "index": 0},
                 {"type": "thinking", "thinking": "second", "index": 1},
             ],
-            additional_kwargs={"ava_reasoning_ms_by_block": {"0": 3000, "1": 1500}},
+            additional_kwargs={"meiva_reasoning_ms_by_block": {"0": 3000, "1": 1500}},
             usage_metadata={
                 "input_tokens": 10,
                 "output_tokens": 20,
@@ -166,7 +166,7 @@ class TestAiMessageItems:
         msg = ToolMessage(
             content="hello",
             tool_call_id="t1",
-            additional_kwargs={"ava_msg_type": "exec_output"},
+            additional_kwargs={"meiva_msg_type": "exec_output"},
         )
         items, _ = build_timeline_items([msg], inputs=_TIMELINE_INPUTS)
         assert items[0].kind == "code_output"
@@ -175,12 +175,12 @@ class TestAiMessageItems:
     def test_system_note_renders_as_system_marker(self):
         from agent.messages import NoteTag, system_note_message
 
-        msg = system_note_message(content="use ava.agents.send_message", tag=NoteTag.AGENT_REPLY)
+        msg = system_note_message(content="use meiva.agents.send_message", tag=NoteTag.AGENT_REPLY)
         items, _ = build_timeline_items([msg], inputs=_TIMELINE_INPUTS)
         assert len(items) == 1
         assert items[0].kind == "system_marker"
         assert items[0].source == "agent_reply"
-        assert items[0].payload == "[system] use ava.agents.send_message"
+        assert items[0].payload == "[system] use meiva.agents.send_message"
 
     def test_system_note_show_timestamp_by_tag(self):
         from agent.messages import NoteTag, system_note_message
@@ -233,13 +233,13 @@ class TestAiMessageItems:
     def test_system_message_renders_as_system_prompt(self):
         from langchain_core.messages import SystemMessage
 
-        msg = SystemMessage(content="You are Ava.\nAct via execute_code.")
+        msg = SystemMessage(content="You are Meiva.\nAct via execute_code.")
         items, msg_count = build_timeline_items([msg], inputs=_TIMELINE_INPUTS)
         assert msg_count == 1
         assert len(items) == 1
         assert items[0].kind == "system_prompt"
         assert items[0].item_id == "0.0"
-        assert items[0].payload == "You are Ava.\nAct via execute_code."
+        assert items[0].payload == "You are Meiva.\nAct via execute_code."
         assert items[0].created_at is None
         assert items[0].source is None
 

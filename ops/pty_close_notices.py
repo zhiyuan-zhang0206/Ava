@@ -1,6 +1,6 @@
-"""Close notices for busy persistent shells a unit closes at `ava stop` or loses to a crash (issue #2044).
+"""Close notices for busy persistent shells a unit closes at `meiva stop` or loses to a crash (issue #2044).
 
-`ava stop` closes busy persistent-shell sessions in its `terminals` phase,
+`meiva stop` closes busy persistent-shell sessions in its `terminals` phase,
 after the services are down and before the data plane stops. Each session it
 VERIFIED closed (its shell's exact identity gone — also when another session
 leaves the stop incomplete) gets one system inbound message for its owner
@@ -59,7 +59,7 @@ _NOTIFIABLE_STATUSES = ("running", "idling")
 
 # Why a unit closed the session, as the owner's notice names it. A pause
 # retains terminals and records nothing.
-STOP_REASON = "an operator stop (ava stop)"
+STOP_REASON = "an operator stop (meiva stop)"
 
 # The same, for sessions a pty-sessions service that ended uncleanly left behind
 # (a crash, a forced stop of the service, a reboot): the sweep found them busy.

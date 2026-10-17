@@ -2,11 +2,11 @@
 "test_rpc_result_domains.py" = ["test_agents_cmd.py"]
 
 [debt.env-patch]
-"test_external_caller_cli.py#monkeypatch.delenv os.environ.AVA_CALLER_IDENTITY" = 4
-"test_external_caller_cli.py#monkeypatch.setenv os.environ.AVA_CALLER_IDENTITY" = 1
+"test_external_caller_cli.py#monkeypatch.delenv os.environ.MEIVA_CALLER_IDENTITY" = 4
+"test_external_caller_cli.py#monkeypatch.setenv os.environ.MEIVA_CALLER_IDENTITY" = 1
 "test_impersonation.py#monkeypatch.delenv os.environ.ANTIGRAVITY_CONVERSATION_ID" = 1
-"test_impersonation.py#monkeypatch.delenv os.environ.DSH_AVA_RELAY_STUB" = 1
-"test_impersonation.py#monkeypatch.setenv os.environ.DSH_AVA_RELAY_STUB" = 1
+"test_impersonation.py#monkeypatch.delenv os.environ.DSH_MEIVA_RELAY_STUB" = 1
+"test_impersonation.py#monkeypatch.setenv os.environ.DSH_MEIVA_RELAY_STUB" = 1
 
 [debt.first-party-patch]
 "test_agents_cmd.py#monkeypatch.setattr base.cluster.machine.gateway_api_base" = 1

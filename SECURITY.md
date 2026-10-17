@@ -6,7 +6,7 @@ Report security issues **privately** — do not open a public issue. Use GitHub'
 private vulnerability reporting: the repository's **Security** tab → **Report a
 vulnerability**. Expect an acknowledgement within a few days.
 
-Ava executes untrusted, model-authored code directly in the agent process, on
+Meiva executes untrusted, model-authored code directly in the agent process, on
 the host — there is no sandbox around `execute_code` — and it exposes an HTTP
 gateway. So reports about **arbitrary code execution reaching beyond the
 intended deployment boundary**, **gateway authentication**, or **data-plane
@@ -15,7 +15,7 @@ valuable.
 
 ## Security model
 
-Ava does not sandbox model-authored code. `execute_code` runs the agent's
+Meiva does not sandbox model-authored code. `execute_code` runs the agent's
 generated Python in the agent process, on the host, with the permissions of
 whichever user started it — the same trust model as a human running that
 code themselves. The `before_exec` hook (see
@@ -32,7 +32,7 @@ download-and-execute pipeline, an obfuscated payload, a credential store read
 paired with an outbound sink, instructions to work behind the user's back)
 **refuses the install**. It is pattern matching, so the same sentence applies:
 a clean report means "no rule matched", not "safe". Installed third-party
-content stays at trust tier `unreviewed` until a person runs `ava skill trust`.
+content stays at trust tier `unreviewed` until a person runs `meiva skill trust`.
 
 ### Local privileged services
 
@@ -53,17 +53,17 @@ is the same trust domain `execute_code` runs in. Same-user isolation for
 these is a non-goal today; if a deployment needs it, isolate the OS user or
 run the cluster in a VM/container (below).
 
-The isolation Ava relies on is **where you deploy the cluster**, not how it
+The isolation Meiva relies on is **where you deploy the cluster**, not how it
 executes code:
 
 - Run each cluster under its own OS user, machine, or VM. A cluster's identity
-  is its `$AVA_HOME`, and two clusters never share a Postgres/Redis instance —
+  is its `$MEIVA_HOME`, and two clusters never share a Postgres/Redis instance —
   but that is deployment-topology isolation between clusters, not a code
   sandbox around any single agent's execution.
 - Don't point an agent at credentials, filesystems, or networks it shouldn't be
   able to reach — the agent can reach anything the OS user it runs as can
   reach.
-- Don't run Ava against untrusted third-party input (an agent ingesting
+- Don't run Meiva against untrusted third-party input (an agent ingesting
   attacker-controlled web content, files, or messages) without treating the
   whole host as exposed to whatever that content can make the agent execute.
 
@@ -71,7 +71,7 @@ If you need real isolation between the model's code and your host — untrusted
 inputs, unattended automation, or a blast radius smaller than "this machine" —
 run the cluster inside a container, VM, or micro-VM with only the credentials
 and filesystem access the task needs. That boundary has to come from the OS or
-a virtualization layer; nothing inside Ava provides it today. A disposable,
+a virtualization layer; nothing inside Meiva provides it today. A disposable,
 fully containerized cluster is on the roadmap
 ([`future/roadmap/docker-sandbox.md`](future/roadmap/docker-sandbox.md))
 as the substrate for eval and self-code-evolution workloads specifically — it
@@ -81,5 +81,5 @@ tracked, deliberate non-goal
 
 ## Supported versions
 
-Ava is pre-1.0 and ships from `main`; fixes land on `main`. There is no backport
+Meiva is pre-1.0 and ships from `main`; fixes land on `main`. There is no backport
 branch yet.

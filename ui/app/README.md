@@ -1,6 +1,6 @@
-# Ava App
+# Meiva App
 
-`ui/app` is the thin Tauri 2 app around Ava's remotely served web console. It
+`ui/app` is the thin Tauri 2 app around Meiva's remotely served web console. It
 does not bundle `ui/web`; the main webview loads the configured gate URL. One
 Rust application targets macOS and Android.
 
@@ -17,7 +17,7 @@ cargo tauri dev
 The persisted `settings.json` lives in Tauri's platform app-config directory.
 It accepts `entryUrl`, optional advanced `gatewayUrl`, `autoLogin`,
 `backgroundService`, and `notifications`; it never stores a cluster secret.
-Desktop auto-login reads `AVA_CLUSTER_SECRET` from `$AVA_HOME/.env` only when
+Desktop auto-login reads `MEIVA_CLUSTER_SECRET` from `$MEIVA_HOME/.env` only when
 `autoLogin` is enabled.
 
 For a production desktop bundle:

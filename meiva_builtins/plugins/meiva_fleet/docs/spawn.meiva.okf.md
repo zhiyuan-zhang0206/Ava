@@ -1,0 +1,107 @@
+---
+type: doc
+title: Spawn — Agent Lifecycle Management
+description: "All operations of the agent lifecycle in meiva.agents: spawn (create a new agent), fork (create by copying conversation state), terminate (terminate), restart (restart process), resurrect (resurrect a terminated agent)."
+tags:
+- fleet
+- lifecycle
+- spawn
+---
+
+# Spawn — Agent Lifecycle Management
+
+## Responsibility
+
+Agent creation, copying, termination, restart, resurrection — dynamic member management for the fleet. spawn/fork/terminate/restart/resurrect are `meiva.agents` **core** methods, the fleet plugin does not register them. However, **the `label=` parameter of `spawn` is fleet-only**: wrapped around core spawn by `meiva_builtins/plugins/meiva_fleet/plugin.py:_spawn_with_label` (:328-353) via monkeypatch (**not** `register_namespace_member`); after disabling fleet, `spawn(label=…)` raises `TypeError`, and `create_and_assign` also disappears.
+
+## API
+
+### `meiva.agents.spawn(prompt=None, fork_from=None, machine=None, config_overlay=None, label=None) -> int`
+
+Creates a new agent, returns its agent_id.
+
+| Parameter | Description |
+|------|------|
+| `prompt` | First message; omit = agent idle after creation |
+| `fork_from` | Copy that agent's conversation state to the new agent |
+| `machine` | Target machine; omit = current machine (`meiva.self.MACHINE_SPEC.name`) |
+| `config_overlay` | Per-field config override, e.g. `{"llm_model": "..."}` |
+| `label` | Initial role/name; omit = auto-named. **fleet-only**: provided by fleet's spawn wrap; unavailable when fleet is disabled |
+
+### `meiva.agents.fork_from` (parameter of spawn, not a standalone function)
+
+`fork_from` is a parameter of `spawn`, not a standalone function. Pass the id of an existing agent, and the new agent will copy its full conversation state — suitable for splitting work: after the parent agent accumulates context, fork a child agent to continue a specific subtask.
+
+### `meiva.agents.terminate(agent_id: int, *, message: str | None = None, force: bool = False, kill_all_shell_sessions: bool = False) -> TerminateOutcome`
+
+Terminates an agent. A terminated agent is resurrected by any new message, including one from its own shell sessions or watchers.
+
+- Default: agent exits after completing the current turn
+- `message`: retain a final message for the next resurrection without another response
+- `force=True`: request interruption when a clean stop cannot progress
+- `kill_all_shell_sessions=True`: also kill every shell session the agent owns (watchers included; `meiva.ui.serve` pages keep running), silently — right before a graceful termination applies, or at once for `force=True` (swept again once the agent's work ended) / an already-terminated agent
+- Result: reads as the acceptance status string (`enqueued` / `already_terminated`); `enqueued` confirms acceptance, not exit or completion of owned work. It carries `open_tasks` — the tasks the agent still owns as it goes down (at most five, newest first), or None — and `shell_sessions`: what the shell-session kill did (`when` = `now` with the `killed` ids, or `at_exit`), or None when none was requested
+
+### `meiva.agents.restart(agent_id: int) -> RestartResult`
+
+Restart agent process. Agent completes the current turn then restarts as a new process, keeping the same agent_id.
+
+### `meiva.agents.resurrect(agent_id: int, prompt: str) -> ResurrectResult`
+
+Resurrect a terminated agent. The agent retains its previous conversation state and receives `prompt` to understand why it was woken.
+
+- `prompt` is required — lets the agent know the context
+- Returns `ALREADY_ALIVE` for an already alive agent
+- Raises `AgentNotFound` for a nonexistent agent_id
+
+## Lifecycle States
+
+```
+IDLING (unclaimed) ──claim──→ RUNNING ──→ IDLING
+                │              │           │
+                │
+                ↓ (fails)
+           TERMINATED ←── terminate (from any state)
+                │
+                └── resurrect ──→ IDLING (unclaimed; retains conversation state)
+```
+
+## Typical Usage Patterns
+
+### Parallel Decomposition
+
+```python
+from uuid import uuid4
+
+# Break down a large task into independent subtasks, spawn a worker for each
+worker_ids = []
+for task in sub_tasks:
+    wid = meiva.agents.spawn(
+        prompt=task,
+        config_overlay={"llm_model": "claude-sonnet-4-5"},
+        label=f"worker-{task.topic}",
+     idempotency_key=str(uuid4()))
+    worker_ids.append(wid)
+
+# Then idle, waiting for each worker to report results via send_message
+```
+
+### Fork Pattern
+
+```python
+from uuid import uuid4
+
+# Current agent has accumulated context, fork a child agent to handle a specific direction
+child_id = meiva.agents.spawn(
+    prompt="Continue analyzing this lead...",
+    fork_from=meiva.self.AGENT_ID,
+    label="Lead Analyst",
+ idempotency_key=str(uuid4()))
+```
+
+## Relationship with Other Subsystems
+
+- [[neighbors.meiva.okf.md]] — spawn/fork/resurrect establish ties, terminate does not affect existing ties
+- [[self.meiva.okf.md]] — label can be specified during spawn
+- [[tasks.meiva.okf.md]] — task owner is an agent_id, agent must exist when changing
+- [[meiva_builtins/plugins/meiva_fleet/docs/meiva_fleet.meiva.okf.md]] — Overview

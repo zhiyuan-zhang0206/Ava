@@ -1,0 +1,156 @@
+"""Register media for delivery through the exec turn's state update.
+
+`meiva.self.attach` appends each registration to `meiva.state_update["attach"]`; the exec node takes
+the entries out of the delta it commits, validates them, parks them in the `attach` channel of the
+checkpointed state and turns them into one media message appended right after the exec output of the
+registering turn (user ruling 2026-08-26). The SDK keeps no buffer of its own.
+"""
+
+from __future__ import annotations
+
+from collections.abc import Callable
+from pathlib import Path
+
+from base.lm.attach.constants import (
+    ATTACH_MAX_FILE_BYTES,
+    ATTACH_MAX_LABEL_CHARS,
+    ATTACH_MEDIA_MIME,
+)
+from base.lm.catalog import ModelCatalog
+from meiva.sdk_surface import process_context
+from meiva.sdk_surface.validation import coerce_str
+
+# The graph-state channel a registration is appended to (`BaseAgentState.attach`).
+_ATTACH_CHANNEL = "attach"
+
+
+def media_gated_members(model: str, *, catalog: ModelCatalog) -> frozenset[str]:
+    """Dotted ``meiva`` member paths unavailable for `model`'s media capability
+    — ``meiva.self.attach`` on a text-only model (user ruling 2026-08-28). The
+    help() renderer hides these from the SDK docs; empty for a media-capable
+    model."""
+    from base.lm.registry import resolve_available_model
+
+    return _gated(
+        _attach_unavailable_reason(
+            resolve_available_model(model, models=catalog.models), catalog=catalog
+        )
+    )
+
+
+def own_media_gated_members() -> frozenset[str]:
+    """`media_gated_members` for the model of the process this runs in — the exec child, whose
+    settings carry its agent's overlay."""
+    from meiva.sdk_surface import settings as sdk_settings
+
+    return _gated(_attach_unavailable_reason(catalog=sdk_settings.model_catalog()))
+
+
+def _gated(unavailable_reason: str | None) -> frozenset[str]:
+    return frozenset() if unavailable_reason is None else frozenset({"meiva.self.attach"})
+
+
+def _current_model() -> str:
+    """The agent's configured model resolved through any withdrawal fallback.
+
+    Capability gates judge the model that will actually run, so a withdrawn id
+    is gated as its fallback (task #3212)."""
+    from base.lm.registry import resolve_available_model
+    from meiva.sdk_surface import settings as _settings
+
+    return resolve_available_model(
+        _settings.agent_setting("llm_model"), models=_settings.model_catalog().models
+    )
+
+
+def _attach_unavailable_reason(model: str | None = None, *, catalog: ModelCatalog) -> str | None:
+    """Why ``attach`` is unavailable for `model` (default: this process's agent's), or None.
+
+    A model with an empty attach-modality set (text-only, or an explicit empty
+    ``attach_modalities`` declaration) cannot receive any attached media, so
+    registering files for its next turn is a contradiction — the SDK docs drop
+    the member and the call fails with this reason (user ruling 2026-08-28)."""
+    from base.lm.registry import attach_modalities_for_model
+
+    model = model or _current_model()
+    if attach_modalities_for_model(
+        model,
+        models=catalog.models,
+        vision_prefixes={prefix: binding.vision for prefix, binding in catalog.bindings.items()},
+    ):
+        return None
+    return f"your model ({model}) is text-only and cannot receive media attachments"
+
+
+def _validate_modality(suffix: str) -> None:
+    """Reject a file whose modality the current model's attach set does not
+    include — a clear error at registration, never a silent pack-time skip
+    (user ruling 2026-08-28)."""
+    from base.lm.registry import attach_modalities_for_model
+    from meiva.sdk_surface import settings as sdk_settings
+
+    catalog = sdk_settings.model_catalog()
+    model = _current_model()
+    mime = ATTACH_MEDIA_MIME[suffix]
+    modality = "pdf" if mime == "application/pdf" else mime.split("/", maxsplit=1)[0]
+    allowed = attach_modalities_for_model(
+        model,
+        models=catalog.models,
+        vision_prefixes={prefix: binding.vision for prefix, binding in catalog.bindings.items()},
+    )
+    if modality in allowed:
+        return
+    raise ValueError(
+        f"attachment modality {modality!r} is not supported by your model ({model}); "
+        f"supported modalities: {', '.join(sorted(allowed)) or 'none'}"
+    )
+
+
+def register(path: str | Path, *, label: str | None, resolve: Callable[[str | Path], Path]) -> None:
+    """The body of `meiva.self.attach`: validate and record one media registration.
+
+    `resolve` is the files namespace's path resolution, supplied by the caller so this module
+    stays below `meiva.files`.
+    """
+    from meiva.sdk_surface import settings as sdk_settings
+
+    if reason := _attach_unavailable_reason(catalog=sdk_settings.model_catalog()):
+        raise RuntimeError(
+            f"meiva.self.attach is unavailable: {reason}; switch to a vision-capable model"
+        )
+    path = coerce_str(path, "path", allow_types=(Path,))
+    label = coerce_str(label, "label", allow_none=True)
+
+    bound = process_context.ambient_context()
+    borrowed = bound is not None and bound.identity is not None and bound.identity.lease is not None
+    if not process_context.in_exec_turn() or borrowed:
+        raise RuntimeError(
+            "meiva.self.attach only works inside an agent turn (execute_code); "
+            "outside a turn there is no runner to deliver the attachment"
+        )
+    resolved = resolve(path).resolve()
+    if not resolved.is_file():
+        raise FileNotFoundError(f"path {str(path)!r} does not name an existing file ({resolved})")
+    suffix = resolved.suffix.lower()
+    if suffix not in ATTACH_MEDIA_MIME:
+        supported = ", ".join(sorted(ATTACH_MEDIA_MIME))
+        raise ValueError(
+            f"unsupported attachment suffix {resolved.suffix!r}; supported suffixes: {supported}; "
+            "text files belong in exec output or meiva.understand"
+        )
+    _validate_modality(suffix)
+    if resolved.stat().st_size > ATTACH_MAX_FILE_BYTES:
+        raise ValueError(f"attachment exceeds the 20 MiB per-file limit: {resolved}")
+    if not isinstance(label, str | None):
+        raise TypeError("attachment label must be a str or None")
+    if label is not None and len(label) > ATTACH_MAX_LABEL_CHARS:
+        raise ValueError(f"attachment label exceeds {ATTACH_MAX_LABEL_CHARS} characters")
+    update = process_context.get_state_update()
+    if not isinstance(update, dict):
+        raise TypeError(
+            f"meiva.state_update must stay a dict, got {type(update).__name__} (attachment)"
+        )
+    update[_ATTACH_CHANNEL] = [
+        *update.get(_ATTACH_CHANNEL, []),
+        {"path": str(resolved), "label": label},
+    ]

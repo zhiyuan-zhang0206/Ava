@@ -6,10 +6,10 @@ from loguru import logger
 
 from agent.execution import child
 from agent.graph.exec.protocol import ResultPayload
-from ava.sdk_surface import install
-from ava.tests.fixtures.pin_agent import pin_agent
 from base.agents.sdk import call_policy
 from base.packages.plugins.extensions import ExtensionRegistry, PluginContributions, SdkNamespace
+from meiva.sdk_surface import install
+from meiva.tests.fixtures.pin_agent import pin_agent
 
 
 def _assert_outcome(
@@ -79,7 +79,7 @@ def test_run_code_collects_sampling_at_its_result_boundary(
     reports: list[str] = []
     sink = logger.add(lambda message: reports.append(str(message)))
     try:
-        child.run_code("import ava; ava.probe.body()", payload)
+        child.run_code("import meiva; meiva.probe.body()", payload)
         assert payload.code_reached
         _assert_outcome(payload, outcome, sampling, body_error, reports)
         assert sampling.error is None or sampling.error[0] is refresh_error

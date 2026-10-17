@@ -2,7 +2,7 @@
 and a real pg_dump round-trip against the session's provisioned Postgres.
 
 Every clock here is pinned: the module decides *when* in cluster time
-(`AVA_TIMEZONE`) and *names* dumps in UTC, so a test that let either fall back
+(`MEIVA_TIMEZONE`) and *names* dumps in UTC, so a test that let either fall back
 to the host's timezone would pass or fail by which machine ran it.
 """
 
@@ -65,10 +65,12 @@ def disable_offsite(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(offsite, "publish", _skip)
 
 
-def spawn_backup_lock_holder(ava_home: Path, ready: Path, hold_s: float) -> subprocess.Popen[bytes]:
+def spawn_backup_lock_holder(
+    meiva_home: Path, ready: Path, hold_s: float
+) -> subprocess.Popen[bytes]:
     """A separate interpreter that takes `backup_lock`, signals, and holds it."""
     env = dict(os.environ)
-    env["AVA_HOME"] = str(ava_home)
+    env["MEIVA_HOME"] = str(meiva_home)
     return subprocess.Popen(  # noqa: S603
         [
             sys.executable,
@@ -108,7 +110,7 @@ def test_due_at_hour_with_no_dumps(bdir: Path) -> None:
 
 
 def test_not_due_again_after_todays_dump(bdir: Path) -> None:
-    _touch(bdir, "ava-20260610T100001Z.dump")
+    _touch(bdir, "meiva-20260610T100001Z.dump")
     assert not backup.is_due(
         cluster_instant(2026, 6, 10, 9, 0),
         clock_factory=Clock.from_settings,
@@ -117,7 +119,7 @@ def test_not_due_again_after_todays_dump(bdir: Path) -> None:
 
 
 def test_due_again_the_next_day(bdir: Path) -> None:
-    _touch(bdir, "ava-20260609T100001Z.dump")
+    _touch(bdir, "meiva-20260609T100001Z.dump")
     assert backup.is_due(
         cluster_instant(2026, 6, 10, settings.services.backup_hour, 0),
         clock_factory=Clock.from_settings,
@@ -127,7 +129,7 @@ def test_due_again_the_next_day(bdir: Path) -> None:
 
 def test_catchup_after_downtime(bdir: Path) -> None:
     """Host down at 03:00 -> the first tick later that day is still due."""
-    _touch(bdir, "ava-20260609T100001Z.dump")
+    _touch(bdir, "meiva-20260609T100001Z.dump")
     assert backup.is_due(
         cluster_instant(2026, 6, 10, 14, 30),
         clock_factory=Clock.from_settings,
@@ -176,7 +178,7 @@ def test_day_boundary_is_cluster_time_not_host_time(
     daily backup was skipped silently — no error, no log, just no dump.
     """
     monkeypatch.setattr(settings.general, "timezone", "Asia/Shanghai")
-    _touch(bdir, "ava-20260609T190000Z.dump")  # 03:00 Jun-10 Shanghai
+    _touch(bdir, "meiva-20260609T190000Z.dump")  # 03:00 Jun-10 Shanghai
 
     today = datetime(2026, 6, 9, 20, 0, tzinfo=UTC)  # 04:00 Jun-10 Shanghai
     for host_tz in ("Asia/Shanghai", "America/Los_Angeles", "Pacific/Kiritimati"):
@@ -235,7 +237,7 @@ def test_dump_name_is_utc_stamped(
     monkeypatch.setattr(backup.subprocess, "run", _fake_run)
     path = backup.run_backup(
         datetime(2026, 6, 10, 3, 0, tzinfo=ZoneInfo("Asia/Shanghai")),
-        db_url="dbname=ava",
+        db_url="dbname=meiva",
         db=database,
         is_remote_reader=lambda: settings.data_plane.is_remote,
         keep_reader=lambda: settings.services.backup_keep,
@@ -243,7 +245,7 @@ def test_dump_name_is_utc_stamped(
         bucket_reader=lambda: settings.services.backup_offsite_bucket,
         credentials_file_reader=lambda: settings.services.backup_offsite_credentials_file,
     )
-    assert path.name == "ava-20260609T190000Z.dump.enc"
+    assert path.name == "meiva-20260609T190000Z.dump.enc"
 
 
 def test_run_backup_can_defer_offsite_publish(
@@ -268,7 +270,7 @@ def test_run_backup_can_defer_offsite_publish(
 
     artifact = backup.run_backup(
         cluster_instant(2026, 6, 10, 3, 0),
-        db_url="dbname=ava",
+        db_url="dbname=meiva",
         publish=False,
         db=database,
         is_remote_reader=lambda: settings.data_plane.is_remote,
@@ -286,7 +288,7 @@ def test_publish_offsite_module_entry_publishes_the_named_artifact(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """The detached uploader entry delegates one existing artifact to idempotent publishing."""
-    artifact = tmp_path / "ava-20260916T030000Z.dump.enc"
+    artifact = tmp_path / "meiva-20260916T030000Z.dump.enc"
     artifact.write_bytes(b"encrypted")
     published: list[tuple[Path, str]] = []
 
@@ -320,7 +322,7 @@ def test_publish_offsite_module_entry_publishes_the_named_artifact(
 def test_publish_offsite_entry_rejects_a_malformed_root(
     root: str, tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    artifact = tmp_path / "ava-20260916T030000Z.dump.enc"
+    artifact = tmp_path / "meiva-20260916T030000Z.dump.enc"
     artifact.write_bytes(b"encrypted")
 
     with pytest.raises(SystemExit) as raised:
@@ -338,7 +340,7 @@ def test_db_size_breakdown_real_db(db_conn: Any, database: Database) -> None:
     _ = db_conn  # dependency: the session cluster is up
     base_url, _name = settings.data_plane.db_url.rsplit("/", 1)
     admin_url = f"{base_url}/postgres"
-    name = f"ava_test_backup_{os.getpid()}_{int(time.time() * 1_000_000)}"
+    name = f"meiva_test_backup_{os.getpid()}_{int(time.time() * 1_000_000)}"
     url = f"{base_url}/{name}"
     with psycopg.connect(admin_url, autocommit=True) as admin, admin.cursor() as cur:
         cur.execute(sql.SQL("CREATE DATABASE {}").format(sql.Identifier(name)))
@@ -413,7 +415,7 @@ def test_run_backup_repairs_storage_permissions(
     monkeypatch.setattr(backup.subprocess, "run", _fake_run)
     target = backup.run_backup(
         cluster_instant(2026, 6, 10, 3, 0),
-        db_url="dbname=ava",
+        db_url="dbname=meiva",
         db=database,
         is_remote_reader=lambda: settings.data_plane.is_remote,
         keep_reader=lambda: settings.services.backup_keep,
@@ -428,12 +430,12 @@ def test_run_backup_repairs_storage_permissions(
 
 def test_prune_order_survives_the_dst_fold(bdir: Path) -> None:
     """DST-fold dumps order by their UTC instants, preserving both repeated wall times."""
-    pdt = _touch(bdir, "ava-20261101T083000Z.dump")  # 01:30 PDT
-    pst = _touch(bdir, "ava-20261101T093000Z.dump")  # 01:30 PST, one hour later
+    pdt = _touch(bdir, "meiva-20261101T083000Z.dump")  # 01:30 PDT
+    pst = _touch(bdir, "meiva-20261101T093000Z.dump")  # 01:30 PST, one hour later
     assert [p for _ts, p in backup.managed_dumps(bdir)] == [pdt, pst]
 
     for i in range(2, settings.services.backup_keep + 1):
-        _touch(bdir, f"ava-202611{i:02d}T090000Z.dump")
+        _touch(bdir, f"meiva-202611{i:02d}T090000Z.dump")
     assert backup.prune(bdir, keep_reader=lambda: settings.services.backup_keep) == [
         pdt
     ]  # the earlier half of the fold, deterministically
@@ -447,13 +449,13 @@ def test_foreign_files_ignored(bdir: Path) -> None:
     pre-cutover naming and the `pre-update` / `pitr-activation` kind segments."""
     foreign = [
         _touch(bdir, "manual.dump"),
-        _touch(bdir, "ava-before-migration.dump"),
+        _touch(bdir, "meiva-before-migration.dump"),
         _touch(bdir, "notes.txt"),
-        _touch(bdir, "ava-20260610-030001.dump"),
-        _touch(bdir, "ava-20260610T100001Z.pre-update.dump.enc"),
+        _touch(bdir, "meiva-20260610-030001.dump"),
+        _touch(bdir, "meiva-20260610T100001Z.pre-update.dump.enc"),
         _touch(
             bdir,
-            "ava-20260610T100001Z.pitr-activation-11111111-1111-1111-1111-111111111111.dump.enc",
+            "meiva-20260610T100001Z.pitr-activation-11111111-1111-1111-1111-111111111111.dump.enc",
         ),
     ]
     assert backup.is_due(
@@ -466,7 +468,7 @@ def test_foreign_files_ignored(bdir: Path) -> None:
 
 
 def test_prune_keeps_newest(bdir: Path) -> None:
-    names = [f"ava-202606{i:02d}T100000Z.dump" for i in range(1, 11)]  # 10 days, oldest first
+    names = [f"meiva-202606{i:02d}T100000Z.dump" for i in range(1, 11)]  # 10 days, oldest first
     for name in names:
         _touch(bdir, name)
     removed = backup.prune(bdir, keep_reader=lambda: settings.services.backup_keep)
@@ -479,7 +481,7 @@ def test_prune_keep_follows_config(bdir: Path, monkeypatch: pytest.MonkeyPatch) 
     """The daily retention window resolves from ``services.backup_keep``."""
     monkeypatch.setattr(settings.services, "backup_keep", 3)
     for day in range(1, 6):
-        _touch(bdir, f"ava-2026060{day}T100000Z.dump")
+        _touch(bdir, f"meiva-2026060{day}T100000Z.dump")
     removed = backup.prune(bdir, keep_reader=lambda: settings.services.backup_keep)
     assert len(removed) == 2
     assert len(backup.managed_dumps(bdir)) == 3
@@ -657,7 +659,7 @@ def test_run_backup_keeps_database_password_out_of_argv(
     password = "password-not-in-argv"  # noqa: S105 — assertion sentinel, not a credential
     backup.run_backup(
         cluster_instant(2026, 8, 8, 3, 0),
-        db_url=f"postgresql://ava:{password}@127.0.0.1:5433/ava",
+        db_url=f"postgresql://meiva:{password}@127.0.0.1:5433/meiva",
         db=database,
         is_remote_reader=lambda: settings.data_plane.is_remote,
         keep_reader=lambda: settings.services.backup_keep,

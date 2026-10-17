@@ -14,21 +14,21 @@ from base.log.tests.log_records import LogRecords
 from base.log.tests.log_records import loguru_records as loguru_records
 
 _RUNNER_PW = "runner-secret-token"
-_DB_URL = "postgresql://ava@127.0.0.1:5433/ava"
+_DB_URL = "postgresql://meiva@127.0.0.1:5433/meiva"
 
 
 def _pg_url(pw: str, *, host: str) -> str:
-    return f"postgresql://ava:{pw}@{host}/ava"
+    return f"postgresql://meiva:{pw}@{host}/meiva"
 
 
 def _write_gateway_env(tmp_path: Path, runner_pw: str | None = None, db_url: str = _DB_URL) -> None:
     lines = [
-        f"AVA_DB_URL={db_url}",
-        "AVA_REDIS_ADMIN_PASSWORD=redis-admin-only",
-        "AVA_REDIS_PASSWORD=redis-runtime-only",
+        f"MEIVA_DB_URL={db_url}",
+        "MEIVA_REDIS_ADMIN_PASSWORD=redis-admin-only",
+        "MEIVA_REDIS_PASSWORD=redis-runtime-only",
     ]
     if runner_pw is not None:
-        lines.append(f"AVA_RUNNER_DB_PASSWORD={runner_pw}")
+        lines.append(f"MEIVA_RUNNER_DB_PASSWORD={runner_pw}")
     (tmp_path / ".env").write_text("\n".join(lines) + "\n")
 
 
@@ -43,24 +43,24 @@ def test_local_plane_serves_the_endpoint_not_its_active_generation(
     _write_gateway_env(tmp_path, runner_pw=_RUNNER_PW)
     secret = seed_write_generation(tmp_path)
     vals = _served(tmp_path)
-    parts = urlsplit(vals["AVA_DB_URL"])
-    assert (parts.username, parts.password) == ("ava", None)
-    assert (parts.hostname, parts.port, parts.path) == ("127.0.0.1", 5433, "/ava")
+    parts = urlsplit(vals["MEIVA_DB_URL"])
+    assert (parts.username, parts.password) == ("meiva", None)
+    assert (parts.hostname, parts.port, parts.path) == ("127.0.0.1", 5433, "/meiva")
     payload = "".join(vals.values())
     for role in (secret.roles.gateway, secret.roles.runner):
         assert role.name not in payload
         assert role.password not in payload
     assert _RUNNER_PW not in payload
-    assert "AVA_RUNNER_DB_PASSWORD" not in vals
-    assert "AVA_REDIS_ADMIN_PASSWORD" not in vals
-    assert "AVA_REDIS_PASSWORD" not in vals
+    assert "MEIVA_RUNNER_DB_PASSWORD" not in vals
+    assert "MEIVA_REDIS_ADMIN_PASSWORD" not in vals
+    assert "MEIVA_REDIS_PASSWORD" not in vals
 
 
 def test_home_without_a_ledger_serves_the_endpoint_too(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     _write_gateway_env(tmp_path, runner_pw=_RUNNER_PW)
-    assert urlsplit(_served(tmp_path)["AVA_DB_URL"]).password is None
+    assert urlsplit(_served(tmp_path)["MEIVA_DB_URL"]).password is None
 
 
 def test_remote_plane_strips_the_provider_password(
@@ -70,9 +70,9 @@ def test_remote_plane_strips_the_provider_password(
     _write_gateway_env(tmp_path, runner_pw=_RUNNER_PW, db_url=provider_url)
     monkeypatch.setattr(config.settings.data_plane, "db_url", provider_url)
     vals = _served(tmp_path)
-    parts = urlsplit(vals["AVA_DB_URL"])
+    parts = urlsplit(vals["MEIVA_DB_URL"])
     assert (parts.username, parts.password, parts.hostname) == (
-        "ava",
+        "meiva",
         None,
         "db.provider.example",
     )
@@ -87,16 +87,16 @@ def test_missing_url_refuses_before_boot_time_fallback(
     tmp_path: Path,
     loguru_records: LogRecords,
 ) -> None:
-    snapshot = {"AVA_RUNNER_DB_PASSWORD": "new-private-password"}
+    snapshot = {"MEIVA_RUNNER_DB_PASSWORD": "new-private-password"}
     if missing_url is not None:
-        snapshot["AVA_DB_URL"] = missing_url
+        snapshot["MEIVA_DB_URL"] = missing_url
     read = Mock(return_value=snapshot)
 
     def read_snapshot(_owner: ConfigAuthority) -> dict[str, str]:
         return read()
 
     monkeypatch.setattr(ConfigAuthority, "read_env_aliases", read_snapshot)
-    with pytest.raises(ValueError, match="AVA_DB_URL is missing") as caught:
+    with pytest.raises(ValueError, match="MEIVA_DB_URL is missing") as caught:
         config.bootstrap_config_values(
             ConfigAuthority(config.settings, config.settings, tmp_path / ".env"),
             provider_key_envs=(),
@@ -114,16 +114,16 @@ def test_served_payload_excludes_the_offsite_backup_destination(
     env_path = tmp_path / ".env"
     env_path.write_text(
         env_path.read_text()
-        + "AVA_BACKUP_OFFSITE_ENDPOINT=https://oss-cn-shanghai.aliyuncs.com\n"
-        + "AVA_BACKUP_OFFSITE_BUCKET=backups\n"
-        + "AVA_BACKUP_OFFSITE_CREDENTIALS_FILE=/private/oss.json\n"
-        + "AVA_WALG_CONFIG_FILE=/private/walg.json\n"
+        + "MEIVA_BACKUP_OFFSITE_ENDPOINT=https://oss-cn-shanghai.aliyuncs.com\n"
+        + "MEIVA_BACKUP_OFFSITE_BUCKET=backups\n"
+        + "MEIVA_BACKUP_OFFSITE_CREDENTIALS_FILE=/private/oss.json\n"
+        + "MEIVA_WALG_CONFIG_FILE=/private/walg.json\n"
     )
     vals = _served(tmp_path)
     for alias in (
-        "AVA_BACKUP_OFFSITE_ENDPOINT",
-        "AVA_BACKUP_OFFSITE_BUCKET",
-        "AVA_BACKUP_OFFSITE_CREDENTIALS_FILE",
-        "AVA_WALG_CONFIG_FILE",
+        "MEIVA_BACKUP_OFFSITE_ENDPOINT",
+        "MEIVA_BACKUP_OFFSITE_BUCKET",
+        "MEIVA_BACKUP_OFFSITE_CREDENTIALS_FILE",
+        "MEIVA_WALG_CONFIG_FILE",
     ):
         assert alias not in vals

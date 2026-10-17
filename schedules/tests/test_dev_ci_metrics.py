@@ -36,7 +36,7 @@ def test_fire_runs_default_repo_and_logs_previous_complete_day(
     calls: list[list[str]] = []
 
     def run_exporter(args: list[str], *, producer: Callable[[], Any]) -> int:
-        assert producer == module.ava.context.clients.event_pipeline
+        assert producer == module.meiva.context.clients.event_pipeline
         calls.append(args)
         return 0
 
@@ -63,7 +63,7 @@ def test_fire_reports_failed_collector(monkeypatch: pytest.MonkeyPatch) -> None:
     module = _load()
 
     def failed_exporter(args: list[str], *, producer: Callable[[], Any]) -> int:
-        assert producer == module.ava.context.clients.event_pipeline
+        assert producer == module.meiva.context.clients.event_pipeline
         return 1
 
     monkeypatch.setattr(
@@ -88,7 +88,7 @@ def test_report_agent_override_rejects_nonnumeric_value(
     monkeypatch.setenv(module._REPORT_AGENT_ENV, "not-an-id")
 
     with pytest.raises(
-        RuntimeError, match="AVA_CI_METRICS_REPORT_AGENT must be a numeric agent id"
+        RuntimeError, match="MEIVA_CI_METRICS_REPORT_AGENT must be a numeric agent id"
     ):
         module._report_agent()
 
@@ -107,8 +107,8 @@ def test_report_failure_uses_exact_label_and_existing_message(
         ]
     )
     send = Mock()
-    monkeypatch.setattr(module.ava.agents, "list_agents", find)
-    monkeypatch.setattr(module.ava.agents, "send_message", send)
+    monkeypatch.setattr(module.meiva.agents, "list_agents", find)
+    monkeypatch.setattr(module.meiva.agents, "send_message", send)
 
     module._report_failure("exporter failed")
 
@@ -120,7 +120,7 @@ def test_report_failure_uses_exact_label_and_existing_message(
         17,
         "Dev/CI metrics collection failed:\nexporter failed\n"
         "Check the schedule log; backfill with `scripts/ci/pull_requests/runs_export.py --repo "
-        "zhiyuan-zhang0206/Ava --print-snapshot`.",
+        "zhiyuan-zhang0206/Meiva --print-snapshot`.",
     )
 
 

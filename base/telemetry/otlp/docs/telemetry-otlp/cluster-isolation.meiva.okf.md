@@ -1,0 +1,61 @@
+---
+type: doc
+title: "Telemetry cluster isolation"
+description: "The home-derived cluster identity and lgtm-host gates that keep co-located Meiva homes from sharing observability by accident."
+tags:
+- base
+- telemetry
+- otlp
+- observability
+- isolation
+---
+
+# Telemetry cluster isolation
+
+## Identity
+
+Every event, metric, and trace Resource carries `cluster`, resolved without the
+data plane from `cluster.home_label(meiva_home())`, then the home slug, then
+`.unknown`. Event JSON and log attributes carry the same value. The designated
+LGTM collector drops a record only when its non-null cluster differs from its
+own home label; null Resources remain valid for the collector's filelog/infra
+pipelines.
+
+## Lifecycle and producer gates
+
+The implicit loopback event exporter requires a registered machine identity and
+the production cluster label `.meiva`. Tests, ad-hoc processes with hostname
+fallback, and non-production homes do not export by default; their unified
+events continue into the local JSONL mirror. An explicit
+`MEIVA_TELEMETRY_OTLP_ENDPOINT` is the operator escape hatch and opts any process
+into a caller-managed collector before the production-identity check.
+
+`$MEIVA_HOME/lgtm-host` names the production gateway home that owns the host's
+LGTM stack and local collector. A production gateway without the marker neither
+installs that collector nor exports logs, metrics, or traces to the implicit
+loopback endpoint. Each explicitly owned backend freezes its producer verdict on first enabled
+use and warns when this marker gate declines export. Roots supply their own
+`MachineIdentity` and unit home; trace retry/arm callbacks retain those same
+inputs. A station capability counts only for the supplied unit home, while a
+foreign home needs its own marker. Missing names decline implicit export and
+missing roles preserve bootstrap/runner and marker-only behavior. Invalid roles
+and unexpected identity defects propagate outside transport failure isolation;
+they never become a cached disabled verdict.
+
+Production-identity pure agent-runner homes retain their authenticated relay
+collector regardless of the marker: they are transport participants, not
+competing backend owners. Non-production runners require an explicit endpoint.
+The collector's Postgres receiver reads the home's own instance over its
+owner-only socket as the password-less monitoring role (peer), so it carries no
+database credential; a remote-managed plane omits it.
+
+## Read boundary
+
+Gateway Loki reads follow the same ownership rule. An unmarked gateway cannot
+use the implicit loopback Loki URL and receives a clean HTTP 503 before any
+network request; an explicit `MEIVA_TELEMETRY_LOKI_URL` is the operator escape
+hatch. Dashboard and fleet callers pass their current cluster label, and the
+production alert rules filter `cluster=".meiva"` after JSON parsing.
+That strict filter excludes preview-cluster pollution.
+
+Parent node: [[telemetry-otlp.meiva.okf.md|OTLP export backend & trace ship to Tempo]].

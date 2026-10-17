@@ -23,7 +23,7 @@ from base.cluster.dataplane.pg_throwaway_base import ThrowawayConfig
 @pytest.fixture
 def foreground_root(monkeypatch: pytest.MonkeyPatch, postgres_access: None) -> Iterator[Path]:
     """Use short socket paths and restrict every sweep to this test's instances."""
-    with tempfile.TemporaryDirectory(prefix="ava-fg-", dir="/tmp") as directory:
+    with tempfile.TemporaryDirectory(prefix="meiva-fg-", dir="/tmp") as directory:
         root = Path(directory)
         monkeypatch.setattr(pg_throwaway_base, "default_base", lambda: root)
         monkeypatch.setattr(pg_throwaway_base, "disk_fallback_base", lambda: root)
@@ -31,7 +31,7 @@ def foreground_root(monkeypatch: pytest.MonkeyPatch, postgres_access: None) -> I
             yield root
         finally:
             # Independent cleanup also runs when an assertion inside the context fails.
-            for data in root.glob("ava-pg-*/data"):
+            for data in root.glob("meiva-pg-*/data"):
                 if (data / "PG_VERSION").is_file():
                     subprocess.run(  # noqa: S603 -- only this test's own temporary PGDATA
                         [
@@ -84,7 +84,7 @@ def test_native_foreground_is_direct_child_and_reaped_on_context_exit(
     assert not psutil.pid_exists(pid)
     with pytest.raises(ChildProcessError):
         os.waitpid(pid, os.WNOHANG)
-    assert not list(foreground_root.glob("ava-pg-*"))
+    assert not list(foreground_root.glob("meiva-pg-*"))
 
 
 def test_startup_failure_reaps_the_native_postmaster(
@@ -104,7 +104,7 @@ def test_startup_failure_reaps_the_native_postmaster(
         scoped.setattr(pg_foreground.psycopg, "connect", no_connection)
         log = tmp_path / "pg.log"
         process = pg_foreground.start_foreground_postgres(
-            [str(pg_tools.pg_tool("postgres")), "--ava-invalid-start-option"], log=log
+            [str(pg_tools.pg_tool("postgres")), "--meiva-invalid-start-option"], log=log
         )
         try:
             with pytest.raises(RuntimeError, match="foreground Postgres exited"):
@@ -172,7 +172,7 @@ def _wait_mock_postmaster(process: subprocess.Popen[bytes]) -> None:
 def test_unreapable_foreground_retains_data_and_registration(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    instance = tmp_path / "ava-pg-owned"
+    instance = tmp_path / "meiva-pg-owned"
     data = instance / "data"
     data.mkdir(parents=True)
     sentinel = data / "retained"
@@ -241,12 +241,12 @@ def test_startup_timeout_keeps_the_child_handle_for_cleanup(
             pytest.fail("a failed readiness check must never yield a database URL")
             assert len(registrations) == 1
         if stop_fails:
-            [instance] = list(foreground_root.glob("ava-pg-*"))
+            [instance] = list(foreground_root.glob("meiva-pg-*"))
             assert (instance / "data" / "PG_VERSION").is_file()
             assert (instance / "owner.lock").is_file()
             assert not released
         else:
-            assert not list(foreground_root.glob("ava-pg-*"))
+            assert not list(foreground_root.glob("meiva-pg-*"))
             assert released == registrations
     finally:
         # The fake refuses to die; release only the locks created by this test.

@@ -19,7 +19,7 @@ prepended to `sys.path`) and reports the heavy modules the touch left in
 - the provider-registration surface (`base.lm.provider_api` plus the `lm_*`
   provider plugins loaded by `model_catalog`) must stay off
   the LM chat-model stack (task #3633);
-- the child's plugin autoload surface form (`ava.ensure_plugins_loaded(surface=True)`)
+- the child's plugin autoload surface form (`meiva.ensure_plugins_loaded(surface=True)`)
   must load the plugin surfaces only — no agent-runtime faces, no `agent.state`
   / `agent.hooks` / `agent.graph.*`, no graph/LM stack — and a later full call
   must upgrade by loading faces only, never re-executing a surface (task #3633,
@@ -28,7 +28,7 @@ prepended to `sys.path`) and reports the heavy modules the touch left in
   `read_request` + the surface load stay off the serde / `agent.state` / the
   faces; the first state use (materialize) resolves them (task #3633, leg-2 B3).
 - the first state use goes through the plugin surface's own call sites too:
-  `ava.cwd.set` as the child's very first state touch (absolute and relative)
+  `meiva.cwd.set` as the child's very first state touch (absolute and relative)
   lands both of its updates, and a stand-in handle held across materialization
   forwards to the rebound real handle (task #3665 — the update-first
   regression).
@@ -51,22 +51,22 @@ import pytest
 _REPO_ROOT = Path(__file__).resolve().parents[3]
 _PROBES = Path(__file__).with_name("child_lazy_imports.py")
 
-# Agent-launch markers: with AVA_AGENT_ID forwarded, `import ava` self-loads
+# Agent-launch markers: with MEIVA_AGENT_ID forwarded, `import meiva` self-loads
 # plugin namespaces (`agent_identity.is_launched_child`), inflating the import by ~13MB
 # and adding plugin modules (recon #3586 §2.6). A boot measurement must strip
 # them — mirroring measure-boot.sh's clean env.
 _CLEAN_ENV_STRIP = frozenset(
     {
-        "AVA_AGENT_ID",
-        "AVA_PROCESS_PROFILE",
-        "AVA_EXEC_REQUEST_FILE",
-        "AVA_EXEC_RESULT_FILE",
-        "AVA_EXEC_TIMEOUT_S",
-        "AVA_TURN_ID",
-        "AVA_SESSION_ID",
-        "AVA_LOG_DIR",
-        "AVA_AGENT_LABEL",
-        "AVA_AGENT_DIR",
+        "MEIVA_AGENT_ID",
+        "MEIVA_PROCESS_PROFILE",
+        "MEIVA_EXEC_REQUEST_FILE",
+        "MEIVA_EXEC_RESULT_FILE",
+        "MEIVA_EXEC_TIMEOUT_S",
+        "MEIVA_TURN_ID",
+        "MEIVA_SESSION_ID",
+        "MEIVA_LOG_DIR",
+        "MEIVA_AGENT_LABEL",
+        "MEIVA_AGENT_DIR",
     }
 )
 
@@ -143,7 +143,7 @@ def test_factory_reexports_the_registry_resolution() -> None:
 def test_child_surface_load_stays_off_the_agent_runtime() -> None:
     report = _run_probe("plugin_surface_load")
     surfaces = cast("list[object]", report["surfaces"])
-    assert "ava_builtins.plugins.ava_memory.plugin" in surfaces, (
+    assert "meiva_builtins.plugins.meiva_memory.plugin" in surfaces, (
         f"the surface load did not run — the probe is vacuous: {surfaces}"
     )
     assert report["faces"] == [], f"the surface load pulled agent-runtime faces: {report['faces']}"
@@ -157,7 +157,7 @@ def test_child_surface_upgrade_loads_faces_without_reexecuting_surfaces() -> Non
     report = _run_probe("plugin_surface_upgrade")
     faces = cast("list[object]", report["faces"])
     assert report["same_surface_identity"] is True, "the upgrade re-executed the surface module"
-    assert "ava_builtins.plugins.ava_memory.agent_runtime" in faces, (
+    assert "meiva_builtins.plugins.meiva_memory.agent_runtime" in faces, (
         f"the upgrade loaded no faces — the probe is vacuous: {faces}"
     )
 
@@ -177,7 +177,7 @@ def _craft_stateful_envelope(tmp_path: Path) -> Path:
 
     from agent.graph.exec.protocol import dumps_typed
 
-    tag, blob = dumps_typed({"ava_code__cwd": str(tmp_path)})
+    tag, blob = dumps_typed({"meiva_code__cwd": str(tmp_path)})
     req = tmp_path / "req-state.json"
     req.write_text(
         json.dumps(
@@ -239,8 +239,8 @@ def test_fresh_child_cwd_set_absolute_first_touch_lands_both_updates(tmp_path: P
     )
     keys = cast("list[str]", report["state_update_keys"])
     assert report["set"] == "ok", f"cwd.set as the first state touch failed: {report['set']}"
-    assert "ava_code__cwd" in keys, f"the cwd update never reached state_update: {keys}"
-    assert "ava_code__cwd_note" in keys, f"the cwd_note update never reached state_update: {keys}"
+    assert "meiva_code__cwd" in keys, f"the cwd update never reached state_update: {keys}"
+    assert "meiva_code__cwd_note" in keys, f"the cwd_note update never reached state_update: {keys}"
     assert report["cwd_after"] == str(target.resolve())
 
 
@@ -251,6 +251,6 @@ def test_fresh_child_cwd_set_relative_first_touch_resolves_against_snapshot(
     report = _run_probe("child_cwd_set_first_touch", str(_craft_stateful_envelope(tmp_path)), "sub")
     keys = cast("list[str]", report["state_update_keys"])
     assert report["set"] == "ok", f"cwd.set as the first state touch failed: {report['set']}"
-    assert "ava_code__cwd" in keys, f"the cwd update never reached state_update: {keys}"
-    assert "ava_code__cwd_note" in keys, f"the cwd_note update never reached state_update: {keys}"
+    assert "meiva_code__cwd" in keys, f"the cwd update never reached state_update: {keys}"
+    assert "meiva_code__cwd_note" in keys, f"the cwd_note update never reached state_update: {keys}"
     assert report["cwd_after"] == str((tmp_path / "sub").resolve())

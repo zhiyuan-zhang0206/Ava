@@ -50,7 +50,7 @@ const NO_AGENTS: number[] = [];
 
 const pathFor = (ids: readonly number[]) => `/insights/run/${ids.join(",")}`;
 
-// ava:ref ui/web/src/docs/frontend-components/run-timeline/window-reads.ava.okf.md#agent-view-ownership
+// meiva:ref ui/web/src/docs/frontend-components/run-timeline/window-reads.meiva.okf.md#agent-view-ownership
 export default function AgentViewPage({ params }: { params: Promise<{ agents: string }> }) {
   const t = useTranslations("runTimeline");
 

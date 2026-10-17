@@ -1,0 +1,11 @@
+exports = ["meiva_tests.py", "model_owner.py", "pin_agent.py", "sdk.py", "workspace.py"]
+
+[uses]
+"meiva_tests.py" = ["pin_agent.py"]
+"workspace.py" = ["pin_agent.py"]
+
+[debt.first-party-patch]
+"model_owner.py#monkeypatch.setattr meiva.__plugin_installation__" = 1
+"pin_agent.py#assignment meiva.context" = 1
+"pin_agent.py#del meiva.context" = 1
+"sdk.py#del meiva.context" = 1

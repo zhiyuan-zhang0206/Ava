@@ -123,7 +123,7 @@ def _agent_runner_rows(pool: ConnectionPool) -> list[tuple[str, bool]]:
     The gateway this gateway runs on is excluded by the role filter even
     though it is the local machine: inventory is agent-runner-only. An agent-runner
     that has not finished its startup UPSERT simply doesn't appear until it
-    registers. `stopped_at` marks an intentional `ava stop`; a stopped host
+    registers. `stopped_at` marks an intentional `meiva stop`; a stopped host
     stays a column but is reported unreachable without a dial (task #4127).
     """
     with pool.connection() as conn, conn.cursor() as cur:

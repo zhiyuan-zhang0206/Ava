@@ -1,9 +1,9 @@
-# Ava ops alert rules — Grafana Alerting, provisioned as code.
+# Meiva ops alert rules — Grafana Alerting, provisioned as code.
 #
 # Source of truth: this file. Converge renders the provisioning tree into the
-# home (`$AVA_HOME/lgtm/native/config/provisioning/`, copied verbatim by
+# home (`$MEIVA_HOME/lgtm/native/config/provisioning/`, copied verbatim by
 # `cli/commands/observability/lgtm_native.py`); native Grafana (port 3003 by
-# default, 53003 on the station via `AVA_LGTM_GRAFANA_PORT`) reads that
+# default, 53003 on the station via `MEIVA_LGTM_GRAFANA_PORT`) reads that
 # rendered copy. Alert-rule file changes do NOT hot-reload: they apply on the
 # next alerting reload or restart (see the README, "Retired rules").
 #
@@ -23,8 +23,8 @@
 #   attributes.
 # - INFRASTRUCTURE metrics (R8-R12, R14-R16, issue #46) come from each
 #   machine's OTel Collector sidecar (host/data-plane receivers plus its own
-#   queue/drop/uptime scrape) and live under `job="ava-infra"` with both
-#   `host` = the OS hostname (physical identity) and `machine_name` = the Ava
+#   queue/drop/uptime scrape) and live under `job="meiva-infra"` with both
+#   `host` = the OS hostname (physical identity) and `machine_name` = the Meiva
 #   roster identity baked from the unit at converge. Per the 2026-08-24 user
 #   ruling, rules group by `machine_name`, so units on one host remain separate
 #   series; each label keeps one meaning. Names below were read off a live
@@ -55,7 +55,7 @@
 # history.
 # Selector matchers are full-string regexes, unlike pipeline label filters
 # (substring), so multi-alternative event_name regexes match exact names.
-# - Prod events carry cluster=".ava"; co-located cluster events must not
+# - Prod events carry cluster=".meiva"; co-located cluster events must not
 #   participate in prod alert evaluation.
 # - Read side is strict: legacy records without a cluster dimension are excluded for up to the Loki event-stream retention window, so aggregate counts may read low during rollout.
 #   This is deliberate: allowing absent-cluster rows would keep the co-located preview leak visible in prod reads for the full retention window.
@@ -115,12 +115,12 @@
 apiVersion: 1
 groups:
   - orgId: 1
-    name: ava-ops
-    folder: Ava
+    name: meiva-ops
+    folder: Meiva
     interval: 1m
     rules:
       # ── R1: WARNING+ERROR spike (current 5m count > 3x the prior-15m rate, and ≥ 30) ──
-      - uid: ava-ops-warning-error-spike
+      - uid: meiva-ops-warning-error-spike
         title: "Event health: WARNING+ERROR+CRITICAL spike"
         condition: F
         for: 5m
@@ -130,16 +130,16 @@ groups:
         execErrState: OK
         labels:
           severity: error
-          ruleUID: ava-ops-warning-error-spike
+          ruleUID: meiva-ops-warning-error-spike
           metric: warn_error_rate
-          team: ava-ops
+          team: meiva-ops
         annotations:
           summary: "WARNING+ERROR+CRITICAL event spike (current 5m count {{ $values.C }}, prior-15m expectation ≤ {{ $values.D }})"
           description: >-
             Events with level ∈ warning/error/critical reached {{ $values.C }} in
             the last 5 minutes, over 3x the prior-15m average rate ({{ $values.D }}
             per 5m). Likely a service failure or error loop. See the Grafana panel
-            /grafana/d/ava-ops-main to locate the source.
+            /grafana/d/meiva-ops-main to locate the source.
         data:
           - refId: A
             datasourceUid: loki
@@ -151,7 +151,7 @@ groups:
                 uid: loki
               editorMode: code
               expr: >-
-                sum(count_over_time({service_name="unknown_service"} | json | cluster=".ava" |
+                sum(count_over_time({service_name="unknown_service"} | json | cluster=".meiva" |
                 category=~"telemetry|log" | level=~"warning|error|critical" [5m]))
               instant: true
               queryType: instant
@@ -168,7 +168,7 @@ groups:
                 uid: loki
               editorMode: code
               expr: >-
-                sum(count_over_time({service_name="unknown_service"} | json | cluster=".ava" |
+                sum(count_over_time({service_name="unknown_service"} | json | cluster=".meiva" |
                 category=~"telemetry|log" | level=~"warning|error|critical" [15m] offset 5m))
               instant: true
               queryType: instant
@@ -227,7 +227,7 @@ groups:
                     params: [E]
 
       # ── R2: SSE / event-log drop backlog (real drops in 10m > 100; p95≈13, degraded 160-342) ──
-      - uid: ava-ops-sse-drop-backlog
+      - uid: meiva-ops-sse-drop-backlog
         title: "Event-pipeline drop backlog (sse_drop / event_log_drop)"
         condition: D
         for: 5m
@@ -237,9 +237,9 @@ groups:
         execErrState: OK
         labels:
           severity: warning
-          ruleUID: ava-ops-sse-drop-backlog
+          ruleUID: meiva-ops-sse-drop-backlog
           metric: event_drop_rate
-          team: ava-ops
+          team: meiva-ops
         annotations:
           summary: "{{ $values.C }} real SSE/event-log drops in 10 minutes (threshold 100)"
           description: >-
@@ -259,7 +259,7 @@ groups:
                 uid: loki
               editorMode: code
               expr: >-
-                sum(sum_over_time({service_name="unknown_service", event_name=~"sse_drop|event_log_drop"} | json | cluster=".ava" |
+                sum(sum_over_time({service_name="unknown_service", event_name=~"sse_drop|event_log_drop"} | json | cluster=".meiva" |
                 category="telemetry" |
                 unwrap attributes_n [10m]))
               instant: true
@@ -302,7 +302,7 @@ groups:
       # not a SQL percentile — histogram_quantile over the latency buckets is
       # the same read the Insights Ops panel uses. The histogram only exists
       # while processes export OTLP metrics; absent data means NoData -> OK.
-      - uid: ava-ops-llm-latency-p95
+      - uid: meiva-ops-llm-latency-p95
         title: "LLM latency p95 above threshold"
         condition: D
         for: 10m
@@ -312,16 +312,16 @@ groups:
         execErrState: OK
         labels:
           severity: error
-          ruleUID: ava-ops-llm-latency-p95
+          ruleUID: meiva-ops-llm-latency-p95
           metric: llm_latency_p95
-          team: ava-ops
+          team: meiva-ops
         annotations:
           summary: "LLM call latency p95 at {{ $values.C }} ms — value at last evaluation (threshold 60000 ms)"
           description: >-
             The latest p95 of llm_usage latency over the last 10 minutes is
             {{ $values.C }} ms. The alert fires after this value remains above
             60s for 10 minutes (histogram_quantile over the
-            ava_llm_usage_latency histogram — an approximation of the exact
+            meiva_llm_usage_latency histogram — an approximation of the exact
             SQL percentile, same as the Ops panel). Usually a provider-side
             failure or slow request pile-up. No alert fires when the metric is
             absent.
@@ -337,7 +337,7 @@ groups:
               editorMode: code
               expr: >-
                 histogram_quantile(0.95, sum by (le)
-                (rate(ava_llm_usage_latency_milliseconds_bucket[10m])))
+                (rate(meiva_llm_usage_latency_milliseconds_bucket[10m])))
               instant: true
               range: false
             relativeTimeRange:
@@ -374,7 +374,7 @@ groups:
                     params: [C]
 
       # ── R5: delivery_stalled fresh backlog (>50 fresh stalls in 10m; current baseline 0) ──
-      - uid: ava-ops-delivery-stalled-backlog
+      - uid: meiva-ops-delivery-stalled-backlog
         title: "Delivery fresh backlog (delivery_stalled fresh)"
         condition: D
         for: 5m
@@ -384,9 +384,9 @@ groups:
         execErrState: OK
         labels:
           severity: warning
-          ruleUID: ava-ops-delivery-stalled-backlog
+          ruleUID: meiva-ops-delivery-stalled-backlog
           metric: delivery_stall_rate
-          team: ava-ops
+          team: meiva-ops
         annotations:
           summary: "{{ $values.C }} fresh delivery stalls in 10 minutes (age_s < 600, threshold 50)"
           description: >-
@@ -405,7 +405,7 @@ groups:
                 uid: loki
               editorMode: code
               expr: >-
-                sum(count_over_time({service_name="unknown_service", event_name="delivery_stalled"} | json | cluster=".ava" |
+                sum(count_over_time({service_name="unknown_service", event_name="delivery_stalled"} | json | cluster=".meiva" |
                 category="telemetry" |
                 attributes_age_s < 600 [10m]))
               instant: true
@@ -451,7 +451,7 @@ groups:
       # That covers the emitter stall AND a broken OTLP export path (the
       # 2026-08-12 incident class), at the cost of no longer distinguishing
       # them. When the stream flows, the query returns no data (NoData -> OK).
-      - uid: ava-ops-events-freshness
+      - uid: meiva-ops-events-freshness
         title: "Event stream stalled (no events in Loki)"
         condition: D
         for: 5m
@@ -461,9 +461,9 @@ groups:
         execErrState: OK
         labels:
           severity: error
-          ruleUID: ava-ops-events-freshness
+          ruleUID: meiva-ops-events-freshness
           metric: events_freshness
-          team: ava-ops
+          team: meiva-ops
         annotations:
           summary: "No events reached Loki in the last 5 minutes"
           description: >-
@@ -488,7 +488,7 @@ groups:
                 uid: loki
               editorMode: code
               expr: >-
-                absent_over_time({service_name="unknown_service"} | json | cluster=".ava" [5m])
+                absent_over_time({service_name="unknown_service"} | json | cluster=".meiva" [5m])
               instant: true
               queryType: instant
             relativeTimeRange:
@@ -533,7 +533,7 @@ groups:
       # pipeline): 5m counts min=295 (~59/min, two windows), p05=349,
       # median=1071, max=3167. The 150/5m threshold (~30/min) is about half
       # the measured trough; it must remain breached for 10m before firing.
-      - uid: ava-ops-events-low-water
+      - uid: meiva-ops-events-low-water
         title: "Event stream below low-water mark"
         condition: D
         for: 10m
@@ -543,9 +543,9 @@ groups:
         execErrState: OK
         labels:
           severity: warning
-          ruleUID: ava-ops-events-low-water
+          ruleUID: meiva-ops-events-low-water
           metric: events_freshness
-          team: ava-ops
+          team: meiva-ops
         annotations:
           summary: "Only {{ $values.C }} events reached Loki in 5 minutes (low-water 150)"
           description: >-
@@ -566,7 +566,7 @@ groups:
                 uid: loki
               editorMode: code
               expr: >-
-                sum(count_over_time({service_name="unknown_service"} | json | cluster=".ava" [5m])) or vector(0)
+                sum(count_over_time({service_name="unknown_service"} | json | cluster=".meiva" [5m])) or vector(0)
               instant: true
               queryType: instant
             relativeTimeRange:
@@ -607,7 +607,7 @@ groups:
       # the shipped default: short bursts are normal work (a build, an eval
       # sweep), a quarter-hour pinned is the box having no headroom left for
       # anything else. Tune per deployment — this is a machine-spec fact.
-      - uid: ava-ops-host-cpu-saturated
+      - uid: meiva-ops-host-cpu-saturated
         title: "Host CPU saturated"
         condition: D
         for: 15m
@@ -617,9 +617,9 @@ groups:
         execErrState: OK
         labels:
           severity: warning
-          ruleUID: ava-ops-host-cpu-saturated
+          ruleUID: meiva-ops-host-cpu-saturated
           metric: host_cpu
-          team: ava-ops
+          team: meiva-ops
         annotations:
           summary: "{{ $labels.machine_name }} CPU at {{ $values.C }} (threshold 0.90) for 15m"
           description: >-
@@ -627,7 +627,7 @@ groups:
             {{ $values.C }} (fraction of all cores) for 15 minutes. This is
             not a limit the kernel enforces — a training or eval job may
             legitimately own the box. The operator decides: identify the
-            consumer (Grafana /grafana/d/ava-ops-main, "Host & data plane" section), then
+            consumer (Grafana /grafana/d/meiva-ops-main, "Host & data plane" section), then
             investigate, terminate idle agents, or leave it alone.
         data:
           - refId: A
@@ -681,7 +681,7 @@ groups:
       # state="used" is the OTel host_metrics equivalent of the status page's
       # pressure figure (total - available): reclaimable cache is NOT counted
       # as used, so 0.90 here means real pressure, not a warm page cache.
-      - uid: ava-ops-host-memory-pressure
+      - uid: meiva-ops-host-memory-pressure
         title: "Host memory pressure"
         condition: D
         for: 15m
@@ -691,9 +691,9 @@ groups:
         execErrState: OK
         labels:
           severity: warning
-          ruleUID: ava-ops-host-memory-pressure
+          ruleUID: meiva-ops-host-memory-pressure
           metric: host_memory
-          team: ava-ops
+          team: meiva-ops
         annotations:
           summary: "{{ $labels.machine_name }} memory at {{ $values.C }} used (threshold 0.90) for 15m"
           description: >-
@@ -761,7 +761,7 @@ groups:
       # on macOS the volumes of one APFS container all report the container's
       # fullness, so a single full disk legitimately fires twice.
       # Excluded: non-asset mounts whose reported fullness is foreign or
-      # transient, never the Ava data plane. macOS /Volumes/* (removable, external and
+      # transient, never the Meiva data plane. macOS /Volumes/* (removable, external and
       # network volumes plus mounted DMG installers — internal volumes live
       # under /System/Volumes/*); /private/tmp/* and /private/var/folders/*
       # (scratch mounts, not persistent assets). These recur with every
@@ -770,9 +770,9 @@ groups:
       # at 0.99 — DMG images read ~100% full by construction (task #3958).
       # Read-only mounts and optical-image filesystem types are excluded regardless
       # of path: installation ISOs also mount beneath /Users (2026-10-13).
-      # The Ava data plane (writable root volume, /System/Volumes/Data,
+      # The Meiva data plane (writable root volume, /System/Volumes/Data,
       # /Users/*/OrbStack on macOS; / on Linux) keeps its watermark.
-      - uid: ava-ops-host-disk-watermark
+      - uid: meiva-ops-host-disk-watermark
         title: "Filesystem over watermark"
         condition: D
         for: 15m
@@ -782,17 +782,17 @@ groups:
         execErrState: OK
         labels:
           severity: warning
-          ruleUID: ava-ops-host-disk-watermark
+          ruleUID: meiva-ops-host-disk-watermark
           metric: host_disk
-          team: ava-ops
+          team: meiva-ops
         annotations:
           summary: "{{ $labels.machine_name }} {{ $labels.mountpoint }} at {{ $values.C }} full (threshold 0.90)"
           description: >-
             Filesystem {{ $labels.mountpoint }} on {{ $labels.machine_name }} is
-            {{ $values.C }} full. 0.90 is also AVA_TRACE_DISK_WATERMARK's
+            {{ $values.C }} full. 0.90 is also MEIVA_TRACE_DISK_WATERMARK's
             default, so crossing it silently degrades trace recording on that
             machine (R7 reports that consequence). Triage: find the growth —
-            the traces mirror ($AVA_HOME/traces), the Postgres data dir, or
+            the traces mirror ($MEIVA_HOME/traces), the Postgres data dir, or
             the LGTM host's Loki/Prometheus volumes — then prune or raise the
             volume.
         data:
@@ -848,7 +848,7 @@ groups:
       # and Loki's 0.95 WAL disk_full_threshold. The shorter critical hold at
       # 0.95 reflects the 2026-09-05 incident: WAL write throttling killed the
       # event stream while /ready continued to answer 200.
-      - uid: ava-ops-host-disk-watermark-93
+      - uid: meiva-ops-host-disk-watermark-93
         title: "Filesystem approaching Loki WAL hard stop"
         condition: D
         for: 15m
@@ -858,9 +858,9 @@ groups:
         execErrState: OK
         labels:
           severity: warning
-          ruleUID: ava-ops-host-disk-watermark-93
+          ruleUID: meiva-ops-host-disk-watermark-93
           metric: host_disk
-          team: ava-ops
+          team: meiva-ops
         annotations:
           summary: "{{ $labels.machine_name }} {{ $labels.mountpoint }} at {{ $values.C }} full (threshold 0.93)"
           description: >-
@@ -914,7 +914,7 @@ groups:
                   query:
                     params: [C]
 
-      - uid: ava-ops-host-disk-watermark-95
+      - uid: meiva-ops-host-disk-watermark-95
         title: "Filesystem at Loki WAL hard stop"
         condition: D
         for: 5m
@@ -924,9 +924,9 @@ groups:
         execErrState: OK
         labels:
           severity: critical
-          ruleUID: ava-ops-host-disk-watermark-95
+          ruleUID: meiva-ops-host-disk-watermark-95
           metric: host_disk
-          team: ava-ops
+          team: meiva-ops
         annotations:
           summary: "{{ $labels.machine_name }} {{ $labels.mountpoint }} at {{ $values.C }} full (critical threshold 0.95)"
           description: >-
@@ -985,7 +985,7 @@ groups:
       # Plain VACUUM reclaims dead tuples but does not compact fragmented
       # files. These rules surface the persistent physical size while there is
       # still room to make an operator-led repack and disk-capacity decision.
-      - uid: ava-ops-checkpoint-blobs-warning
+      - uid: meiva-ops-checkpoint-blobs-warning
         title: "checkpoint_blobs physical size above 2.5 GiB"
         condition: D
         for: 2h
@@ -995,9 +995,9 @@ groups:
         execErrState: OK
         labels:
           severity: warning
-          ruleUID: ava-ops-checkpoint-blobs-warning
+          ruleUID: meiva-ops-checkpoint-blobs-warning
           metric: checkpoint_blobs_physical_bytes
-          team: ava-ops
+          team: meiva-ops
         annotations:
           summary: "checkpoint_blobs physical size {{ $values.C }} B is above 2.5 GiB"
           description: >-
@@ -1015,7 +1015,7 @@ groups:
                 type: prometheus
                 uid: prometheus
               editorMode: code
-              expr: max(ava_checkpoint_table_sizes_blobs_bytes_ratio) > 2684354560
+              expr: max(meiva_checkpoint_table_sizes_blobs_bytes_ratio) > 2684354560
               instant: true
               range: false
             relativeTimeRange:
@@ -1051,7 +1051,7 @@ groups:
                   query:
                     params: [C]
 
-      - uid: ava-ops-checkpoint-blobs-error
+      - uid: meiva-ops-checkpoint-blobs-error
         title: "checkpoint_blobs physical size above 4 GiB"
         condition: D
         for: 2h
@@ -1061,9 +1061,9 @@ groups:
         execErrState: OK
         labels:
           severity: error
-          ruleUID: ava-ops-checkpoint-blobs-error
+          ruleUID: meiva-ops-checkpoint-blobs-error
           metric: checkpoint_blobs_physical_bytes
-          team: ava-ops
+          team: meiva-ops
         annotations:
           summary: "checkpoint_blobs physical size {{ $values.C }} B is above 4 GiB"
           description: >-
@@ -1081,7 +1081,7 @@ groups:
                 type: prometheus
                 uid: prometheus
               editorMode: code
-              expr: max(ava_checkpoint_table_sizes_blobs_bytes_ratio) > 4294967296
+              expr: max(meiva_checkpoint_table_sizes_blobs_bytes_ratio) > 4294967296
               instant: true
               range: false
             relativeTimeRange:
@@ -1122,7 +1122,7 @@ groups:
       # go quiet (NoData -> OK) whenever their series stops, and a burst can
       # add ~10 GiB per 6h before any absolute tier escalates — these two
       # rules cover the silence itself and the early growth phase.
-      - uid: ava-ops-checkpoint-blobs-freshness
+      - uid: meiva-ops-checkpoint-blobs-freshness
         title: "checkpoint_blobs size telemetry silent (2h)"
         condition: D
         for: 5m
@@ -1132,21 +1132,21 @@ groups:
         execErrState: OK
         labels:
           severity: warning
-          ruleUID: ava-ops-checkpoint-blobs-freshness
+          ruleUID: meiva-ops-checkpoint-blobs-freshness
           metric: checkpoint_blobs_freshness
-          team: ava-ops
+          team: meiva-ops
         annotations:
           summary: "checkpoint_blobs size metric stopped reaching Prometheus"
           description: >-
-            No sample of ava_checkpoint_table_sizes_blobs_bytes_ratio has
+            No sample of meiva_checkpoint_table_sizes_blobs_bytes_ratio has
             reached Prometheus for two hours. The series is re-emitted every
             export cycle while the events-maintenance daemon runs; its normal
             restarts leave gaps under two hours, so a longer silence means
             the checkpoint telemetry or its export path stopped — and while
             it is silent the checkpoint_blobs size rules are blind. Triage
             the events_maintenance daemon's health, [otlp-exporter] log
-            lines, and ~/.ava/logs/events-*.jsonl. With
-            AVA_TELEMETRY_OTLP_ENABLED=off the gateway-metrics-silent rule
+            lines, and ~/.meiva/logs/events-*.jsonl. With
+            MEIVA_TELEMETRY_OTLP_ENABLED=off the gateway-metrics-silent rule
             fires too.
         data:
           - refId: A
@@ -1158,7 +1158,7 @@ groups:
                 type: prometheus
                 uid: prometheus
               editorMode: code
-              expr: absent_over_time(ava_checkpoint_table_sizes_blobs_bytes_ratio[2h])
+              expr: absent_over_time(meiva_checkpoint_table_sizes_blobs_bytes_ratio[2h])
               instant: true
               range: false
             relativeTimeRange:
@@ -1194,7 +1194,7 @@ groups:
                   query:
                     params: [C]
 
-      - uid: ava-ops-checkpoint-blobs-growth
+      - uid: meiva-ops-checkpoint-blobs-growth
         title: "checkpoint_blobs grew more than 1 GiB in 6 hours"
         condition: D
         for: 1h
@@ -1204,9 +1204,9 @@ groups:
         execErrState: OK
         labels:
           severity: warning
-          ruleUID: ava-ops-checkpoint-blobs-growth
+          ruleUID: meiva-ops-checkpoint-blobs-growth
           metric: checkpoint_blobs_growth
-          team: ava-ops
+          team: meiva-ops
         annotations:
           summary: "checkpoint_blobs grew by {{ $values.C }} B in the trailing 6h (threshold 1 GiB)"
           description: >-
@@ -1227,7 +1227,7 @@ groups:
                 type: prometheus
                 uid: prometheus
               editorMode: code
-              expr: max(ava_checkpoint_table_sizes_blobs_bytes_ratio) - max(ava_checkpoint_table_sizes_blobs_bytes_ratio offset 6h)
+              expr: max(meiva_checkpoint_table_sizes_blobs_bytes_ratio) - max(meiva_checkpoint_table_sizes_blobs_bytes_ratio offset 6h)
               instant: true
               range: false
             relativeTimeRange:
@@ -1272,7 +1272,7 @@ groups:
       # architecture exists to avoid. Backends piling up means either the
       # pooler is passing through more than it should or the pooler is gone
       # and every process is dialing Postgres directly.
-      - uid: ava-ops-pg-connection-saturation
+      - uid: meiva-ops-pg-connection-saturation
         title: "Postgres connection saturation"
         condition: D
         for: 10m
@@ -1282,9 +1282,9 @@ groups:
         execErrState: OK
         labels:
           severity: warning
-          ruleUID: ava-ops-pg-connection-saturation
+          ruleUID: meiva-ops-pg-connection-saturation
           metric: pg_connections
-          team: ava-ops
+          team: meiva-ops
         annotations:
           summary: "{{ $labels.machine_name }} Postgres backends at {{ $values.C }} of max_connections (threshold 0.80)"
           description: >-
@@ -1292,7 +1292,7 @@ groups:
             {{ $values.C }} of the server's max_connections. Past 1.0 new
             connections are refused and every process that needs the database
             fails at once. Check the PgBouncer pooler is up and pooling
-            (AVA_PGBOUNCER_ENABLED), and look for a process leaking sessions.
+            (MEIVA_PGBOUNCER_ENABLED), and look for a process leaking sessions.
         data:
           - refId: A
             datasourceUid: prometheus
@@ -1344,11 +1344,11 @@ groups:
       # ── R12: Redis memory (issue #46) ──
       # The redis receiver reports used memory but not maxmemory, so this is
       # an absolute byte threshold — 2 GiB, a deployment fact about the box's
-      # RAM, tuned here. Ava's Redis carries the events pub/sub channel and
+      # RAM, tuned here. Meiva's Redis carries the events pub/sub channel and
       # short-lived caches; a steadily climbing footprint is a leak, and once
       # maxmemory is reached the eviction of live keys (redis_keys_evicted_total,
       # on the dashboard) starts dropping cluster state.
-      - uid: ava-ops-redis-memory
+      - uid: meiva-ops-redis-memory
         title: "Redis memory above threshold"
         condition: D
         for: 15m
@@ -1358,9 +1358,9 @@ groups:
         execErrState: OK
         labels:
           severity: warning
-          ruleUID: ava-ops-redis-memory
+          ruleUID: meiva-ops-redis-memory
           metric: redis_memory
-          team: ava-ops
+          team: meiva-ops
         annotations:
           summary: "{{ $labels.machine_name }} Redis using {{ $values.C }} bytes (threshold 2 GiB)"
           description: >-
@@ -1422,7 +1422,7 @@ groups:
       # after the route recovers. One instance per
       # machine_name/exporter/data_type says which machine and signal path is
       # blocked.
-      - uid: ava-ops-otelcol-queue-pressure
+      - uid: meiva-ops-otelcol-queue-pressure
         title: "OTel Collector exporter queue pressure"
         condition: D
         for: 5m
@@ -1432,9 +1432,9 @@ groups:
         execErrState: OK
         labels:
           severity: error
-          ruleUID: ava-ops-otelcol-queue-pressure
+          ruleUID: meiva-ops-otelcol-queue-pressure
           metric: otelcol_queue
-          team: ava-ops
+          team: meiva-ops
         annotations:
           summary: "{{ $labels.machine_name }} collector {{ $labels.exporter }} {{ $labels.data_type }} queue at {{ $values.C }} (threshold 0.80)"
           description: >-
@@ -1495,7 +1495,7 @@ groups:
                     params: [C]
 
       # Actual queue loss is an immediate error, independent of log export.
-      - uid: ava-ops-telemetry-queue-loss
+      - uid: meiva-ops-telemetry-queue-loss
         title: "Telemetry events lost"
         condition: D
         for: 0s
@@ -1505,9 +1505,9 @@ groups:
         execErrState: OK
         labels:
           severity: error
-          ruleUID: ava-ops-telemetry-queue-loss
+          ruleUID: meiva-ops-telemetry-queue-loss
           metric: telemetry_queue_loss
-          team: ava-ops
+          team: meiva-ops
         annotations:
           summary: "{{ $labels.machine }} {{ $labels.process }} telemetry queue lost events"
           description: >-
@@ -1526,7 +1526,7 @@ groups:
               editorMode: code
               expr: >-
                 time() - max by (cluster, machine, process, queue)
-                (ava_event_log_drop_last_dropped_at_ratio{cluster=".ava"})
+                (meiva_event_log_drop_last_dropped_at_ratio{cluster=".meiva"})
               instant: true
               range: false
             relativeTimeRange:
@@ -1567,7 +1567,7 @@ groups:
       # These are monotonic counters. `increase` is load-bearing: comparing an
       # absolute value would create a permanent alert after the first failure
       # until the collector restarted.
-      - uid: ava-ops-otelcol-enqueue-failures
+      - uid: meiva-ops-otelcol-enqueue-failures
         title: "OTel Collector rejected telemetry"
         condition: D
         for: 0m
@@ -1577,9 +1577,9 @@ groups:
         execErrState: OK
         labels:
           severity: error
-          ruleUID: ava-ops-otelcol-enqueue-failures
+          ruleUID: meiva-ops-otelcol-enqueue-failures
           metric: otelcol_enqueue_failed
-          team: ava-ops
+          team: meiva-ops
         annotations:
           summary: "{{ $labels.machine_name }} collector {{ $labels.exporter }} rejected {{ $values.C }} telemetry items in 5m"
           description: >-
@@ -1642,7 +1642,7 @@ groups:
       # 5m. The instance naturally retires after 24h; machine-heartbeat
       # alerting owns permanent fleet membership, while this rule owns the
       # collector path.
-      - uid: ava-ops-otelcol-host-silent
+      - uid: meiva-ops-otelcol-host-silent
         title: "OTel Collector stopped reporting"
         condition: D
         # The query's 5m absence window is already the debounce. A second 5m
@@ -1654,16 +1654,16 @@ groups:
         execErrState: OK
         labels:
           severity: error
-          ruleUID: ava-ops-otelcol-host-silent
+          ruleUID: meiva-ops-otelcol-host-silent
           metric: otelcol_silence
-          team: ava-ops
+          team: meiva-ops
         annotations:
           summary: "{{ $labels.machine_name }} collector has not reported for 5 minutes"
           description: >-
             Machine {{ $labels.machine_name }} reported OTel Collector uptime within the
             last 24 hours but no sample arrived in the last 5 minutes. The
             collector may be down or its runner-to-gateway metrics relay may
-            be broken. Check the local ava-otel-collector session and the
+            be broken. Check the local meiva-otel-collector session and the
             authenticated gateway OTLP receiver.
         data:
           - refId: A
@@ -1724,7 +1724,7 @@ groups:
       # is load-bearing: an absolute comparison would alert forever after the
       # first drop. Post-deploy expectation: silent once 6h covers the known
       # replay pattern; a firing instance reports a new, longer-latency episode.
-      - uid: ava-ops-prom-too-old-samples
+      - uid: meiva-ops-prom-too-old-samples
         title: "Prometheus dropped too-old OTLP samples"
         condition: D
         for: 0m
@@ -1734,9 +1734,9 @@ groups:
         execErrState: OK
         labels:
           severity: warning
-          ruleUID: ava-ops-prom-too-old-samples
+          ruleUID: meiva-ops-prom-too-old-samples
           metric: prom_tsdb_too_old_samples
-          team: ava-ops
+          team: meiva-ops
         annotations:
           summary: "Prometheus rejected too-old OTLP samples in the last 10m"
           description: >-
@@ -1797,7 +1797,7 @@ groups:
       # Completed observations are independent from health. The expectation
       # timestamp also covers root boot without a first completed round. Keep
       # machine/home/process dimensions so a healthy peer cannot hide a silent root.
-      - uid: ava-ops-root-health-stale
+      - uid: meiva-ops-root-health-stale
         title: "Root stopped completing health rounds"
         condition: D
         for: 0m
@@ -1807,9 +1807,9 @@ groups:
         execErrState: OK
         labels:
           severity: error
-          ruleUID: ava-ops-root-health-stale
+          ruleUID: meiva-ops-root-health-stale
           metric: root_health_stale
-          team: ava-ops
+          team: meiva-ops
         annotations:
           summary: "{{ $labels.machine }} {{ $labels.home_id }} {{ $labels.process }} has no completed root health round for 3 minutes"
           description: >-
@@ -1832,29 +1832,29 @@ groups:
               expr: >-
                 (
                   max by (machine, home_id, process) (
-                    time() - max_over_time(ava_root_health_tick_last_tick_timestamp_seconds[3m])
+                    time() - max_over_time(meiva_root_health_tick_last_tick_timestamp_seconds[3m])
                   ) > 180
                   or
                   (
                     max by (machine, home_id, process) (
-                      last_over_time(ava_root_health_expected_expected_since_timestamp_seconds[24h])
+                      last_over_time(meiva_root_health_expected_expected_since_timestamp_seconds[24h])
                     ) > 0
                     unless on(machine, home_id, process)
                     max by (machine, home_id, process) (
-                      max_over_time(ava_root_health_tick_last_tick_timestamp_seconds[3m])
+                      max_over_time(meiva_root_health_tick_last_tick_timestamp_seconds[3m])
                     )
                   )
                 )
                 and on(machine, home_id, process)
                 (
                   max by (machine, home_id, process) (
-                    last_over_time(ava_root_health_expected_expected_since_timestamp_seconds[24h])
+                    last_over_time(meiva_root_health_expected_expected_since_timestamp_seconds[24h])
                   ) > 0
                 )
                 and on(machine, home_id, process)
                 (
                   time() - max by (machine, home_id, process) (
-                    last_over_time(ava_root_health_expected_expected_since_timestamp_seconds[24h])
+                    last_over_time(meiva_root_health_expected_expected_since_timestamp_seconds[24h])
                   ) > 180
                 )
               instant: true
@@ -1895,7 +1895,7 @@ groups:
       # ── Gateway application metrics silent (gateway_latency heartbeat absent 5m) ──
       # This Prometheus-native watchdog does not depend on the gateway's events
       # reaching Loki: that exporter is the component whose blindness it detects.
-      - uid: ava-ops-gateway-metrics-silent
+      - uid: meiva-ops-gateway-metrics-silent
         title: "Gateway metrics stream silent (gateway_latency heartbeat)"
         condition: D
         for: 5m
@@ -1905,20 +1905,20 @@ groups:
         execErrState: OK
         labels:
           severity: error
-          ruleUID: ava-ops-gateway-metrics-silent
+          ruleUID: meiva-ops-gateway-metrics-silent
           metric: gateway_metrics_silence
-          team: ava-ops
+          team: meiva-ops
         annotations:
           summary: "The gateway's 60s latency heartbeat stopped reaching Prometheus"
           description: >-
             The gateway's own 60-second gateway_latency heartbeat has stopped
-            reaching Prometheus. Either AVA_TELEMETRY_OTLP_ENABLED=off disabled
+            reaching Prometheus. Either MEIVA_TELEMETRY_OTLP_ENABLED=off disabled
             the whole OTLP surface (the R6 events rule also fires), the gateway's
             OTLP exporter is blind after an init-time collector blip (the
             five-minute retry and otlp_backend_recovered event close that
             episode), or the collector/Prometheus path broke. Triage
-            ~/.ava/logs/events-*.jsonl, [otlp-exporter] log lines, and
-            ava_gateway_latency_count_total in Prometheus.
+            ~/.meiva/logs/events-*.jsonl, [otlp-exporter] log lines, and
+            meiva_gateway_latency_count_total in Prometheus.
         data:
           - refId: A
             datasourceUid: prometheus
@@ -1930,7 +1930,7 @@ groups:
                 uid: prometheus
               editorMode: code
               expr: >-
-                absent_over_time(ava_gateway_latency_count_total[5m])
+                absent_over_time(meiva_gateway_latency_count_total[5m])
               instant: true
               range: false
             relativeTimeRange:
@@ -1968,11 +1968,11 @@ groups:
 
       # ── R20: Memory search rows soft warning (task #2088/#2090) ──
       # The memory-search store's absolute row count, sampled every 60s into
-      # the ava_memory_search_stats_rows_ratio gauge (OTLP mirror, job
-      # ava/ava-memory_search, contract metric name — task #1107). The count
+      # the meiva_memory_search_stats_rows_ratio gauge (OTLP mirror, job
+      # meiva/meiva-memory_search, contract metric name — task #1107). The count
       # only grows between npz rebuilds, so a 2h hold means real growth:
       # 30k soft warning, 50k backend-switch evaluation, 100k hard cap.
-      - uid: ava-ops-memory-search-rows-warning
+      - uid: meiva-ops-memory-search-rows-warning
         title: "Memory search rows above soft threshold"
         condition: D
         for: 2h
@@ -1982,9 +1982,9 @@ groups:
         execErrState: OK
         labels:
           severity: warning
-          ruleUID: ava-ops-memory-search-rows-warning
+          ruleUID: meiva-ops-memory-search-rows-warning
           metric: memory_search_rows
-          team: ava-ops
+          team: meiva-ops
         annotations:
           summary: "Memory search store at {{ $values.C }} rows (soft threshold 30000)"
           description: >-
@@ -2003,7 +2003,7 @@ groups:
                 type: prometheus
                 uid: prometheus
               editorMode: code
-              expr: max(ava_memory_search_stats_rows_ratio) > 30000
+              expr: max(meiva_memory_search_stats_rows_ratio) > 30000
               instant: true
               range: false
             relativeTimeRange:
@@ -2040,7 +2040,7 @@ groups:
                     params: [C]
 
       # ── R21: Memory search rows hard cap (task #2088/#2090) ──
-      - uid: ava-ops-memory-search-rows-critical
+      - uid: meiva-ops-memory-search-rows-critical
         title: "Memory search rows above hard cap"
         condition: D
         for: 2h
@@ -2050,9 +2050,9 @@ groups:
         execErrState: OK
         labels:
           severity: critical
-          ruleUID: ava-ops-memory-search-rows-critical
+          ruleUID: meiva-ops-memory-search-rows-critical
           metric: memory_search_rows
-          team: ava-ops
+          team: meiva-ops
         annotations:
           summary: "Memory search store at {{ $values.C }} rows (hard cap 100000)"
           description: >-
@@ -2070,7 +2070,7 @@ groups:
                 type: prometheus
                 uid: prometheus
               editorMode: code
-              expr: max(ava_memory_search_stats_rows_ratio) > 100000
+              expr: max(meiva_memory_search_stats_rows_ratio) > 100000
               instant: true
               range: false
             relativeTimeRange:
@@ -2111,7 +2111,7 @@ groups:
       # be trusted. The event is emitted by the weekly logical-dump
       # scheduler; group by the named drill so one broken path does not hide
       # another.
-      - uid: ava-ops-recovery-drill-failed
+      - uid: meiva-ops-recovery-drill-failed
         title: "Scheduled recovery drill failed"
         condition: D
         for: 0m
@@ -2121,9 +2121,9 @@ groups:
         execErrState: OK
         labels:
           severity: error
-          ruleUID: ava-ops-recovery-drill-failed
+          ruleUID: meiva-ops-recovery-drill-failed
           metric: recovery_drill_failure
-          team: ava-ops
+          team: meiva-ops
         annotations:
           summary: "Recovery drill {{ $labels.attributes_drill }} failed ({{ $values.C }} failure events in 1h)"
           description: >-
@@ -2144,7 +2144,7 @@ groups:
               editorMode: code
               expr: >-
                 sum by (attributes_drill) (count_over_time({service_name="unknown_service", event_name="recovery_drill_failed"}
-                | json | cluster=".ava" | category="telemetry" | level="error" [1h]))
+                | json | cluster=".meiva" | category="telemetry" | level="error" [1h]))
               instant: true
               queryType: instant
             relativeTimeRange:
@@ -2184,7 +2184,7 @@ groups:
       # The scheduler attempts the daily dump once per cluster day and does not
       # retry a failure, so each event is a day without a new dump. The 24h
       # window keeps the alert firing until the next scheduled attempt.
-      - uid: ava-ops-backup-dump-failed
+      - uid: meiva-ops-backup-dump-failed
         title: "Scheduled logical dump failed"
         condition: D
         for: 0m
@@ -2194,9 +2194,9 @@ groups:
         execErrState: OK
         labels:
           severity: error
-          ruleUID: ava-ops-backup-dump-failed
+          ruleUID: meiva-ops-backup-dump-failed
           metric: backup_dump_failure
-          team: ava-ops
+          team: meiva-ops
         annotations:
           summary: "Scheduled logical dump failed ({{ $values.C }} failure events in 24h)"
           description: >-
@@ -2216,7 +2216,7 @@ groups:
               editorMode: code
               expr: >-
                 sum(count_over_time({service_name="unknown_service", event_name="backup_dump_failed"}
-                | json | cluster=".ava" | category="telemetry" | level="error" [24h]))
+                | json | cluster=".meiva" | category="telemetry" | level="error" [24h]))
               instant: true
               queryType: instant
             relativeTimeRange:
@@ -2252,8 +2252,8 @@ groups:
                   query:
                     params: [C]
 
-      # ── ava-ops-machine-offline-warning: replaces services/wake/heartbeat/liveness.py _fire_machine_offline WARNING grade (transition_severity warning_after_s=180) ──
-      - uid: ava-ops-machine-offline-warning
+      # ── meiva-ops-machine-offline-warning: replaces services/wake/heartbeat/liveness.py _fire_machine_offline WARNING grade (transition_severity warning_after_s=180) ──
+      - uid: meiva-ops-machine-offline-warning
         title: "Machine offline (agent-runner unreachable)"
         condition: D
         for: 3m
@@ -2263,16 +2263,16 @@ groups:
         execErrState: OK
         labels:
           severity: warning
-          ruleUID: ava-ops-machine-offline-warning
+          ruleUID: meiva-ops-machine-offline-warning
           metric: machine_offline
-          team: ava-ops
+          team: meiva-ops
         annotations:
           summary: "machine {{ $labels.attributes_machine }} unreachable for 3+ minutes"
           description: >-
             The gateway's liveness pass (every ~60s) failed its status_probe of agent-runner {{
             $labels.attributes_machine }} on every pass for at least 3 minutes (machine_probe_failed events,
             payload consecutive_failures). Normal recovery (restart, brief network blip) stays under the 3
-            minute grace window. Escalates to the error rule at 10 minutes. A paused machine (`ava cluster
+            minute grace window. Escalates to the error rule at 10 minutes. A paused machine (`meiva cluster
             pause`) is not probed and cannot fire this.
         data:
           - refId: A
@@ -2286,7 +2286,7 @@ groups:
               editorMode: code
               expr: >-
                 sum by (attributes_machine) (count_over_time({service_name="unknown_service",
-                event_name="machine_probe_failed"} | json | cluster=".ava" | category="telemetry" |
+                event_name="machine_probe_failed"} | json | cluster=".meiva" | category="telemetry" |
                 attributes_consecutive_failures < 11 [2m]))
               instant: true
               queryType: instant
@@ -2323,8 +2323,8 @@ groups:
                   query:
                     params: [C]
 
-      # ── ava-ops-machine-offline-error: replaces services/wake/heartbeat/liveness.py _fire_machine_offline ERROR grade (transition_severity error_after_s=600) ──
-      - uid: ava-ops-machine-offline-error
+      # ── meiva-ops-machine-offline-error: replaces services/wake/heartbeat/liveness.py _fire_machine_offline ERROR grade (transition_severity error_after_s=600) ──
+      - uid: meiva-ops-machine-offline-error
         title: "Machine offline 10+ minutes (agent-runner unreachable)"
         condition: D
         for: 10m
@@ -2334,15 +2334,15 @@ groups:
         execErrState: OK
         labels:
           severity: error
-          ruleUID: ava-ops-machine-offline-error
+          ruleUID: meiva-ops-machine-offline-error
           metric: machine_offline
-          team: ava-ops
+          team: meiva-ops
         annotations:
           summary: "machine {{ $labels.attributes_machine }} unreachable for 10+ minutes"
           description: >-
             agent-runner {{ $labels.attributes_machine }} has failed every liveness probe for at least 10
             minutes (machine_probe_failed events). Its agents render offline. Check the host, its network
-            path and its ops server; `ava cluster status` shows the roster.
+            path and its ops server; `meiva cluster status` shows the roster.
         data:
           - refId: A
             datasourceUid: loki
@@ -2355,7 +2355,7 @@ groups:
               editorMode: code
               expr: >-
                 sum by (attributes_machine) (count_over_time({service_name="unknown_service",
-                event_name="machine_probe_failed"} | json | cluster=".ava" | category="telemetry" [2m]))
+                event_name="machine_probe_failed"} | json | cluster=".meiva" | category="telemetry" [2m]))
               instant: true
               queryType: instant
             relativeTimeRange:
@@ -2391,8 +2391,8 @@ groups:
                   query:
                     params: [C]
 
-      # ── ava-ops-exec-child-boot-failed: replaces agent/graph/exec/_alerts.py maybe_alert_exec_boot_failure (POST /api/alerts, source agent-exec, per-agent 600s rate limit) ──
-      - uid: ava-ops-exec-child-boot-failed
+      # ── meiva-ops-exec-child-boot-failed: replaces agent/graph/exec/_alerts.py maybe_alert_exec_boot_failure (POST /api/alerts, source agent-exec, per-agent 600s rate limit) ──
+      - uid: meiva-ops-exec-child-boot-failed
         title: "Exec child boot failed"
         condition: D
         for: 0s
@@ -2402,9 +2402,9 @@ groups:
         execErrState: OK
         labels:
           severity: warning
-          ruleUID: ava-ops-exec-child-boot-failed
+          ruleUID: meiva-ops-exec-child-boot-failed
           metric: exec_child_boot_failed
-          team: ava-ops
+          team: meiva-ops
         annotations:
           summary: "agent {{ $labels.agent_id }} ({{ $labels.machine }}): exec child crashed before running code ({{ $values.C }} in 5m)"
           description: >-
@@ -2425,7 +2425,7 @@ groups:
               editorMode: code
               expr: >-
                 sum by (agent_id, machine) (count_over_time({service_name="unknown_service",
-                event_name="exec_child_boot_failed"} | json | cluster=".ava" | category="telemetry" [5m]))
+                event_name="exec_child_boot_failed"} | json | cluster=".meiva" | category="telemetry" [5m]))
               instant: true
               queryType: instant
             relativeTimeRange:
@@ -2461,8 +2461,8 @@ groups:
                   query:
                     params: [C]
 
-      # ── ava-ops-inspect-metrics-gap: replaces gateway/inspect/_metrics_health.py episode alert (upsert_alert source inspect-metrics, per-condition cooldown, store-derived resolve) ──
-      - uid: ava-ops-inspect-metrics-gap
+      # ── meiva-ops-inspect-metrics-gap: replaces gateway/inspect/_metrics_health.py episode alert (upsert_alert source inspect-metrics, per-condition cooldown, store-derived resolve) ──
+      - uid: meiva-ops-inspect-metrics-gap
         title: "Inspector metrics recorder gap"
         condition: D
         for: 0s
@@ -2472,9 +2472,9 @@ groups:
         execErrState: OK
         labels:
           severity: warning
-          ruleUID: ava-ops-inspect-metrics-gap
+          ruleUID: meiva-ops-inspect-metrics-gap
           metric: inspect_metrics_coverage_gap
-          team: ava-ops
+          team: meiva-ops
         annotations:
           summary: "inspector metrics: agent {{ $labels.agent_id }} {{ $labels.attributes_family }} limited by {{ $labels.attributes_condition }}"
           description: >-
@@ -2497,7 +2497,7 @@ groups:
               expr: >-
                 sum by (agent_id, attributes_family, attributes_condition)
                 (count_over_time({service_name="unknown_service", event_name="inspect_metrics_coverage_gap"} |
-                json | cluster=".ava" | category="telemetry" [15m]))
+                json | cluster=".meiva" | category="telemetry" [15m]))
               instant: true
               queryType: instant
             relativeTimeRange:
@@ -2533,8 +2533,8 @@ groups:
                   query:
                     params: [C]
 
-      # ── ava-ops-impersonation-seal-stuck: replaces base/agents/impersonation_event_alerts.py reconcile_seal_stuck_alerts (upsert_alert ImpersonationEventSealStuck, source health-probe) ──
-      - uid: ava-ops-impersonation-seal-stuck
+      # ── meiva-ops-impersonation-seal-stuck: replaces base/agents/impersonation_event_alerts.py reconcile_seal_stuck_alerts (upsert_alert ImpersonationEventSealStuck, source health-probe) ──
+      - uid: meiva-ops-impersonation-seal-stuck
         title: "Impersonation event log waiting on an open source"
         condition: D
         for: 0s
@@ -2544,9 +2544,9 @@ groups:
         execErrState: OK
         labels:
           severity: warning
-          ruleUID: ava-ops-impersonation-seal-stuck
+          ruleUID: meiva-ops-impersonation-seal-stuck
           metric: impersonation_event_seal_stuck
-          team: ava-ops
+          team: meiva-ops
         annotations:
           summary: "impersonation lease {{ $labels.attributes_lease_id }} (agent {{ $labels.agent_id }}, {{ $labels.attributes_lease_machine }}) ended but its event source is still open ({{ $labels.attributes_pending_reason }})"
           description: >-
@@ -2567,7 +2567,7 @@ groups:
               expr: >-
                 sum by (agent_id, attributes_lease_id, attributes_lease_machine, attributes_pending_reason)
                 (count_over_time({service_name="unknown_service",
-                event_name="impersonation_event_log_incomplete"} | json | cluster=".ava" | category="telemetry"
+                event_name="impersonation_event_log_incomplete"} | json | cluster=".meiva" | category="telemetry"
                 | attributes_condition="seal_stuck" [3m]))
               instant: true
               queryType: instant
@@ -2604,8 +2604,8 @@ groups:
                   query:
                     params: [C]
 
-      # ── ava-ops-impersonation-capture-failed: replaces base/agents/impersonation_event_alerts.py alert_capture_failed (upsert_alert ImpersonationEventCaptureFailed, source health-probe, never resolved) ──
-      - uid: ava-ops-impersonation-capture-failed
+      # ── meiva-ops-impersonation-capture-failed: replaces base/agents/impersonation_event_alerts.py alert_capture_failed (upsert_alert ImpersonationEventCaptureFailed, source health-probe, never resolved) ──
+      - uid: meiva-ops-impersonation-capture-failed
         title: "Impersonation event capture failed"
         condition: D
         for: 0s
@@ -2615,9 +2615,9 @@ groups:
         execErrState: OK
         labels:
           severity: warning
-          ruleUID: ava-ops-impersonation-capture-failed
+          ruleUID: meiva-ops-impersonation-capture-failed
           metric: impersonation_event_capture_failed
-          team: ava-ops
+          team: meiva-ops
         annotations:
           summary: "impersonation lease {{ $labels.attributes_lease_id }} (agent {{ $labels.agent_id }}, {{ $labels.attributes_lease_machine }}): event capture failed, the lease can never complete"
           description: >-
@@ -2638,7 +2638,7 @@ groups:
               expr: >-
                 sum by (agent_id, attributes_lease_id, attributes_lease_machine)
                 (count_over_time({service_name="unknown_service",
-                event_name="impersonation_event_log_incomplete"} | json | cluster=".ava" | category="telemetry"
+                event_name="impersonation_event_log_incomplete"} | json | cluster=".meiva" | category="telemetry"
                 | attributes_condition="capture_failed" [3m]))
               instant: true
               queryType: instant
@@ -2675,8 +2675,8 @@ groups:
                   query:
                     params: [C]
 
-      # ── ava-ops-im-push-failed: replaces services/entrypoints/im_bridge/push_watchdog.py alert_push_failure (cross-channel send_to_owner push, threshold 2, 1800s cooldown, adapter._push_alerted_at) ──
-      - uid: ava-ops-im-push-failed
+      # ── meiva-ops-im-push-failed: replaces services/entrypoints/im_bridge/push_watchdog.py alert_push_failure (cross-channel send_to_owner push, threshold 2, 1800s cooldown, adapter._push_alerted_at) ──
+      - uid: meiva-ops-im-push-failed
         title: "IM push link failing (weixin)"
         condition: D
         for: 0s
@@ -2686,9 +2686,9 @@ groups:
         execErrState: OK
         labels:
           severity: warning
-          ruleUID: ava-ops-im-push-failed
+          ruleUID: meiva-ops-im-push-failed
           metric: im_push_failed
-          team: ava-ops
+          team: meiva-ops
         annotations:
           summary: "weixin push link failed {{ $values.C }} sends in 10m (2+ consecutive failures)"
           description: >-
@@ -2709,7 +2709,7 @@ groups:
               editorMode: code
               expr: >-
                 sum by (attributes_channel) (count_over_time({service_name="unknown_service",
-                event_name="im_push_failed"} | json | cluster=".ava" | category="telemetry" |
+                event_name="im_push_failed"} | json | cluster=".meiva" | category="telemetry" |
                 attributes_channel="weixin" | attributes_failures >= 2 [10m]))
               instant: true
               queryType: instant
@@ -2746,14 +2746,14 @@ groups:
                   query:
                     params: [C]
 
-      # ── ava-ops-im-push-stall: leg-level outbound stall (task #4935; the signal comes from the
+      # ── meiva-ops-im-push-stall: leg-level outbound stall (task #4935; the signal comes from the
       #    bridge's own sampling, a=#5877). A configured leg has pushes pending but no delivered
       #    push for > 15m — well beyond the observed self-heal window (2026-10-04..07 transient
       #    drops healed within minutes; 10-08: the Telegram leg stayed silent 54 min, 2 pushes
       #    stranded, no alert). Detection lives in code; threshold/debounce/recovery live here. A
       #    full host outage stops the samples: this series disappears and NoData=OK keeps the leg
       #    rule quiet while the host-level OOB/absence signature reports. ──
-      - uid: ava-ops-im-push-stall
+      - uid: meiva-ops-im-push-stall
         title: "IM leg push stalled (pending, no delivered push for 15m)"
         condition: D
         for: 2m
@@ -2763,9 +2763,9 @@ groups:
         execErrState: OK
         labels:
           severity: warning
-          ruleUID: ava-ops-im-push-stall
+          ruleUID: meiva-ops-im-push-stall
           metric: im_push_stall
-          team: ava-ops
+          team: meiva-ops
         annotations:
           summary: "{{ $labels.attributes_channel }} leg stalled: no delivered push > 15m ({{ $values.C }} critical samples in 2m)"
           description: >-
@@ -2785,7 +2785,7 @@ groups:
               editorMode: code
               expr: >-
                 sum by (attributes_channel) (count_over_time({service_name="unknown_service",
-                event_name="im_push_health"} | json | cluster=".ava" | category="telemetry" |
+                event_name="im_push_health"} | json | cluster=".meiva" | category="telemetry" |
                 attributes_last_ok_age_s > 900 | attributes_pending > 0 [2m]))
               instant: true
               queryType: instant
@@ -2822,8 +2822,8 @@ groups:
                   query:
                     params: [C]
 
-      # ── ava-ops-im-feishu-owner-seed-failed: replaces services/entrypoints/im_bridge/adapters/feishu.py _seed_owner_from_switch_state telegram send_to_owner message (copy.FEISHU_OWNER_SEED_*) ──
-      - uid: ava-ops-im-feishu-owner-seed-failed
+      # ── meiva-ops-im-feishu-owner-seed-failed: replaces services/entrypoints/im_bridge/adapters/feishu.py _seed_owner_from_switch_state telegram send_to_owner message (copy.FEISHU_OWNER_SEED_*) ──
+      - uid: meiva-ops-im-feishu-owner-seed-failed
         title: "Feishu owner chat not restored at bridge boot"
         condition: D
         for: 0s
@@ -2833,9 +2833,9 @@ groups:
         execErrState: OK
         labels:
           severity: warning
-          ruleUID: ava-ops-im-feishu-owner-seed-failed
+          ruleUID: meiva-ops-im-feishu-owner-seed-failed
           metric: im_feishu_owner_seed_failed
-          team: ava-ops
+          team: meiva-ops
         annotations:
           summary: "feishu notifications are blind after the bridge restart ({{ $labels.attributes_reason }})"
           description: >-
@@ -2855,7 +2855,7 @@ groups:
               editorMode: code
               expr: >-
                 sum by (attributes_reason) (count_over_time({service_name="unknown_service",
-                event_name="im_feishu_owner_seed_failed"} | json | cluster=".ava" | category="telemetry" [30m]))
+                event_name="im_feishu_owner_seed_failed"} | json | cluster=".meiva" | category="telemetry" [30m]))
               instant: true
               queryType: instant
             relativeTimeRange:
@@ -2891,8 +2891,8 @@ groups:
                   query:
                     params: [C]
 
-      # ── ava-ops-delivery-stalled: replaces services/wake/delivery_watchdog/daemon.py _DeployWindowGate (deploy-window hold + settle window, AVA_DELIVERY_WATCHDOG_ALERT_GRACE_SECONDS). The per-row event itself is unchanged; this rule is its Grafana notification path (the event had no per-event rule, only the >50/10m backlog rule). ──
-      - uid: ava-ops-delivery-stalled
+      # ── meiva-ops-delivery-stalled: replaces services/wake/delivery_watchdog/daemon.py _DeployWindowGate (deploy-window hold + settle window, MEIVA_DELIVERY_WATCHDOG_ALERT_GRACE_SECONDS). The per-row event itself is unchanged; this rule is its Grafana notification path (the event had no per-event rule, only the >50/10m backlog rule). ──
+      - uid: meiva-ops-delivery-stalled
         title: "Chat delivery stalled (delivery_stalled event)"
         condition: D
         for: 1m
@@ -2902,18 +2902,18 @@ groups:
         execErrState: OK
         labels:
           severity: warning
-          ruleUID: ava-ops-delivery-stalled
+          ruleUID: meiva-ops-delivery-stalled
           metric: delivery_stalled
-          team: ava-ops
+          team: meiva-ops
         annotations:
           summary: "Chat delivery to agent {{ $labels.agent_id }} is stalled ({{ $values.C }} stalled inbound(s) in 3m)"
           description: >-
             The delivery watchdog emits one delivery_stalled event per chat inbound that stayed pending past
-            AVA_DELIVERY_WATCHDOG_THRESHOLD_SECONDS (30s) while its owner is idling or terminated (lost
+            MEIVA_DELIVERY_WATCHDOG_THRESHOLD_SECONDS (30s) while its owner is idling or terminated (lost
             pub/sub wake or a claim loop that is not running). Wake re-dispatch and the dead-letter sweeps
             keep running; this rule is only the notification. Deploy windows are silenced upstream by the
             fleet-update silence, so a resume's claim tail does not page. The rule is per agent (stream
-            label agent_id); ava-ops-delivery-stalled-backlog stays as the fleet-wide volume rule.
+            label agent_id); meiva-ops-delivery-stalled-backlog stays as the fleet-wide volume rule.
         data:
           - refId: A
             datasourceUid: loki
@@ -2926,7 +2926,7 @@ groups:
               editorMode: code
               expr: >-
                 sum by (agent_id) (count_over_time({service_name="unknown_service",
-                event_name="delivery_stalled"} | json | cluster=".ava" | category="telemetry" [3m]))
+                event_name="delivery_stalled"} | json | cluster=".meiva" | category="telemetry" [3m]))
               instant: true
               queryType: instant
             relativeTimeRange:
@@ -2962,8 +2962,8 @@ groups:
                   query:
                     params: [C]
 
-      # ── ava-ops-db-pool-acquire-slow: replaces agent/db/__init__.py per-host cooldown marker file (db-pool-slow-acquire.warn) and AVA_DB_POOL_SLOW_ACQUIRE_WARN_COOLDOWN_SECONDS. AVA_DB_POOL_SLOW_ACQUIRE_WARN_SECONDS (the 10s detection threshold) stays. Every slow borrow now WARNs and emits the event; the for: 2m + count window replaces the 300s coalescing. ──
-      - uid: ava-ops-db-pool-acquire-slow
+      # ── meiva-ops-db-pool-acquire-slow: replaces agent/db/__init__.py per-host cooldown marker file (db-pool-slow-acquire.warn) and MEIVA_DB_POOL_SLOW_ACQUIRE_WARN_COOLDOWN_SECONDS. MEIVA_DB_POOL_SLOW_ACQUIRE_WARN_SECONDS (the 10s detection threshold) stays. Every slow borrow now WARNs and emits the event; the for: 2m + count window replaces the 300s coalescing. ──
+      - uid: meiva-ops-db-pool-acquire-slow
         title: "DB pool borrows slow (db_pool_acquire_slow)"
         condition: D
         for: 2m
@@ -2973,9 +2973,9 @@ groups:
         execErrState: OK
         labels:
           severity: warning
-          ruleUID: ava-ops-db-pool-acquire-slow
+          ruleUID: meiva-ops-db-pool-acquire-slow
           metric: db_pool_acquire_slow
-          team: ava-ops
+          team: meiva-ops
         annotations:
           summary: "{{ $values.C }} agent DB pool borrows took >=10s on {{ $labels.machine }} in 10m"
           description: >-
@@ -2998,7 +2998,7 @@ groups:
               editorMode: code
               expr: >-
                 sum by (machine) (count_over_time({service_name="unknown_service",
-                event_name="db_pool_acquire_slow"} | json | cluster=".ava" | category="telemetry" [10m]))
+                event_name="db_pool_acquire_slow"} | json | cluster=".meiva" | category="telemetry" [10m]))
               instant: true
               queryType: instant
             relativeTimeRange:
@@ -3034,8 +3034,8 @@ groups:
                   query:
                     params: [C]
 
-      # ── ava-ops-root-unit-restart-failed: replaces services/supervision/ava_root/alerts.py AlertRouter/AlertWebhookNotifier: fire once per episode (kind restart_failed, severity error) posted to /api/alerts with source ava-root ──
-      - uid: ava-ops-root-unit-restart-failed
+      # ── meiva-ops-root-unit-restart-failed: replaces services/supervision/meiva_root/alerts.py AlertRouter/AlertWebhookNotifier: fire once per episode (kind restart_failed, severity error) posted to /api/alerts with source meiva-root ──
+      - uid: meiva-ops-root-unit-restart-failed
         title: "Root unit replacement failed"
         condition: D
         for: 0m
@@ -3045,16 +3045,16 @@ groups:
         execErrState: OK
         labels:
           severity: error
-          ruleUID: ava-ops-root-unit-restart-failed
+          ruleUID: meiva-ops-root-unit-restart-failed
           metric: root_unit_restart_failed
-          team: ava-ops
+          team: meiva-ops
         annotations:
           summary: "Root unit {{ $labels.attributes_unit }}: replacement failed and is being retried"
           description: >-
             The unit's intent is running and its last replacement failed at its down or up half; the health
             monitor may retry within its finite budget. root_unit_failure_state is emitted on every health round
             (~60s) while the state holds, so the alert resolves by itself once the unit is replaced or
-            stopped. Check the detail on the matching event and `ava status` on the owning machine.
+            stopped. Check the detail on the matching event and `meiva status` on the owning machine.
         data:
           - refId: A
             datasourceUid: loki
@@ -3067,7 +3067,7 @@ groups:
               editorMode: code
               expr: >-
                 sum by (attributes_unit) (count_over_time({service_name="unknown_service",
-                event_name="root_unit_failure_state"} | json | cluster=".ava" | category="telemetry" |
+                event_name="root_unit_failure_state"} | json | cluster=".meiva" | category="telemetry" |
                 attributes_kind="restart_failed" [3m]))
               instant: true
               queryType: instant
@@ -3105,7 +3105,7 @@ groups:
                     params: [C]
 
       # Keep this rule UID so existing alert identity survives the simpler restart policy.
-      - uid: ava-ops-root-unit-breaker-open
+      - uid: meiva-ops-root-unit-breaker-open
         title: "Root unit automatic restarts exhausted"
         condition: D
         for: 0m
@@ -3115,9 +3115,9 @@ groups:
         execErrState: OK
         labels:
           severity: critical
-          ruleUID: ava-ops-root-unit-breaker-open
+          ruleUID: meiva-ops-root-unit-breaker-open
           metric: root_unit_restart_attempts_exhausted
-          team: ava-ops
+          team: meiva-ops
         annotations:
           summary: "Root unit {{ $labels.attributes_unit }}: automatic restart attempts exhausted"
           description: >-
@@ -3137,7 +3137,7 @@ groups:
               editorMode: code
               expr: >-
                 sum by (attributes_unit) (count_over_time({service_name="unknown_service",
-                event_name="root_unit_failure_state"} | json | cluster=".ava" | category="telemetry" |
+                event_name="root_unit_failure_state"} | json | cluster=".meiva" | category="telemetry" |
                 attributes_kind=~"restarts_exhausted|breaker_open" [3m]))
               instant: true
               queryType: instant
@@ -3174,8 +3174,8 @@ groups:
                   query:
                     params: [C]
 
-      # ── ava-ops-root-unit-not-revivable: replaces services/supervision/ava_root/health.py terminal_escalate_rounds=2 (consecutive terminal rounds escalate WARNING -> ERROR) ──
-      - uid: ava-ops-root-unit-not-revivable
+      # ── meiva-ops-root-unit-not-revivable: replaces services/supervision/meiva_root/health.py terminal_escalate_rounds=2 (consecutive terminal rounds escalate WARNING -> ERROR) ──
+      - uid: meiva-ops-root-unit-not-revivable
         title: "Root unit not revivable"
         condition: D
         for: 0m
@@ -3185,9 +3185,9 @@ groups:
         execErrState: OK
         labels:
           severity: error
-          ruleUID: ava-ops-root-unit-not-revivable
+          ruleUID: meiva-ops-root-unit-not-revivable
           metric: root_unit_not_revivable
-          team: ava-ops
+          team: meiva-ops
         annotations:
           summary: "Root unit {{ $labels.attributes_unit }}: terminal probe verdict on consecutive rounds ({{ $values.C }} in 2m)"
           description: >-
@@ -3208,7 +3208,7 @@ groups:
               editorMode: code
               expr: >-
                 sum by (attributes_unit) (count_over_time({service_name="unknown_service",
-                event_name="root_unit_not_revivable"} | json | cluster=".ava" | category="telemetry" [2m]))
+                event_name="root_unit_not_revivable"} | json | cluster=".meiva" | category="telemetry" [2m]))
               instant: true
               queryType: instant
             relativeTimeRange:
@@ -3244,8 +3244,8 @@ groups:
                   query:
                     params: [C]
 
-      # ── ava-ops-root-diagnostic-venv: replaces AVA_VENV_PROBE_FAILURE_THRESHOLD (default 2) gating the root_diagnostic episode log ──
-      - uid: ava-ops-root-diagnostic-venv
+      # ── meiva-ops-root-diagnostic-venv: replaces MEIVA_VENV_PROBE_FAILURE_THRESHOLD (default 2) gating the root_diagnostic episode log ──
+      - uid: meiva-ops-root-diagnostic-venv
         title: "Root venv diagnostic failing"
         condition: D
         for: 0m
@@ -3255,9 +3255,9 @@ groups:
         execErrState: OK
         labels:
           severity: warning
-          ruleUID: ava-ops-root-diagnostic-venv
+          ruleUID: meiva-ops-root-diagnostic-venv
           metric: root_diagnostic_venv
-          team: ava-ops
+          team: meiva-ops
         annotations:
           summary: "{{ $labels.machine }}: Root venv diagnostic non-alive on consecutive rounds ({{ $values.C }} in 3m)"
           description: >-
@@ -3276,7 +3276,7 @@ groups:
               editorMode: code
               expr: >-
                 sum by (machine) (count_over_time({service_name="unknown_service", event_name="root_diagnostic"} | json |
-                cluster=".ava" | category="telemetry" | attributes_diagnostic="venv" |
+                cluster=".meiva" | category="telemetry" | attributes_diagnostic="venv" |
                 attributes_verdict!="alive" [3m]))
               instant: true
               queryType: instant
@@ -3313,8 +3313,8 @@ groups:
                   query:
                     params: [C]
 
-      # ── ava-ops-root-diagnostic-brew-pin: replaces AVA_BREW_PIN_PROBE_FAILURE_THRESHOLD (default 2) gating the root_diagnostic episode log ──
-      - uid: ava-ops-root-diagnostic-brew-pin
+      # ── meiva-ops-root-diagnostic-brew-pin: replaces MEIVA_BREW_PIN_PROBE_FAILURE_THRESHOLD (default 2) gating the root_diagnostic episode log ──
+      - uid: meiva-ops-root-diagnostic-brew-pin
         title: "Root brew-pin diagnostic failing"
         condition: D
         for: 0m
@@ -3324,9 +3324,9 @@ groups:
         execErrState: OK
         labels:
           severity: warning
-          ruleUID: ava-ops-root-diagnostic-brew-pin
+          ruleUID: meiva-ops-root-diagnostic-brew-pin
           metric: root_diagnostic_brew_pin
-          team: ava-ops
+          team: meiva-ops
         annotations:
           summary: "{{ $labels.machine }}: Root brew-pin diagnostic non-alive on consecutive rounds ({{ $values.C }} in 3m)"
           description: >-
@@ -3345,7 +3345,7 @@ groups:
               editorMode: code
               expr: >-
                 sum by (machine) (count_over_time({service_name="unknown_service", event_name="root_diagnostic"} | json |
-                cluster=".ava" | category="telemetry" | attributes_diagnostic="brew-pin" |
+                cluster=".meiva" | category="telemetry" | attributes_diagnostic="brew-pin" |
                 attributes_verdict!="alive" [3m]))
               instant: true
               queryType: instant
@@ -3382,8 +3382,8 @@ groups:
                   query:
                     params: [C]
 
-      # ── ava-ops-health-probe-warning: replaces health_alerts._alert_failure WARNING grade at transition_warning_seconds (180s) of an unhealthy episode ──
-      - uid: ava-ops-health-probe-warning
+      # ── meiva-ops-health-probe-warning: replaces health_alerts._alert_failure WARNING grade at transition_warning_seconds (180s) of an unhealthy episode ──
+      - uid: meiva-ops-health-probe-warning
         title: "Cluster health probe failing (3 min)"
         condition: D
         for: 3m
@@ -3393,9 +3393,9 @@ groups:
         execErrState: OK
         labels:
           severity: warning
-          ruleUID: ava-ops-health-probe-warning
+          ruleUID: meiva-ops-health-probe-warning
           metric: health_probe_failing
-          team: ava-ops
+          team: meiva-ops
         annotations:
           summary: "Cluster health check {{ $labels.attributes_check }} failing"
           description: >-
@@ -3418,7 +3418,7 @@ groups:
               editorMode: code
               expr: >-
                 sum by (attributes_check) (count_over_time({service_name="unknown_service",
-                event_name="health_probe_failing"} | json | cluster=".ava" | category="telemetry" [8m]))
+                event_name="health_probe_failing"} | json | cluster=".meiva" | category="telemetry" [8m]))
               instant: true
               queryType: instant
             relativeTimeRange:
@@ -3454,8 +3454,8 @@ groups:
                   query:
                     params: [C]
 
-      # ── ava-ops-health-probe-error: replaces health_alerts._alert_failure ERROR grade at transition_error_seconds (600s) - the in-place WARNING -> ERROR escalation becomes two coexisting rules ──
-      - uid: ava-ops-health-probe-error
+      # ── meiva-ops-health-probe-error: replaces health_alerts._alert_failure ERROR grade at transition_error_seconds (600s) - the in-place WARNING -> ERROR escalation becomes two coexisting rules ──
+      - uid: meiva-ops-health-probe-error
         title: "Cluster health probe failing (10 min)"
         condition: D
         for: 10m
@@ -3465,9 +3465,9 @@ groups:
         execErrState: OK
         labels:
           severity: error
-          ruleUID: ava-ops-health-probe-error
+          ruleUID: meiva-ops-health-probe-error
           metric: health_probe_failing
-          team: ava-ops
+          team: meiva-ops
         annotations:
           summary: "Cluster health check {{ $labels.attributes_check }} still failing after 10 minutes"
           description: >-
@@ -3488,7 +3488,7 @@ groups:
               editorMode: code
               expr: >-
                 sum by (attributes_check) (count_over_time({service_name="unknown_service",
-                event_name="health_probe_failing"} | json | cluster=".ava" | category="telemetry" [8m]))
+                event_name="health_probe_failing"} | json | cluster=".meiva" | category="telemetry" [8m]))
               instant: true
               queryType: instant
             relativeTimeRange:
@@ -3524,8 +3524,8 @@ groups:
                   query:
                     params: [C]
 
-      # ── ava-ops-health-probe-silent: replaces no old equivalent: the removed state-file alerting had no dead-man for the probe itself ──
-      - uid: ava-ops-health-probe-silent
+      # ── meiva-ops-health-probe-silent: replaces no old equivalent: the removed state-file alerting had no dead-man for the probe itself ──
+      - uid: meiva-ops-health-probe-silent
         title: "Cluster health probe silent"
         condition: D
         for: 0m
@@ -3535,16 +3535,16 @@ groups:
         execErrState: OK
         labels:
           severity: error
-          ruleUID: ava-ops-health-probe-silent
+          ruleUID: meiva-ops-health-probe-silent
           metric: health_probe_silent
-          team: ava-ops
+          team: meiva-ops
         annotations:
           summary: "The cluster health probe has not run in 15 minutes"
           description: >-
             No health_probe_ran heartbeat reached Loki in 15 minutes although the probe runs every 5. Either
-            the OS job (`ava cluster health-probe-register`) is gone or failing before the end of its run,
+            the OS job (`meiva cluster health-probe-register`) is gone or failing before the end of its run,
             or the event path is down (the stream-freshness rule covers the latter). Every
-            health_probe_failing rule is blind while this fires: check the probe's cron log and run `ava
+            health_probe_failing rule is blind while this fires: check the probe's cron log and run `meiva
             cluster health-probe` by hand.
         data:
           - refId: A
@@ -3558,7 +3558,7 @@ groups:
               editorMode: code
               expr: >-
                 absent_over_time({service_name="unknown_service", event_name="health_probe_ran"} | json |
-                cluster=".ava" | category="telemetry" [15m])
+                cluster=".meiva" | category="telemetry" [15m])
               instant: true
               queryType: instant
             relativeTimeRange:
@@ -3594,8 +3594,8 @@ groups:
                   query:
                     params: [C]
 
-      # ── ava-ops-service-start-unready: replaces cli/commands/probe.py start-readiness alerts rows (upsert_alert source=start-readiness, fingerprint reuse, resolved edge) ──
-      - uid: ava-ops-service-start-unready
+      # ── meiva-ops-service-start-unready: replaces cli/commands/probe.py start-readiness alerts rows (upsert_alert source=start-readiness, fingerprint reuse, resolved edge) ──
+      - uid: meiva-ops-service-start-unready
         title: "Non-critical service not ready after start"
         condition: D
         for: 0m
@@ -3605,15 +3605,15 @@ groups:
         execErrState: OK
         labels:
           severity: warning
-          ruleUID: ava-ops-service-start-unready
+          ruleUID: meiva-ops-service-start-unready
           metric: service_start_unready
-          team: ava-ops
+          team: meiva-ops
         annotations:
-          summary: "Non-critical service {{ $labels.attributes_service }} not ready within 45s of ava start"
+          summary: "Non-critical service {{ $labels.attributes_service }} not ready within 45s of meiva start"
           description: >-
-            `ava start` finished without failing, but the non-critical service {{ $labels.attributes_service
-            }} did not become ready within its short window. ava-root keeps trying to revive it; `ava
-            status` re-checks and `ava start` is idempotent to retry. A standing outage of the service is
+            `meiva start` finished without failing, but the non-critical service {{ $labels.attributes_service
+            }} did not become ready within its short window. meiva-root keeps trying to revive it; `meiva
+            status` re-checks and `meiva start` is idempotent to retry. A standing outage of the service is
             also covered by the health-probe `service_probe` check.
         data:
           - refId: A
@@ -3627,7 +3627,7 @@ groups:
               editorMode: code
               expr: >-
                 sum by (attributes_service) (count_over_time({service_name="unknown_service",
-                event_name="service_start_unready"} | json | cluster=".ava" | category="telemetry" [30m]))
+                event_name="service_start_unready"} | json | cluster=".meiva" | category="telemetry" [30m]))
               instant: true
               queryType: instant
             relativeTimeRange:
@@ -3663,9 +3663,9 @@ groups:
                   query:
                     params: [C]
 
-      # ── ava-ops-boot-retries-exhausted: the OS boot job (`ava start --boot`) spent its attempt budget ──
-      - uid: ava-ops-boot-retries-exhausted
-        title: "Boot-time ava start gave up"
+      # ── meiva-ops-boot-retries-exhausted: the OS boot job (`meiva start --boot`) spent its attempt budget ──
+      - uid: meiva-ops-boot-retries-exhausted
+        title: "Boot-time meiva start gave up"
         condition: D
         for: 0m
         keepFiringFor: *recovery-window
@@ -3674,17 +3674,17 @@ groups:
         execErrState: OK
         labels:
           severity: error
-          ruleUID: ava-ops-boot-retries-exhausted
+          ruleUID: meiva-ops-boot-retries-exhausted
           metric: boot_retries_exhausted
-          team: ava-ops
+          team: meiva-ops
         annotations:
-          summary: "The boot-time ava start failed through its whole attempt budget on {{ $values.C }} occasion(s) in 1h"
+          summary: "The boot-time meiva start failed through its whole attempt budget on {{ $values.C }} occasion(s) in 1h"
           description: >-
-            The OS boot job (`ava start --boot`, launchd on macOS, the systemd unit on Linux) failed
+            The OS boot job (`meiva start --boot`, launchd on macOS, the systemd unit on Linux) failed
             every attempt of its budget and is no longer retried, so this host's services may be down.
             The event's attributes.exit_code is the last attempt's exit code; the cause is in the boot
-            log (`$AVA_HOME/logs/autostart.log` on macOS, `journalctl -u ava-boot` on Linux). Fix it,
-            then run `ava start`.
+            log (`$MEIVA_HOME/logs/autostart.log` on macOS, `journalctl -u meiva-boot` on Linux). Fix it,
+            then run `meiva start`.
         data:
           - refId: A
             datasourceUid: loki
@@ -3697,7 +3697,7 @@ groups:
               editorMode: code
               expr: >-
                 sum(count_over_time({service_name="unknown_service", event_name="boot_retries_exhausted"} | json
-                | cluster=".ava" | category="telemetry" [1h]))
+                | cluster=".meiva" | category="telemetry" [1h]))
               instant: true
               queryType: instant
             relativeTimeRange:
@@ -3733,8 +3733,8 @@ groups:
                   query:
                     params: [C]
 
-      # ── ava-ops-schedule-verify-failed: replaces cli/commands/management/schedules_verify.py _alert_verify (POST /api/alerts source=schedule-verify with open-instance starts_at reuse) ──
-      - uid: ava-ops-schedule-verify-failed
+      # ── meiva-ops-schedule-verify-failed: replaces cli/commands/management/schedules_verify.py _alert_verify (POST /api/alerts source=schedule-verify with open-instance starts_at reuse) ──
+      - uid: meiva-ops-schedule-verify-failed
         title: "Schedule scripts fail dry-import"
         condition: D
         for: 0m
@@ -3744,17 +3744,17 @@ groups:
         execErrState: OK
         labels:
           severity: error
-          ruleUID: ava-ops-schedule-verify-failed
+          ruleUID: meiva-ops-schedule-verify-failed
           metric: schedule_verify_failed
-          team: ava-ops
+          team: meiva-ops
         annotations:
           summary: "In-store schedule scripts fail dry-import, a name read or call-signature binding ({{ $values.C }} failed sweep(s) in 1h)"
           description: >-
-            `ava schedules verify` found DB-embedded schedule scripts that no longer import, read only
+            `meiva schedules verify` found DB-embedded schedule scripts that no longer import, read only
             names they bind, or bind their calls against the checkout (a module move, a rename leftover
             or a signature change), or the sweep itself failed. The event's
             attributes.detail lists `id=... name=... missing=...` per script. Re-sync the built-in schedules
-            from the repo (`ava schedules provision`) or fix the agent-written script, then re-run `ava
+            from the repo (`meiva schedules provision`) or fix the agent-written script, then re-run `meiva
             schedules verify`.
         data:
           - refId: A
@@ -3768,7 +3768,7 @@ groups:
               editorMode: code
               expr: >-
                 sum(count_over_time({service_name="unknown_service", event_name="schedule_verify_failed"} | json
-                | cluster=".ava" | category="telemetry" [1h]))
+                | cluster=".meiva" | category="telemetry" [1h]))
               instant: true
               queryType: instant
             relativeTimeRange:
@@ -3804,8 +3804,8 @@ groups:
                   query:
                     params: [C]
 
-      # ── ava-ops-agent-continuation-lost: the agent host reports a turn that failed while its continuation was owed to a draining maintenance hold ──
-      - uid: ava-ops-agent-continuation-lost
+      # ── meiva-ops-agent-continuation-lost: the agent host reports a turn that failed while its continuation was owed to a draining maintenance hold ──
+      - uid: meiva-ops-agent-continuation-lost
         title: "Agent continuation failed at a maintenance hold"
         condition: D
         for: 0m
@@ -3815,16 +3815,16 @@ groups:
         execErrState: OK
         labels:
           severity: error
-          ruleUID: ava-ops-agent-continuation-lost
+          ruleUID: meiva-ops-agent-continuation-lost
           metric: agent_continuation_lost
-          team: ava-ops
+          team: meiva-ops
         annotations:
           summary: "agent {{ $labels.agent_id }}: its turn failed ({{ $labels.attributes_failure_category }}) while its continuation was owed to a maintenance hold"
           description: >-
             An agent's turn raised during a stop's drain. The host ended its pending restart command and
             raised this once; the interrupted work may be lost and the restart was not carried out. The
             drain will time out on this agent: read the agent_continuation_lost event (holder, outcome),
-            check the agent after `ava start`, and re-prompt, restart or resurrect it. The instance
+            check the agent after `meiva start`, and re-prompt, restart or resurrect it. The instance
             resolves an hour after the event.
         data:
           - refId: A
@@ -3838,7 +3838,7 @@ groups:
               editorMode: code
               expr: >-
                 sum by (agent_id, attributes_failure_category) (count_over_time({service_name="unknown_service",
-                event_name="agent_continuation_lost"} | json | cluster=".ava" | category="telemetry" [1h]))
+                event_name="agent_continuation_lost"} | json | cluster=".meiva" | category="telemetry" [1h]))
               instant: true
               queryType: instant
             relativeTimeRange:
@@ -3874,8 +3874,8 @@ groups:
                   query:
                     params: [C]
 
-      # ── ava-ops-impersonation-notice-failed: the host's one submission of an ended lease's notice was not accepted ──
-      - uid: ava-ops-impersonation-notice-failed
+      # ── meiva-ops-impersonation-notice-failed: the host's one submission of an ended lease's notice was not accepted ──
+      - uid: meiva-ops-impersonation-notice-failed
         title: "Impersonation ended-lease notice not delivered"
         condition: D
         for: 0m
@@ -3885,9 +3885,9 @@ groups:
         execErrState: OK
         labels:
           severity: warning
-          ruleUID: ava-ops-impersonation-notice-failed
+          ruleUID: meiva-ops-impersonation-notice-failed
           metric: impersonation_terminal_notice_failed
-          team: ava-ops
+          team: meiva-ops
         annotations:
           summary: "agent {{ $labels.agent_id }}: the ended impersonation lease {{ $labels.attributes_lease_id }} could not be announced to its Codex thread"
           description: >-
@@ -3907,7 +3907,7 @@ groups:
               editorMode: code
               expr: >-
                 sum by (agent_id, attributes_lease_id) (count_over_time({service_name="unknown_service",
-                event_name="impersonation_terminal_notice_failed"} | json | cluster=".ava" | category="telemetry" [1h]))
+                event_name="impersonation_terminal_notice_failed"} | json | cluster=".meiva" | category="telemetry" [1h]))
               instant: true
               queryType: instant
             relativeTimeRange:
@@ -3944,8 +3944,8 @@ groups:
                     params: [C]
 
   - orgId: 1
-    name: ava-ops-slow
-    folder: Ava
+    name: meiva-ops-slow
+    folder: Meiva
     interval: 5m
     rules:
       # R7 evaluates at 5m without semantic loss: it is chronic and resolves
@@ -3961,7 +3961,7 @@ groups:
       # resolves 24h after the last event — one onset + one recovery IM per
       # episode instead of one per event. error severity: silently-off
       # observability is the incident class this alert exists to end.
-      - uid: ava-ops-trace-disk-watermark
+      - uid: meiva-ops-trace-disk-watermark
         title: "Trace recording disabled (data disk over watermark)"
         condition: D
         for: 5m
@@ -3971,16 +3971,16 @@ groups:
         execErrState: OK
         labels:
           severity: error
-          ruleUID: ava-ops-trace-disk-watermark
+          ruleUID: meiva-ops-trace-disk-watermark
           metric: trace_degraded
-          team: ava-ops
+          team: meiva-ops
         annotations:
           summary: "Trace recording auto-disabled — data disk over watermark ({{ $values.C }} degradation events in 24h)"
           description: >-
             Events with attributes.action=recording_disabled_disk_watermark
             (event_name=trace, category=telemetry) reached {{ $values.C }} in
             the last 24 hours. Each event = one agent start that skipped span
-            recording because its data disk is over AVA_TRACE_DISK_WATERMARK
+            recording because its data disk is over MEIVA_TRACE_DISK_WATERMARK
             (default 0.9): the mirror can never fill the disk, but spans are
             not recorded — an observability blind spot (2026-08-07..10: 207
             events over 3 days, unnoticed). Triage: `df -h` on the affected
@@ -4000,7 +4000,7 @@ groups:
                 uid: loki
               editorMode: code
               expr: >-
-                sum(count_over_time({service_name="unknown_service", event_name="trace"} | json | cluster=".ava" |
+                sum(count_over_time({service_name="unknown_service", event_name="trace"} | json | cluster=".meiva" |
                 category="telemetry" |
                 attributes_action="recording_disabled_disk_watermark" [24h]))
               instant: true
@@ -4044,7 +4044,7 @@ groups:
       # incident. Group by vendor so the notification names the account that
       # needs concurrency reduction or a quota check, without paging once per
       # affected model.
-      - uid: ava-ops-llm-rate-limit
+      - uid: meiva-ops-llm-rate-limit
         title: "LLM provider rate-limit burst"
         condition: D
         for: 0m
@@ -4054,9 +4054,9 @@ groups:
         execErrState: OK
         labels:
           severity: warning
-          ruleUID: ava-ops-llm-rate-limit
+          ruleUID: meiva-ops-llm-rate-limit
           metric: llm_rate_limit_burst
-          team: ava-ops
+          team: meiva-ops
         annotations:
           summary: "LLM {{ $labels.attributes_vendor }} rate-limit burst ({{ $values.C }} HTTP 429s in 5m)"
           description: >-
@@ -4077,7 +4077,7 @@ groups:
               editorMode: code
               expr: >-
                 sum by (attributes_vendor)
-                (count_over_time({service_name="unknown_service", event_name="llm_provider_error"} | json | cluster=".ava" |
+                (count_over_time({service_name="unknown_service", event_name="llm_provider_error"} | json | cluster=".meiva" |
                 category="telemetry" |
                 attributes_status="429" [5m]))
               instant: true
@@ -4144,7 +4144,7 @@ groups:
       #
       # critical, not error: this is the only rule whose condition means the
       # agents cannot run at all until a human spends money.
-      - uid: ava-ops-llm-billing-quota
+      - uid: meiva-ops-llm-billing-quota
         title: "LLM provider billing/quota failure"
         condition: D
         for: 0m
@@ -4154,9 +4154,9 @@ groups:
         execErrState: OK
         labels:
           severity: critical
-          ruleUID: ava-ops-llm-billing-quota
+          ruleUID: meiva-ops-llm-billing-quota
           metric: llm_billing_failure
-          team: ava-ops
+          team: meiva-ops
         annotations:
           summary: "LLM API billing/quota failure — the {{ $labels.attributes_vendor }} key for {{ $labels.attributes_model }} is out of credit or quota-throttled ({{ $values.C }} rejections in 15m)"
           description: >-
@@ -4169,7 +4169,7 @@ groups:
             topped up or the quota raised. Fires on the FIRST occurrence by
             design (no spike threshold): one rejection already means the fleet
             is stalled on this model. Triage: top up the vendor account, or
-            point AVA_LLM_MODEL at a model whose key still has credit; the rule
+            point MEIVA_LLM_MODEL at a model whose key still has credit; the rule
             resolves 15m after the last rejection.
         data:
           - refId: A
@@ -4183,7 +4183,7 @@ groups:
               editorMode: code
               expr: >-
                 sum by (attributes_vendor, attributes_model)
-                (count_over_time({service_name="unknown_service", event_name="llm_provider_error"} | json | cluster=".ava" |
+                (count_over_time({service_name="unknown_service", event_name="llm_provider_error"} | json | cluster=".meiva" |
                 category="telemetry" |
                 attributes_billing="true" [15m]))
               instant: true
@@ -4228,7 +4228,7 @@ groups:
       #        sub-second values; 3s/10s two-tier follows the PM slow-request
       #        spec. Warning-first: no IM push (Insights-visible only) — the
       #        user's alarm-fatigue ruling (2026-08-22). ──
-      - uid: ava-ops-gateway-latency-route-warning
+      - uid: meiva-ops-gateway-latency-route-warning
         title: "Gateway latency: fast route p95 above 3s"
         condition: D
         for: 5m
@@ -4238,9 +4238,9 @@ groups:
         execErrState: OK
         labels:
           severity: warning
-          ruleUID: ava-ops-gateway-latency-route-warning
+          ruleUID: meiva-ops-gateway-latency-route-warning
           metric: gateway_latency_route_p95
-          team: ava-ops
+          team: meiva-ops
           notify_im: "false"
         annotations:
           summary: "Fast route {{ $labels.attributes_route }} p95 at {{ $values.C }} ms (threshold 3000 ms)"
@@ -4260,7 +4260,7 @@ groups:
               editorMode: code
               expr: >-
                 max by (attributes_route) (max_over_time({service_name="unknown_service", event_name="gateway_latency"}
-                | json | cluster=".ava" | category=~"telemetry|log"
+                | json | cluster=".meiva" | category=~"telemetry|log"
                 | attributes_route_class="fast"
                 | unwrap attributes_p95_ms [5m]))
               instant: true
@@ -4301,7 +4301,7 @@ groups:
                   query:
                     params: [C]
 
-      - uid: ava-ops-gateway-latency-route-error
+      - uid: meiva-ops-gateway-latency-route-error
         title: "Gateway latency: fast route p95 above 10s"
         condition: D
         for: 5m
@@ -4311,9 +4311,9 @@ groups:
         execErrState: OK
         labels:
           severity: error
-          ruleUID: ava-ops-gateway-latency-route-error
+          ruleUID: meiva-ops-gateway-latency-route-error
           metric: gateway_latency_route_p95
-          team: ava-ops
+          team: meiva-ops
           notify_im: "false"
         annotations:
           summary: "Fast route {{ $labels.attributes_route }} p95 at {{ $values.C }} ms (threshold 10000 ms)"
@@ -4332,7 +4332,7 @@ groups:
               editorMode: code
               expr: >-
                 max by (attributes_route) (max_over_time({service_name="unknown_service", event_name="gateway_latency"}
-                | json | cluster=".ava" | category=~"telemetry|log"
+                | json | cluster=".meiva" | category=~"telemetry|log"
                 | attributes_route_class="fast"
                 | unwrap attributes_p95_ms [5m]))
               instant: true
@@ -4376,7 +4376,7 @@ groups:
       # ── R18: Turn duration p95 (agent-wide slowdown signal). Threshold =
       #        2x the 24h baseline p95 (37.6s on 2026-08-23) → 75s, sustained
       #        10m. Warning-first, no IM push. ──
-      - uid: ava-ops-turn-duration-p95
+      - uid: meiva-ops-turn-duration-p95
         title: "Turn duration p95 above 75s"
         condition: D
         for: 10m
@@ -4386,14 +4386,14 @@ groups:
         execErrState: OK
         labels:
           severity: warning
-          ruleUID: ava-ops-turn-duration-p95
+          ruleUID: meiva-ops-turn-duration-p95
           metric: turn_duration_p95
-          team: ava-ops
+          team: meiva-ops
           notify_im: "false"
         annotations:
           summary: "Turn duration p95 at {{ $values.C }} s (threshold 75 s, 2x 24h baseline)"
           description: >-
-            The agent-wide turn duration p95 (ava_turn_end_duration_seconds
+            The agent-wide turn duration p95 (meiva_turn_end_duration_seconds
             histogram, 10m rate) stayed above 75s — 2x the 2026-08-23 24h
             baseline of 37.6s — for 10 minutes. Signals collective slowdown
             ("runs slower and slower"), not a single long task.
@@ -4409,7 +4409,7 @@ groups:
               editorMode: code
               expr: >-
                 histogram_quantile(0.95, sum by (le)
-                (rate(ava_turn_end_duration_seconds_bucket[10m])))
+                (rate(meiva_turn_end_duration_seconds_bucket[10m])))
               instant: true
               range: false
             relativeTimeRange:
@@ -4449,7 +4449,7 @@ groups:
       #        expected to take longer, so their calibrated warning/error
       #        thresholds are 5s/10s. Warning-first: no IM push
       #        (Insights-visible only). ──
-      - uid: ava-ops-gw-latency-slow-warning
+      - uid: meiva-ops-gw-latency-slow-warning
         title: "Gateway latency: slow route p95 above 5000ms"
         condition: D
         for: 5m
@@ -4459,9 +4459,9 @@ groups:
         execErrState: OK
         labels:
           severity: warning
-          ruleUID: ava-ops-gw-latency-slow-warning
+          ruleUID: meiva-ops-gw-latency-slow-warning
           metric: gateway_latency_route_slow_p95
-          team: ava-ops
+          team: meiva-ops
           notify_im: "false"
         annotations:
           summary: "Slow route {{ $labels.attributes_route }} p95 at {{ $values.C }} ms (threshold 5000 ms)"
@@ -4481,7 +4481,7 @@ groups:
               editorMode: code
               expr: >-
                 max by (attributes_route) (max_over_time({service_name="unknown_service", event_name="gateway_latency"}
-                | json | cluster=".ava" | category=~"telemetry|log"
+                | json | cluster=".meiva" | category=~"telemetry|log"
                 | attributes_route_class="slow"
                 | unwrap attributes_p95_ms [5m]))
               instant: true
@@ -4522,7 +4522,7 @@ groups:
                   query:
                     params: [C]
 
-      - uid: ava-ops-gw-latency-slow-error
+      - uid: meiva-ops-gw-latency-slow-error
         title: "Gateway latency: slow route p95 above 10000ms"
         condition: D
         for: 5m
@@ -4532,9 +4532,9 @@ groups:
         execErrState: OK
         labels:
           severity: error
-          ruleUID: ava-ops-gw-latency-slow-error
+          ruleUID: meiva-ops-gw-latency-slow-error
           metric: gateway_latency_route_slow_p95
-          team: ava-ops
+          team: meiva-ops
           notify_im: "false"
         annotations:
           summary: "Slow route {{ $labels.attributes_route }} p95 at {{ $values.C }} ms (threshold 10000 ms)"
@@ -4553,7 +4553,7 @@ groups:
               editorMode: code
               expr: >-
                 max by (attributes_route) (max_over_time({service_name="unknown_service", event_name="gateway_latency"}
-                | json | cluster=".ava" | category=~"telemetry|log"
+                | json | cluster=".meiva" | category=~"telemetry|log"
                 | attributes_route_class="slow"
                 | unwrap attributes_p95_ms [5m]))
               instant: true
@@ -4593,7 +4593,7 @@ groups:
                     type: and
                   query:
                     params: [C]
-      - uid: ava-ops-tempo-backend-down
+      - uid: meiva-ops-tempo-backend-down
         title: Tempo backend unreachable
         condition: D
         for: 1h
@@ -4603,12 +4603,12 @@ groups:
         execErrState: OK
         labels:
           severity: warning
-          ruleUID: ava-ops-tempo-backend-down
+          ruleUID: meiva-ops-tempo-backend-down
           metric: tempo_up
-          team: ava-ops
+          team: meiva-ops
         annotations:
           summary: 'Tempo trace backend unreachable - up{job="tempo"}=0 for 1h (trace store down)'
-          description: 'The Prometheus scrape target for the Tempo trace store (the native systemd user unit com.ava.tempo.ava-578ca0ec.service on the observability station host ubuntu - 127.0.0.1:3200 queries, 127.0.0.1:14318 OTLP) has been down for over an hour. Its failure is deliberately outside the station healthcheck repair loop, so this rule IS the signal - a silent 7-day outage happened before this alert existed (2026-09-07..14, task #3330). Triage: on the station host (ubuntu) run systemctl --user status com.ava.tempo.ava-578ca0ec.service and restart it when needed with systemctl --user restart com.ava.tempo.ava-578ca0ec.service. Verify here: up{job="tempo"}=1 and 127.0.0.1:14318 answers (404 on a bare GET is normal for the OTLP receiver).'
+          description: 'The Prometheus scrape target for the Tempo trace store (the native systemd user unit com.meiva.tempo.meiva-578ca0ec.service on the observability station host ubuntu - 127.0.0.1:3200 queries, 127.0.0.1:14318 OTLP) has been down for over an hour. Its failure is deliberately outside the station healthcheck repair loop, so this rule IS the signal - a silent 7-day outage happened before this alert existed (2026-09-07..14, task #3330). Triage: on the station host (ubuntu) run systemctl --user status com.meiva.tempo.meiva-578ca0ec.service and restart it when needed with systemctl --user restart com.meiva.tempo.meiva-578ca0ec.service. Verify here: up{job="tempo"}=1 and 127.0.0.1:14318 answers (404 on a bare GET is normal for the OTLP receiver).'
         data:
           - refId: A
             datasourceUid: prometheus
@@ -4655,8 +4655,8 @@ groups:
                   query:
                     params: [C]
 
-      # ── ava-ops-lifecycle-pointer-stuck: the hourly TTL-reaper scan found a lifecycle command nothing will settle on its own (a force-terminate whose original host died before observing it, or a torn done pointer); every resurrect of the agent defers until an operator settles it ──
-      - uid: ava-ops-lifecycle-pointer-stuck
+      # ── meiva-ops-lifecycle-pointer-stuck: the hourly TTL-reaper scan found a lifecycle command nothing will settle on its own (a force-terminate whose original host died before observing it, or a torn done pointer); every resurrect of the agent defers until an operator settles it ──
+      - uid: meiva-ops-lifecycle-pointer-stuck
         title: "Lifecycle pointer stuck"
         condition: D
         for: 0s
@@ -4666,9 +4666,9 @@ groups:
         execErrState: OK
         labels:
           severity: warning
-          ruleUID: ava-ops-lifecycle-pointer-stuck
+          ruleUID: meiva-ops-lifecycle-pointer-stuck
           metric: lifecycle_pointer_stuck
-          team: ava-ops
+          team: meiva-ops
         annotations:
           summary: "{{ $values.C }} agent lifecycle pointer(s) stuck on an unsettled command"
           description: >-
@@ -4691,7 +4691,7 @@ groups:
               editorMode: code
               expr: >-
                 sum(count_over_time({service_name="unknown_service",
-                event_name="lifecycle_pointer_stuck"} | json | cluster=".ava" | category="telemetry"
+                event_name="lifecycle_pointer_stuck"} | json | cluster=".meiva" | category="telemetry"
                 [2h]))
               instant: true
               queryType: instant
@@ -4728,8 +4728,8 @@ groups:
                   query:
                     params: [C]
 
-      # ── ava-ops-root-diagnostic-browser-reach: replaces AVA_BROWSER_REACH_FAILURE_THRESHOLD (default 3) gating the root_diagnostic episode log ──
-      - uid: ava-ops-root-diagnostic-browser-reach
+      # ── meiva-ops-root-diagnostic-browser-reach: replaces MEIVA_BROWSER_REACH_FAILURE_THRESHOLD (default 3) gating the root_diagnostic episode log ──
+      - uid: meiva-ops-root-diagnostic-browser-reach
         title: "Root browser-reach diagnostic failing"
         condition: D
         for: 0m
@@ -4739,9 +4739,9 @@ groups:
         execErrState: OK
         labels:
           severity: warning
-          ruleUID: ava-ops-root-diagnostic-browser-reach
+          ruleUID: meiva-ops-root-diagnostic-browser-reach
           metric: root_diagnostic_browser_reach
-          team: ava-ops
+          team: meiva-ops
         annotations:
           summary: "{{ $labels.machine }}: Root browser-reach diagnostic non-alive on 3+ consecutive probes ({{ $values.C }} in 16m)"
           description: >-
@@ -4762,7 +4762,7 @@ groups:
               editorMode: code
               expr: >-
                 sum by (machine) (count_over_time({service_name="unknown_service", event_name="root_diagnostic"} | json |
-                cluster=".ava" | category="telemetry" | attributes_diagnostic="browser-reach" |
+                cluster=".meiva" | category="telemetry" | attributes_diagnostic="browser-reach" |
                 attributes_verdict!="alive" [16m]))
               instant: true
               queryType: instant
@@ -4799,8 +4799,8 @@ groups:
                   query:
                     params: [C]
 
-      # ── ava-ops-schedule-stalled: replaces the schedule manager's stall detection ending in a log WARNING only (no rule read the event) ──
-      - uid: ava-ops-schedule-stalled
+      # ── meiva-ops-schedule-stalled: replaces the schedule manager's stall detection ending in a log WARNING only (no rule read the event) ──
+      - uid: meiva-ops-schedule-stalled
         title: "Schedule has had no live session for 2h"
         condition: D
         for: 0m
@@ -4810,14 +4810,14 @@ groups:
         execErrState: OK
         labels:
           severity: warning
-          ruleUID: ava-ops-schedule-stalled
+          ruleUID: meiva-ops-schedule-stalled
           metric: schedule_stalled
-          team: ava-ops
+          team: meiva-ops
         annotations:
           summary: "schedule {{ $labels.attributes_schedule_id }} has had no live session for 2h+"
           description: >-
             The schedule manager found an enabled, non-completed schedule with no live session for more than
-            two hours (schedule_stalled, emitted once per outage). Triage with `ava schedules list` and the
+            two hours (schedule_stalled, emitted once per outage). Triage with `meiva schedules list` and the
             schedule's session log; a breaker-tripped error schedule is included on purpose, its silence is
             the failure. Resolves 24 hours after the event.
         data:
@@ -4832,7 +4832,7 @@ groups:
               editorMode: code
               expr: >-
                 sum by (attributes_schedule_id) (count_over_time({service_name="unknown_service",
-                event_name="schedule_stalled"} | json | cluster=".ava" | category="telemetry" [24h]))
+                event_name="schedule_stalled"} | json | cluster=".meiva" | category="telemetry" [24h]))
               instant: true
               queryType: instant
             relativeTimeRange:
@@ -4868,8 +4868,8 @@ groups:
                   query:
                     params: [C]
 
-      # ── ava-ops-schedule-convergence-abandoned: the schedule manager stopped retrying a surviving or unreadable session (bounded convergence) ──
-      - uid: ava-ops-schedule-convergence-abandoned
+      # ── meiva-ops-schedule-convergence-abandoned: the schedule manager stopped retrying a surviving or unreadable session (bounded convergence) ──
+      - uid: meiva-ops-schedule-convergence-abandoned
         title: "Schedule manager gave up converging a schedule"
         condition: D
         for: 0m
@@ -4879,16 +4879,16 @@ groups:
         execErrState: OK
         labels:
           severity: warning
-          ruleUID: ava-ops-schedule-convergence-abandoned
+          ruleUID: meiva-ops-schedule-convergence-abandoned
           metric: schedule_convergence_abandoned
-          team: ava-ops
+          team: meiva-ops
         annotations:
           summary: "schedule {{ $labels.attributes_schedule_id }}: the manager stopped retrying its session"
           description: >-
             The schedule manager retried a reap that the session survived (or a live session whose launch
             provenance it could not read) for ten minutes and then stopped (schedule_convergence_abandoned,
             emitted once per give-up). The schedule is recorded as an error and its process is left alone.
-            Inspect the process with `ava schedules list` and the host, stop it by hand if needed, then
+            Inspect the process with `meiva schedules list` and the host, stop it by hand if needed, then
             restart the schedule explicitly. Resolves 24 hours after the event.
         data:
           - refId: A
@@ -4902,7 +4902,7 @@ groups:
               editorMode: code
               expr: >-
                 sum by (attributes_schedule_id) (count_over_time({service_name="unknown_service",
-                event_name="schedule_convergence_abandoned"} | json | cluster=".ava" | category="telemetry" [24h]))
+                event_name="schedule_convergence_abandoned"} | json | cluster=".meiva" | category="telemetry" [24h]))
               instant: true
               queryType: instant
             relativeTimeRange:
@@ -4938,8 +4938,8 @@ groups:
                   query:
                     params: [C]
 
-      # ── ava-ops-maintenance-hold-overdue: a maintenance hold left in place freezes every wake on its machine and had no age alert ──
-      - uid: ava-ops-maintenance-hold-overdue
+      # ── meiva-ops-maintenance-hold-overdue: a maintenance hold left in place freezes every wake on its machine and had no age alert ──
+      - uid: meiva-ops-maintenance-hold-overdue
         title: "Maintenance hold in place for over the alert age"
         condition: D
         for: 0m
@@ -4949,19 +4949,19 @@ groups:
         execErrState: OK
         labels:
           severity: warning
-          ruleUID: ava-ops-maintenance-hold-overdue
+          ruleUID: meiva-ops-maintenance-hold-overdue
           metric: maintenance_hold_overdue
-          team: ava-ops
+          team: meiva-ops
         annotations:
           summary: "machine {{ $labels.machine }}: maintenance hold {{ $labels.attributes_holder }} ({{ $labels.attributes_phase }}) has been in place past the alert age"
           description: >-
             The root's maintenance-hold diagnostic found this machine's hold (or an unreadable hold journal)
-            in place for longer than AVA_MAINTENANCE_HOLD_ALERT_AFTER_S (default 30 minutes), counted from
+            in place for longer than MEIVA_MAINTENANCE_HOLD_ALERT_AFTER_S (default 30 minutes), counted from
             its acquisition (maintenance_hold_overdue, emitted once per hold). While it stands, every wake on
-            the machine is frozen. A planned `ava stop` that is still deliberately stopped holds it on purpose;
-            otherwise run `ava start` on that machine, which brings the services up and releases the hold
-            after readiness. An unreadable journal (state invalid) is cleared by no command: confirm no `ava
-            stop` is in flight, remove `$AVA_HOME/run/deploy-pause-owner.json` by hand, then run `ava start`.
+            the machine is frozen. A planned `meiva stop` that is still deliberately stopped holds it on purpose;
+            otherwise run `meiva start` on that machine, which brings the services up and releases the hold
+            after readiness. An unreadable journal (state invalid) is cleared by no command: confirm no `meiva
+            stop` is in flight, remove `$MEIVA_HOME/run/deploy-pause-owner.json` by hand, then run `meiva start`.
             Nothing releases the hold automatically. Resolves 24 hours after the event.
         data:
           - refId: A
@@ -4975,7 +4975,7 @@ groups:
               editorMode: code
               expr: >-
                 sum by (machine, attributes_holder, attributes_phase) (count_over_time({service_name="unknown_service",
-                event_name="maintenance_hold_overdue"} | json | cluster=".ava" | category="telemetry" [24h]))
+                event_name="maintenance_hold_overdue"} | json | cluster=".meiva" | category="telemetry" [24h]))
               instant: true
               queryType: instant
             relativeTimeRange:

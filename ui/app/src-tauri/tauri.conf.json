@@ -1,7 +1,7 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "Ava",
-  "identifier": "com.ava.app",
+  "productName": "Meiva",
+  "identifier": "com.meiva.app",
   "build": {
     "frontendDist": "../app-ui"
   },
@@ -20,10 +20,10 @@
     "targets": ["app", "dmg"],
     "createUpdaterArtifacts": true,
     "category": "Productivity",
-    "shortDescription": "Ava console app",
-    "longDescription": "Desktop and mobile app for the Ava cluster console.",
+    "shortDescription": "Meiva console app",
+    "longDescription": "Desktop and mobile app for the Meiva cluster console.",
     "copyright": "Apache-2.0",
-    "publisher": "Ava",
+    "publisher": "Meiva",
     "icon": [],
     "macOS": {
       "minimumSystemVersion": "10.15"
@@ -35,7 +35,7 @@
   "plugins": {
     "updater": {
       "endpoints": [
-        "https://github.com/zhiyuan-zhang0206/Ava/releases/download/app-latest/latest.json"
+        "https://github.com/zhiyuan-zhang0206/Meiva/releases/download/app-latest/latest.json"
       ],
       "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDY5NTc0M0YzQzQwN0M3REMKUldUY3h3ZkU4ME5YYVRYZTQ3RUZJTU5sL2hDR2luNS9NSjZHV1R2SUlaYVVzOG8vK0tFR1ZBNWkK"
     }

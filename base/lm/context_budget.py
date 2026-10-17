@@ -5,8 +5,8 @@ The hard threshold is ``min(fraction * window, ceiling)``. All three factors are
 per-model: the window is the model's registry fact (``ModelSpec.context_window``),
 and the fraction and ceiling resolve through the per-model config layering
 (``resolve_setting``: code shared default 0.4 / 0.3 / no-ceiling < the model's
-registry tuning default < an explicit ``AVA_AUTO_COMPACT_FRACTION`` /
-``AVA_COMPACT_REMINDER_FRACTION`` / ``AVA_AUTO_COMPACT_CEILING_TOKENS`` env value
+registry tuning default < an explicit ``MEIVA_AUTO_COMPACT_FRACTION`` /
+``MEIVA_COMPACT_REMINDER_FRACTION`` / ``MEIVA_AUTO_COMPACT_CEILING_TOKENS`` env value
 < the per-agent overlay). No per-model threshold table for operators to maintain:
 a model added to the registry gets correct thresholds for free, and one env value
 still pins the whole cluster when the user says so.
@@ -28,13 +28,13 @@ context did not move with them, so one fraction means a different absolute
 budget on a 200K model than on a 1M one, and every vendor window inflation
 loosens it again. The ceiling is the escape hatch for pinning an absolute
 trigger — per model in the registry, or cluster-wide via
-``AVA_AUTO_COMPACT_CEILING_TOKENS``. When it binds it scales the soft threshold
+``MEIVA_AUTO_COMPACT_CEILING_TOKENS``. When it binds it scales the soft threshold
 by the same factor it scales the hard one, so the reminder keeps its
 proportional lead instead of collapsing onto the forced ceiling. Ceiling 0 = no
 cap, which is what the whole roster runs today.
 
 (The design before fractions compared a chars/4 estimate against a single
-absolute token count — ``AVA_AUTO_COMPACT_TOKENS`` = 800K — which was silently
+absolute token count — ``MEIVA_AUTO_COMPACT_TOKENS`` = 800K — which was silently
 unreachable on a 200K-window model, so compaction never fired and the model
 overflowed. The ceiling here is per-model and paired with the fraction, so a
 small-window model can never lose its threshold to it.)
