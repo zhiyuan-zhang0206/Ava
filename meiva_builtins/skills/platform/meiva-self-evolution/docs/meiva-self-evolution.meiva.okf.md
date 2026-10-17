@@ -51,6 +51,25 @@ Each record's `evidence` block, its fields and the coverage grade derived from
 them are specified in
 [[meiva_builtins/skills/platform/meiva-self-evolution/docs/evidence-block-and-grading.meiva.okf.md|the evidence-block node]].
 
+## Score abstention
+
+```meiva-contract
+id = "score-abstention"
+kind = "invariant"
+code = [
+  "meiva_builtins/skills/platform/meiva-self-evolution/scripts/rubric.py:abstain_reason",
+  "meiva_builtins/skills/platform/meiva-self-evolution/scripts/evaluate.py:gather",
+]
+tests = [
+  "meiva_builtins/skills/platform/meiva-self-evolution/tests/test_self_evolution_rubric.py::test_empty_trace_no_longer_scores_perfect",
+  "meiva_builtins/skills/platform/meiva-self-evolution/tests/test_self_evolution_rubric.py::test_missing_precondition_abstains",
+  "meiva_builtins/skills/platform/meiva-self-evolution/tests/test_self_evolution_rubric.py::test_scorable_trace_returns_numbers",
+]
+statement = """
+`rubric.scores()` returns `overall=None` and names the missing evidence in `abstain`, instead of scoring a trace it has no evidence for. Scoring saturates at 1.0 when nothing was recorded: `has_output` is the only evidence-bearing completion term, and every efficiency term is best when the run did nothing. The record's `evidence_grade` owns the judgement: anything other than `complete` abstains with the record's own `unknown_reason` (`no_telemetry`, `no_task`, `no_terminal`). Records written before the evidence block exists fall back to the same three checks on their own fields. `evaluate.gather` normalizes `task_prompt` through `task_prompt_of`, keeps abstained replays in `per_task` but out of `n` and the mean, and records `abstain:<reason>` as their verification reason.
+"""
+```
+
 ## Key dependencies
 - [[meiva_builtins/skills/docs/skills.meiva.okf.md|Skills index]] — full skills catalog
 - [[meiva/skills/docs/skills.meiva.okf.md|Skill System]] — the target of mining regressions is the skill library itself
