@@ -12,7 +12,7 @@ import pytest
 
 from ava.sdk_surface.batch import DEFAULT_BATCH_MAX_CONCURRENT
 from ava.web import SearchResult, plans, runner, wiring
-from ava.web.deps import WebDeps
+from ava.web.deps import FetchDeps, SearchDeps
 from base.lm.effort import ReasoningEffort
 
 
@@ -84,30 +84,32 @@ class WebHarness:
     block, and `search` / `fetch` run the SDK calls against them.
     """
 
-    def __init__(self, base: WebDeps) -> None:
+    def __init__(self, search: SearchDeps, fetch: FetchDeps) -> None:
         self.urlopen = MagicMock(name="urlopen")
-        self.deps = dataclasses.replace(base, open_url=self._open)
+        self.search_deps = dataclasses.replace(search, open_url=self._open)
+        self.fetch_deps = dataclasses.replace(fetch, open_url=self._open)
 
     def _open(self, request: Any, timeout: float) -> Any:
         return self.urlopen(request, timeout)
 
     def set_brave(self, **changes: Any) -> None:
-        self.deps = dataclasses.replace(
-            self.deps, brave=dataclasses.replace(self.deps.brave, **changes)
+        self.search_deps = dataclasses.replace(
+            self.search_deps, brave=dataclasses.replace(self.search_deps.brave, **changes)
         )
 
     def set_jina(self, **changes: Any) -> None:
-        self.deps = dataclasses.replace(
-            self.deps, jina=dataclasses.replace(self.deps.jina, **changes)
+        self.fetch_deps = dataclasses.replace(
+            self.fetch_deps, jina=dataclasses.replace(self.fetch_deps.jina, **changes)
         )
 
     def set_model(self, **changes: Any) -> None:
-        self.deps = dataclasses.replace(
-            self.deps, fetch_model=dataclasses.replace(self.deps.fetch_model, **changes)
+        self.fetch_deps = dataclasses.replace(
+            self.fetch_deps,
+            fetch_model=dataclasses.replace(self.fetch_deps.fetch_model, **changes),
         )
 
     def build_chat_model(self, build: Callable[..., Any]) -> None:
-        self.deps = dataclasses.replace(self.deps, build_chat_model=build)
+        self.fetch_deps = dataclasses.replace(self.fetch_deps, build_chat_model=build)
 
     def urlopen_returns(self, **mock_options: Any) -> AbstractContextManager[None]:
         """For a `with` block, answer the network with `return_value=` / `side_effect=`."""
@@ -120,7 +122,7 @@ class WebHarness:
         max_concurrent: int | None = DEFAULT_BATCH_MAX_CONCURRENT,
     ) -> list[list[Any]]:
         return runner.run_search(
-            plans.plan_search(queries, count, max_concurrent), self.deps, SearchResult
+            plans.plan_search(queries, count, max_concurrent), self.search_deps, SearchResult
         )
 
     def fetch(
@@ -131,14 +133,14 @@ class WebHarness:
         max_concurrent: int | None = DEFAULT_BATCH_MAX_CONCURRENT,
     ) -> list[str]:
         return runner.run_fetch(
-            plans.plan_fetch(targets, max_chars, effort, max_concurrent), self.deps
+            plans.plan_fetch(targets, max_chars, effort, max_concurrent), self.fetch_deps
         )
 
 
 @pytest.fixture
 def web_harness(sdk_model_owner: None) -> WebHarness:
     """The real web deps of the test SDK installation, with the network a mock."""
-    return WebHarness(wiring.web_deps())
+    return WebHarness(wiring.search_deps(), wiring.fetch_deps())
 
 
 __all__ = ["FakeModelResponse", "FakeResp", "SummaryModel", "WebHarness", "web_harness"]

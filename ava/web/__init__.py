@@ -47,7 +47,7 @@ def search(
     # call is made.
     from ava.web import runner, wiring
 
-    return runner.run_search(plan, wiring.web_deps(), SearchResult)
+    return runner.run_search(plan, wiring.search_deps(), SearchResult)
 
 
 def fetch(
@@ -75,4 +75,4 @@ def fetch(
     plan = plans.plan_fetch(targets, max_chars, effort, max_concurrent)
     from ava.web import runner, wiring
 
-    return runner.run_fetch(plan, wiring.web_deps())
+    return runner.run_fetch(plan, wiring.fetch_deps())
