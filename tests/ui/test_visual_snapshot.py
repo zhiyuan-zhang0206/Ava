@@ -10,7 +10,7 @@ from tests.e2e.visual._visual_snapshot import assert_visual_snapshot, snapshot_p
 
 
 class _FakePage:
-    def __init__(self, png: bytes, comparison: dict[str, int | bool]) -> None:
+    def __init__(self, png: bytes, comparison: dict[str, object]) -> None:
         self.png = png
         self.comparison = comparison
         self.screenshot_options: dict[str, object] | None = None
@@ -19,7 +19,10 @@ class _FakePage:
         self.screenshot_options = kwargs
         return self.png
 
-    def evaluate(self, _expression: str, _arg: object) -> dict[str, int | bool]:
+    def wait_for_timeout(self, _milliseconds: float) -> None:
+        pass
+
+    def evaluate(self, _expression: str, _arg: object) -> dict[str, object]:
         return self.comparison
 
 
@@ -34,6 +37,7 @@ def _page(*, different_pixels: int = 0, total_pixels: int = 1_000) -> _FakePage:
             "actualHeight": 50,
             "expectedWidth": 20,
             "expectedHeight": 50,
+            "changedRegion": None,
         },
     )
 
@@ -108,6 +112,39 @@ def test_rejects_pixel_differences_above_the_configured_ratio(tmp_path: Path) ->
         )
 
 
+def test_reports_the_changed_region_in_the_failure_message(tmp_path: Path) -> None:
+    page = _FakePage(
+        b"actual PNG",
+        {
+            "sameDimensions": True,
+            "differentPixels": 2,
+            "totalPixels": 1_000,
+            "actualWidth": 20,
+            "actualHeight": 50,
+            "expectedWidth": 20,
+            "expectedHeight": 50,
+            "changedRegion": {"x": 3, "y": 7, "width": 11, "height": 13},
+        },
+    )
+    reference = snapshot_path(
+        "test_visual_regression",
+        "test_home_visual_regression",
+        "home.png",
+        snapshots_dir=tmp_path,
+    )
+    reference.parent.mkdir(parents=True)
+    reference.write_bytes(b"expected PNG")
+
+    with pytest.raises(pytest.fail.Exception, match=r"changed region is x=3\.\.13, y=7\.\.19\."):
+        assert_visual_snapshot(
+            cast(Page, page),
+            test_file="test_visual_regression",
+            test_name="test_home_visual_regression",
+            name="home.png",
+            snapshots_dir=tmp_path,
+        )
+
+
 def test_rejects_changed_screenshot_dimensions(tmp_path: Path) -> None:
     page = _FakePage(
         b"actual PNG",
@@ -119,6 +156,7 @@ def test_rejects_changed_screenshot_dimensions(tmp_path: Path) -> None:
             "actualHeight": 50,
             "expectedWidth": 30,
             "expectedHeight": 50,
+            "changedRegion": None,
         },
     )
     reference = snapshot_path(
