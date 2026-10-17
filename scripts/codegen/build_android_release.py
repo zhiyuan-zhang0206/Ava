@@ -70,6 +70,19 @@ def build_manifest(
     }
 
 
+def assert_version_code_advances(*, current: Path, version_code: int) -> None:
+    body: Any = json.loads(current.read_text(encoding="utf-8"))
+    if not isinstance(body, dict):
+        raise TypeError(f"{current} is not a manifest object")
+    previous = body.get("versionCode")
+    if isinstance(previous, bool) or not isinstance(previous, int):
+        raise TypeError(f"{current} has no integer versionCode")
+    if version_code <= previous:
+        raise ValueError(
+            f"refusing versionCode {version_code}: android-latest already advertises {previous}"
+        )
+
+
 def _checked_version_code(version_code: int) -> int:
     if version_code <= LEGACY_VERSION_CODE:
         raise ValueError(
@@ -107,6 +120,12 @@ def main(argv: list[str] | None = None) -> int:
     config_parser.add_argument("--version-name", required=True)
     config_parser.add_argument("--version-code", type=int, required=True)
 
+    guard_parser = commands.add_parser(
+        "assert-advances", help="fail unless the code is newer than android-latest's manifest"
+    )
+    guard_parser.add_argument("--current", type=Path, required=True)
+    guard_parser.add_argument("--version-code", type=int, required=True)
+
     manifest_parser = commands.add_parser("manifest", help=f"write {MANIFEST_NAME}")
     manifest_parser.add_argument("--version-code", type=int, required=True)
     manifest_parser.add_argument("--version-name", required=True)
@@ -122,6 +141,10 @@ def main(argv: list[str] | None = None) -> int:
         return 0
     if args.command == "tauri-config":
         print(tauri_config(version_name=args.version_name, version_code=args.version_code))
+        return 0
+    if args.command == "assert-advances":
+        assert_version_code_advances(current=args.current, version_code=args.version_code)
+        print(f"versionCode {args.version_code} advances android-latest")
         return 0
 
     body = build_manifest(

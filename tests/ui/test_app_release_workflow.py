@@ -49,10 +49,17 @@ def test_android_latest_publishes_the_manifest_with_the_apk() -> None:
     assert 'gh release upload "$TAG" "${assets[@]}" --clobber' in text
 
 
-def test_android_manual_dispatch_can_build_without_publishing() -> None:
+def test_android_manual_dispatch_builds_without_publishing_by_default() -> None:
     text = _android_workflow()
     assert "dry_run:" in text
+    assert "default: true" in text
     assert "github.event_name != 'workflow_dispatch' || inputs.dry_run != true" in text
+
+
+def test_android_publish_refuses_to_roll_the_channel_back() -> None:
+    text = _android_workflow()
+    assert "gh release download android-latest --pattern android-latest.json" in text
+    assert "build_android_release.py assert-advances" in text
 
 
 def test_manual_dispatch_keeps_the_explicit_unsigned_build_path() -> None:
