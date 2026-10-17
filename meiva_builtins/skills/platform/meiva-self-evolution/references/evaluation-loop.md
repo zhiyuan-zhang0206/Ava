@@ -72,3 +72,9 @@ scores two dimensions in [0, 1]: **completion** (output produced,
 clean exec) and **efficiency** (few tokens/turns, no exec failures, no
 compaction, no re-prompts); `overall` weights completion higher. Use only the
 verified mean — invalid replays are reported separately.
+
+A record whose evidence graded below `complete` scores `None` on all three
+dimensions and counts as abstained (`n_abstained`); `mean` averages scored
+samples only and is `None` when nothing scored. Compare it only when it is not
+`None` — see
+[[meiva_builtins/skills/platform/meiva-self-evolution/docs/rubric-abstention.meiva.okf.md|rubric abstention]].

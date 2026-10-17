@@ -278,13 +278,13 @@ def build_report_data(
     See the JSON schema documented in the template's companion README or the
     sample at `skills/meiva-self-evolution/references/sample_report.json`.
     """
-    overall_delta = 0.0
-    for s in score_skills:
-        for d in s.get("dimensions", []):
-            if d.get("label") == "overall":
-                overall_delta += d.get("delta", 0)
-    if score_skills:
-        overall_delta = round(overall_delta / len(score_skills), 3)
+    deltas = [
+        d.get("delta", 0)
+        for s in score_skills
+        for d in s.get("dimensions", [])
+        if d.get("label") == "overall"
+    ]
+    overall_delta = f"{round(sum(deltas) / len(deltas), 3):+.3f}" if deltas else "n/a"
 
     tasks_replayed = eval_results.get("replayed", 0) if eval_results else 0
     improved = eval_results.get("improved", 0) if eval_results else 0
@@ -296,7 +296,7 @@ def build_report_data(
         "skill_count": len(score_skills),
         "total_runs": total_runs,
         "changes_count": len(changes),
-        "overall_delta": f"{overall_delta:+.3f}",
+        "overall_delta": overall_delta,
         "tasks_replayed": tasks_replayed,
         "improved": improved,
         "regressed": regressed,

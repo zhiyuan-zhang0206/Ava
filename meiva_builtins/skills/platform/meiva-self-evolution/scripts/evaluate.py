@@ -1,3 +1,4 @@
+# meiva:ref meiva_builtins/skills/platform/meiva-self-evolution/docs/rubric-abstention.meiva.okf.md#coverage-counts
 """Evaluate a skill by re-running its tasks with fresh agents and scoring them.
 
 This is the measurement half of the optimization loop (see the Evaluation Loop
@@ -176,11 +177,27 @@ def poll(state: dict[str, Any], *, database: Database) -> dict[str, list[int]]:
     return {"done": done, "pending": pending}
 
 
-def _mean(score_dicts: list[dict[str, float]]) -> dict[str, float]:
+def _mean(score_dicts: list[dict[str, float | None]]) -> dict[str, float | None]:
     if not score_dicts:
-        return {"completion": 0.0, "efficiency": 0.0, "overall": 0.0}
-    keys = ("completion", "efficiency", "overall")
-    return {k: round(sum(s[k] for s in score_dicts) / len(score_dicts), 3) for k in keys}
+        return {"completion": None, "efficiency": None, "overall": None}
+    return {
+        key: round(_column_mean(score_dicts, key), 3)
+        for key in ("completion", "efficiency", "overall")
+    }
+
+
+def _column_mean(score_dicts: list[dict[str, float | None]], key: str) -> float:
+    values = [value for score in score_dicts if (value := score[key]) is not None]
+    return sum(values) / len(values)
+
+
+def _score_summary(score_dicts: list[dict[str, float | None]]) -> dict[str, Any]:
+    scored = [s for s in score_dicts if s["overall"] is not None]
+    return {
+        "mean": _mean(scored),
+        "n_scored": len(scored),
+        "n_abstained": len(score_dicts) - len(scored),
+    }
 
 
 def _leak_paths(agent_id: int) -> LeakPaths:
@@ -229,11 +246,14 @@ def gather(state: dict[str, Any], *, database: Database) -> dict[str, Any]:
         )
     invalid = [task for task in per_task if not task["valid"]]
     valid = [task for task in per_task if task["valid"]]
+    summary = _score_summary([task["scores"] for task in valid])
     return {
         "skill": state["skill"],
         "stamp": state["stamp"],
         "n": len(valid),
-        "mean": _mean([task["scores"] for task in valid]),
+        "mean": summary["mean"],
+        "n_scored": summary["n_scored"],
+        "n_abstained": summary["n_abstained"],
         "per_task": per_task,
         "invalid": invalid,
         "invalidated": sum(task["invalidated"] for task in per_task),

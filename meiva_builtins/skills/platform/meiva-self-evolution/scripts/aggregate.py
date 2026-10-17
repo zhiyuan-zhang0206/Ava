@@ -88,14 +88,16 @@ def parse_failure_md(text: str) -> list[dict[str, Any]]:
 
 
 def compute_score_dimensions(
-    before: dict[str, float], after: dict[str, float]
+    before: dict[str, float], after: dict[str, float | None]
 ) -> list[dict[str, Any]]:
     """Convert two {completion, efficiency, overall} dicts into the dimension list
     the report template expects."""
     dims = []
     for key in ("completion", "efficiency", "overall"):
         b = before.get(key, 0)
-        a = after.get(key, 0)
+        a = after.get(key)
+        if a is None:
+            return []
         delta = round(a - b, 3)
         dims.append(
             {
