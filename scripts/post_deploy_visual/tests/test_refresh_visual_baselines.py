@@ -50,6 +50,14 @@ def _drift_failure(test_name: str) -> str:
     )
 
 
+def _drift_failure_with_region(test_name: str) -> str:
+    return (
+        f"FAILED tests/e2e/visual/test_visual_regression.py::{test_name} - Failed: "
+        "Visual regression: 1001/100000 pixels changed (1.001%); "
+        "allowed ratio is 0.100%; changed region is x=818..1279, y=84..710.\n"
+    )
+
+
 def _candidate_failures(tmp_path: Path) -> str:
     return "".join(
         f"FAILED tests/e2e/visual/test_visual_regression.py::{test_name} - Failed: "
@@ -80,6 +88,18 @@ def test_check_only_maps_pixel_drift_to_distinct_exit_code(
     def run(argv: Sequence[str], **options: object) -> RunResult:
         _assert_run_options(options, tmp_path)
         return _completed(argv, 1, _drift_failure("test_home_visual_regression"))
+
+    assert refresh.main(["--check-only"], host=fake_host(run)) == refresh.VISUAL_DRIFT_EXIT_CODE
+
+
+def test_check_only_accepts_a_drift_reason_that_names_the_changed_region(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _prepare_references(tmp_path, monkeypatch)
+
+    def run(argv: Sequence[str], **options: object) -> RunResult:
+        _assert_run_options(options, tmp_path)
+        return _completed(argv, 1, _drift_failure_with_region("test_home_visual_regression"))
 
     assert refresh.main(["--check-only"], host=fake_host(run)) == refresh.VISUAL_DRIFT_EXIT_CODE
 
