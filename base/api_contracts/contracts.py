@@ -94,6 +94,19 @@ ROUTE_CONTRACTS: dict[tuple[str, str], RouteContract] = {
         PauseSemantics.CONTROL_PLANE,
         note="control-plane op — host self-report during stop",
     ),
+    ("GET", "/api/host/permissions"): RouteContract(
+        note="live probe of this host's macOS grants — each call re-reads the system",
+    ),
+    ("POST", "/api/host/permissions/recheck"): RouteContract(
+        note="re-probe — repeats read the same system state again",
+    ),
+    ("POST", "/api/host/permissions/request"): RouteContract(
+        Idempotency.NON_IDEMPOTENT,
+        note="raises permission dialogs a person must answer; a repeat asks again rather than replaying a decision",
+    ),
+    ("POST", "/api/host/permissions/defer"): RouteContract(
+        note="record the user's 'later' — repeats write the same flag",
+    ),
     ("GET", "/api/cluster/status"): RouteContract(
         pause=PauseSemantics.CONTROL_PLANE, note="control-plane read — observability during rollout"
     ),
