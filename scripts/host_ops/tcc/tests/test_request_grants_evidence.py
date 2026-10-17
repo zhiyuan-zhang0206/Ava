@@ -10,15 +10,22 @@ import pytest
 from base.host.permissions_helper.wire import RequestGrantsResult
 from scripts.host_ops.tcc import request_grants_evidence as module
 
-DECISION = (
-    "2026-10-17 18:00:01.123456+0800 tccd[120]: AUTHREQ_RESULT service=kTCCServiceScreenCapture"
-    " authValue=2 authReason=4 preflight=no"
+REQUEST = (
+    "2026-10-17 18:00:00.000001+0800 tccd[120]: AUTHREQ_CTX: msgID=74954.1,"
+    " function=TCCAccessRequest, service=kTCCServiceScreenCapture, preflight=no, query=1"
+)
+VERDICT = (
+    "2026-10-17 18:00:01.123456+0800 tccd[120]: AUTHREQ_RESULT: msgID=74954.1,"
+    " authValue=2, authReason=4"
 )
 PREFLIGHT = (
-    "2026-10-17 18:00:00.000001+0800 tccd[120]: AUTHREQ_RESULT"
-    " service=kTCCServiceAccessibility authValue=2 preflight=yes"
+    "2026-10-17 18:00:00.500000+0800 tccd[120]: AUTHREQ_CTX: msgID=1.1,"
+    " function=TCCAccessPreflight, service=kTCCServiceAccessibility, preflight=yes"
 )
-OTHER = "2026-10-17 18:00:02.000000+0800 tccd[120]: something unrelated preflight=no"
+PREFLIGHT_VERDICT = (
+    "2026-10-17 18:00:00.600000+0800 tccd[120]: AUTHREQ_RESULT: msgID=1.1,"
+    " authValue=2, authReason=4"
+)
 
 
 def no_log(_start: datetime, _window: int) -> str:
@@ -26,7 +33,7 @@ def no_log(_start: datetime, _window: int) -> str:
 
 
 def decision_log(_start: datetime, _window: int) -> str:
-    return "\n".join([DECISION, PREFLIGHT, OTHER])
+    return "\n".join([REQUEST, PREFLIGHT, VERDICT, PREFLIGHT_VERDICT])
 
 
 class FakeHelper:
@@ -72,9 +79,28 @@ class Dead:
         raise AssertionError(f"no child expected: {name} {argv} {env} {cwd} {stdout} {stderr}")
 
 
-def test_only_a_non_preflight_decision_for_the_two_grants_is_evidence() -> None:
-    assert module.decision_lines("\n".join([DECISION, PREFLIGHT, OTHER])) == [DECISION]
-    assert module.decision_lines("no decisions here") == []
+def test_a_request_is_its_ctx_line_plus_the_verdict_with_the_same_msg_id() -> None:
+    lines, decided = module.decision_evidence("\n".join([REQUEST, PREFLIGHT, VERDICT]))
+    assert lines == [REQUEST, VERDICT]
+    assert decided == {"kTCCServiceScreenCapture"}
+
+
+def test_a_preflight_never_counts_even_though_it_also_has_a_verdict() -> None:
+    lines, decided = module.decision_evidence("\n".join([PREFLIGHT, PREFLIGHT_VERDICT]))
+    assert lines == []
+    assert decided == set()
+
+
+def test_a_request_without_a_verdict_is_not_evidence_yet() -> None:
+    lines, decided = module.decision_evidence(REQUEST)
+    assert lines == []
+    assert decided == set()
+
+
+def test_an_unrelated_line_never_becomes_evidence() -> None:
+    lines, decided = module.decision_evidence("no decisions here")
+    assert lines == []
+    assert decided == set()
 
 
 def test_the_log_is_read_from_the_request_window_only() -> None:
@@ -115,7 +141,8 @@ def test_the_evidence_names_what_was_requested_and_what_tccd_said(tmp_path: Path
     assert len(files) == 1
     body = json.loads(files[0].read_text())
     assert body["requested"] == {"screen_recording": False, "accessibility": False}
-    assert body["tccd_lines"] == [DECISION]
+    assert body["tccd_lines"] == [REQUEST, VERDICT]
+    assert body["decided_services"] == ["kTCCServiceScreenCapture"]
     assert body["helper_pid"] == 42
 
 
@@ -129,7 +156,12 @@ def test_a_request_without_a_decision_line_is_not_evidence(tmp_path: Path) -> No
 def test_screen_recording_acceptance_needs_its_own_line(tmp_path: Path) -> None:
     class AccessOnly:
         def __call__(self, _start: datetime, _window: int) -> str:
-            return PREFLIGHT.replace("preflight=yes", "preflight=no")
+            return "\n".join(
+                [
+                    PREFLIGHT.replace("preflight=yes", "preflight=no"),
+                    PREFLIGHT_VERDICT,
+                ]
+            )
 
     code = module.main(
         ["--out", str(tmp_path), "--require", "kTCCServiceScreenCapture"],
