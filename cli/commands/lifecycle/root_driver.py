@@ -173,7 +173,13 @@ def require_root_owner(status: dict[str, Any], *, helper: HelperFactory | None) 
         or not helper_process.live()
         or not root.live()
     ):
-        raise RootDriverError("root is outside this home's signed-helper custody")
+        raise RootDriverError(
+            f"root is outside this home's signed-helper custody: live root pid {root.pid} was "
+            "started by a previous permissions helper, so this home's keeper neither adopts it "
+            "nor seeds a replacement while it holds the instance lock. That root retires itself "
+            "once it sees its helper ancestry is gone; wait for it to exit, then run "
+            "`meiva start` again (task #5292)."
+        )
 
 
 def root_argv(run_dir: Path, manifests: Path, runtime: StartRuntime | None = None) -> list[str]:

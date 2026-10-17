@@ -13,10 +13,12 @@ import asyncio
 import logging
 import signal
 import sys
-from collections.abc import Sequence
-from dataclasses import dataclass
+from collections.abc import Callable, Sequence
+from dataclasses import dataclass, field
 from pathlib import Path
 
+from base.host.exit_codes import HELPER_CHAIN_BROKEN_EXIT_CODE
+from base.log import logger
 from base.native_process.root_control.instance_lock import (
     AlreadyRunningError,
     acquire_instance_lock,
@@ -30,6 +32,7 @@ from base.native_process.root_control.ipc import (
     error_response,
     ok_response,
 )
+from services.supervision.meiva_root.helper_chain import HelperChainConfig, HelperChainWatch
 from services.supervision.meiva_root.manifest import ManifestError, load_manifests
 from services.supervision.meiva_root.server import ControlServer
 from services.supervision.meiva_root.supervisor import Supervisor
@@ -54,6 +57,7 @@ class DaemonOptions:
     run_dir: Path
     manifests_path: Path
     wiring: str | None = None
+    helper_chain: HelperChainConfig = field(default_factory=HelperChainConfig)
 
 
 def parse_args(argv: Sequence[str] | None = None) -> DaemonOptions:
@@ -79,12 +83,53 @@ def parse_args(argv: Sequence[str] | None = None) -> DaemonOptions:
         default=None,
         help="optional 'module:attribute' wiring hook, driven with the daemon lifecycle",
     )
+    parser.add_argument(
+        "--helper-chain-interval",
+        type=float,
+        default=HelperChainConfig.interval_s,
+        help="seconds between helper-ancestry readings",
+    )
+    parser.add_argument(
+        "--helper-chain-confirm-rounds",
+        type=int,
+        default=HelperChainConfig.confirm_rounds,
+        help="consecutive broken ancestry readings before this root retires",
+    )
     parsed = parser.parse_args(argv)
     return DaemonOptions(
         run_dir=parsed.run_dir,
         manifests_path=parsed.manifests,
         wiring=parsed.wiring,
+        helper_chain=HelperChainConfig(
+            interval_s=parsed.helper_chain_interval,
+            confirm_rounds=parsed.helper_chain_confirm_rounds,
+        ),
     )
+
+
+class RootRetirement:
+    def __init__(self, request_stop: Callable[[], None]) -> None:
+        self._request_stop = request_stop
+        self.exit_code = 0
+
+    def retire(self, detail: str) -> None:
+        self.exit_code = HELPER_CHAIN_BROKEN_EXIT_CODE
+        logger.warning(
+            "[root] helper ancestry is gone — retiring this root "
+            "so the helper keeper seeds a replacement ({detail})",
+            event="helper_chain_broken",
+            process="root",
+            detail=detail,
+        )
+        self._request_stop()
+
+
+def install_signal_handlers(
+    loop: asyncio.AbstractEventLoop, request_stop: Callable[[], None]
+) -> None:
+    for signum in (signal.SIGTERM, signal.SIGINT):
+        loop.add_signal_handler(signum, request_stop)
+    loop.add_signal_handler(signal.SIGHUP, lambda: _log.info("SIGHUP ignored"))
 
 
 async def run(options: DaemonOptions) -> int:
@@ -112,6 +157,8 @@ async def run(options: DaemonOptions) -> int:
             nonlocal retiring
             retiring = True
             stop.set()
+
+        retirement = RootRetirement(request_stop)
 
         async def dispatch(request: RequestPayload) -> ResponsePayload:
             if request["verb"] == Verb.SHUTDOWN:
@@ -141,11 +188,7 @@ async def run(options: DaemonOptions) -> int:
         server = ControlServer(socket_path, dispatch, after_response=after_response)
         loop = asyncio.get_running_loop()
 
-        for signum in (signal.SIGTERM, signal.SIGINT):
-            loop.add_signal_handler(signum, request_stop)
-        # SIGHUP does not reload anything; ignoring it keeps a stray terminal
-        # hangup from killing the tree; release replacement is an outer-owner action.
-        loop.add_signal_handler(signal.SIGHUP, lambda: _log.info("SIGHUP ignored"))
+        install_signal_handlers(loop, request_stop)
         started: list[WiringParticipant] = []
         try:
             await supervisor.start()
@@ -157,9 +200,15 @@ async def run(options: DaemonOptions) -> int:
                 socket_path,
                 len(started),
             )
+            participant_tasks.create_task(
+                HelperChainWatch(
+                    retire=retirement.retire, stop=stop, config=options.helper_chain
+                ).run()
+            )
             await stop.wait()
         except BaseException as primary:
             try:
+                request_stop()
                 await finish(started, server, supervisor, lock_fd)
             except BaseException as cleanup:
                 raise BaseExceptionGroup(
@@ -171,7 +220,7 @@ async def run(options: DaemonOptions) -> int:
             # (and the control server) still exist. A failing stop never blocks the
             # tree shutdown below.
             await finish(started, server, supervisor, lock_fd)
-        return 0
+        return retirement.exit_code
 
 
 async def finish(

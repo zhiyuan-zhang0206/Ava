@@ -16,7 +16,7 @@ import stat
 import subprocess
 import sys
 import time
-from collections.abc import Callable, Generator
+from collections.abc import Callable, Generator, Sequence
 from contextlib import contextmanager
 from pathlib import Path
 from typing import cast
@@ -25,6 +25,7 @@ import httpx
 import psutil
 import pytest
 
+from base.host.exit_codes import HELPER_CHAIN_BROKEN_EXIT_CODE
 from base.host.system.boot_unit import BootUnitContext
 from base.host.system.hostport import Host
 from base.native_process.ownership import OwnedProcess
@@ -44,7 +45,13 @@ def _write_manifests(base: Path, units: list[dict[str, object]]) -> Path:
     return path
 
 
-def _daemon_command(run_dir: Path, manifests: Path, *, wiring: str | None = None) -> list[str]:
+def _daemon_command(
+    run_dir: Path,
+    manifests: Path,
+    *,
+    wiring: str | None = None,
+    extra: Sequence[str] = (),
+) -> list[str]:
     command = [
         sys.executable,
         "-m",
@@ -56,6 +63,7 @@ def _daemon_command(run_dir: Path, manifests: Path, *, wiring: str | None = None
     ]
     if wiring is not None:
         command.extend(["--wiring", wiring])
+    command.extend(extra)
     return command
 
 
@@ -66,13 +74,14 @@ def _daemon(
     *,
     wiring: str | None = None,
     env: dict[str, str] | None = None,
+    extra: Sequence[str] = (),
 ) -> Generator[tuple[subprocess.Popen[bytes], Path]]:
     """Run a daemon; guarantee it is gone (TERM, then KILL) at scope exit."""
     run_dir.mkdir(parents=True, exist_ok=True)
     log_path = run_dir / "daemon.log"
     with log_path.open("ab") as log_file:
         proc = subprocess.Popen(  # noqa: S603 — fixed argv, this module's own command, no shell
-            _daemon_command(run_dir, manifests, wiring=wiring),
+            _daemon_command(run_dir, manifests, wiring=wiring, extra=extra),
             cwd=REPO_ROOT,
             stdout=log_file,
             stderr=subprocess.STDOUT,
@@ -215,6 +224,30 @@ def test_daemon_end_to_end(short_tmp: Path) -> None:
     assert proc.returncode == 0
     assert not (run_dir / _SOCKET_NAME).exists()
     assert (run_dir / "meiva-root.lock").exists()
+
+
+_FAST_HELPER_CHAIN = ("--helper-chain-interval", "0.05", "--helper-chain-confirm-rounds", "1")
+
+
+def test_retires_when_the_helper_ancestry_is_gone(short_tmp: Path) -> None:
+    run_dir = short_tmp / "run"
+    manifests = _write_manifests(short_tmp, [{"id": "svc", "exec": _SLEEPER, "restart": "never"}])
+    env = {**os.environ, "MEIVA_PERMISSIONS_HELPER_PID": str(2**31 - 1)}
+    with _daemon(run_dir, manifests, env=env, extra=_FAST_HELPER_CHAIN) as (proc, log):
+        assert proc.wait(timeout=30) == HELPER_CHAIN_BROKEN_EXIT_CODE, _read_log(log)
+    assert "helper ancestry is gone" in _read_log(log)
+    assert not (run_dir / _SOCKET_NAME).exists()
+
+
+def test_keeps_running_while_the_helper_ancestry_is_intact(short_tmp: Path) -> None:
+    run_dir = short_tmp / "run"
+    manifests = _write_manifests(short_tmp, [{"id": "svc", "exec": _SLEEPER, "restart": "never"}])
+    env = {**os.environ, "MEIVA_PERMISSIONS_HELPER_PID": str(os.getpid())}
+    with _daemon(run_dir, manifests, env=env, extra=_FAST_HELPER_CHAIN) as (proc, log):
+        client = _wait_ready(run_dir, proc, log)
+        time.sleep(0.5)
+        assert proc.poll() is None, _read_log(log)
+        assert client.status()["ok"] is True
 
 
 def test_second_daemon_refuses_the_same_run_dir(short_tmp: Path) -> None:

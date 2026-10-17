@@ -407,6 +407,24 @@ def test_generation_change_refuses_without_signal_or_seed_publication(
     assert not {"stop_root", "seed_root"} & set(helper.calls)  # a refused generation never signals
 
 
+def test_the_custody_refusal_names_the_recovery(tmp_path: Path) -> None:
+    me = OwnedProcess.capture(psutil.Process())
+    status = {"root": {"pid": me.pid, "create_time": me.birth, "starttime": me.starttime}}
+    helper = ScriptedHelper(
+        ping={
+            "pong": True,
+            "root_stop_intent_v1": True,
+            "helper_shutdown_v1": True,
+            "pid": os.getppid(),
+        },
+        root_status={"pid": me.pid + 1, "run_dir": str(tmp_path)},
+    )
+    with pytest.raises(driver.RootDriverError) as refusal:
+        driver.require_root_owner(status, helper=serve(helper))
+    assert "outside this home's signed-helper custody" in str(refusal.value)
+    assert "meiva start" in str(refusal.value)
+
+
 def test_a_platform_without_a_helper_asks_only_that_the_root_is_live() -> None:
     me = OwnedProcess.capture(psutil.Process())
     live_root = {"root": {"pid": me.pid, "create_time": me.birth, "starttime": me.starttime}}
