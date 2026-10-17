@@ -17,7 +17,6 @@ exports = ["db", "execution", "extensions", "graph", "hooks", "impersonation.py"
 
 [debt.private-module]
 "tests/claim/test_inbound_ownership.py -> graph/claim/_batch.py" = 1
-"tests/history/test_fork_notes.py -> graph/claim/_dispatch.py" = 3
 "tests/impersonation/test_impersonation.py -> graph/exec/_result.py" = 1
 "tests/test_exec_subprocess.py -> graph/exec/_result.py" = 1
 "tests/test_exec_subprocess.py -> graph/exec/_stream.py" = 1

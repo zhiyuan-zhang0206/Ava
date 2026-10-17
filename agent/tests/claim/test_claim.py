@@ -22,9 +22,7 @@ from typing import cast
 import psycopg
 import pytest
 from langchain_core.messages import BaseMessage, HumanMessage, SystemMessage
-from langchain_core.messages.modifier import RemoveMessage
 from langgraph.graph import END
-from langgraph.graph.message import REMOVE_ALL_MESSAGES
 from psycopg_pool import AsyncConnectionPool
 
 from agent.graph import claim_node
@@ -307,16 +305,18 @@ async def test_claim_fork_kind_appends_identity_marker_and_continues(
 
     assert cmd.goto == "before_llm"
     msgs = cmd.update["messages"]  # type: ignore[index]
-    # messages non-empty → no SystemMessage injection; the fork rebuilds the
-    # head (full wipe + inherited history re-listed) and appends marker + notes.
-    # Shape: [RemoveMessage(__remove_all__), sys, inherited, marker, agent_id].
-    assert len(msgs) == 5  # pyright: ignore[reportUnknownArgumentType]
-    assert isinstance(msgs[0], RemoveMessage) and msgs[0].id == REMOVE_ALL_MESSAGES  # pyright: ignore[reportUnknownMemberType]
-    assert [m.additional_kwargs.get("meiva_note_tag") for m in msgs[-2:]] == [  # pyright: ignore[reportUnknownMemberType]
+    from agent.messages.guard import guarded_add_messages
+
+    assert len(msgs) == 2  # pyright: ignore[reportUnknownArgumentType]
+    assert [m.additional_kwargs.get("meiva_note_tag") for m in msgs] == [  # pyright: ignore[reportUnknownMemberType]
         "lifecycle_fork",
         "agent_id",
     ]
-    lifecycle = msgs[3]
+    lifecycle = msgs[0]
+    merged = guarded_add_messages(
+        [SystemMessage(content="sys"), HumanMessage(content="inherited")], msgs
+    )
+    assert [m.content for m in merged[:2]] == ["sys", "inherited"]  # pyright: ignore[reportUnknownMemberType]
     assert isinstance(lifecycle, HumanMessage)
     assert isinstance(lifecycle.content, str)  # pyright: ignore[reportUnknownMemberType]
     content = lifecycle.content
@@ -328,7 +328,7 @@ async def test_claim_fork_kind_appends_identity_marker_and_continues(
     assert lifecycle.additional_kwargs.get("meiva_note_tag") == "lifecycle_fork"  # pyright: ignore[reportUnknownMemberType]
 
 
-async def test_claim_fork_strips_inherited_source_notes(
+async def test_claim_fork_preserves_the_inherited_prefix(
     redis_url: str,
     db_conn: psycopg.Connection,
     aops_pool: AsyncConnectionPool,
@@ -338,12 +338,6 @@ async def test_claim_fork_strips_inherited_source_notes(
     database_gate: ProcessDbGate,
     machine_identity: MachineIdentity,
 ):
-    """The fork strip (issue #1320): inherited head notes that name the SOURCE —
-    its agent id, its per-agent memory, its preloaded skills — are removed, and
-    the new agent's own copies are grafted. The cluster memory index is
-    cluster-wide: the inherited copy is kept and NOT re-grafted."""
-    from langchain_core.messages import RemoveMessage
-
     tid = spawn_agent(
         catalog=model_catalog,
         authority=config_authority,
@@ -385,23 +379,19 @@ async def test_claim_fork_strips_inherited_source_notes(
         monkeypatch.undo()
 
     assert cmd.goto == "before_llm"
-    msgs = cast(list[BaseMessage], (cmd.update or {})["messages"])
-    # The rebuild: one full-wipe marker, then the inherited history re-listed
-    # with the three source-identity notes dropped (the cluster index — the
-    # SYSTEM_NOTE not owned by the source — survives the rebuild).
-    assert isinstance(msgs[0], RemoveMessage) and msgs[0].id == REMOVE_ALL_MESSAGES
-    rebuilt_ids = {m.id for m in msgs[1:] if not isinstance(m, RemoveMessage)}
-    assert {old_id.id, old_mem.id, old_preload.id} & rebuilt_ids == set()
-    assert cluster_index.id in rebuilt_ids
-    # Grafted after the rebuild: fork marker + the new agent's own id + its
-    # own per-agent memory.
-    tail = [m for m in msgs if not isinstance(m, RemoveMessage)][-3:]
-    assert [m.additional_kwargs.get("meiva_note_tag") for m in tail] == [  # pyright: ignore[reportUnknownMemberType]
+    from agent.messages.guard import guarded_add_messages
+
+    delta = cast(list[BaseMessage], (cmd.update or {})["messages"])
+    merged = guarded_add_messages(list(inherited), delta)
+    assert [m.id for m in merged[: len(inherited)]] == [m.id for m in inherited]
+    assert [m.content for m in merged[: len(inherited)]] == [m.content for m in inherited]
+    tail = merged[len(inherited) :]
+    assert [m.additional_kwargs.get("meiva_note_tag") for m in tail] == [
         "lifecycle_fork",
         "agent_id",
         "agent_memory",
     ]
-    grafted_content: object = tail[-1].content  # pyright: ignore[reportUnknownMemberType]
+    grafted_content: object = tail[-1].content
     assert isinstance(grafted_content, str) and "source's memory" not in grafted_content
 
 

@@ -47,7 +47,9 @@ Context]] for the registry itself.
   truncate oversized declarations with a visible marker plus a warning — never
   silently. Content carries no timestamps, so unchanged state is byte-stable.
   `on_fork`: the inherited note carries the SOURCE's chain, so `_handle_fork`
-  strips it and regrafts the new agent's own.
+  grafts the new agent's own after the fork marker (the inherited copy stays in
+  the source's history — see [[agent/graph/docs/context-notes/context-notes.meiva.okf.md|Standing
+  Context]]).
 
 Malformed fences (unclosed / stray close / nested open) drop the block with a
 warning; only a file's body counts, split by the pool validator's frontmatter rule
