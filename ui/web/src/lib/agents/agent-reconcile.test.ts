@@ -27,13 +27,20 @@ function snapshot(tag: string): ConversationSnapshotResponse {
     timeline: { items: [], msg_count: 0, has_more: false },
     token_usage: { input_tokens: tag === "new" ? 2 : 1, output_tokens: 0, reasoning_tokens: 0,
       max_input_tokens: 100_000, soft_compact_tokens: 70_000, hard_compact_tokens: 90_000 },
-    pending: [{ id: tag === "new" ? 2 : 1, content: tag, source: "user", images: null,
-      created_at: "2026-09-18T00:00:00Z" }],
+    pending: [{ id: tag === "new" ? 2 : 1, content: tag, source: "user", sender: "user",
+      images: null, created_at: "2026-09-18T00:00:00Z" }],
   };
 }
 
 function pendingRow(id: number): PendingInbound {
-  return { id, content: String(id), source: "user", images: null, created_at: "2026-09-18T00:00:00Z" };
+  return {
+    id,
+    content: String(id),
+    source: "user",
+    sender: "user",
+    images: null,
+    created_at: "2026-09-18T00:00:00Z",
+  };
 }
 
 let client: QueryClient;
