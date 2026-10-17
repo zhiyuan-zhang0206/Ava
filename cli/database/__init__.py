@@ -33,11 +33,9 @@ class OperatorDatabaseFactory:
         self,
         *,
         local_host: Callable[[], str],
-        gateway_url_reader: Callable[[], str],
         open_database: OpenDatabase,
     ) -> None:
         self._local_host = local_host
-        self._gateway_url_reader = gateway_url_reader
         self._open_database = open_database
         self._lock = Lock()
         self._gate: Any = None
@@ -90,7 +88,7 @@ class OperatorDatabaseFactory:
         return self._open_database(
             config,
             self._admission_gate(),
-            ClusterDirectUrl(self._local_host, gateway_url_reader=self._gateway_url_reader),
+            ClusterDirectUrl(self._local_host),
         )
 
 
@@ -108,13 +106,10 @@ def open_operator_database(config: Any, gate: Any, direct_url: Any) -> Any:
 def operator_database_factory(
     *,
     local_host: Callable[[], str],
-    gateway_url_reader: Callable[[], str],
     open_database: OpenDatabase,
 ) -> OperatorDatabaseFactory:
     """Construct without configuration or Git; each handle reads live settings."""
-    return OperatorDatabaseFactory(
-        local_host=local_host, gateway_url_reader=gateway_url_reader, open_database=open_database
-    )
+    return OperatorDatabaseFactory(local_host=local_host, open_database=open_database)
 
 
 class OperatorEventPipeline:

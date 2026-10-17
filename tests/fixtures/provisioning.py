@@ -425,7 +425,7 @@ def database(db_url: str, database_gate):
 
     return Database.from_settings(
         gate=database_gate,
-        direct_url=ClusterDirectUrl(lambda: "127.0.0.1", gateway_url_reader=lambda: ""),
+        direct_url=ClusterDirectUrl(lambda: "127.0.0.1"),
     )
 
 

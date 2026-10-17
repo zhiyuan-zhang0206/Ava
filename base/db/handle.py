@@ -109,6 +109,9 @@ class Database:
 
     def direct_url(self) -> str:
         """The admin-plane URL of this handle's cluster (never through the pooler)."""
+        return connections.require_direct(self.direct_resolution())
+
+    def direct_resolution(self) -> connections.DirectResolution:
         return connections.require_direct_url(self._direct_url)(self._config)
 
     @contextmanager

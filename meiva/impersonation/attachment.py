@@ -92,9 +92,7 @@ def _attachment_database(
     return lambda: Database(
         db_config_from_boot(config),
         gate=gate,
-        direct_url=ClusterDirectUrl(
-            machine.host, gateway_url_reader=lambda: config.view.gateway.gateway_url
-        ),
+        direct_url=ClusterDirectUrl(machine.host),
     )
 
 

@@ -84,7 +84,17 @@ when the test exits, including an assertion failure.
 
 `cli/commands/lifecycle/migrations.py:cmd_migrations_apply` is deliberately
 not a user-facing verb — it runs as a step of `meiva start`, so any restart
-crossing a schema change catches the DB up on its own. `start_generation.record_running_sha` records the running source
+crossing a schema change catches the DB up on its own.
+
+Every host runs that step on a cold start, so its two branches split by who can
+mutate the schema. A plane this home owns migrates over the postmaster's own
+owner socket — direct by construction, and it survives a transaction pooler
+because the applier holds a session advisory lock for its whole loop. A plane this
+home does not own is dialed ordinarily: an agent-runner only ever finds nothing
+pending (the mutation authority is checked exactly when something is), and a
+provider-managed plane has no local pooler in front of its URL. The checkpoint
+schema check that follows both branches is a read-only verification, so it dials
+the ordinary access URL as well. `start_generation.record_running_sha` records the running source
 after a successful start. What start treats as already-up, what it waits for,
 and when an unready service becomes exit code 4:
 [[start-readiness.meiva.okf.md]].

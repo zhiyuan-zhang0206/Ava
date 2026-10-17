@@ -37,8 +37,8 @@ from base.db import code_version_gate as gate
 from base.host.exit_codes import CODE_BEHIND_MINIMUM_EXIT_CODE
 
 
-def _session_direct_url(_config: object = None, **_kwargs: object) -> str:
-    return settings.data_plane.db_url
+def _session_direct_url(_config: object = None, **_kwargs: object) -> connections.DirectResolution:
+    return connections.DirectResolution(url=settings.data_plane.db_url, is_direct=True)
 
 
 def test_connect_runs_a_query(

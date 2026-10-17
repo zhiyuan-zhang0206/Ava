@@ -13,11 +13,11 @@ from typing import Any
 
 import psycopg
 
-from base.agents.context.clients import DatabaseFactory
+from cli.database import OperatorDatabaseFactory
 
 
 def cmd_migrations_apply(
-    *, database_factory: DatabaseFactory, machine_name: Callable[[], str]
+    *, database_factory: OperatorDatabaseFactory, machine_name: Callable[[], str]
 ) -> list[str]:
     """Apply Meiva migrations and verify checkpoint schema; `meiva start` step 2.5.
 
@@ -46,20 +46,10 @@ def cmd_migrations_apply(
     # Meiva SQL runs keeps update recovery on the old code + old schema.
     cluster.assert_checkpoint_dependency_pinned(required_migration_set())
 
-    # Both dials bypass PgBouncer — the ONE sanctioned data-plane exemption
-    # (user ruling 2026-08: every consumer goes through PgBouncer; see
-    # base/db/__init__.py `connect`). apply_pending_migrations holds a SESSION
-    # advisory lock (pg_advisory_lock, base/deploy/schema/migrations.py _MIGRATION_LOCK_KEY)
-    # across its whole apply loop, and transaction pooling hands the backend
-    # back to the pool at the end of each transaction — the lock would silently
-    # drop between statements, letting a concurrent applier interleave DDL.
-    # Both are also unbounded: migration DDL may legitimately exceed the 60s
-    # statement ceiling (large-table rebuilds, partition backfills).
     if settings.data_plane.is_remote:
-        # A remote-managed plane's provider URL is its only authority.
-        with database_factory().connect(direct=True, unbounded=True) as conn:
+        with database_factory().connect(unbounded=True) as conn:
             done = _apply(conn, machine_name=machine_name)
-        cluster.assert_checkpoint_schema_current(database_factory().direct_url())
+        cluster.assert_checkpoint_schema_current(database_factory.db_url())
     else:
         # A locally owned plane migrates as the administrator acting as the
         # schema owner over the home's own socket: objects stay owner-owned and

@@ -267,9 +267,6 @@ def _verify_start_delivery(scenario: str, home: Any, kwargs: Any, expected: Any)
     else:
         assert urlsplit(url).password == expected.roles.gateway.password
     assert urlsplit(factory.db_url()).password == expected.roles.gateway.password
-    # The subsequent checkpoint assertion receives the same authorized login.
-    direct: str = factory().direct_url()
-    assert urlsplit(direct).password == expected.roles.gateway.password
 
 
 def _help_admission() -> None:
@@ -307,7 +304,6 @@ def _help_admission() -> None:
     factory = operator_database_factory(
         local_host=command.machine.host,
         open_database=open_database,
-        gateway_url_reader=lambda: command.config.view.gateway.gateway_url,
     )
     assert not seen
     factory()
