@@ -42,7 +42,8 @@ _FAILED_SUMMARY = re.compile(r"^FAILED\s+(?P<nodeid>\S+)\s+-\s+(?P<reason>.*)$")
 _ERROR_SUMMARY = re.compile(r"^ERROR\s+")
 _PIXEL_DRIFT_REASON = re.compile(
     r"^Failed: Visual regression: \d+/\d+ pixels changed \([^)]+\); "
-    r"allowed ratio is [^)]+\.$"
+    r"allowed ratio is [^)]+\.(?: "
+    r"changed region is (?:none|x=\d+\.\.\d+, y=\d+\.\.\d+)\.)?$"
 )
 _ANSI_ESCAPE = re.compile(r"\x1b\[[0-?]*[ -/]*[@-~]")
 
