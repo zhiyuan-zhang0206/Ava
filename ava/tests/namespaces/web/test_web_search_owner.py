@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import importlib
 import json
 import threading
 from collections.abc import Iterator
@@ -13,6 +14,8 @@ from pydantic import SecretStr
 
 import ava
 from ava.sdk_surface import install, process_context
+from ava.sdk_surface.installation import installed
+from ava.web import wiring
 from base.agents.context import AvaContext
 from base.agents.context.clients import ClientSet
 from base.agents.sdk.call_policy import SamplingPolicy, SamplingPolicyOwner
@@ -122,10 +125,24 @@ def test_search_runs_without_a_model_catalog(
     assert [call["fn"] for call in emitted_events.attributes("sdk_call")] == ["web.search"]
 
 
-def test_fetch_still_refuses_a_non_model_installation(
+def test_fetch_reports_a_missing_model_configuration(
     non_model_installation: ConfigAuthority,
 ) -> None:
-    with pytest.raises(RuntimeError, match="carries no ModelCatalog"):
+    with pytest.raises(ava.web.FetchError) as caught:
         ava.web.fetch([("https://example.com/article", "summarize")])
 
+    assert "model configuration" in str(caught.value)
+    assert "ModelCatalog" in str(caught.value)
     assert _LoopbackWeb.requests == []
+
+
+def test_search_reads_no_model_configuration(non_model_installation: ConfigAuthority) -> None:
+    deps = wiring.search_deps()
+
+    assert deps.brave.api_key is not None
+    assert ava.web.search(["owner query"])[0][0].title == "owner title"
+
+
+def test_wiring_import_reads_no_configuration() -> None:
+    assert installed() is None
+    importlib.reload(wiring)

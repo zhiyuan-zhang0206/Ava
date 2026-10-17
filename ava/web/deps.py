@@ -1,3 +1,5 @@
+# ava:ref ava/web/docs/web.ava.okf.md#webdeps-split
+
 from __future__ import annotations
 
 from collections.abc import Callable

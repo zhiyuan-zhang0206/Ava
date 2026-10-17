@@ -1,3 +1,5 @@
+# ava:ref ava/web/docs/web.ava.okf.md#webdeps-fetch-model-boundary
+
 from __future__ import annotations
 
 from collections.abc import Callable
@@ -7,6 +9,7 @@ from ava.sdk_surface import settings as sdk_settings
 from ava.sdk_surface.injection_check import begin_check
 from ava.security import finding_delivery_active, record_model_finding, scan_content
 from ava.web.deps import BraveConfig, FetchDeps, FetchModel, JinaConfig, SearchDeps
+from ava.web.errors import FetchError
 from base.config.service_read import ConfigAuthority
 from base.host.env.agent_slices import ModelOverrides
 from base.host.net.ports import SYSTEM_URL_OPENER
@@ -34,11 +37,16 @@ def search_deps_for(authority: ConfigAuthority) -> SearchDeps:
 
 
 def fetch_deps() -> FetchDeps:
-    return fetch_deps_for(
-        sdk_settings.config_authority(),
-        catalog=sdk_settings.model_catalog(),
-        overrides=sdk_settings.model_overrides(),
-    )
+    authority = sdk_settings.config_authority()
+    try:
+        catalog = sdk_settings.model_catalog()
+        overrides = sdk_settings.model_overrides()
+    except RuntimeError as exc:
+        raise FetchError(
+            "web.fetch requires this SDK installation's model configuration (ModelCatalog), "
+            "but it carries none; web.search needs no model"
+        ) from exc
+    return fetch_deps_for(authority, catalog=catalog, overrides=overrides)
 
 
 def fetch_deps_for(
