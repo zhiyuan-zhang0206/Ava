@@ -63,6 +63,7 @@ _TOKEN_USAGE = {
     "hard_compact_tokens": 0,
 }
 
+# meiva:ref tests/e2e/visual/docs/visual-regression-gate.meiva.okf.md#visual-fixture-renders-the-real-ui
 _API_STUBS: dict[str, object] = {
     "/api/agents": {"agents": [_AGENT], "next_cursor": None},
     "/api/agents/roster": {"agents": [_AGENT], "ancestors": []},
