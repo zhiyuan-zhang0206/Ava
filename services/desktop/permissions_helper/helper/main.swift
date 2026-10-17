@@ -679,6 +679,23 @@ func axTrustedOrPrompt() -> Bool {
     return false
 }
 
+/// `request_grants`: raise the two desktop dialogs this helper can still get, and report
+/// the grants as they stand afterwards. Screen Recording asks through
+/// `CGRequestScreenCaptureAccess`; Accessibility reuses the rate-limited prompt above,
+/// because its grant is only readable as a boolean from the process that holds it -- a
+/// spawned child inherits its launch chain's trust, so a prompt raised there is answered
+/// for the wrong identity. macOS shows at most one dialog per bundle identity; later
+/// requests for the same grant return false without showing anything.
+func requestGrants(_ req: [String: Any]) throws -> [String: Any] {
+    try rejectUnknownFields(req, allowed: [])
+    _ = CGRequestScreenCaptureAccess()
+    _ = axTrustedOrPrompt()
+    return [
+        "screen_recording": CGPreflightScreenCaptureAccess(),
+        "accessibility": AXIsProcessTrusted(),
+    ]
+}
+
 /// Strict JSON input primitives shared by the atomic input operations.
 func inputNumber(_ req: [String: Any], _ key: String, defaultValue: Double? = nil) throws -> Double {
     if req[key] == nil, let value = defaultValue { return value }
@@ -2782,9 +2799,10 @@ func dispatch(_ req: [String: Any]) -> [String: Any] {
         switch method {
         case "ping":
             result = ["pong": true, "pid": Int(getpid()), "root_stop_intent_v1": true, "helper_shutdown_v1": true,
-                      "root_seed_report_v1": true, "ax_tree_v1": true, "ax_act_v1": true, "ax_act_v2": true, "ax_target_v1": true, "native_input_v1": true, "corner_failsafe_v1": true, "capture_indicator_v1": true, "clipboard_v1": true, "mouse_hold_v1": true,
+                      "root_seed_report_v1": true, "ax_tree_v1": true, "ax_act_v1": true, "ax_act_v2": true, "ax_target_v1": true, "native_input_v1": true, "corner_failsafe_v1": true, "capture_indicator_v1": true, "clipboard_v1": true, "mouse_hold_v1": true, "request_grants_v1": true,
                       "preflight_screen": CGPreflightScreenCaptureAccess(),
                       "ax_trusted": AXIsProcessTrusted()]
+        case "request_grants": result = try requestGrants(req)
         case "file_list": result = try fileList(req)
         case "file_read": result = try fileRead(req)
         case "list_apps": result = listApps()

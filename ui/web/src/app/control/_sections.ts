@@ -85,6 +85,7 @@ export const CONTROL_SECTIONS: ControlSectionDef[] = [
       { id: "display-model-picker", label: "Model picker", labelKey: "display-model-picker" },
     ],
   },
+  { id: "permissions", label: "Permissions", labelKey: "permissions" },
   { id: "plugins", label: "Plugins", labelKey: "plugins" },
   { id: "mcp", label: "MCP", labelKey: "mcp" },
   { id: "skills", label: "Skills", labelKey: "skills" },

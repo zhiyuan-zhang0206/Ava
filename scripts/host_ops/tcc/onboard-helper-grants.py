@@ -54,6 +54,21 @@ REPO_ROOT = Path(__file__).resolve().parents[3]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
+from base.host.permissions_helper.grants import probe as permissions_probe
+from base.host.permissions_helper.grants import triggers
+from base.host.permissions_helper.grants.catalog import Grant
+from base.host.permissions_helper.grants.probe import (
+    PermissionsProbeError,
+    read_result,
+)
+
+_SCRIPT_WORDS = {
+    Grant.GRANTED: "granted",
+    Grant.DENIED: "denied",
+    Grant.NOT_DETERMINED: "not-determined",
+    Grant.UNKNOWN: "unknown",
+}
+
 DEFAULT_WORKDIR = "/tmp/tcc-onboard-helper-grants"  # noqa: S108 - scratch evidence dir, never secret
 
 IMPLEMENTED_GROUPS = ("folders", "apple-events", "sr-ax")
@@ -131,51 +146,6 @@ POLL_S = 2.0
 PREFLIGHT_EVERY_N_POLLS = 3
 PROBE_WAIT_S = 10.0
 
-_PREFLIGHT_PROBE = '''"""Helper-spawned probe: side-effect-free TCC preflight queries."""
-import ctypes
-import json
-import sys
-
-SERVICES = json.loads(sys.argv[1])
-RESULT_WORDS = {0: "granted", 1: "denied", 2: "not-determined"}
-
-_cf = ctypes.CDLL("/System/Library/Frameworks/CoreFoundation.framework/CoreFoundation")
-_cf.CFStringCreateWithCString.restype = ctypes.c_void_p
-_cf.CFStringCreateWithCString.argtypes = [ctypes.c_void_p, ctypes.c_char_p, ctypes.c_uint32]
-_tcc = ctypes.CDLL("/System/Library/PrivateFrameworks/TCC.framework/Versions/A/TCC")
-_tcc.TCCAccessPreflight.restype = ctypes.c_int
-_tcc.TCCAccessPreflight.argtypes = [ctypes.c_void_p, ctypes.c_void_p]
-
-
-def preflight(service):
-    cf_service = _cf.CFStringCreateWithCString(None, service.encode(), 0x08000100)
-    return _tcc.TCCAccessPreflight(ctypes.c_void_p(cf_service), None)
-
-
-results = {}
-for service in SERVICES:
-    code = preflight(service)
-    results[service] = {"code": code, "result": RESULT_WORDS.get(code, "unknown")}
-with open(sys.argv[2], "w") as handle:
-    json.dump(results, handle, indent=2)
-'''
-
-_FOLDER_ACCESS_CHILD = '''"""Helper-spawned child: direct folder access (the TCC trigger)."""
-import os
-import sys
-
-target, result_path = sys.argv[1], sys.argv[2]
-try:
-    names = os.listdir(target)
-    text = "granted %d" % len(names)
-except PermissionError:
-    text = "denied"
-except Exception as exc:  # noqa: BLE001 - report any failure verbatim to the driver
-    text = "error %s: %s" % (type(exc).__name__, exc)
-with open(result_path, "w") as handle:
-    handle.write(text)
-'''
-
 _SCAN_CHILD = '''"""Helper-spawned child: bounded scan of a guarded tree (the fill trigger)."""
 import os
 import sys
@@ -215,23 +185,6 @@ except FileNotFoundError:
 except PermissionError as exc:
     text = "denied %s" % exc
 except OSError as exc:
-    text = "error %s: %s" % (type(exc).__name__, exc)
-with open(result_path, "w") as handle:
-    handle.write(text)
-'''
-
-_APPLE_EVENT_CHILD = '''"""Helper-spawned child: one benign AppleEvent to a target app."""
-import subprocess
-import sys
-
-script, result_path = sys.argv[1], sys.argv[2]
-try:
-    done = subprocess.run(["osascript", "-e", script], capture_output=True, text=True)
-    if done.returncode == 0:
-        text = "granted " + done.stdout.strip()[:120]
-    else:
-        text = "failed " + done.stderr.strip()[:200]
-except Exception as exc:  # noqa: BLE001 - report any failure verbatim to the driver
     text = "error %s: %s" % (type(exc).__name__, exc)
 with open(result_path, "w") as handle:
     handle.write(text)
@@ -279,72 +232,27 @@ def helper_client() -> Any:
     return sessions_helper_client()
 
 
-def spawn_child(client: Any, workdir: Path, name: str, argv: list[str], tag: str) -> int:
-    from base.host.permissions_helper.client import PermissionsHelperError
+def child_env() -> dict[str, str]:
     from base.sessions import env_forwarding
 
-    # The helper spawn contract wants the child's FULL environment; the
-    # registry's session forward view is the sanctioned builder for it.
-    # activate_venv=False: the child's cwd is the scratch workdir, outside
-    # this checkout (see base/sessions/env_forwarding.py).
-    child_env = env_forwarding.forward_env_dict(activate_venv=False)
-    try:
-        result = client.spawn_process(
-            name,
-            argv,
-            child_env,
-            str(workdir),
-            str(workdir / f"{tag}.stdout.log"),
-            str(workdir / f"{tag}.stderr.log"),
-        )
-    except PermissionsHelperError as exc:
-        message = str(exc)
-        if "unknown method" in message:
-            raise OnboardError(
-                "helper build needs a rebuild: it does not support the spawn"
-                f" wire method ({message!r}) -- rebuild or update the"
-                " permissions helper, then re-run this tool."
-            ) from exc
-        raise OnboardError(f"helper spawn failed: {message}") from exc
-    pid = result.get("pid")
-    if not isinstance(pid, int):
-        raise OnboardError(f"helper spawn returned no pid: {result!r}")
-    return pid
+    return env_forwarding.forward_env_dict(activate_venv=False)
 
 
-def read_result(path: Path) -> str | None:
-    try:
-        return path.read_text().strip()
-    except FileNotFoundError:
-        return None
+def spawn_child(client: Any, workdir: Path, name: str, argv: list[str], tag: str) -> int:
+    return permissions_probe.spawn_child(
+        client, name=name, argv=argv, env=child_env(), workdir=workdir, tag=tag
+    )
 
 
 def preflight_matrix(client: Any, workdir: Path, run_id: str) -> dict[str, str]:
-    probe = workdir / "tcc_preflight_probe.py"
-    probe.write_text(_PREFLIGHT_PROBE)
-    # Run-scoped result name: a late write from an earlier run's still-blocked
-    # child can not land in this run's file.
-    result_path = workdir / f"preflight-{run_id}.results.json"
-    if result_path.exists():
-        result_path.unlink()
-    spawn_child(
+    grants = permissions_probe.run_preflight(
         client,
-        workdir,
-        f"tcc-onboard-{run_id}-preflight",
-        [sys.executable, str(probe), json.dumps(PREFLIGHT_SERVICES), str(result_path)],
-        f"preflight-{run_id}",
+        workdir=workdir,
+        run_id=run_id,
+        env=child_env(),
+        services=tuple(PREFLIGHT_SERVICES),
     )
-    deadline = time.monotonic() + PROBE_WAIT_S
-    while time.monotonic() < deadline:
-        text = read_result(result_path)
-        if text is not None:
-            data = json.loads(text)
-            return {service: entry["result"] for service, entry in data.items()}
-        time.sleep(0.25)
-    raise OnboardError(
-        f"preflight probe produced no result within {PROBE_WAIT_S:.0f}s"
-        f" (see the child logs under {workdir})"
-    )
+    return {service: _SCRIPT_WORDS[grant] for service, grant in grants.items()}
 
 
 def reap_child(client: Any, spawn_name: str) -> str:
@@ -513,15 +421,18 @@ def _folder_grants(
             if args.check:
                 statuses[item_id] = matrix.get(service, "unknown")
                 continue
-            child = workdir / f"folder-{item_id}.child.py"
-            child.write_text(_FOLDER_ACCESS_CHILD)
             result_path = workdir / f"folder-{item_id}-{run_id}.result"
             text = wait_for_item(
                 client,
                 workdir,
                 run_id,
                 item_id,
-                [sys.executable, str(child), str(Path.home() / folder), str(result_path)],
+                triggers.child_argv(
+                    next(key for key, sub in triggers.FOLDER_PATHS.items() if sub == folder),
+                    home=Path.home(),
+                    result_path=result_path,
+                )
+                or [],
                 result_path,
                 args.timeout,
                 service,
@@ -542,15 +453,22 @@ def _apple_event_grants(
         print("\n== AppleEvents block (Automation dialogs, one per target app) ==")
         for target, script in APPLE_EVENT_TARGETS:
             item_id = f"apple-events:{target}"
-            child = workdir / f"ae-{target.replace(' ', '_')}.child.py"
-            child.write_text(_APPLE_EVENT_CHILD)
             result_path = workdir / f"ae-{target.replace(' ', '_')}-{run_id}.result"
             text = wait_for_item(
                 client,
                 workdir,
                 run_id,
                 f"ae-{target.replace(' ', '_')}",
-                [sys.executable, str(child), script, str(result_path)],
+                triggers.child_argv(
+                    next(
+                        key
+                        for key, event in triggers.APPLE_EVENT_SCRIPTS.items()
+                        if event == script
+                    ),
+                    home=Path.home(),
+                    result_path=result_path,
+                )
+                or [],
                 result_path,
                 args.timeout,
                 None,
@@ -793,7 +711,7 @@ def main() -> int:
 if __name__ == "__main__":
     try:
         raise SystemExit(main())
-    except OnboardError as exc:
+    except (OnboardError, PermissionsProbeError) as exc:
         # Setup failures (missing repo venv, old helper build, probe timeout)
         # end as a clean message + exit 2 instead of a traceback.
         print(f"FAIL: {exc}")

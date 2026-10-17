@@ -1,5 +1,5 @@
-exports = ["cluster.py", "host.py", "logs.py", "pty.py"]
+exports = ["cluster.py", "host.py", "logs.py", "permissions.py", "pty.py"]
 
 [uses]
-"__init__.py" = ["backup.py", "cluster.py", "computer.py", "host.py", "logs.py", "management.py", "pty.py"]
+"__init__.py" = ["backup.py", "cluster.py", "computer.py", "host.py", "logs.py", "management.py", "permissions.py", "pty.py"]
 "tests" = ["__init__.py", "logs.py"]

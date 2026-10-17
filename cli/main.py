@@ -66,6 +66,7 @@ _LITE_VERBS = frozenset(
         "memory",
         "plugins",
         "skill",
+        "permissions",
     }
 )
 
