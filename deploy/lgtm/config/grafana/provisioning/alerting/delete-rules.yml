@@ -12,3 +12,150 @@ deleteRules:
     uid: meiva-ops-agent-restart-spike
   - orgId: 1
     uid: meiva-ops-hosted-boot-recovery-deferred
+
+# Every rule below was re-provisioned under its meiva-* uid on 2026-10-17; the old
+# uid stayed orphaned and kept evaluating beside the new one.
+  - orgId: 1
+    uid: ava-ops-agent-continuation-lost
+  - orgId: 1
+    uid: ava-ops-backup-dump-failed
+  - orgId: 1
+    uid: ava-ops-backup-operation-blocked
+  - orgId: 1
+    uid: ava-ops-backup-operation-quarantined
+  - orgId: 1
+    uid: ava-ops-boot-retries-exhausted
+  - orgId: 1
+    uid: ava-ops-checkpoint-blobs-error
+  - orgId: 1
+    uid: ava-ops-checkpoint-blobs-freshness
+  - orgId: 1
+    uid: ava-ops-checkpoint-blobs-growth
+  - orgId: 1
+    uid: ava-ops-checkpoint-blobs-warning
+  - orgId: 1
+    uid: ava-ops-db-pool-acquire-slow
+  - orgId: 1
+    uid: ava-ops-delivery-stalled
+  - orgId: 1
+    uid: ava-ops-delivery-stalled-backlog
+  - orgId: 1
+    uid: ava-ops-events-freshness
+  - orgId: 1
+    uid: ava-ops-events-low-water
+  - orgId: 1
+    uid: ava-ops-exec-child-boot-failed
+  - orgId: 1
+    uid: ava-ops-fleet-graph-stale
+  - orgId: 1
+    uid: ava-ops-gateway-latency-route-error
+  - orgId: 1
+    uid: ava-ops-gateway-latency-route-warning
+  - orgId: 1
+    uid: ava-ops-gateway-metrics-silent
+  - orgId: 1
+    uid: ava-ops-gw-latency-slow-error
+  - orgId: 1
+    uid: ava-ops-gw-latency-slow-warning
+  - orgId: 1
+    uid: ava-ops-health-probe-error
+  - orgId: 1
+    uid: ava-ops-health-probe-silent
+  - orgId: 1
+    uid: ava-ops-health-probe-warning
+  - orgId: 1
+    uid: ava-ops-host-cpu-saturated
+  - orgId: 1
+    uid: ava-ops-host-disk-watermark
+  - orgId: 1
+    uid: ava-ops-host-disk-watermark-93
+  - orgId: 1
+    uid: ava-ops-host-disk-watermark-95
+  - orgId: 1
+    uid: ava-ops-host-memory-pressure
+  - orgId: 1
+    uid: ava-ops-im-feishu-owner-seed-failed
+  - orgId: 1
+    uid: ava-ops-im-push-failed
+  - orgId: 1
+    uid: ava-ops-im-push-stall
+  - orgId: 1
+    uid: ava-ops-impersonation-capture-failed
+  - orgId: 1
+    uid: ava-ops-impersonation-notice-failed
+  - orgId: 1
+    uid: ava-ops-impersonation-seal-stuck
+  - orgId: 1
+    uid: ava-ops-inspect-metrics-gap
+  - orgId: 1
+    uid: ava-ops-lifecycle-pointer-stuck
+  - orgId: 1
+    uid: ava-ops-llm-billing-quota
+  - orgId: 1
+    uid: ava-ops-llm-latency-p95
+  - orgId: 1
+    uid: ava-ops-llm-rate-limit
+  - orgId: 1
+    uid: ava-ops-llm-stall-burst
+  - orgId: 1
+    uid: ava-ops-llm-stall-pair
+  - orgId: 1
+    uid: ava-ops-machine-offline-error
+  - orgId: 1
+    uid: ava-ops-machine-offline-warning
+  - orgId: 1
+    uid: ava-ops-maintenance-hold-overdue
+  - orgId: 1
+    uid: ava-ops-memory-search-rows-critical
+  - orgId: 1
+    uid: ava-ops-memory-search-rows-warning
+  - orgId: 1
+    uid: ava-ops-otelcol-enqueue-failures
+  - orgId: 1
+    uid: ava-ops-otelcol-host-silent
+  - orgId: 1
+    uid: ava-ops-otelcol-queue-pressure
+  - orgId: 1
+    uid: ava-ops-pg-connection-saturation
+  - orgId: 1
+    uid: ava-ops-prom-too-old-samples
+  - orgId: 1
+    uid: ava-ops-recovery-drill-failed
+  - orgId: 1
+    uid: ava-ops-redis-memory
+  - orgId: 1
+    uid: ava-ops-root-diagnostic-brew-pin
+  - orgId: 1
+    uid: ava-ops-root-diagnostic-browser-reach
+  - orgId: 1
+    uid: ava-ops-root-diagnostic-venv
+  - orgId: 1
+    uid: ava-ops-root-health-stale
+  - orgId: 1
+    uid: ava-ops-root-unit-breaker-open
+  - orgId: 1
+    uid: ava-ops-root-unit-custody-held
+  - orgId: 1
+    uid: ava-ops-root-unit-not-revivable
+  - orgId: 1
+    uid: ava-ops-root-unit-restart-failed
+  - orgId: 1
+    uid: ava-ops-schedule-convergence-abandoned
+  - orgId: 1
+    uid: ava-ops-schedule-stalled
+  - orgId: 1
+    uid: ava-ops-schedule-verify-failed
+  - orgId: 1
+    uid: ava-ops-service-start-unready
+  - orgId: 1
+    uid: ava-ops-sse-drop-backlog
+  - orgId: 1
+    uid: ava-ops-telemetry-queue-loss
+  - orgId: 1
+    uid: ava-ops-tempo-backend-down
+  - orgId: 1
+    uid: ava-ops-trace-disk-watermark
+  - orgId: 1
+    uid: ava-ops-turn-duration-p95
+  - orgId: 1
+    uid: ava-ops-warning-error-spike
