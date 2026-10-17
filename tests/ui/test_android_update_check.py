@@ -154,7 +154,7 @@ def _run(
 
 
 def test_the_banner_stays_out_of_the_composer_band() -> None:
-    style = _run(check=_available())["style"]
+    style = str(_run(check=_available())["style"])
     assert "top:52px" in style
     assert "bottom:0" not in style
 
