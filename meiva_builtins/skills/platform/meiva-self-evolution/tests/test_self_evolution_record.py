@@ -71,6 +71,26 @@ def _empty_transcript(_agent_id: int, *, database: Database) -> list[dict[str, s
     return []
 
 
+def _build(
+    record: Any,
+    database: Database,
+    *,
+    inbounds: list[dict[str, Any]] | None = None,
+    transcript: list[dict[str, str]] | None = None,
+    spawner: str = "user",
+) -> dict[str, Any]:
+    return record.build_record(
+        database=database,
+        agent_id=7,
+        week="2026-08-30",
+        events=[],
+        log_events=[],
+        inbounds=inbounds or [],
+        transcript=transcript if transcript is not None else [],
+        meta=(spawner, "terminated", ""),
+    )
+
+
 @pytest.mark.parametrize(
     ("turns", "exec_failed", "expected"),
     [
@@ -131,6 +151,107 @@ def test_targeted_correction_remains_a_per_agent_correction(
 
     assert rec["corrections"] == ["wrong: use the requested path"]
     assert rec["label"] == "fumbled"
+
+
+@pytest.mark.parametrize(
+    ("spawner", "inbounds", "transcript", "expected", "source"),
+    [
+        pytest.param(
+            "agent:1",
+            [{"source": "user", "content": "human brief", "is_broadcast": False}],
+            [],
+            "human brief",
+            "human",
+            id="human-first",
+        ),
+        pytest.param(
+            "agent:1",
+            [{"source": "ui:web", "content": "web console brief", "is_broadcast": False}],
+            [],
+            "web console brief",
+            "human",
+            id="legacy-web-console-is-human",
+        ),
+        pytest.param(
+            "agent:1",
+            [{"source": "agent:1", "content": "spawn brief", "is_broadcast": False}],
+            [],
+            "spawn brief",
+            "spawner",
+            id="spawner-brief",
+        ),
+        pytest.param(
+            "agent:9",
+            [{"source": "schedule:7", "content": "scheduled brief", "is_broadcast": False}],
+            [],
+            "scheduled brief",
+            "schedule",
+            id="schedule-brief",
+        ),
+        pytest.param(
+            "agent:1",
+            [],
+            [
+                {"type": "human", "content": f"{record_module.SYSTEM_MARKER} Your Agent ID is 7."},
+                {"type": "human", "content": "inherited brief"},
+            ],
+            "inherited brief",
+            "transcript",
+            id="transcript-fallback",
+        ),
+        pytest.param(
+            "agent:1",
+            [],
+            [{"type": "human", "content": f"{record_module.SYSTEM_MARKER} Your Agent ID is 7."}],
+            "",
+            "none",
+            id="preamble-only",
+        ),
+    ],
+)
+def test_task_prompt_origin(
+    record: Any,
+    database: Database,
+    spawner: str,
+    inbounds: list[dict[str, Any]],
+    transcript: list[dict[str, str]],
+    expected: str,
+    source: str,
+) -> None:
+    rec = _build(record, database, inbounds=inbounds, transcript=transcript, spawner=spawner)
+
+    assert rec["task_prompt"] == expected
+    assert rec["task_prompt_source"] == source
+
+
+def test_the_human_message_that_carried_the_task_is_not_a_followup(
+    record: Any, database: Database
+) -> None:
+    inbounds = [
+        {"source": "agent:1", "content": "spawn brief", "is_broadcast": False},
+        {"source": "user", "content": "also check the logs", "is_broadcast": False},
+        {"source": "user", "content": "and then the metrics", "is_broadcast": False},
+    ]
+
+    rec = _build(record, database, inbounds=inbounds, spawner="agent:1")
+
+    assert rec["task_prompt"] == "also check the logs"
+    assert rec["task_prompt_source"] == "human"
+    assert rec["followup_prompts"] == ["and then the metrics"]
+
+
+def test_task_prompt_of_falls_back_to_the_transcript(record: Any) -> None:
+    legacy = {
+        "task_prompt": "",
+        "transcript": [
+            {"type": "human", "content": f"{record_module.SYSTEM_MARKER} Your Agent ID is 7."},
+            {"type": "human", "content": "Fix the flaky test."},
+        ],
+    }
+    collected = {"task_prompt": "Fix the flaky test.", "transcript": []}
+
+    assert record.task_prompt_of(legacy) == "Fix the flaky test."
+    assert record.task_prompt_of(collected) == "Fix the flaky test."
 
 
 def test_msg_text_skips_thinking_and_tool_use_blocks(record: Any) -> None:

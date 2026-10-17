@@ -115,6 +115,7 @@ class _DripServer(socketserver.ThreadingTCPServer):
         interval_s: float,
         hold_open_s: float = 0.0,
         close_delimited: bool = False,
+        stop_after_s: float | None = None,
     ) -> None:
         super().__init__(("127.0.0.1", 0), _DripHandler)
         self.body_len = body_len
@@ -122,6 +123,7 @@ class _DripServer(socketserver.ThreadingTCPServer):
         self.interval_s = interval_s
         self.hold_open_s = hold_open_s
         self.close_delimited = close_delimited
+        self.stop_after_s = stop_after_s
         self.bytes_sent = 0
 
     @property
@@ -145,6 +147,7 @@ class _DripHandler(http.server.BaseHTTPRequestHandler):
 
     def do_GET(self) -> None:
         server = cast(_DripServer, self.server)
+        started = time.monotonic()
         self.send_response(200)
         if server.close_delimited:
             self.send_header("Connection", "close")
@@ -153,6 +156,8 @@ class _DripHandler(http.server.BaseHTTPRequestHandler):
         self.end_headers()
         sent = 0
         while sent < server.body_len:
+            if server.stop_after_s is not None and time.monotonic() - started > server.stop_after_s:
+                return
             size = min(server.chunk_size, server.body_len - sent)
             self.wfile.write(b"x" * size)
             self.wfile.flush()
@@ -167,8 +172,9 @@ class _SilentServer(socketserver.ThreadingTCPServer):
     daemon_threads = True
     allow_reuse_address = True
 
-    def __init__(self) -> None:
+    def __init__(self, *, stop_after_s: float) -> None:
         super().__init__(("127.0.0.1", 0), _SilentHandler)
+        self.stop_after_s = stop_after_s
 
     @property
     def url(self) -> str:
@@ -185,7 +191,7 @@ class _SilentServer(socketserver.ThreadingTCPServer):
 
 class _SilentHandler(socketserver.BaseRequestHandler):
     def handle(self) -> None:
-        time.sleep(2.0)
+        time.sleep(cast(_SilentServer, self.server).stop_after_s)
 
 
 @pytest.mark.parametrize("close_delimited", [False, True], ids=["content-length", "no-length"])
@@ -194,17 +200,22 @@ def test_a_dripping_mirror_cannot_outlive_the_asset_deadline(
 ) -> None:
     limits = _limits(total_budget_s=0.5, socket_timeout_s=1.0, retry_backoff_s=0.05)
     drip = _DripServer(
-        body_len=1 << 20, chunk_size=1, interval_s=0.02, close_delimited=close_delimited
+        body_len=1 << 20,
+        chunk_size=1,
+        interval_s=0.02,
+        close_delimited=close_delimited,
+        stop_after_s=3.0,
     )
     opener = _ObservedOpener()
     started = time.monotonic()
-    with drip, pytest.raises(RuntimeError, match="budget"):
+    with drip, pytest.raises(RuntimeError, match="budget") as caught:
         lgtm_native.download_with_retry(
             drip.url, tmp_path / "loki.zip", open_url=opener, timers=SYSTEM_TIMERS, limits=limits
         )
     elapsed = time.monotonic() - started
     assert elapsed >= limits.total_budget_s
     assert elapsed <= limits.total_budget_s + limits.socket_timeout_s + 0.3
+    assert isinstance(caught.value.__cause__, TimeoutError)
     assert drip.bytes_sent < drip.body_len
     assert (opener.opened, opener.closed) == (1, 1)
 
@@ -213,9 +224,9 @@ def test_a_connection_that_never_sends_headers_ends_within_the_socket_guard(
     tmp_path: Path,
 ) -> None:
     limits = _limits(total_budget_s=0.6, socket_timeout_s=0.2, retry_backoff_s=5.0)
-    server = _SilentServer()
+    server = _SilentServer(stop_after_s=3.0)
     started = time.monotonic()
-    with server, pytest.raises(RuntimeError, match="budget"):
+    with server, pytest.raises(RuntimeError, match="budget") as caught:
         lgtm_native.download_with_retry(
             server.url,
             tmp_path / "loki.zip",
@@ -225,12 +236,18 @@ def test_a_connection_that_never_sends_headers_ends_within_the_socket_guard(
         )
     elapsed = time.monotonic() - started
     assert elapsed <= limits.total_budget_s + limits.socket_timeout_s + 0.3
+    assert isinstance(caught.value.__cause__, TimeoutError)
 
 
 def test_a_body_that_closes_after_the_deadline_is_not_a_success(tmp_path: Path) -> None:
     limits = _limits(total_budget_s=1.0, socket_timeout_s=1.0)
     drip = _DripServer(
-        body_len=2, chunk_size=1, interval_s=0.5, hold_open_s=0.2, close_delimited=True
+        body_len=2,
+        chunk_size=1,
+        interval_s=0.5,
+        hold_open_s=0.2,
+        close_delimited=True,
+        stop_after_s=3.0,
     )
     destination = tmp_path / "loki.zip"
     with drip, pytest.raises(TimeoutError, match="budget"):

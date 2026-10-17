@@ -13,7 +13,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { InspectorPanel } from "./inspector-panel";
 import { InspectorToggle } from "./inspector-toggle";
 import { BAR_DIVIDER_CLASS, BAR_HEIGHT_CLASS } from "@/lib/layout/layout";
-import { formatAbsolute, formatRelative } from "@/lib/format/time";
+import type * as TimeFormat from "@/lib/format/time";
+import { formatAbsolute, formatRelative, formatUpcoming } from "@/lib/format/time";
 import { foldNotices } from "@/lib/fold/notices";
 import { BACK_VISIT_REVALIDATE_MAX } from "@/lib/layout/switch-budget";
 import { AGENTS_QUERY_KEY } from "@/lib/fold/agents";
@@ -55,6 +56,11 @@ vi.mock("@/lib/transport/api", () => ({
     resolveNotice,
   },
 }));
+
+vi.mock("@/lib/format/time", async (importOriginal) => {
+  const actual = await importOriginal<typeof TimeFormat>();
+  return { ...actual, formatUpcoming: vi.fn(actual.formatUpcoming) };
+});
 
 const streamHandlers = vi.hoisted(() => ({
   system: undefined as ((event: unknown) => void) | undefined,
@@ -118,6 +124,7 @@ afterEach(() => {
   getAgentInspectLive.mockReset();
   getAgentInspectWidgets.mockReset();
   getAgentRoster.mockReset();
+  vi.mocked(formatUpcoming).mockClear();
   resolveNotice.mockClear();
   toggle.mockReset();
   panelState.open = true;
@@ -140,6 +147,11 @@ function renderWithGlobalRetries(ui: React.ReactElement) {
     defaultOptions: { queries: { retry: 3, retryDelay: 0 } },
   });
   return rtlRender(<QueryClientProvider client={qc}>{ui}</QueryClientProvider>);
+}
+
+function useFrozenClock(iso: string) {
+  vi.useFakeTimers({ toFake: ["Date"] });
+  vi.setSystemTime(new Date(iso));
 }
 
 function fixture(overrides: Partial<AgentInspectStatistics> = {}): AgentInspectStatistics {
@@ -932,8 +944,22 @@ describe("InspectorPanel", () => {
 });
 
 describe("InspectorPanel heartbeat cells (merged into Liveness, Task #1195)", () => {
-  it("shows the projected next check-in when idle and un-paused", async () => {
-    const nextAt = new Date(Date.now() + 270_000).toISOString();
+  it("shows the projected next check-in as a local clock time when idle and un-paused", async () => {
+    useFrozenClock("2026-10-17T16:26:00Z");
+    getAgentInspectLive.mockResolvedValue(
+      liveFixture({
+        heartbeat: { interval_s: 300, next_at: "2026-10-17T16:30:00Z", paused_until: null, heartbeat_pending: false, last_pause: null },
+      }),
+    );
+    render(<InspectorPanel agentId={1} />);
+    await waitFor(() => expect(screen.getByText("Liveness")).toBeTruthy());
+    expect(screen.getByText("4:30 PM")).toBeTruthy();
+    expect(screen.getByText("never paused")).toBeTruthy();
+  });
+
+  it("gives a heartbeat that lands tomorrow a day label instead of a bare clock time", async () => {
+    useFrozenClock("2026-10-17T16:26:00Z");
+    const nextAt = "2026-10-18T15:21:00Z";
     getAgentInspectLive.mockResolvedValue(
       liveFixture({
         heartbeat: { interval_s: 300, next_at: nextAt, paused_until: null, heartbeat_pending: false, last_pause: null },
@@ -941,19 +967,19 @@ describe("InspectorPanel heartbeat cells (merged into Liveness, Task #1195)", ()
     );
     render(<InspectorPanel agentId={1} />);
     await waitFor(() => expect(screen.getByText("Liveness")).toBeTruthy());
-    expect(screen.getByText("in 4m")).toBeTruthy();
-    expect(screen.getByText("never paused")).toBeTruthy();
+    expect(screen.getByText("Tomorrow 3:21 PM")).toBeTruthy();
+    expect(vi.mocked(formatUpcoming)).toHaveBeenCalledWith(nextAt, expect.any(Date));
   });
 
   it("shows the active pause window when paused", async () => {
-    const pausedUntil = new Date(Date.now() + 720_000).toISOString();
+    useFrozenClock("2026-10-17T16:26:00Z");
     getAgentInspectLive.mockResolvedValue(
       liveFixture({
-        heartbeat: { interval_s: 900, next_at: null, paused_until: pausedUntil, heartbeat_pending: false, last_pause: null },
+        heartbeat: { interval_s: 900, next_at: null, paused_until: "2026-10-17T16:38:00Z", heartbeat_pending: false, last_pause: null },
       }),
     );
     render(<InspectorPanel agentId={1} />);
-    await waitFor(() => expect(screen.getByText(/^\d{1,2}:\d{2}/)).toBeTruthy());
+    await waitFor(() => expect(screen.getByText("4:38 PM")).toBeTruthy());
     expect(screen.queryByText("every 15m")).toBeNull();
   });
 
