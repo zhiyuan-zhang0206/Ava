@@ -28,4 +28,20 @@ code = ["tests/e2e/visual/_visual_snapshot.py:settled_screenshot", "tests/e2e/vi
 tests = ["tests/e2e/visual/test_visual_regression.py::test_home_visual_regression", "tests/e2e/visual/test_visual_regression.py::test_fleet_visual_regression", "tests/e2e/visual/test_visual_regression.py::test_mobile_visual_regression", "tests/ui/test_visual_snapshot.py::test_reports_the_changed_region_in_the_failure_message"]
 ```
 
+```meiva-contract
+id = "visual-diff-sensitivity-floor"
+kind = "invariant"
+statement = "A difference below MAX_DIFF_PIXEL_RATIO (0.100%) is not a failure: that budget absorbs antialiasing and sub-pixel noise, so the gate reports only changes above it. On a 1280x800 surface the floor is 1024 changed pixels, which is roughly a 25-px text edit or a smaller local repaint. Measured on the home surface: renaming the sidebar's Spawn label to Spawn now changed 149 pixels (0.015%) and stayed green, while widening the sidebar column from 16% to 20% changed 15492 pixels (1.513%) and failed with changed region x=16..1246, y=11..787. A green gate therefore means no visible change above the floor, not no change at all; lowering the floor requires its own decision because the noise it absorbs is what made the gate flake."
+code = ["tests/e2e/visual/_visual_snapshot.py:MAX_DIFF_PIXEL_RATIO", "tests/e2e/visual/_visual_snapshot.py:_CHANNEL_DELTA_THRESHOLD"]
+tests = ["tests/e2e/visual/test_visual_regression.py::test_home_visual_regression"]
+```
+
+```meiva-contract
+id = "visual-fixture-renders-the-real-ui"
+kind = "invariant"
+statement = "The stubs behind these surfaces answer the console's reads with bodies shaped by their backend response models, answer anything else with a 404 plus an explicit detail body and fail the test naming the endpoint, and freeze the page clock at a fixed instant so a relative label such as the sidebar's 1mo ago cannot walk across buckets on a wall clock. Each regression test also asserts that the rendered page carries no error boundary and, on the home surface, a real agent row: a fixture that answers an unknown endpoint with an empty object renders a plausible-looking error state, and a baseline captured from it hides the surface it was meant to guard. A payload whose shape depends on the host (the permission gate answers not_applicable off macOS) is stubbed with what this runner's own host reports, so the fixture shows the banner iff the runner would and no surface the runner never displays leaks into a reference."
+code = ["tests/e2e/visual/test_visual_regression.py:_API_STUBS", "tests/e2e/visual/test_visual_regression.py:_FROZEN_NOW", "tests/e2e/visual/test_visual_regression.py:_assert_no_error_boundary"]
+tests = ["tests/e2e/visual/test_visual_regression.py::test_home_visual_regression", "tests/e2e/visual/test_visual_regression.py::test_fleet_visual_regression", "tests/e2e/visual/test_visual_regression.py::test_mobile_visual_regression"]
+```
+
 Suite entry points and CI integration: [[tests/docs/tests.meiva.okf.md]].

@@ -17,10 +17,11 @@ from __future__ import annotations
 
 import json
 from collections.abc import Iterator
+from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
-from playwright.sync_api import Browser, Locator, Page, Route, expect
+from playwright.sync_api import Browser, FloatRect, Locator, Page, Route, expect
 
 from tests.e2e._ports import FRONTEND_URL
 from tests.e2e.visual._visual_snapshot import assert_visual_snapshot
@@ -51,6 +52,18 @@ _AGENT = {
     "unread_notice_count": 0,
 }
 
+_FROZEN_NOW = datetime(2026, 10, 17, 12, 0, tzinfo=UTC)
+_TIMELINE: dict[str, object] = {"items": [], "msg_count": 0, "has_more": False}
+_TOKEN_USAGE = {
+    "input_tokens": 0,
+    "output_tokens": 0,
+    "reasoning_tokens": 0,
+    "max_input_tokens": 0,
+    "soft_compact_tokens": 0,
+    "hard_compact_tokens": 0,
+}
+
+# meiva:ref tests/e2e/visual/docs/visual-regression-gate.meiva.okf.md#visual-fixture-renders-the-real-ui
 _API_STUBS: dict[str, object] = {
     "/api/agents": {"agents": [_AGENT], "next_cursor": None},
     "/api/agents/roster": {"agents": [_AGENT], "ancestors": []},
@@ -67,15 +80,55 @@ _API_STUBS: dict[str, object] = {
     "/api/config": {"fields": [], "raw_overrides": {}, "machine_capabilities": []},
     "/api/notices": {"open": [], "awaiting": [], "resolved_page": [], "next_cursor": None},
     "/api/tasks": {"tasks": []},
-    "/api/agents/1/timeline": {"items": [], "msg_count": 0, "has_more": False},
-    "/api/agents/1/token-usage": {
-        "input_tokens": 0,
-        "output_tokens": 0,
-        "reasoning_tokens": 0,
-        "max_context_tokens": 0,
-        "soft_compact_tokens": 0,
-        "hard_compact_tokens": 0,
+    "/api/agents/1/timeline": _TIMELINE,
+    "/api/agents/1/token-usage": _TOKEN_USAGE,
+    "/api/agents/1/conversation-snapshot": {
+        "timeline": _TIMELINE,
+        "token_usage": _TOKEN_USAGE,
+        "pending": [],
     },
+    "/api/agents/1/to-user": {
+        "content": None,
+        "version": None,
+        "modified_at": None,
+        "resources": {},
+        "legacy_html": False,
+    },
+    "/api/models": {"providers": {}, "models": {}, "default": ""},
+    "/api/commands": [],
+    "/api/cluster/status": {
+        "machine_name": "test-host",
+        "serve_gateway": True,
+        "serve_agent_runner": True,
+        "serve_observability_station": False,
+        "paused": False,
+        "paused_reason": None,
+        "head_sha": None,
+        "running_sha": None,
+        "schema_mismatch": None,
+        "shell_count": 0,
+        "agent_host_online": True,
+        "supervisor_online": True,
+        "agent_count": 1,
+        "session_count": 0,
+        "agent_groups": [],
+        "resource": None,
+    },
+    "/api/stats/dashboard": {
+        "live_count": 1,
+        "window_hours": 24,
+        "applied_window_hours": 24,
+        "tokens": {"input": 0, "output": 0, "cache_read": 0, "cache_hit_pct": 0},
+        "cost_usd": 0,
+        "avg_turn_seconds": None,
+        "warnings": 0,
+        "errors": 0,
+        "alert_classes_active": 0,
+        "alert_classes_dismissed": 0,
+        "plugin_stats": [],
+        "as_of": "2026-10-17T00:00:00Z",
+    },
+    "/api/ui/contributions": {"themes": [], "nav": [], "stats": []},
     "/api/agents/1/pages": [],
     "/api/agents/1/pending": [],
     "/api/pages": [],
@@ -88,6 +141,17 @@ _API_STUBS: dict[str, object] = {
         "shells": {"shells": []},
     },
     "/api/system": {"cpu_percent": 0, "mem_percent": 0, "disk_percent": 0},
+    # meiva:ref tests/e2e/visual/docs/visual-regression-gate.meiva.okf.md#visual-fixture-renders-the-real-ui
+    "/api/host/permissions": {
+        "state": "not_applicable",
+        "headline": "This host needs no macOS permissions.",
+        "checked_at": "2026-10-17T12:00:00+00:00",
+        "diagnostic": "There are no macOS authorizations to check on this host.",
+        "helper_reachable": True,
+        "required_total": 0,
+        "required_missing": 0,
+        "items": [],
+    },
 }
 
 _INERT_EVENT_SOURCE = """
@@ -121,10 +185,21 @@ def visual_page(frontend_proc: None, playwright_browser: Browser) -> Iterator[Pa
     )
     page = context.new_page()
     page.add_init_script(_INERT_EVENT_SOURCE)
+    page.clock.set_fixed_time(_FROZEN_NOW)
+
+    unstubbed: list[str] = []
 
     def _stub(route: Route) -> None:
         endpoint = "/api/" + route.request.url.split("/api/", 1)[1].split("?", 1)[0]
-        body = _API_STUBS.get(endpoint, {})
+        body = _API_STUBS.get(endpoint)
+        if body is None:
+            unstubbed.append(f"{route.request.method} {endpoint}")
+            route.fulfill(
+                status=404,
+                content_type="application/json",
+                body=json.dumps({"detail": f"visual fixture has no stub for {endpoint}"}),
+            )
+            return
         route.fulfill(status=200, content_type="application/json", body=json.dumps(body))
 
     page.route("**/api/**", _stub)
@@ -132,16 +207,27 @@ def visual_page(frontend_proc: None, playwright_browser: Browser) -> Iterator[Pa
         yield page
     finally:
         context.close()
+        if unstubbed:
+            pytest.fail("the visual fixture has no stub for: " + ", ".join(sorted(set(unstubbed))))
 
 
 def _open(page: Page, path: str) -> None:
     page.goto(f"{FRONTEND_URL}{path}", wait_until="domcontentloaded")
 
 
+def _assert_no_error_boundary(page: Page) -> None:
+    assert page.get_by_text("Something went wrong").count() == 0, (
+        "the fixture rendered an error boundary instead of the page under test; "
+        "a baseline captured from it would hide that surface"
+    )
+
+
 def test_home_visual_regression(visual_page: Page) -> None:
     """Desktop conversation shell stays visually stable."""
     _open(visual_page, "/")
     visual_page.wait_for_selector("textarea:not([disabled])", timeout=15_000)
+    _assert_no_error_boundary(visual_page)
+    assert visual_page.get_by_text(f"#{_AGENT['agent_id']} · {_AGENT['label']}").count() > 0
     assert_visual_snapshot(
         visual_page,
         test_file=Path(__file__).stem,
@@ -154,6 +240,7 @@ def test_fleet_visual_regression(visual_page: Page) -> None:
     """Desktop fleet shell stays visually stable."""
     _open(visual_page, "/fleet")
     visual_page.wait_for_selector("text=Fleet", timeout=15_000)
+    _assert_no_error_boundary(visual_page)
     assert_visual_snapshot(
         visual_page,
         test_file=Path(__file__).stem,
@@ -167,6 +254,7 @@ def test_mobile_visual_regression(visual_page: Page) -> None:
     visual_page.set_viewport_size({"width": 390, "height": 844})
     _open(visual_page, "/")
     visual_page.wait_for_selector("textarea:not([disabled])", timeout=15_000)
+    _assert_no_error_boundary(visual_page)
     assert_visual_snapshot(
         visual_page,
         test_file=Path(__file__).stem,
@@ -246,13 +334,26 @@ def test_plugin_quota_rows_wrap_inside_statistics_popover(
     page.get_by_role("button", name="Statistics", exact=True).click()
     dialog = page.get_by_role("dialog").filter(has=page.get_by_text(label, exact=True))
     dialog.wait_for(state="visible")
-    bounds = dialog.bounding_box()
-    assert bounds is not None
+    dialog.get_by_text(detail, exact=True).first.wait_for(state="visible")
+    bounds = _settled_dialog_bounds(dialog)
     assert 0 <= bounds["x"] <= width - bounds["width"]
     assert 0 <= bounds["y"] <= height - bounds["height"]
     assert dialog.evaluate("el => el.scrollWidth <= el.clientWidth")
     assert dialog.evaluate("el => el.scrollHeight > el.clientHeight")
     _assert_quota_text_is_readable(dialog, (label, reset, detail))
+
+
+def _settled_dialog_bounds(dialog: Locator) -> FloatRect:
+    previous = dialog.bounding_box()
+    assert previous is not None
+    for _ in range(20):
+        dialog.page.wait_for_timeout(50)
+        current = dialog.bounding_box()
+        assert current is not None
+        if current == previous:
+            return current
+        previous = current
+    return previous
 
 
 def _assert_quota_text_is_readable(dialog: Locator, texts: tuple[str, ...]) -> None:
