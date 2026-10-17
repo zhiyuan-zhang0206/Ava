@@ -303,7 +303,7 @@ const SUMMARY_PARSE_INTERVAL_MS = 250;
 // Shared by the TurnBlock aggregate header so a collapsed turn reads as the same
 // clickable summary row as a card header.
 export const HEADER_CLS =
-  "w-full flex items-center gap-1.5 px-3 py-1.5 text-[11px] font-mono text-left " +
+  "w-full flex items-center gap-1.5 px-2 sm:px-3 py-1.5 text-[11px] font-mono text-left " +
   "text-muted-foreground/80 hover:text-foreground hover:bg-accent/30 " +
   "transition-colors select-none rounded-tr-sm";
 
@@ -393,13 +393,17 @@ export function MessageCard({
   return (
     <div
       className={cn(
-        "border-l-2 rounded-r-sm relative",
+        "rounded-r-sm relative",
         actions ? "group/msgcard" : null,
-        config.border,
         config.bg,
         config.cardText,
       )}
     >
+      <span
+        aria-hidden
+        data-testid="card-accent"
+        className={cn("pointer-events-none absolute top-0 left-0 h-7 w-0 rounded-full border-l-2", config.border)}
+      />
       {children}
       {actions ? (
         <div className={cn("pointer-events-none absolute inset-x-0 bottom-0 z-10 justify-end p-1", FLEX)}>

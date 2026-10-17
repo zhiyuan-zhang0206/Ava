@@ -152,7 +152,7 @@ export const TimelineRow = memo(function TimelineRow({
             isStuck={isStuck}
           />
           {expanded ? (
-            <div className="px-3 pb-2 pt-0.5">
+            <div className="px-2 pb-2 pt-0.5 sm:px-3">
               <ItemView item={item} streaming={streaming} />
             </div>
           ) : null}

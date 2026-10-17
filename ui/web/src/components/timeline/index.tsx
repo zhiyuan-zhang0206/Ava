@@ -811,7 +811,7 @@ export const TimelineView = memo(function TimelineView({
           aria-live="polite"
           aria-relevant="additions"
           style={maxWidthCss ? { maxWidth: maxWidthCss } : undefined}
-          className={cn("mx-auto w-full px-4 pb-3 space-y-3", BAR_CLEAR_TOP_PADDING_CLASS, virtualEnabled && "timeline-virtual")}
+          className={cn("mx-auto w-full px-2 pb-3 space-y-3 sm:px-4", BAR_CLEAR_TOP_PADDING_CLASS, virtualEnabled && "timeline-virtual")}
         >
           {turnAnnouncement ? (
             <span key={turnAnnouncement} className="sr-only" data-testid="timeline-turn-announcement">
