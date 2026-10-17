@@ -8,6 +8,7 @@ import shutil
 import sys
 import tarfile
 import tempfile
+from dataclasses import dataclass
 from pathlib import Path
 
 from base.clock import Timers
@@ -36,35 +37,6 @@ _DOWNLOAD_URL = (
 
 VERSION_MARKER = "version"
 
-# Download fetch discipline (issue #172): the tarball is on the critical path
-# of `meiva start`, so a slow or dead mirror must fail the converge step in
-# bounded time and say so — never stall bring-up indefinitely. Per-read socket
-# timeout catches a wedged connection; a total wall-clock cap per attempt
-# catches a mirror that trickles forever; a bounded retry rides out transient
-# blips; a heartbeat line distinguishes slow from dead.
-DOWNLOAD_SOCKET_TIMEOUT_S = 30.0
-_DOWNLOAD_ATTEMPT_TIMEOUT_S = 600.0
-_DOWNLOAD_ATTEMPTS = 3
-_DOWNLOAD_RETRY_BACKOFF_S = 5.0
-_DOWNLOAD_PROGRESS_INTERVAL_S = 15.0
-
-
-def _download_backoff(attempt: int) -> float:
-    return _DOWNLOAD_RETRY_BACKOFF_S * (attempt + 1)
-
-
-# Pinned collector download retries every failure on the original 5s, 10s schedule.
-_DOWNLOAD_POLICY = Policy(
-    max_attempts=_DOWNLOAD_ATTEMPTS,
-    backoff=_download_backoff,
-    jitter="none",
-    jitter_span=1.0,
-    classify=lambda _exc: True,
-    idempotent=True,
-    respect_retry_after=False,
-    on_final_failure=None,
-)
-
 
 def platform_tag() -> str | None:
     """The release asset tag for this machine, or None when unsupported.
@@ -89,6 +61,20 @@ def binary_name() -> str:
     return "otelcol-contrib"
 
 
+@dataclass(frozen=True)
+class DownloadLimits:
+    total_budget_s: float
+    socket_timeout_s: float
+    attempts: int
+    retry_backoff_s: float
+    progress_interval_s: float
+
+
+@dataclass
+class DownloadProgress:
+    received: int = 0
+
+
 # meiva:ref base/deploy/release/docs/collector-artifact.meiva.okf.md#bounded-download-attempt
 def stream_download(
     url: str,
@@ -96,21 +82,30 @@ def stream_download(
     *,
     open_url: UrlOpener,
     timers: Timers,
-    attempt_timeout_s: float = _DOWNLOAD_ATTEMPT_TIMEOUT_S,
+    limits: DownloadLimits,
+    deadline: float,
+    progress: DownloadProgress,
 ) -> None:
-    started = timers.monotonic()
-    last_beat = started
-    got = 0
+    def _remaining() -> float:
+        return deadline - timers.monotonic()
+
+    def _elapsed() -> float:
+        return limits.total_budget_s - _remaining()
+
+    def _require_budget() -> float:
+        remaining = _remaining()
+        if remaining <= 0:
+            raise TimeoutError(
+                f"otel-collector download exceeded its {limits.total_budget_s:.0f}s budget "
+                f"({progress.received} bytes received, "
+                f"{max(-remaining, 0.0):.1f}s past the deadline)"
+            )
+        return remaining
+
+    last_beat = 0.0
     total: int | None = None
-
-    def _check_budget() -> float:
-        now = timers.monotonic()
-        if now - started > attempt_timeout_s:
-            raise TimeoutError(f"download exceeded {attempt_timeout_s:.0f}s wall-clock cap")
-        return now
-
     with (
-        open_url(url, DOWNLOAD_SOCKET_TIMEOUT_S) as resp,
+        open_url(url, min(limits.socket_timeout_s, _require_budget())) as resp,
         dest.open("wb") as fh,
     ):
         try:
@@ -118,58 +113,104 @@ def stream_download(
         except (TypeError, ValueError):
             total = None
         while True:
-            _check_budget()
+            _require_budget()
             chunk = resp.read1(1 << 16)
-            now = _check_budget()
+            _require_budget()
             if not chunk:
                 break
             fh.write(chunk)
-            got += len(chunk)
-            if now - last_beat >= _DOWNLOAD_PROGRESS_INTERVAL_S:
-                pct = f" ({got * 100 // total}%)" if total else ""
-                _report(f"  · otel-collector: {got / 1e6:.1f} MB{pct} in {now - started:.0f}s")
-                last_beat = now
-    _report(
-        f"  · otel-collector: downloaded {got / 1e6:.1f} MB in {timers.monotonic() - started:.0f}s"
+            progress.received += len(chunk)
+            elapsed = _elapsed()
+            if elapsed - last_beat >= limits.progress_interval_s:
+                pct = f" ({progress.received * 100 // total}%)" if total else ""
+                _report(
+                    f"  · otel-collector: {progress.received / 1e6:.1f} MB{pct} in {elapsed:.0f}s"
+                )
+                last_beat = elapsed
+    _report(f"  · otel-collector: downloaded {progress.received / 1e6:.1f} MB in {_elapsed():.0f}s")
+
+
+def _download_policy(limits: DownloadLimits) -> Policy:
+    def _backoff(attempt: int) -> float:
+        return limits.retry_backoff_s * (attempt + 1)
+
+    return Policy(
+        max_attempts=limits.attempts,
+        backoff=_backoff,
+        jitter="none",
+        jitter_span=1.0,
+        classify=lambda _exc: True,
+        idempotent=True,
+        respect_retry_after=False,
+        on_final_failure=None,
     )
 
 
 # meiva:ref base/deploy/release/docs/collector-artifact.meiva.okf.md#download-wait-closure
-def download_with_retry(url: str, tarball: Path, *, open_url: UrlOpener, timers: Timers) -> None:
+def download_with_retry(
+    url: str, tarball: Path, *, open_url: UrlOpener, timers: Timers, limits: DownloadLimits
+) -> None:
     started = timers.monotonic()
+    deadline = started + limits.total_budget_s
     attempt = 0
+    progress = DownloadProgress()
+
+    def _used() -> float:
+        return timers.monotonic() - started
+
+    def _remaining() -> float:
+        return deadline - timers.monotonic()
+
+    def _wait(seconds: float) -> None:
+        remaining = _remaining()
+        if remaining > 0:
+            timers.sleep(min(seconds, remaining))
 
     def _download_once() -> None:
-        nonlocal attempt
+        nonlocal attempt, progress
         attempt += 1
+        progress = DownloadProgress()
         try:
-            stream_download(url, tarball, open_url=open_url, timers=timers)
+            stream_download(
+                url,
+                tarball,
+                open_url=open_url,
+                timers=timers,
+                limits=limits,
+                deadline=deadline,
+                progress=progress,
+            )
         except Exception as exc:  # URLError / TimeoutError / OSError
-            elapsed = timers.monotonic() - started
             _report(
-                f"  ! otel-collector: download attempt {attempt}/{_DOWNLOAD_ATTEMPTS} "
-                f"failed after {elapsed:.0f}s: {exc}",
+                f"  ! otel-collector: download attempt {attempt}/{limits.attempts} failed after "
+                f"{_used():.0f}s ({max(_remaining(), 0.0):.0f}s of the "
+                f"{limits.total_budget_s:.0f}s budget left, {progress.received} bytes received): "
+                f"{exc}",
                 error=True,
             )
             raise
 
     try:
-        retry(_DOWNLOAD_POLICY, sleep=timers.sleep)(_download_once)
+        retry(_download_policy(limits), sleep=_wait)(_download_once)
     except Exception as exc:
         raise RuntimeError(
-            f"failed to download otel-collector from {url} after {_DOWNLOAD_ATTEMPTS} "
-            f"attempts ({timers.monotonic() - started:.0f}s total): {exc}"
+            f"failed to download otel-collector from {url} after {attempt} attempt(s) "
+            f"({_used():.0f}s used of the {limits.total_budget_s:.0f}s budget, "
+            f"{max(_remaining(), 0.0):.0f}s left, {progress.received} bytes received by the last "
+            f"attempt): {exc}"
         ) from exc
 
 
-def download_and_verify(tag: str, dest_dir: Path, *, open_url: UrlOpener, timers: Timers) -> None:
+def download_and_verify(
+    tag: str, dest_dir: Path, *, open_url: UrlOpener, timers: Timers, limits: DownloadLimits
+) -> None:
     """Download + SHA256-verify + extract the pinned tarball into dest_dir."""
     url = _DOWNLOAD_URL.format(version=OTELCOL_CONTRIB_VERSION, tag=tag)
     expected = _OTELCOL_CONTRIB_SHA256[tag]
     with tempfile.TemporaryDirectory() as tmp:
         tarball = Path(tmp) / "otelcol-contrib.tar.gz"
         _report(f"  · otel-collector: downloading {url}")
-        download_with_retry(url, tarball, timers=timers, open_url=open_url)
+        download_with_retry(url, tarball, timers=timers, open_url=open_url, limits=limits)
         digest = hashlib.sha256(tarball.read_bytes()).hexdigest()
         if digest != expected:
             raise RuntimeError(
