@@ -1,15 +1,3 @@
-"""`ava memory` — memory pool operations.
-
-Wraps the git / gh / curl operations from the ava-memory skill so agents
-call a single command instead of hand-typing shell pipelines. Each verb is
-a standalone Python function callable from the cli/parsers dispatch tree.
-
-Verbs:
-  init          Explicitly initialize the memory pool and plugin-owned templates
-  refresh       Trigger the gateway to re-index the memory pool
-  search        Search gateway memory and render relative paths with metadata
-"""
-
 from __future__ import annotations
 
 import sys
@@ -56,7 +44,6 @@ def cmd_memory_init(*, machine: MachineIdentity) -> int:
 
 
 def _refresh_index() -> None:
-    """POST /api/memory/refresh to the gateway so it re-indexes."""
     access = gateway_access_from_settings()  # ambient: C
     url = f"{gateway_api_base(access.gateway_url)}/api/memory/refresh"
     try:
@@ -70,11 +57,6 @@ def _refresh_index() -> None:
 
 
 def cmd_memory_refresh() -> int:
-    """Trigger the gateway to re-index the memory pool.
-
-    POSTs /api/memory/refresh so the memory indexer picks up the
-    latest consolidated pool (merged main) and re-embeds changed files.
-    """
     print("refreshing memory index...")
     _refresh_index()
     return 0

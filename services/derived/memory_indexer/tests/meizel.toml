@@ -11,7 +11,6 @@ exports = ["fake_provider.py"]
 "test_memory_indexer_config.py#monkeypatch.setattr services.derived.memory_indexer.daemon.asyncio.sleep" = 1
 "test_memory_indexer_config.py#monkeypatch.setattr services.derived.memory_indexer.daemon.get_backend" = 1
 "test_memory_indexer_quiesced.py#monkeypatch.setattr base.deploy.maintenance.admission.quiesced" = 1
-"test_memory_indexer_quiesced.py#monkeypatch.setattr services.derived.memory_indexer.daemon.process_paths" = 1
 "test_memory_rerank.py#monkeypatch.setattr services.derived.memory_indexer.rerank.ask_relevance" = 2
 "test_memory_rerank.py#monkeypatch.setattr services.derived.memory_indexer.rerank.decide" = 2
 "test_memory_search_reconcile.py#monkeypatch.setattr base.native_process.code_version.first_parent_count" = 1

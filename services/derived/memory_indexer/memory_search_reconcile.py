@@ -87,7 +87,7 @@ def _connect_backends(
         if readonly:
             print(f"read-only backend connection refused: {exc}", file=sys.stderr)
             print(
-                "Run the indexer daemon's cold-start reconcile on startup to repair the "
+                "The indexer daemon's next patrol (15 minutes by default) repairs the "
                 "backend, or use --allow-write only if you own that backend.",
                 file=sys.stderr,
             )
@@ -187,7 +187,7 @@ def main() -> int:
             )
             print(f"only in {args.b}: {only_b[:5]}", file=sys.stderr)
             print(
-                "sync the backends with the indexer daemon's cold-start reconcile and re-run",
+                "sync the backends with the indexer daemon's next patrol and re-run",
                 file=sys.stderr,
             )
             return 2

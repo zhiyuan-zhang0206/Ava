@@ -1,18 +1,3 @@
-"""Memory search service daemon — uvicorn over the MemoryStore on 19531.
-
-`ava start` spawns this session before the memory indexer (the indexer's
-cold-start connects to whichever backend `AVA_MEMORY_SEARCH_BACKEND`
-names, so the storage service must be up first). The store loads its npz
-at boot; the indexer daemon then reconciles disk against it, so a fresh
-backend needs no hand-copied data.
-
-Usage:
-    .venv/bin/python -m services.derived.memory_search.daemon
-
-Kept alive by the watchdog via `services.derived.memory_search.healthcheck`
-(a real POST /search probe, not a bare TCP connect).
-"""
-
 from __future__ import annotations
 
 import asyncio

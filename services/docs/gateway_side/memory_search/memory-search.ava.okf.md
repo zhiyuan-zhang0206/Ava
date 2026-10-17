@@ -25,8 +25,8 @@ persistence.
   baseline
 - **Persistence**: every mutation rewrites `$AVA_HOME/memory-search/vectors.npz`
   atomically (tmp file + rename) before acking — a kill-after-ack never loses
-  a row; a fresh service loads the file at boot and the indexer's cold-start
-  reconcile fills what disk says
+  a row; a fresh service loads the file at boot and the indexer's next patrol
+  fills what disk says
 - **Local binding**: only `127.0.0.1`, no LAN ports
 
 ## Key Dependencies

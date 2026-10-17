@@ -16,11 +16,15 @@ from services.derived.memory_indexer.tests.fake_provider import FakeProvider
 
 def test_tuning_defaults_are_the_production_values() -> None:
     tuning = MemoryIndexerConfig()
-    assert (tuning.loop_interval_s, tuning.reconcile_chunk_paths, tuning.batch_size) == (
-        1.0,
-        64,
-        32,
-    )
+    assert (
+        tuning.loop_interval_s,
+        tuning.patrol_interval_s,
+        tuning.retry_backoff_s,
+        tuning.retry_limit,
+        tuning.excluded_basenames,
+        tuning.reconcile_chunk_paths,
+        tuning.batch_size,
+    ) == (1.0, 900.0, 60.0, 3, ("MEMORY.md", "index.md"), 64, 32)
 
 
 @pytest.mark.parametrize(
@@ -28,6 +32,11 @@ def test_tuning_defaults_are_the_production_values() -> None:
     [
         ("loop_interval_s", 0.0),
         ("loop_interval_s", -1.0),
+        ("patrol_interval_s", 0.0),
+        ("patrol_interval_s", -1.0),
+        ("retry_backoff_s", 0.0),
+        ("retry_backoff_s", -1.0),
+        ("retry_limit", -1),
         ("reconcile_chunk_paths", 0),
         ("batch_size", 0),
         ("batch_size", -1),
@@ -37,6 +46,12 @@ def test_tuning_rejects_values_that_would_stall_or_skip_work(field: str, value: 
     overrides: dict[str, Any] = {field: value}
     with pytest.raises(ValueError, match=field):
         MemoryIndexerConfig(**overrides)
+
+
+def test_excluded_basenames_must_be_plain_file_names() -> None:
+    for name in ("", "sub/index.md", "sub\\index.md"):
+        with pytest.raises(ValueError, match="excluded_basenames"):
+            MemoryIndexerConfig(excluded_basenames=(name,))
 
 
 def test_inputs_are_cold_and_owned() -> None:
