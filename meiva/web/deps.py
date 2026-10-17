@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Literal, Protocol
 
 from pydantic import SecretStr
 
@@ -12,7 +12,26 @@ from base.host.env.agent_slices import ModelOverrides
 from base.host.net.ports import UrlOpener
 from base.lm.catalog import ModelCatalog
 
-__all__ = ["BraveConfig", "FetchDeps", "FetchModel", "JinaConfig", "SearchDeps"]
+__all__ = [
+    "BraveConfig",
+    "DeepSeekFetchConfig",
+    "DeepSeekSearchConfig",
+    "FetchDeps",
+    "FetchModel",
+    "JinaConfig",
+    "ReaderProvider",
+    "RequestPacer",
+    "SearchDeps",
+    "SearchProvider",
+]
+
+
+class RequestPacer(Protocol):
+    def acquire(self) -> None: ...
+
+
+SearchProvider = Literal["brave", "deepseek"]
+ReaderProvider = Literal["jina", "deepseek"]
 
 
 @dataclass(frozen=True)
@@ -23,6 +42,23 @@ class BraveConfig:
     endpoint: str
     timeout_s: float
     max_count: int
+
+
+@dataclass(frozen=True)
+class DeepSeekSearchConfig:
+    api_key: SecretStr | None
+    endpoint: str
+    timeout_s: float
+    max_count: int
+    pacer: RequestPacer
+
+
+@dataclass(frozen=True)
+class DeepSeekFetchConfig:
+    api_key: SecretStr | None
+    endpoint: str
+    timeout_s: float
+    pacer: RequestPacer
 
 
 @dataclass(frozen=True)
@@ -51,14 +87,18 @@ class FetchModel:
 
 @dataclass(frozen=True)
 class SearchDeps:
+    provider: SearchProvider
     brave: BraveConfig
+    deepseek: DeepSeekSearchConfig
     open_url: UrlOpener
     scan: Callable[[str, str], str]
 
 
 @dataclass(frozen=True)
 class FetchDeps:
+    reader: ReaderProvider
     jina: JinaConfig
+    deepseek: DeepSeekFetchConfig
     fetch_model: FetchModel
     open_url: UrlOpener
     build_chat_model: Callable[..., Any]
