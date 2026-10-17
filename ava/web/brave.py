@@ -10,7 +10,7 @@ import urllib.request
 from collections.abc import Callable
 from typing import Any
 
-from ava.web.deps import WebDeps
+from ava.web.deps import SearchDeps
 from ava.web.errors import SearchError
 from ava.web.policy import WEB_READ_POLICY
 from base.host.net.resilience import retry
@@ -21,7 +21,7 @@ _log = logging.getLogger(__name__)
 
 
 def search_one[Result](
-    query: str, count: int, deps: WebDeps, make_result: Callable[..., Result]
+    query: str, count: int, deps: SearchDeps, make_result: Callable[..., Result]
 ) -> list[Result]:
     """The synchronous unit of work — search Brave for one query.
 

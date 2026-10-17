@@ -293,7 +293,9 @@ def test_fetch_url_encodes_target(mock_llm: dict[str, Any], web_harness: WebHarn
     with web_harness.urlopen_returns(side_effect=_capture):
         web_harness.fetch([("https://example.com/search?q=hello world", "summarize")])
     # spaces should become %20, other URL structure (scheme / :/ / ?&=) preserved
-    assert captured["url"].startswith(web_harness.deps.jina.reader_base + "https://example.com/")
+    assert captured["url"].startswith(
+        web_harness.fetch_deps.jina.reader_base + "https://example.com/"
+    )
     assert "%20" in captured["url"]
     assert "?q=hello" in captured["url"]
 
@@ -333,7 +335,7 @@ def test_fetch_http_error_raises(web_harness: WebHarness) -> None:
     """HTTP layer error (429 rate limit / 503 downstream down) must include upstream body in traceback."""
     web_harness.set_jina(api_key=None)
     http_err = urllib.error.HTTPError(
-        url=web_harness.deps.jina.reader_base + "...",
+        url=web_harness.fetch_deps.jina.reader_base + "...",
         code=429,
         msg="Too Many Requests",
         hdrs=None,  # type: ignore[arg-type]

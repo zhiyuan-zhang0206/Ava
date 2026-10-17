@@ -1,9 +1,4 @@
-"""What the web operations need besides their arguments: configuration values and ports.
-
-`ava/web/brave.py` and `ava/web/reader.py` read nothing ambient. The configured endpoints, keys
-and timeouts arrive as small frozen config values, the network, the model factory and the
-injection check as callables, so a test hands them a fake opener and the values it wants.
-"""
+# ava:ref ava/web/docs/web.ava.okf.md#webdeps-split
 
 from __future__ import annotations
 
@@ -17,7 +12,7 @@ from base.host.env.agent_slices import ModelOverrides
 from base.host.net.ports import UrlOpener
 from base.lm.catalog import ModelCatalog
 
-__all__ = ["BraveConfig", "FetchModel", "JinaConfig", "WebDeps"]
+__all__ = ["BraveConfig", "FetchDeps", "FetchModel", "JinaConfig", "SearchDeps"]
 
 
 @dataclass(frozen=True)
@@ -55,10 +50,14 @@ class FetchModel:
 
 
 @dataclass(frozen=True)
-class WebDeps:
-    """The dependencies of `search_one` and `fetch_one`, nothing else."""
-
+class SearchDeps:
     brave: BraveConfig
+    open_url: UrlOpener
+    scan: Callable[[str, str], str]
+
+
+@dataclass(frozen=True)
+class FetchDeps:
     jina: JinaConfig
     fetch_model: FetchModel
     open_url: UrlOpener
