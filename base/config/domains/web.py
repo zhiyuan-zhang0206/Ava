@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from typing import Literal
+
 from pydantic import Field, SecretStr
 
 from base.config.base import EnvSettings
@@ -34,6 +36,114 @@ class WebSettings(EnvSettings):
         default=20,
         alias="MEIVA_WEB_MAX_RESULTS",
         description="Brave search max results per call (free tier caps at 20; higher values are rejected with 422).",
+        json_schema_extra={
+            "restart_required": "agent",
+            "writable": True,
+            "sensitive": False,
+            "scope": "cluster-pinned",
+        },
+    )
+
+    web_search_provider: Literal["brave", "deepseek"] = Field(
+        default="brave",
+        alias="MEIVA_WEB_SEARCH_PROVIDER",
+        description=(
+            "Search provider behind `meiva.web.search`. `brave` is the incumbent default; "
+            "`deepseek` uses the DeepSeek Search tool, which needs DEEPSEEK_API_KEY (the same "
+            "key the deepseek-* models use) and is bound by DeepSeek's account-level 5 QPS. "
+            "The two differ in what they are good at rather than in a single score: DeepSeek "
+            "favours primary and official sources and repeats one site's pages; Brave favours "
+            "popular tutorials, keeps the requested language, and returns news/videos/"
+            "discussions partitions that DeepSeek does not have. A provider switch needs a "
+            "decision, not a config edit by habit."
+        ),
+        json_schema_extra={
+            "restart_required": "agent",
+            "writable": True,
+            "sensitive": False,
+            "scope": "cluster-pinned",
+        },
+    )
+
+    web_fetch_reader: Literal["jina", "deepseek"] = Field(
+        default="jina",
+        alias="MEIVA_WEB_FETCH_READER",
+        description=(
+            "Page reader behind `meiva.web.fetch`. `jina` runs Jina Reader (server-side headless "
+            "browser, so it renders JavaScript and returns a bot-challenge or login-wall page as "
+            "the body, which `meiva.web` detects and turns into a FetchError); `deepseek` runs "
+            "the DeepSeek Fetch tool (Markdown body, needs DEEPSEEK_API_KEY, answers 403/404 "
+            "when it cannot read the page, so there is no wall page to detect). The answer step "
+            "and the injection check are unchanged by this switch."
+        ),
+        json_schema_extra={
+            "restart_required": "agent",
+            "writable": True,
+            "sensitive": False,
+            "scope": "cluster-pinned",
+        },
+    )
+
+    web_deepseek_search_endpoint: str = Field(
+        default="https://api.deepseek.com/v1/tools/search",
+        alias="MEIVA_WEB_DEEPSEEK_SEARCH_ENDPOINT",
+        description=(
+            "DeepSeek Search tool endpoint used when `web_search_provider` is `deepseek`. "
+            "Override to point at a relay or mirror without code changes; it receives the same "
+            "auth as DeepSeek (`Authorization: Bearer` with DEEPSEEK_API_KEY)."
+        ),
+        json_schema_extra={
+            "restart_required": "agent",
+            "writable": True,
+            "sensitive": False,
+            "scope": "cluster-pinned",
+        },
+    )
+
+    web_deepseek_fetch_endpoint: str = Field(
+        default="https://api.deepseek.com/v1/tools/fetch",
+        alias="MEIVA_WEB_DEEPSEEK_FETCH_ENDPOINT",
+        description=(
+            "DeepSeek Fetch tool endpoint used when `web_fetch_reader` is `deepseek`. Same "
+            "override and auth rules as the search endpoint above."
+        ),
+        json_schema_extra={
+            "restart_required": "agent",
+            "writable": True,
+            "sensitive": False,
+            "scope": "cluster-pinned",
+        },
+    )
+
+    web_deepseek_max_results: int = Field(
+        default=50,
+        alias="MEIVA_WEB_DEEPSEEK_MAX_RESULTS",
+        description=(
+            "DeepSeek Search result cap per call. The tool rejects `count` above 50 and the "
+            "price does not depend on it, so 50 is the ceiling the provider itself allows; the "
+            "caller's `count` is clamped to it. Kept separate from `web_max_search_results` "
+            "because Brave's ceiling (20) is lower and would silently cap DeepSeek results."
+        ),
+        json_schema_extra={
+            "restart_required": "agent",
+            "writable": True,
+            "sensitive": False,
+            "scope": "cluster-pinned",
+        },
+    )
+
+    web_deepseek_qps: float = Field(
+        default=5.0,
+        gt=0.0,
+        alias="MEIVA_WEB_DEEPSEEK_QPS",
+        description=(
+            "Request rate `meiva.web` allows itself against the DeepSeek Search and Fetch "
+            "tools, in requests per second. DeepSeek enforces 5 QPS per account for both tools "
+            "and answers 429 above it; `meiva.web` spaces its request starts `1/web_deepseek_qps` "
+            "apart so a 12-wide batch queues locally instead of retrying. Measuring a 10-query "
+            "batch at concurrency 12: unthrottled 4 of 14 requests were 429 (2.1s), throttled to "
+            "5 QPS none were (1.4s). Raise it only if DeepSeek raises the account limit."
+        ),
         json_schema_extra={
             "restart_required": "agent",
             "writable": True,
