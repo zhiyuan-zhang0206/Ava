@@ -97,6 +97,24 @@ class WebHarness:
             self.search_deps, brave=dataclasses.replace(self.search_deps.brave, **changes)
         )
 
+    def set_provider(self, provider: str) -> None:
+        self.search_deps = dataclasses.replace(self.search_deps, provider=provider)
+
+    def set_reader(self, reader: str) -> None:
+        self.fetch_deps = dataclasses.replace(self.fetch_deps, reader=reader)
+
+    def set_deepseek_search(self, **changes: Any) -> None:
+        self.search_deps = dataclasses.replace(
+            self.search_deps,
+            deepseek=dataclasses.replace(self.search_deps.deepseek, **changes),
+        )
+
+    def set_deepseek_fetch(self, **changes: Any) -> None:
+        self.fetch_deps = dataclasses.replace(
+            self.fetch_deps,
+            deepseek=dataclasses.replace(self.fetch_deps.deepseek, **changes),
+        )
+
     def set_jina(self, **changes: Any) -> None:
         self.fetch_deps = dataclasses.replace(
             self.fetch_deps, jina=dataclasses.replace(self.fetch_deps.jina, **changes)

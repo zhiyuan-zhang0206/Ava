@@ -6,7 +6,7 @@ import asyncio
 from collections.abc import Callable
 
 from meiva.sdk_surface.batch import run_batch
-from meiva.web import brave, reader
+from meiva.web import brave, deepseek, reader
 from meiva.web.deps import FetchDeps, SearchDeps
 from meiva.web.plans import FetchPlan, SearchPlan
 
@@ -17,13 +17,13 @@ def run_search[Result](
     plan: SearchPlan, deps: SearchDeps, make_result: Callable[..., Result]
 ) -> list[list[Result]]:
     """One result list per query, in input order; `make_result` builds each result."""
-    return asyncio.run(
-        run_batch(
-            plan.queries,
-            lambda q: brave.search_one(q, plan.count, deps, make_result),
-            plan.max_concurrent,
-        )
-    )
+
+    def search_one(query: str) -> list[Result]:
+        if deps.provider == "brave":
+            return brave.search_one(query, plan.count, deps, make_result)
+        return deepseek.search_one(query, plan.count, deps, make_result)
+
+    return asyncio.run(run_batch(plan.queries, search_one, plan.max_concurrent))
 
 
 def run_fetch(plan: FetchPlan, deps: FetchDeps) -> list[str]:
