@@ -111,6 +111,7 @@ def test_fresh_start_waits_for_reachable_bind_and_fails_fast_on_timeout(
         userlist=_USERLIST,
         admin_password=_ADMIN,
         machine=command_machine,
+        max_client_conn=2000,
     )
 
     assert rc == 1
@@ -157,6 +158,7 @@ def test_fresh_start_degraded_to_loopback_only_is_a_loud_failure(
         userlist=_USERLIST,
         admin_password=_ADMIN,
         machine=command_machine,
+        max_client_conn=2000,
     )
 
     assert rc == 1
@@ -193,6 +195,7 @@ def test_fresh_start_with_public_listener_is_success(
         userlist=_USERLIST,
         admin_password=_ADMIN,
         machine=command_machine,
+        max_client_conn=2000,
     )
 
     assert rc == 0
@@ -247,6 +250,7 @@ def test_the_pooler_daemon_inherits_no_meiva_authority(
             userlist=_USERLIST,
             admin_password=_ADMIN,
             machine=command_machine,
+            max_client_conn=2000,
         )
         == 0
     )
@@ -312,6 +316,7 @@ def test_running_pooler_is_reloaded_when_public_listener_is_healthy(
         userlist=_USERLIST,
         admin_password=_ADMIN,
         machine=command_machine,
+        max_client_conn=2000,
     )
 
     assert rc == 0
@@ -373,6 +378,7 @@ def test_running_degraded_pooler_is_restarted_not_reloaded(
         userlist=_USERLIST,
         admin_password=_ADMIN,
         machine=command_machine,
+        max_client_conn=2000,
     )
 
     assert rc == 0
@@ -417,6 +423,7 @@ def test_running_degraded_pooler_surviving_terminate_is_reported(
         userlist=_USERLIST,
         admin_password=_ADMIN,
         machine=command_machine,
+        max_client_conn=2000,
     )
 
     assert rc == 1
@@ -466,6 +473,7 @@ def test_running_pooler_with_changed_userlist_is_restarted_never_reloaded(
         userlist=_USERLIST,
         admin_password=_ADMIN,
         machine=command_machine,
+        max_client_conn=2000,
     )
 
     assert rc == 0

@@ -384,6 +384,7 @@ def test_pooler_restart_revokes_a_removed_user_a_reload_would_keep(
         userlist=without_gateway,
         admin_password=admin.password,
         machine=command_runtime.machine,
+        max_client_conn=2000,
     )
     assert rc == 0
     owner_after = ownership.pooler(base_pooler.ini_path(), base_pooler.pidfile_path())

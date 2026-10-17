@@ -117,6 +117,7 @@ def test_foreign_pooler_listener_refuses_before_config_or_signal(
             userlist=b"",
             admin_password=_UNUSED_ADMIN,
             machine=command_machine,
+            max_client_conn=2000,
         )
 
 
@@ -158,6 +159,7 @@ def test_pooler_birth_change_prevents_reload(
             userlist=b"",
             admin_password=_UNUSED_ADMIN,
             machine=command_machine,
+            max_client_conn=2000,
         )
 
 

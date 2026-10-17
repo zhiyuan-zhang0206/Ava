@@ -37,6 +37,7 @@ def test_pgbouncer_ini_uses_only_canonical_socket(
         listen_port=6433,
         db_name="meiva",
         machine=command_machine,
+        max_client_conn=2000,
     )
     assert f"host={canonical} port=5433" in ini
 

@@ -179,4 +179,5 @@ def test_start_does_not_reload_a_recycled_pid(
             userlist=b"",
             admin_password="unused-admin-credential",  # noqa: S106 — never presented
             machine=command_machine,
+            max_client_conn=2000,
         )

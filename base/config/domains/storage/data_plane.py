@@ -269,6 +269,32 @@ class DataPlaneSettings(EnvSettings):
         },
     )
 
+    pooler_max_client_conn: int = Field(
+        default=2000,
+        gt=0,
+        alias="MEIVA_POOLER_MAX_CLIENT_CONN",
+        description=(
+            "PgBouncer `max_client_conn`: how many client connections the pooler "
+            "admits at once. This is a CLIENT slot budget, not a Postgres "
+            "connection budget — transaction pooling multiplexes those clients "
+            "onto `default_pool_size` server connections per (database, user) "
+            "pair, so the pooler can admit far more clients than Postgres's own "
+            "max_connections. Size it above the sum of every process's pool "
+            "maxima on every host that dials this pooler: the agent host's "
+            "workload (64) and control (8) pools, the ops and daemon pools, and "
+            "the gateway's pools. The old fixed 500 sat below that sum, so one "
+            "burst of borrowers exhausted the client slots while Postgres itself "
+            "was mostly idle (2026-10-17 19:17 incident: acquire timeouts "
+            "cascading after the restore hook pinned connections)."
+        ),
+        json_schema_extra={
+            "restart_required": "all",
+            "writable": True,
+            "sensitive": False,
+            "scope": "cluster-pinned",
+        },
+    )
+
     data_plane_host: str = Field(
         default="",
         alias="MEIVA_DATA_PLANE_HOST",
