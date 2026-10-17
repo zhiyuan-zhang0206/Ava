@@ -363,6 +363,7 @@ async def consume_claimed_inbounds(
     agent_id: int,
     *,
     incarnation: RuntimeIncarnation | None,
+    unknown_execution: bool = False,
 ) -> None:
     """Consume the `'claimed'` chat rows an interrupted turn left behind.
 
@@ -375,8 +376,10 @@ async def consume_claimed_inbounds(
     """
     from agent.db import finalize_claimed_inbounds
 
-    consumed = await finalize_claimed_inbounds(ops_pool, agent_id, incarnation=incarnation)
-    if consumed:
+    consumed = await finalize_claimed_inbounds(
+        ops_pool, agent_id, incarnation=incarnation, unknown_execution=unknown_execution
+    )
+    if consumed and unknown_execution:
         logger.info(
             "consumed {consumed} claimed inbound(s) with unknown results; no redelivery",
             event="inbound_reconcile",

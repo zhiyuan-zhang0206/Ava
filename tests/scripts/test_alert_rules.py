@@ -32,6 +32,7 @@ _EXPECTED_UIDS = {
     "meiva-ops-checkpoint-blobs-freshness",
     "meiva-ops-checkpoint-blobs-growth",
     "meiva-ops-trace-disk-watermark",
+    "meiva-ops-inbound-consumed-unknown",
     "meiva-ops-llm-billing-quota",
     "meiva-ops-gateway-latency-route-warning",
     "meiva-ops-gateway-latency-route-error",
@@ -75,7 +76,7 @@ def _load_groups() -> list[dict[str, Any]]:
     assert [group["name"] for group in groups] == ["meiva-ops", "meiva-ops-slow"]
     assert [group["folder"] for group in groups] == ["Meiva", "Meiva"]
     assert [group["interval"] for group in groups] == ["1m", "5m"]
-    assert [len(group["rules"]) for group in groups] == [50, 14]
+    assert [len(group["rules"]) for group in groups] == [50, 15]
     return groups
 
 
@@ -485,3 +486,21 @@ def assert_reduce_keeps_route_label(rule: dict[str, Any]) -> None:
     reduce_node = next(d for d in rule["data"] if d["model"].get("type") == "reduce")
     assert reduce_node["model"].get("mode") == "byLabels"
     assert "attributes_route" in reduce_node["model"].get("includeLabels", [])
+
+
+def test_inbound_consumed_unknown_rule_counts_the_event_over_a_day() -> None:
+    rules = {r["uid"]: r for r in load_rules()}
+    rule = rules["meiva-ops-inbound-consumed-unknown"]
+    exprs = rule_query_exprs(rule, "loki")
+    assert len(exprs) == 1
+    assert "count_over_time" in exprs[0]
+    assert 'event_name="inbound_consumed_unknown"' in exprs[0]
+    assert "[24h]" in exprs[0]
+    assert rule["for"] == "10m"
+    assert threshold_params(rule) == [[2]]
+    assert rule["labels"] == {
+        "severity": "warning",
+        "ruleUID": "meiva-ops-inbound-consumed-unknown",
+        "metric": "inbound_consumed_unknown",
+        "team": "meiva-ops",
+    }

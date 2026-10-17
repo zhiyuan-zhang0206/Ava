@@ -127,6 +127,7 @@ above (or when its name is unregistered); otherwise it stays in the JSONL mirror
 | `hook_timing` | hook-runner pass — per-hook wall durations, attributing a slow before_llm / before_exec node to its hooks from events alone | noise | hook_ms | — | events | — |
 | `last_msg` | last-message check | noise | — | — | events | — |
 | `status_change` | agent status transition — both telemetry (loguru) and audit (audit_events) sides emit this name | noise | from, to | — | events | — |
+| `inbound_consumed_unknown` | a claimed inbound was consumed without knowing whether its work ran (host crash / aborted turn); the row is marked in its payload and is never redelivered — this event is the only record of what was lost | anomaly | inbound_id, kind, age_s, content_preview | — | events | ✓ |
 | `delivery_stalled` | delivery backlog | anomaly | inbound_id, age_s | — | events | ✓ |
 | `exec` | execute_code succeeded | observation | body, ok, duration_seconds | — | events | ✓ |
 | `exec_failed` | execute_code failed | anomaly | exc_type, body | — | events | ✓ |

@@ -14,7 +14,24 @@ class DeliveryStalled(TypedDict):
     age_s: float
 
 
+class InboundConsumedUnknown(TypedDict):
+    inbound_id: int
+    kind: str
+    age_s: float
+    content_preview: str
+
+
 EVENTS: dict[str, EventSpec] = {
+    "inbound_consumed_unknown": telemetry_event(
+        "inbound_consumed_unknown",
+        "a claimed inbound was consumed without knowing whether its work ran "
+        "(host crash / aborted turn); the row is marked in its payload and is "
+        "never redelivered — this event is the only record of what was lost",
+        payload=InboundConsumedUnknown,
+        tier="anomaly",
+        site="agent/db/__init__.py:finalize_claimed_inbounds",
+        persist=True,
+    ),
     "delivery_stalled": telemetry_event(
         "delivery_stalled",
         "delivery backlog",
