@@ -19,13 +19,14 @@ def test_patch_label_sends_the_label_and_who_set_it() -> None:
 
     context = MeivaContext(
         clients=ClientSet(
+            gateway_url="http://gateway",
             factories={
                 GatewayTransportInputs: lambda: GatewayTransportInputs(
                     max_retries_reader=lambda: 1,
                     retry_delay_reader=lambda: 0.0,
                     memory_deadline_reader=lambda: 1.0,
                 )
-            }
+            },
         )
     )
     previous = process_context.bound_context()
