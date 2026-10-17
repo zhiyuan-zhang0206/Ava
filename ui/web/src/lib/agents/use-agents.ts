@@ -7,6 +7,7 @@ import { useCallback, useEffect, useRef } from "react";
 import { api } from "../transport/api";
 import { errMsg } from "../contracts/errors";
 import { AGENTS_QUERY_KEY, AGENT_DETAIL_QUERY_KEY } from "../fold/agents";
+import { REFERENCE_PARAM } from "../context/reference-url";
 import { useStore } from "../state/store";
 import { useAgentActions } from "./use-agent-actions";
 import type { AgentRoster } from "../contracts/types";
@@ -66,8 +67,12 @@ export function useAgents(showError: (msg: string) => void) {
       else localStorage.setItem(ACTIVE_ID_KEY, String(id));
     } catch { /* selection still works when storage is disabled */ }
     const url = new URL(window.location.href);
-    if (id == null) url.searchParams.delete("agent_id");
-    else url.searchParams.set("agent_id", String(id));
+    const selected = id == null ? null : String(id);
+    if (url.searchParams.get("agent_id") !== selected) {
+      if (selected == null) url.searchParams.delete("agent_id");
+      else url.searchParams.set("agent_id", selected);
+      url.searchParams.delete(REFERENCE_PARAM);
+    }
     if (url.toString() !== window.location.href) window.history.replaceState(null, "", url);
   }, [activeId]);
 
