@@ -519,16 +519,17 @@ class ObservabilitySettings(EnvSettings):
     )
 
     otel_collector_download_budget_s: float = Field(
-        default=1800.0,
+        default=900.0,
         gt=0,
         alias="MEIVA_OTELCOL_DOWNLOAD_BUDGET_S",
         description=(
             "Wall-clock budget for ONE otel-collector download operation at `meiva start`, "
             "shared by every attempt and by the waits between them; there is no separate "
             "per-attempt cap. A mirror that trickles or stalls must fail the converge step "
-            "within this time instead of holding bring-up for tens of minutes. 1800 s keeps "
-            "the old worst case (3 attempts x 600 s) so a before/after comparison is "
-            "like-for-like; lower it once the intended bound is measured (task #5274)."
+            "within this time instead of holding bring-up for ~30 minutes. 900 s downloads "
+            "the 112 MB linux_amd64 release tarball at >=125 KB/s (measured: 112 MB in 15 s "
+            "on a 7.6 MB/s link), halves the old worst case, and stays configurable for "
+            "slow links (`MEIVA_OTELCOL_DOWNLOAD_BUDGET_S`)."
         ),
         json_schema_extra={
             "restart_required": "",
