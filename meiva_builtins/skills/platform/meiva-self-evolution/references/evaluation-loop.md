@@ -72,3 +72,9 @@ scores two dimensions in [0, 1]: **completion** (output produced,
 clean exec) and **efficiency** (few tokens/turns, no exec failures, no
 compaction, no re-prompts); `overall` weights completion higher. Use only the
 verified mean — invalid replays are reported separately.
+
+A run whose evidence grades below `complete` abstains instead of scoring: it
+stays in `per_task` and in `invalid` with reason `abstain:<reason>`, while `n`
+and `mean` cover scored runs only, and `mean` is `null` when nothing scored.
+Compare a mean only when it is not `null` — the rule is
+[score abstention](../docs/meiva-self-evolution.meiva.okf.md).

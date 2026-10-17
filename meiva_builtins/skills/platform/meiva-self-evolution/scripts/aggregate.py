@@ -88,14 +88,16 @@ def parse_failure_md(text: str) -> list[dict[str, Any]]:
 
 
 def compute_score_dimensions(
-    before: dict[str, float], after: dict[str, float]
+    before: dict[str, float], after: dict[str, float | None]
 ) -> list[dict[str, Any]]:
     """Convert two {completion, efficiency, overall} dicts into the dimension list
     the report template expects."""
     dims = []
     for key in ("completion", "efficiency", "overall"):
-        b = before.get(key, 0)
-        a = after.get(key, 0)
+        b = before.get(key)
+        a = after.get(key)
+        if a is None or b is None:
+            continue
         delta = round(a - b, 3)
         dims.append(
             {
@@ -115,15 +117,25 @@ def compute_score_dimensions(
     return dims
 
 
-def main() -> None:
+def measured_mean(state: dict[str, Any]) -> dict[str, Any] | None:
+    n = state.get("n")
+    mean = state.get("mean")
+    if not isinstance(mean, dict):
+        return None
+    if isinstance(n, int) and n <= 0:
+        return None
+    return mean
+
+
+def main(argv: list[str] | None = None) -> None:
     p = argparse.ArgumentParser(description="Aggregate self_evolution outputs into a report JSON.")
     p.add_argument("--changes", required=True, help="JSON list of {skill, summary, pr, pr_url}")
     p.add_argument("--eval-dir", help="directory containing evaluate.py gather outputs")
     p.add_argument("--failure-md", help="mine.py markdown output file")
     p.add_argument("--week", required=True, help="ISO week label e.g. 2025-06-30")
-    p.add_argument("--total-runs", type=int, default=0, help="total runs in dataset")
+    p.add_argument("--total-runs", type=int, required=True, help="total runs in dataset")
     p.add_argument("--out", default="report.json", help="output path")
-    args = p.parse_args()
+    args = p.parse_args(argv)
 
     # Changes
     changes = load_json(Path(args.changes))
@@ -135,24 +147,27 @@ def main() -> None:
     score_skills: list[dict[str, Any]] = []
     if args.eval_dir:
         eval_dir = Path(args.eval_dir)
+        previous: dict[str, dict[str, Any]] = {}
         for f in sorted(eval_dir.glob("*.json")):
             state = load_json(f)
-            # The gather output has {skill, stamp, mean: {completion, efficiency, overall}, ...}
-            # We need before/after pair. If there's a baseline, it's in the same dir
-            # with an earlier stamp. For now, just use the gathered scores as "after"
-            # and a placeholder baseline.
-            skill = state.get("skill", f.stem.rsplit("-", 1)[0])
-            mean = state.get("mean")
-            if mean is None:
-                score_skills.append(
-                    {"skill": skill, "dimensions": [], "n": state.get("n", 0), "unavailable": True}
-                )
-                continue
-            dims = compute_score_dimensions(
-                {"completion": 0.70, "efficiency": 0.60, "overall": 0.67},  # placeholder baseline
-                mean,
+            skill = str(state.get("skill", f.stem.rsplit("-", 1)[0]))
+            mean = measured_mean(state)
+            before = previous.get(skill)
+            dims = (
+                compute_score_dimensions(before, mean)
+                if before is not None and mean is not None
+                else []
             )
-            score_skills.append({"skill": skill, "dimensions": dims, "n": state.get("n", 0)})
+            if mean is not None:
+                previous[skill] = mean
+            score_skills.append(
+                {
+                    "skill": skill,
+                    "dimensions": dims,
+                    "n": state.get("n", 0),
+                    "unavailable": mean is None,
+                }
+            )
 
     # Failure clusters from mine.py output
     failure_clusters: list[dict[str, Any]] = []

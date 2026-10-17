@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# meiva:ref meiva_builtins/skills/platform/meiva-self-evolution/docs/coverage-sentinel.meiva.okf.md#coverage-sentinel
 """Daily incremental self-evolution scan.
 
 Collects the past N days (default 1) of real agent runs into a trace
@@ -49,8 +50,10 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import collect
 import label
+import rubric
 from record import task_prompt_of
 
+from base.config import settings
 from base.db import Database
 from base.paths import meiva_home
 
@@ -161,22 +164,33 @@ def _is_test_only_window(records: list[dict[str, Any]], counts: dict[str, int] |
     return bool(counts and counts["seen"] > 0 and counts["excluded_test"] == counts["seen"])
 
 
+class Alert(NamedTuple):
+    code: int
+    reason: str | None
+
+
+def alert_verdict(
+    records: list[dict[str, Any]],
+    counts: dict[str, int] | None = None,
+) -> Alert:
+    if not records:
+        if _is_test_only_window(records, counts):
+            return Alert(0, None)
+        return Alert(2, "empty-window")
+    totals = _Totals.of(records)
+    coverage = _coverage(totals)
+    if coverage is not None and coverage < settings.general.self_evolution_coverage_alert_floor:
+        return Alert(2, "data-quality: low-coverage")
+    if any(r["label"] in label.REGRESSION_LABELS for r in records):
+        return Alert(2, "regression")
+    return Alert(0, None)
+
+
 def alert_exit(
     records: list[dict[str, Any]],
     counts: dict[str, int] | None = None,
 ) -> int:
-    """0 when nothing is worth acting on, 2 (ALERT) when any run is bad —
-    or when no runs were collected at all: an empty dataset means the data
-    source is broken, which must never report as "nothing to act on"
-    (2026-08-14: PG events froze and the scan green-lit an empty day).
-
-    `counts` (collect.collect_with_counts) refines the sentinel: an empty
-    dataset whose every pre-filter run was a TEST- spawn is the filter
-    working as designed, not a source outage, and exits 0 (QA review of
-    PR #698, 2026-08-29). Without counts any empty dataset exits 2."""
-    if not records:
-        return 0 if _is_test_only_window(records, counts) else 2
-    return 2 if any(r["label"] in label.REGRESSION_LABELS for r in records) else 0
+    return alert_verdict(records, counts).code
 
 
 class _Totals(NamedTuple):
@@ -187,6 +201,8 @@ class _Totals(NamedTuple):
     peer: int
     execfail: int
     unknown_reasons: Counter[str]
+    total: int
+    scored: int
 
     @classmethod
     def of(cls, records: list[dict[str, Any]]) -> _Totals:
@@ -198,7 +214,42 @@ class _Totals(NamedTuple):
             Counter(
                 r.get("unknown_reason") or "unspecified" for r in records if r["label"] == "unknown"
             ),
+            len(records),
+            sum(1 for r in records if rubric.scores(r).get("overall") is not None),
         )
+
+
+def _coverage(totals: _Totals) -> float | None:
+    if not totals.total:
+        return None
+    return (totals.total - totals.by_label["unknown"]) / totals.total
+
+
+def _coverage_line(totals: _Totals) -> str:
+    coverage = _coverage(totals)
+    share = "n/a" if coverage is None else f"{coverage:.1%}"
+    unknown = totals.by_label["unknown"]
+    reasons = ", ".join(f"{name} {count}" for name, count in sorted(totals.unknown_reasons.items()))
+    return (
+        f"batch {totals.total} runs · judgeable {totals.total - unknown} ({share})"
+        f" · unknown {unknown}{f' ({reasons})' if reasons else ''}"
+        f" · scored {totals.scored}"
+    )
+
+
+def _coverage_alert_line(totals: _Totals) -> str | None:
+    coverage = _coverage(totals)
+    floor = settings.general.self_evolution_coverage_alert_floor
+    if coverage is None or coverage >= floor:
+        return None
+    if totals.unknown_reasons:
+        reason, count = totals.unknown_reasons.most_common(1)[0]
+    else:
+        reason, count = "unspecified", 0
+    return (
+        f"ALERT — data-quality: low-coverage: judgeable {coverage:.1%} < floor {floor:.0%};"
+        f" largest unknown gap {reason} ({count} run(s))"
+    )
 
 
 def _label_counts(totals: _Totals) -> str:
@@ -250,7 +301,8 @@ def _header_lines(
     )
     return [
         f"self-evolution daily scan — {datetime.now(UTC).strftime('%Y-%m-%dT%H:%M:%SZ')}",
-        f"window: {days} day(s) | runs: {len(records)} ({_label_counts(totals)})"
+        f"window: {days} day(s) | runs: {len(records)} ({_label_counts(totals)})",
+        _coverage_line(totals),
         f" | corrections {totals.corrections} | peer feedback {totals.peer} | exec-fail runs {totals.execfail}",
         _builtin_help_line(records),
         _subprocess_line(records),
@@ -322,6 +374,10 @@ def render(
     lines = _header_lines(records, path, days, totals)
     if not records:
         lines.append(_no_runs_line(records, counts))
+    else:
+        coverage_alert = _coverage_alert_line(totals)
+        if coverage_alert is not None:
+            lines.append(coverage_alert)
     lines.extend(_bad_run_lines(records, report_path=report_path, compact_bad=compact_bad))
     if report_path is not None:
         lines.append(
