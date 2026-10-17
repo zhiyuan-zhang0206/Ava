@@ -13,6 +13,7 @@ import httpx
 import pytest
 
 import meiva
+from meiva.gateway_client import use_client
 from meiva.sdk_surface import agent_identity
 from meiva.tests.fixtures.pin_agent import pin_agent, pin_no_identity
 
@@ -155,7 +156,7 @@ def test_lifecycle_default_source_requires_identity_before_http(
 
     with (
         httpx.Client(base_url="http://gateway", transport=httpx.MockTransport(forbidden)) as http,
-        meiva.context.clients.using_gateway(http),
+        use_client(http),
         pytest.raises(RuntimeError, match="no established actor or agent identity"),
     ):
         if action == "terminate":

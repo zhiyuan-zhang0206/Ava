@@ -417,9 +417,7 @@ def main() -> None:
     database = partial(
         Database.from_settings,
         gate=gate,
-        direct_url=ClusterDirectUrl(
-            machine.host, gateway_url_reader=lambda: config.view.gateway.gateway_url
-        ),
+        direct_url=ClusterDirectUrl(machine.host),
     )
     pipeline = build_pipeline(database=database, machine=machine, home=meiva_home().resolve())
     primary: BaseException | None = None

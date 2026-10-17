@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import shutil
 from datetime import datetime
+from pathlib import Path
 from typing import Any
 
 import psycopg
@@ -14,7 +15,6 @@ from pydantic import BaseModel, Field
 from base.cluster import session_name
 from base.config import settings
 from base.db.transaction import write_transaction
-from base.paths import meiva_home
 from gateway.agents.creation import create_and_launch_agent, guarded_draft_key
 from gateway.http.model_catalog import require_model_catalog
 from gateway.routers.receipts import creation as creation_receipts
@@ -308,9 +308,9 @@ def delete_blocking(pool: ConnectionPool[Any], schedule_id: int) -> None:
         session_control.enqueue_in_transaction(conn, schedule_id)
 
 
-def _remove_schedule_dir(schedule_id: int) -> None:
+def _remove_schedule_dir(home: Path, schedule_id: int) -> None:
 
-    shutil.rmtree(meiva_home() / "schedules" / str(schedule_id), ignore_errors=True)
+    shutil.rmtree(home / "schedules" / str(schedule_id), ignore_errors=True)
 
 
 @router.delete(
@@ -322,7 +322,9 @@ async def delete_schedule(request: Request, schedule_id: int) -> dict[str, str]:
     pool = request.app.state.db_pool
     await asyncio.to_thread(delete_blocking, pool, schedule_id)
     await session_control.wait_consumed(pool, schedule_id)
-    await asyncio.to_thread(_remove_schedule_dir, schedule_id)
+    await asyncio.to_thread(
+        _remove_schedule_dir, request.app.state.gateway_process.home, schedule_id
+    )
     return {"status": "deleted"}
 
 

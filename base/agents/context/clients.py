@@ -1,27 +1,8 @@
-"""The connections a process holds for its `MeivaContext`: built on first use, closed together.
-
-An exec child (or any process that runs as an agent) depends on a SQL connection, a Redis client
-and a gateway HTTP client, plus whatever its SDK layer adds (the MCP clients). None of it persists
-and none of it is a graph-state fact, so it belongs to the context. A `ClientSet` is the context's
-owner of those objects:
-
-- nothing is built at construction: importing psycopg / redis / httpx waits for the first call that
-  needs it, which keeps a child that never touches the database off that stack;
-- a set built in a child resolves credentials from the child's own settings and environment; the
-  description a host sends (`MeivaContext.describe`) carries endpoints, never a secret;
-  its composition root supplies lazy builders and the endpoint resolver;
-- `close()` releases everything the set built. A client a test or an embedder supplied with
-  `using_gateway` is not the set's to close. Constructor-specific factory builders
-  remain configured after close, so subsequent use can build fresh clients.
-
-A failure to build a client raises at the call that needed it; nothing here swallows one.
-"""
-
+# meiva:ref base/agents/context/docs/clients.meiva.okf.md#client-set-single-owner
 from __future__ import annotations
 
 import threading
-from collections.abc import Callable, Generator, Mapping
-from contextlib import contextmanager
+from collections.abc import Callable, Mapping
 from typing import TYPE_CHECKING, Any
 
 from base.log import logger
@@ -123,7 +104,6 @@ class ClientSet:
         self._sql: LazyConnection | None = None
         self._redis: LazyConnection | None = None
         self._gateway: httpx.Client | None = None
-        self._gateway_provided = False
         self._factories = dict(factories) if factories is not None else {}
         self._made: dict[Callable[..., object], object] = {}
         self._pipeline_factory = pipeline_factory
@@ -180,19 +160,15 @@ class ClientSet:
                 self._gateway = self._build_gateway()
             return self._gateway
 
-    @contextmanager
-    def using_gateway(self, client: httpx.Client) -> Generator[httpx.Client]:
-        """Route this set's gateway calls through `client` for the block (a test's in-process
-        gateway, or any `httpx.Client`), then put back what was there. The set never closes a
-        client it was given."""
-        with self._lock:
-            previous = (self._gateway, self._gateway_provided)
-            self._gateway, self._gateway_provided = client, True
-        try:
-            yield client
-        finally:
-            with self._lock:
-                self._gateway, self._gateway_provided = previous
+    def with_gateway(self, builder: Callable[[str], httpx.Client]) -> ClientSet:
+        # meiva:ref base/agents/context/docs/clients.meiva.okf.md#client-set-single-owner
+        return ClientSet(
+            gateway_url=self._gateway_url,
+            database=self._database,
+            redis=self._redis_factory,
+            gateway=builder,
+            factories=self._factories,
+        )
 
     # ── the SDK layer's own clients ──────────────────────────────────────
 
@@ -265,10 +241,9 @@ class ClientSet:
             if self._sql is not None:
                 owned.append(self._sql)
                 self._sql = None
-            if self._gateway is not None and not self._gateway_provided:
+            if self._gateway is not None:
                 owned.append(self._gateway)
             self._gateway = None
-            self._gateway_provided = False
         primary: BaseException | None = None
         with self._lock:
             pipeline = self._event_pipeline

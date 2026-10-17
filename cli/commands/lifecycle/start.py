@@ -89,7 +89,7 @@ def refuse_occupied_health_ports(roster: tuple[ServiceSpec, ...]) -> int:
 
 
 def _prepare_start_schema(
-    *, database_factory: DatabaseFactory, machine_name: Callable[[], str]
+    *, database_factory: OperatorDatabaseFactory, machine_name: Callable[[], str]
 ) -> int:
     print("\n→ apply pending migrations")
     try:
@@ -352,7 +352,7 @@ def _admit_start(
     if state.live:
         from base import cluster
 
-        cluster.assert_checkpoint_schema_current(database_factory().direct_url())
+        cluster.assert_checkpoint_schema_current(database_factory.db_url())
     return None
 
 

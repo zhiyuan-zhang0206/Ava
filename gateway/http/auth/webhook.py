@@ -44,6 +44,7 @@ def authenticate_webhook(request: Request, *, provider: str) -> WebhookAuthentic
     verified_by = cluster_credential(
         request.headers.get("Authorization"),
         config.cluster_secret,
+        home=request.app.state.gateway_process.home,
         cache=request.app.state.machine_token_acceptance,
     )
     if verified_by is not None:

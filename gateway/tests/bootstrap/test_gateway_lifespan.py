@@ -13,6 +13,7 @@ from base.cluster.machine.tests.identity import machine_identity as machine_iden
 from base.config.tests.configuration import snapshot_process_config
 from base.host.system.hostport import Host
 from base.host.system.tests.fake_commands import fake_host
+from base.paths import meiva_home
 from gateway import app as gateway_app
 from gateway.cluster.process_boot import LOADED_IMAGE, GatewayProcess
 from gateway.http.config import gateway_config_from_boot
@@ -145,6 +146,7 @@ async def test_process_ownership_borrowed_vs_owned_controls_client_close_count(
     assert borrowed_process.clients.exports_deferred() is None
 
     owned_process = GatewayProcess(
+        home=meiva_home(),
         config=snapshot_process_config(),
         image=LOADED_IMAGE,
         machine=machine_identity,
@@ -187,6 +189,7 @@ async def test_owned_process_startup_failure_closes_clients_and_preserves_primar
     class _FailingOwnedProcess(GatewayProcess):
         def __init__(self) -> None:
             super().__init__(
+                home=meiva_home(),
                 config=snapshot_process_config(),
                 image=LOADED_IMAGE,
                 machine=machine_identity,
@@ -216,6 +219,7 @@ async def test_owned_process_startup_failure_closes_clients_and_preserves_primar
 def test_invalid_process_ownership_rejected(*, machine_identity: MachineIdentity) -> None:
     boot = snapshot_process_config()
     process = GatewayProcess(
+        home=meiva_home(),
         config=boot,
         image=LOADED_IMAGE,
         machine=machine_identity,
@@ -287,6 +291,7 @@ class _RecordingPoolsProcess(GatewayProcess):
         self.data_pool = _RecordingPool(events, "data", ready, data_close_failure)
         self.control_pool = _RecordingPool(events, "control", ready)
         super().__init__(
+            home=meiva_home(),
             config=snapshot_process_config(),
             image=LOADED_IMAGE,
             machine=machine,
@@ -332,6 +337,7 @@ class _LateMachineFailureProcess(GatewayProcess):
         self._machine_reads = 0
         self._real_machine = machine
         super().__init__(
+            home=meiva_home(),
             config=snapshot_process_config(),
             image=LOADED_IMAGE,
             machine=machine,

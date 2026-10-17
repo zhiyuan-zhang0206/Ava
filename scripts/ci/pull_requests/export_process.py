@@ -28,9 +28,7 @@ def owned_event_pipeline(process: str, *, image: LoadedCommit | None) -> Generat
     def database() -> Database:
         return Database.from_settings(
             gate=gate,
-            direct_url=ClusterDirectUrl(
-                machine.host, gateway_url_reader=lambda: config.view.gateway.gateway_url
-            ),
+            direct_url=ClusterDirectUrl(machine.host),
         )
 
     config = ConfigBoot()

@@ -8,6 +8,7 @@ import httpx2
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
+from base import paths
 from base.api_contracts.idempotency import PRINCIPAL_SCOPE, SCOPE_HEADER
 from base.cluster.machine import MachineIdentity
 from base.cluster.machine.boot import machine_from_boot
@@ -45,6 +46,7 @@ def gateway_test_process(
         resolved_config = snapshot_process_config() if config is None else config
         resolved_machine = machine_from_boot(resolved_config) if machine is None else machine
         process = GatewayProcess(
+            home=paths.meiva_home(),
             config=resolved_config,
             image=LOADED_IMAGE,
             machine=resolved_machine,
@@ -67,6 +69,7 @@ def gateway_test_app(
         resolved_boot = snapshot_process_config() if boot is None else boot
         resolved_machine = machine_from_boot(resolved_boot) if machine is None else machine
         process = GatewayProcess(
+            home=paths.meiva_home(),
             config=resolved_boot,
             image=LOADED_IMAGE,
             machine=resolved_machine,

@@ -9,8 +9,7 @@ the scores come from the search result.
 """
 
 import json
-from collections.abc import Iterator
-from contextlib import ExitStack
+from collections.abc import Callable, Iterator
 from pathlib import Path
 from typing import Any, NamedTuple
 
@@ -118,17 +117,15 @@ def _set_search(search: _MemoryGateway, results: list[MemorySearchResult]) -> li
     return search.asked
 
 
+def _gateway(search: _MemoryGateway) -> Callable[[str], httpx.Client]:
+    return lambda url: httpx.Client(base_url=url, transport=httpx.MockTransport(search.respond))
+
+
 @pytest.fixture
 def context(search: _MemoryGateway) -> Iterator[MeivaContext]:
-    ctx = _context()
+    ctx = _context(gateway=_gateway(search))
     try:
-        with (
-            httpx.Client(
-                base_url="http://gateway.test", transport=httpx.MockTransport(search.respond)
-            ) as client,
-            ctx.clients.using_gateway(client),
-        ):
-            yield ctx
+        yield ctx
     finally:
         ctx.clients.close()
 
@@ -145,19 +142,23 @@ def _agent(**changes: Any) -> AgentSlices:
     return AgentSlices.resolve(default_reader=defaults(**changes))
 
 
-def _context(agent_id: int | None = None) -> MeivaContext:
+def _context(
+    agent_id: int | None = None, *, gateway: Callable[[str], httpx.Client] | None = None
+) -> MeivaContext:
     return MeivaContext(
         identity=AgentIdentity(agent_id=agent_id, owns_loop=True) if agent_id is not None else None,
         catalog=build_model_catalog(),
         clock_factory=Clock.from_settings,
         clients=ClientSet(
+            gateway_url="http://gateway.test",
+            gateway=gateway,
             factories={
                 GatewayTransportInputs: lambda: GatewayTransportInputs(
                     max_retries_reader=lambda: 1,
                     retry_delay_reader=lambda: 0.0,
                     memory_deadline_reader=lambda: 15.0,
                 )
-            }
+            },
         ),
     )
 
@@ -530,28 +531,34 @@ async def test_recall_logs_search_time_and_injected_count(
 
 async def test_gateway_search_receives_each_explicit_host_context(memory_root: Path) -> None:
     """Two host calls select their own HTTP clients without binding the shared SDK."""
-    contexts = [_context(agent_id) for agent_id in (11, 22)]
     seen: list[int] = []
-    with ExitStack() as stack:
-        for agent_id, ctx in zip((11, 22), contexts, strict=True):
-            stack.callback(ctx.clients.close)
 
-            def respond(request: httpx.Request, *, selected: int = agent_id) -> httpx.Response:
-                assert request.method == "POST"
-                assert request.url.path == "/api/memory/search"
-                seen.append(selected)
-                return httpx.Response(200, json={"results": []})
+    def responder(selected: int) -> Callable[[httpx.Request], httpx.Response]:
+        def respond(request: httpx.Request) -> httpx.Response:
+            assert request.method == "POST"
+            assert request.url.path == "/api/memory/search"
+            seen.append(selected)
+            return httpx.Response(200, json={"results": []})
 
-            client = stack.enter_context(
-                httpx.Client(
-                    base_url=f"http://gateway-{agent_id}.test",
-                    transport=httpx.MockTransport(respond),
-                )
-            )
-            stack.enter_context(ctx.clients.using_gateway(client))
+        return respond
+
+    contexts = [
+        _context(
+            agent_id,
+            gateway=lambda _url, selected=agent_id: httpx.Client(
+                base_url=f"http://gateway-{selected}.test",
+                transport=httpx.MockTransport(responder(selected)),
+            ),
+        )
+        for agent_id in (11, 22)
+    ]
+    try:
         for ctx in contexts:
             assert (
                 await recall.passive_memory_recall(_conversation(), agent=_agent(), context=ctx)
                 is None
             )
         assert seen == [11, 22]
+    finally:
+        for ctx in contexts:
+            ctx.clients.close()

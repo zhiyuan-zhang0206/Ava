@@ -205,7 +205,6 @@ def run_command(
     args.runtime = command
     database_factory = operator_database_factory(
         local_host=command.machine.host,
-        gateway_url_reader=lambda: command.config.view.gateway.gateway_url,
         open_database=open_database,
     )
     args.database_factory = database_factory

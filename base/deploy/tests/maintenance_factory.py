@@ -13,8 +13,13 @@ WHEN = datetime(2026, 9, 6, tzinfo=UTC)
 
 @pytest.fixture(autouse=True)
 def isolate(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(pause_owner, "state_path", lambda: tmp_path / "pause.json")
-    monkeypatch.setattr(pause_owner, "lock_path", lambda: tmp_path / "pause.lock")
+    (tmp_path / "run").mkdir()
+    monkeypatch.setattr(
+        pause_owner, "state_path", lambda: tmp_path / "run" / "deploy-pause-owner.json"
+    )
+    monkeypatch.setattr(
+        pause_owner, "lock_path", lambda: tmp_path / "run" / "deploy-pause-owner.lock"
+    )
 
 
 def maintenance_agent(conn: psycopg.Connection[Any], *, machine_name: str) -> int:

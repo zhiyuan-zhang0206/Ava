@@ -12,7 +12,6 @@ def _factory() -> OperatorDatabaseFactory:
     return operator_database_factory(
         local_host=lambda: "localhost",
         open_database=open_operator_database,
-        gateway_url_reader=lambda: "",
     )
 
 

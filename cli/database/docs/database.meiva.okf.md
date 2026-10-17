@@ -12,7 +12,6 @@ tags: [cli, database]
 ```python
 factory = operator_database_factory(
     local_host=command.machine.host,
-    gateway_url_reader=lambda: command.config.view.gateway.gateway_url,
     open_database=open_operator_database,
 )
 ```
@@ -44,8 +43,9 @@ The entry constructs the factory after parsing and passes it through the parsed
 command to every handle consumer. The callback stays lazy and belongs to the
 same `CommandRuntime.machine` used by logging and telemetry. Import and help retain their lightweight
 boundaries; init and start admit the home before configuration-dependent work.
-The required gateway URL reader belongs to that same command's `ConfigBoot`; the factory binds
-it to each resolver without reading it. Only a remote pooled direct dial needs its value.
+The lazy local-host reader belongs to that same command's `CommandRuntime.machine`; the factory
+binds it to each resolver without reading it. Only a direct resolution of a non-loopback URL
+needs its value.
 `operator_event_pipeline(factory, machine=command.machine, home=meiva_home())` retains one lazy pipeline for logging and
 health initialization and cold command reporters; `OperatorEventPipeline(..., flush_interval_s=)` sets how long its writer holds a
 partial batch (0.5 seconds by default). Its database writer borrows

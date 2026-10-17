@@ -20,7 +20,12 @@ def get_bootstrap(
 
     secret = config.settings.data_plane.cluster_secret
     if (
-        cluster_credential(authorization, secret, cache=request.app.state.machine_token_acceptance)
+        cluster_credential(
+            authorization,
+            secret,
+            home=request.app.state.gateway_process.home,
+            cache=request.app.state.machine_token_acceptance,
+        )
         is None
     ):
         raise HTTPException(status_code=401, detail="machine API token required")

@@ -14,8 +14,13 @@ WHEN = datetime(2026, 9, 6, tzinfo=UTC)
 
 @pytest.fixture(autouse=True)
 def isolate(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(pause_owner, "state_path", lambda: tmp_path / "pause.json")
-    monkeypatch.setattr(pause_owner, "lock_path", lambda: tmp_path / "pause.lock")
+    (tmp_path / "run").mkdir()
+    monkeypatch.setattr(
+        pause_owner, "state_path", lambda: tmp_path / "run" / "deploy-pause-owner.json"
+    )
+    monkeypatch.setattr(
+        pause_owner, "lock_path", lambda: tmp_path / "run" / "deploy-pause-owner.lock"
+    )
 
 
 def test_maintenance_hold_has_no_expiry() -> None:
@@ -101,46 +106,45 @@ def test_quiesced_covers_only_the_stop_window() -> None:
     assert not admission.quiesced()
 
 
-def test_business_gate_tracks_the_journal_without_posture_or_time() -> None:
-    assert not admission.business_paused()
+def test_business_gate_tracks_the_journal_without_posture_or_time(tmp_path: Path) -> None:
+    assert not admission.business_paused(tmp_path)
 
     first = pause_owner.begin_maintenance("migration", WHEN).snapshot
     assert first.maintenance is not None
-    assert not admission.business_paused()
+    assert not admission.business_paused(tmp_path)
     pause_owner.change_maintenance(
         "migration", WHEN, first.maintenance, MaintenanceHold(MaintenancePhase.DRAINING)
     )
-    assert not admission.business_paused()
+    assert not admission.business_paused(tmp_path)
     admission.set_phase("migration", WHEN, MaintenancePhase.DRAINED)
-    assert not admission.business_paused()
+    assert not admission.business_paused(tmp_path)
     for phase in (MaintenancePhase.STOPPING, MaintenancePhase.STOPPED):
         admission.set_phase("migration", WHEN, phase)
-        assert admission.business_paused(), phase
+        assert admission.business_paused(tmp_path), phase
     final = admission.snapshot()
     assert final is not None and final.maintenance is not None
     pause_owner.change_maintenance(
         "migration", WHEN, final.maintenance, final.maintenance, resumed=True
     )
-    assert not admission.business_paused()
+    assert not admission.business_paused(tmp_path)
     with pytest.raises(RuntimeError, match="already resumed"):
         pause_owner.begin_maintenance("migration", WHEN)
 
 
-def test_business_gate_refuses_holdless_and_invalid_pause_records() -> None:
+def test_business_gate_refuses_holdless_and_invalid_pause_records(tmp_path: Path) -> None:
     record = {"state": "paused", "holder": "incomplete", "acquired_at": WHEN.isoformat()}
     pause_owner.state_path().write_text(json.dumps(record))
     assert pause_owner.read().status == "invalid"
-    assert admission.business_paused()
+    assert admission.business_paused(tmp_path)
     pause_owner.state_path().write_text("invalid")
-    assert admission.business_paused()
+    assert admission.business_paused(tmp_path)
 
 
-def test_business_gate_refuses_unreadable_state(monkeypatch: pytest.MonkeyPatch) -> None:
-    def unreadable() -> None:
-        raise OSError("unreadable journal")
-
-    monkeypatch.setattr(pause_owner, "read", unreadable)
-    assert admission.business_paused()
+def test_business_gate_refuses_unreadable_state(tmp_path: Path) -> None:
+    journal = pause_owner.state_path_for(tmp_path)
+    journal.mkdir(parents=True)
+    assert pause_owner.read_for_home(tmp_path).status == "invalid"
+    assert admission.business_paused(tmp_path)
 
 
 def test_windows_read_an_unreadable_owner_as_held(

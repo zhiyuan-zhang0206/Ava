@@ -77,7 +77,6 @@ def _producer(
     return OperatorEventPipeline(
         WatchedDatabase(
             local_host=machine.host,
-            gateway_url_reader=lambda: "",
             open_database=open_operator_database,
         ),
         machine=machine,
