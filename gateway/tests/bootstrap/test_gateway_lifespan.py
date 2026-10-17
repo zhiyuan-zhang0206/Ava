@@ -1,4 +1,5 @@
 import asyncio
+import threading
 from collections.abc import Callable
 from contextlib import AsyncExitStack
 from typing import Any
@@ -95,7 +96,7 @@ async def test_client_close_failure_still_joins_flushers_before_pool_close(
     with gateway_test_process(machine=machine_identity) as process:
         app.state.gateway_config = gateway_config_from_boot(process.config)
         async with asyncio.timeout(5):
-            with pytest.raises(ExceptionGroup) as raised:
+            with pytest.raises(RuntimeError) as raised:
                 async with gateway_app.lifespan(app, process=process, process_ownership="borrowed"):
                     tasks.extend([await flusher_tasks.get(), await flusher_tasks.get()])
                     pools.extend([app.state.db_pool, app.state.control_db_pool])
@@ -115,10 +116,11 @@ async def test_client_close_failure_still_joins_flushers_before_pool_close(
 
                         monkeypatch.setattr(pool, "close", checked_close)
 
-    assert raised.value.exceptions == (failure,)
+    assert raised.value is failure
     assert close_checks == [True, True]
     assert all(task.done() for task in tasks)
     assert all(pool.closed for pool in pools)
+    assert app.state.grafana_client.is_closed
 
 
 async def test_process_ownership_borrowed_vs_owned_controls_client_close_count(
@@ -226,3 +228,218 @@ def test_invalid_process_ownership_rejected(*, machine_identity: MachineIdentity
             process=process,
             process_ownership=bad_ownership,
         )
+
+
+class _RecordingPool:
+    def __init__(
+        self,
+        events: list[tuple[str, bool]],
+        name: str,
+        ready: Callable[[], bool],
+        failure: BaseException | None = None,
+    ) -> None:
+        self.events = events
+        self.name = name
+        self.ready = ready
+        self.failure = failure
+        self.closed = False
+        self.close_calls = 0
+
+    def close(self) -> None:
+        self.close_calls += 1
+        if self.closed:
+            return
+        self.closed = True
+        self.events.append((self.name, self.ready()))
+        if self.failure is not None:
+            raise self.failure
+
+
+class _RecordingPoolsDatabase:
+    def __init__(self, process: "_RecordingPoolsProcess") -> None:
+        self._process = process
+        self._database = GatewayProcess.database(process)
+
+    def pool(self, **kwargs: Any) -> Any:
+        if kwargs.get("max_size") == 8:
+            return self._process.data_pool
+        if kwargs.get("min_size") == 1 and kwargs.get("max_size") == 2:
+            if self._process.control_failure is not None:
+                raise self._process.control_failure
+            return self._process.control_pool
+        return self._database.pool(**kwargs)
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self._database, name)
+
+
+class _RecordingPoolsProcess(GatewayProcess):
+    def __init__(
+        self,
+        *,
+        machine: MachineIdentity,
+        events: list[tuple[str, bool]],
+        ready: Callable[[], bool],
+        control_failure: BaseException | None = None,
+        data_close_failure: BaseException | None = None,
+    ) -> None:
+        self.control_failure = control_failure
+        self.data_pool = _RecordingPool(events, "data", ready, data_close_failure)
+        self.control_pool = _RecordingPool(events, "control", ready)
+        super().__init__(
+            config=snapshot_process_config(),
+            image=LOADED_IMAGE,
+            machine=machine,
+            host=fake_host(),
+        )
+
+    def database(self) -> Any:
+        return _RecordingPoolsDatabase(self)
+
+
+async def test_control_pool_construction_failure_closes_the_data_pool_once(
+    db_conn: psycopg.Connection[Any],
+    flusher_tasks: asyncio.Queue[asyncio.Task[Any]],
+    *,
+    machine_identity: MachineIdentity,
+) -> None:
+    del db_conn, flusher_tasks
+    events: list[tuple[str, bool]] = []
+    failure = RuntimeError("control pool construction failed")
+    process = _RecordingPoolsProcess(
+        machine=machine_identity, events=events, ready=lambda: False, control_failure=failure
+    )
+    app = FastAPI()
+    app.state.gateway_config = gateway_config_from_boot(process.config)
+
+    with process.lifetime():
+        async with asyncio.timeout(5):
+            with pytest.raises(RuntimeError) as raised:
+                async with gateway_app.lifespan(app, process=process, process_ownership="borrowed"):
+                    pytest.fail("lifespan served without its control pool")
+
+    assert raised.value is failure
+    assert events == [("data", False)]
+    assert process.data_pool.close_calls == 1
+
+
+class _LateMachineFailureProcess(GatewayProcess):
+    def __init__(
+        self, *, machine: MachineIdentity, failure: BaseException, fail_at_read: int
+    ) -> None:
+        self._failure = failure
+        self._fail_at_read = fail_at_read
+        self._machine_reads = 0
+        self._real_machine = machine
+        super().__init__(
+            config=snapshot_process_config(),
+            image=LOADED_IMAGE,
+            machine=machine,
+            host=fake_host(),
+        )
+
+    @property
+    def machine(self) -> MachineIdentity:
+        if threading.current_thread() is threading.main_thread():
+            self._machine_reads += 1
+            if self._machine_reads >= self._fail_at_read:
+                raise self._failure
+        return self._real_machine
+
+    @machine.setter
+    def machine(self, _value: MachineIdentity) -> None:
+        return None
+
+
+async def test_failure_after_monitor_closes_started_resources(
+    db_conn: psycopg.Connection[Any],
+    flusher_tasks: asyncio.Queue[asyncio.Task[Any]],
+    *,
+    machine_identity: MachineIdentity,
+) -> None:
+    del db_conn, flusher_tasks
+    failure = RuntimeError("upload recovery construction failed")
+    process = _LateMachineFailureProcess(machine=machine_identity, failure=failure, fail_at_read=5)
+    app = FastAPI()
+    app.state.gateway_config = gateway_config_from_boot(process.config)
+
+    with process.lifetime():
+        async with asyncio.timeout(5):
+            with pytest.raises(RuntimeError) as raised:
+                async with gateway_app.lifespan(app, process=process, process_ownership="borrowed"):
+                    pytest.fail("lifespan served after the post-monitor failure")
+
+    assert raised.value is failure
+    assert app.state.runtime_metrics._stopped
+    assert app.state.db_pool.closed
+    assert app.state.control_db_pool.closed
+    assert app.state.grafana_client.is_closed
+    assert app.state.insights_client.is_closed
+
+
+async def test_failing_pool_release_still_closes_the_remaining_resources(
+    db_conn: psycopg.Connection[Any],
+    flusher_tasks: asyncio.Queue[asyncio.Task[Any]],
+    *,
+    machine_identity: MachineIdentity,
+) -> None:
+    del db_conn
+    events: list[tuple[str, bool]] = []
+    tasks: list[asyncio.Task[Any]] = []
+    failure = RuntimeError("data-plane pool close failed")
+    process = _RecordingPoolsProcess(
+        machine=machine_identity,
+        events=events,
+        ready=lambda: all(task.done() for task in tasks),
+        data_close_failure=failure,
+    )
+    app = FastAPI()
+    app.state.gateway_config = gateway_config_from_boot(process.config)
+
+    with process.lifetime():
+        async with asyncio.timeout(5):
+            with pytest.raises(RuntimeError) as raised:
+                async with gateway_app.lifespan(app, process=process, process_ownership="borrowed"):
+                    tasks.extend([await flusher_tasks.get(), await flusher_tasks.get()])
+
+    assert raised.value is failure
+    assert events == [("control", True), ("data", True)]
+    assert app.state.runtime_metrics._stopped
+    assert app.state.grafana_client.is_closed
+    assert app.state.insights_client.is_closed
+
+
+async def test_cancelled_lifespan_joins_flushers_before_pool_close(
+    db_conn: psycopg.Connection[Any],
+    flusher_tasks: asyncio.Queue[asyncio.Task[Any]],
+    *,
+    machine_identity: MachineIdentity,
+) -> None:
+    del db_conn
+    events: list[tuple[str, bool]] = []
+    tasks: list[asyncio.Task[Any]] = []
+    process = _RecordingPoolsProcess(
+        machine=machine_identity,
+        events=events,
+        ready=lambda: all(task.done() for task in tasks),
+    )
+    app = FastAPI()
+    app.state.gateway_config = gateway_config_from_boot(process.config)
+    entered = asyncio.Event()
+
+    async def serve() -> None:
+        async with gateway_app.lifespan(app, process=process, process_ownership="borrowed"):
+            tasks.extend([await flusher_tasks.get(), await flusher_tasks.get()])
+            entered.set()
+            await asyncio.Event().wait()
+
+    with process.lifetime():
+        async with asyncio.timeout(5):
+            running = asyncio.create_task(serve())
+            await entered.wait()
+            running.cancel()
+            with pytest.raises(asyncio.CancelledError):
+                await running
+
+    assert events == [("control", True), ("data", True)]
+    assert all(task.done() for task in tasks)
