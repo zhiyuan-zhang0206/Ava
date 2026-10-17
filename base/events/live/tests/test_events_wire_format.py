@@ -100,7 +100,18 @@ FROZEN_WIRE: list[tuple[type, str, dict[str, Any]]] = [
         "notice_posted",
         {"notice_id": 7, "priority": "P1", "title": "migration done", "task_id": 3},
     ),
-    (NoticeResolved, "notice_resolved", {"notice_id": 7}),
+    (
+        NoticeResolved,
+        "notice_resolved",
+        {
+            "notice_id": 7,
+            "resolution": "answered",
+            "require_response": True,
+            "age_seconds": 900,
+            "had_reply": True,
+            "superseded_by": None,
+        },
+    ),
     (TaskCreated, "task_created", {"task_id": 3}),
     (TaskUpdated, "task_updated", {"task_id": 3}),
 ]
