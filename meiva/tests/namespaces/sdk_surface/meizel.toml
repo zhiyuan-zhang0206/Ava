@@ -2,7 +2,7 @@
 "test_help_renderer.py" = "executes generated module source to render help for it"
 
 [uses]
-"test_sampling_atexit.py" = ["child_sampling_atexit.py"]
+"test_sampling_atexit.py" = ["child_sampling_atexit.py", "child_sampling_atexit_uninstalled.py"]
 
 [debt.env-patch]
 "test_install.py#patch.dict os.environ" = 1
