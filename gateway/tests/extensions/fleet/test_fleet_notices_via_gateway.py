@@ -430,7 +430,7 @@ def test_supersede_and_withdraw_publish_notice_resolved_for_both_kinds(
 
     resolved: list[int] = []
 
-    async def _fake_publish(_bus: object, _aid: int, global_id: int) -> None:
+    async def _fake_publish(_bus: object, _aid: int, global_id: int, **_: object) -> None:
         resolved.append(global_id)
 
     monkeypatch.setattr(ops_mod, "publish_notice_resolved", _fake_publish)

@@ -50,6 +50,12 @@ from ops.lifecycle import termination
 
 # Re-exported from `events`; callers keep module-qualified sites.
 from ops.lifecycle.events import (
+    NoticeResolutionFacts as NoticeResolutionFacts,
+)
+from ops.lifecycle.events import (
+    notice_resolution_facts as notice_resolution_facts,
+)
+from ops.lifecycle.events import (
     publish_inbound_arrived as publish_inbound_arrived,
 )
 from ops.lifecycle.events import (

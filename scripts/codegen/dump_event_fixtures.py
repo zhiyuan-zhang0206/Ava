@@ -178,6 +178,11 @@ def _samples() -> dict[str, dict]:
             "role": "notice_resolved",
             "agent_id": agent_id,
             "notice_id": 7,
+            "resolution": "answered",
+            "require_response": True,
+            "age_seconds": 900,
+            "had_reply": True,
+            "superseded_by": None,
         },
         "task_created": {
             "role": "task_created",
