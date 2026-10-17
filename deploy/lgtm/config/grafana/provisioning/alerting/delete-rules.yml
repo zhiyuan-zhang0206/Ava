@@ -12,6 +12,12 @@ deleteRules:
     uid: meiva-ops-agent-restart-spike
   - orgId: 1
     uid: meiva-ops-hosted-boot-recovery-deferred
+  # T5280 (2026-10-17): absolute checkpoint_blobs size tiers retired under the
+  # full-retention ruling; the footprint growth/freshness rules cover the class.
+  - orgId: 1
+    uid: meiva-ops-checkpoint-blobs-warning
+  - orgId: 1
+    uid: meiva-ops-checkpoint-blobs-error
 
 # Every rule below was re-provisioned under its meiva-* uid on 2026-10-17; the old
 # uid stayed orphaned and kept evaluating beside the new one.

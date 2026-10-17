@@ -42,7 +42,9 @@ tombstone): file provisioning deletes the UID on the next alerting reload or
 restart, and entries are idempotent, so tombstones stay after the rule is
 gone. Tombstoned so far: R23 (`meiva-ops-pitr-storage-growth`, retired
 2026-10-02, removed from the station 2026-10-05) and R3
-(`meiva-ops-agent-restart-spike`, which counted an event nothing emits).
+(`meiva-ops-agent-restart-spike`, which counted an event nothing emits),
+plus the two absolute checkpoint_blobs size tiers (`…-warning` / `…-error`,
+retired 2026-10-17 under T5280 when full retention made them fire forever).
 
 ## Where these run (LGTM stack)
 
@@ -172,14 +174,16 @@ series the rules read are e.g. `meiva_checkpoint_table_sizes_blobs_bytes_ratio`:
 
 | uid | Group | Metric | Condition | `for` | Severity |
 |-----|-------|--------|-----------|-------|----------|
-| `meiva-ops-checkpoint-blobs-warning` | `meiva-ops` | checkpoint_blobs physical size | > 2.5 GiB (Prometheus) | 2h | warning |
-| `meiva-ops-checkpoint-blobs-error` | `meiva-ops` | checkpoint_blobs physical size | > 4 GiB (Prometheus) | 2h | error |
-| `meiva-ops-checkpoint-blobs-freshness` | `meiva-ops` | checkpoint_blobs emitter silence | no samples in Prometheus for 2h (absent_over_time) | 5m | warning |
-| `meiva-ops-checkpoint-blobs-growth` | `meiva-ops` | checkpoint_blobs growth rate | +1 GiB in the trailing 6h (Prometheus) | 1h | warning |
+| `meiva-ops-checkpoint-blobs-freshness` | `meiva-ops` | checkpoint table size emitter silence | no sample of any of the three series in Prometheus for 2h (absent_over_time) | 5m | warning |
+| `meiva-ops-checkpoint-blobs-growth` | `meiva-ops` | checkpoint tables footprint growth | +1 GiB across the three tables in the trailing 6h (Prometheus) | 15m | warning |
 | `meiva-ops-memory-search-rows-warning` | `meiva-ops` | memory-search store rows | > 30000 (Prometheus) | 2h | warning |
 | `meiva-ops-memory-search-rows-critical` | `meiva-ops` | memory-search store rows | > 100000 (Prometheus) | 2h | critical |
 
 The two checkpoint guards came out of the #4002 evaluation items (#4004/#4005).
+Their UIDs keep the historical `blobs` scope they were born with; since
+T5280 (2026-10-17) both cover the whole checkpoint footprint — the absolute
+2.5/4 GiB tiers were retired because full retention makes an absolute size
+tier fire forever, and capacity is guarded by the host disk-watermark rules.
 The freshness rule fires on the silent-NoData class itself — the absolute tiers
 above go quiet exactly when the series stops, which is how the 24-day miss
 stayed invisible — with the 2h window chosen to clear every restart gap
