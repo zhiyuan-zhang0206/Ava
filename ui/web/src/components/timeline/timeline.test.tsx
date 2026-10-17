@@ -875,11 +875,9 @@ describe("ItemView: inbound_chat source-driven color", () => {
     // can be located (the border container is the same either way).
     revealCollapsedCards();
     const txt = screen.getByText(payloadText);
-    // Find the nearest border-l-2 ancestor div (EnvelopeBlock container)
-    let cur: HTMLElement | null = txt.parentElement;
-    while (cur && !cur.className.includes("border-l-2")) cur = cur.parentElement;
-    if (!cur) throw new Error("no border-l-2 ancestor");
-    return cur;
+    const accent = txt.closest(".timeline-item")?.querySelector('[data-testid="card-accent"]');
+    if (!accent) throw new Error("no card accent");
+    return accent as HTMLElement;
   }
 
   it("source='agent:5' → violet border (from another agent)", () => {
@@ -1042,10 +1040,9 @@ describe("ItemView: configurable timeline colors (tasks #3304/#3312)", () => {
         ]}
       />,
     );
-    // The card frame carries the resolved family's border + bg.
-    const card = screen.getByText("Note").closest(".border-l-2");
-    expect(card?.className).toContain("border-fuchsia-500/40");
-    expect(card?.className).toContain("bg-fuchsia-50/40");
+    const accent = screen.getByText("Note").closest(".timeline-item")?.querySelector('[data-testid="card-accent"]');
+    expect(accent?.className).toContain("border-fuchsia-500/40");
+    expect(accent?.parentElement?.className).toContain("bg-fuchsia-50/40");
   });
 });
 
