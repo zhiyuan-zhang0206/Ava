@@ -48,6 +48,7 @@ from typing import Any, NamedTuple
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import collect
+from record import task_prompt_of
 
 from base.db import Database
 from base.paths import meiva_home
@@ -259,7 +260,7 @@ def _bad_run_lines(
     sorted_bad = sorted(bad, key=lambda r: r["agent_id"])
     rich_lines: list[str] = []
     for rec in sorted_bad:
-        task = (rec["task_prompt"] or "").strip().replace("\n", " ")
+        task = task_prompt_of(rec).strip().replace("\n", " ")
         if len(task) > 120:
             task = task[:117] + "..."
         line = f"  #{rec['agent_id']} {rec['label']} — {', '.join(_why(rec))}"

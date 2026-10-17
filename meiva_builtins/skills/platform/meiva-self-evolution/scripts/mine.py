@@ -41,6 +41,8 @@ from typing import Any
 # this exact __file__-derived, within-skill shape as the endorsed guard.
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
+from record import task_prompt_of
+
 UNATTRIBUTED = "(unattributed)"
 BAD_LABELS = ("failed", "fumbled")
 
@@ -119,7 +121,7 @@ def exec_duration_stats(records: list[dict[str, Any]]) -> str:
         lines.append(
             f"- run #{r['agent_id']} [{r['label']}] "
             f"exec={d:.1f}s turns={r['turns']} "
-            f'"{_oneline(r["task_prompt"], 80)}"'
+            f'"{_oneline(task_prompt_of(r), 80)}"'
         )
     lines.append("")
     return "\n".join(lines)
@@ -136,7 +138,7 @@ def render(clusters: dict[str, list[dict[str, Any]]], empty: str = "") -> str:
         for r in recs:
             lines.append(
                 f"- run #{r['agent_id']} [{r['label']}] "
-                f'"{_oneline(r["task_prompt"])}"  ({_signals(r)})'
+                f'"{_oneline(task_prompt_of(r))}"  ({_signals(r)})'
             )
         lines.append("")
     return "\n".join(lines)
