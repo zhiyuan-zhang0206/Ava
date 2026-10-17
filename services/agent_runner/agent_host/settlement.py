@@ -94,7 +94,9 @@ async def reconcile_inbounds_after_abort(
         return
     try:
         async with database_phase():
-            await consume_claimed_inbounds(pool, agent_id, incarnation=incarnation)
+            await consume_claimed_inbounds(
+                pool, agent_id, incarnation=incarnation, unknown_execution=True
+            )
     except RuntimeOwnershipLostError:
         logger.warning(
             "host abort reconcile skipped: runtime ownership already replaced — "

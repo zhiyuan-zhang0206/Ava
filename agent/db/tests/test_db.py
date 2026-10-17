@@ -222,6 +222,36 @@ class TestFinalizeClaimedInbounds:
         assert consumed == 2
         assert self._statuses(db_conn, [young, ancient]) == {young: "done", ancient: "done"}
 
+    async def test_unknown_execution_marks_the_consumed_row(
+        self,
+        redis_url: str,
+        db_conn: psycopg.Connection,
+        aops_pool: AsyncConnectionPool,
+        *,
+        model_catalog: ModelCatalog,
+        config_authority: ConfigAuthority,
+        database_gate: ProcessDbGate,
+        machine_identity: MachineIdentity,
+    ) -> None:
+        tid = spawn_agent(
+            catalog=model_catalog,
+            authority=config_authority,
+            database_gate=database_gate,
+            machine=machine_identity,
+        )
+        lost = self._insert_claimed(db_conn, tid, "before the crash", "5 minutes")
+
+        consumed = await finalize_claimed_inbounds(
+            aops_pool, tid, incarnation=None, unknown_execution=True
+        )
+
+        assert consumed == 1
+        payload = db_conn.execute(
+            "SELECT payload FROM inbound_messages WHERE id = %s", (lost,)
+        ).fetchone()
+        assert payload is not None
+        assert payload[0]["consumed_without_execution"] is True
+
     async def test_no_claimed_rows_is_noop(
         self,
         redis_url: str,

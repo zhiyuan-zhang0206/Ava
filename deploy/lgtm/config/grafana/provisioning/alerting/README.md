@@ -103,6 +103,7 @@ Application layer — the Loki event stream plus the LLM latency histogram:
 | `meiva-ops-sse-drop-backlog` | `meiva-ops` | sse_drop + event_log_drop backlog | SUM(payload.n) in 10m > 100 (Loki unwrap) | 5m | warning |
 | `meiva-ops-llm-latency-p95` | `meiva-ops` | llm_usage latency p95 | histogram p95 in 10m > 60000 ms (Prometheus) | 10m | error |
 | `meiva-ops-delivery-stalled-backlog` | `meiva-ops` | delivery_stalled fresh backlog | fresh (age_s<600) count in 10m > 50 (Loki) | 5m | warning |
+| `meiva-ops-inbound-consumed-unknown` | `meiva-ops-slow` | inbound consumed without execution evidence | `inbound_consumed_unknown` count in 24h > 2 (Loki) | 10m | warning |
 | `meiva-ops-events-freshness` | `meiva-ops` | event stream stalled | no events in Loki for 5m (absent_over_time) | 5m | error |
 | `meiva-ops-root-health-stale` | `meiva-ops` | root health round freshness | a machine+home+process expecting rounds within 24h has its last completed round >3m stale, or none since startup (Prometheus) | 0m | error |
 | `meiva-ops-gateway-metrics-silent` | `meiva-ops` | gateway_latency heartbeat | no samples in Prometheus for 5m (absent_over_time) | 5m | error |

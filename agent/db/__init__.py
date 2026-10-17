@@ -391,7 +391,11 @@ async def claim_inbound_batch(
 
 
 async def finalize_claimed_inbounds(
-    pool: AsyncConnectionPool | None, agent_id: int, *, incarnation: RuntimeIncarnation | None
+    pool: AsyncConnectionPool | None,
+    agent_id: int,
+    *,
+    incarnation: RuntimeIncarnation | None,
+    unknown_execution: bool = False,
 ) -> int:
     """Consume every claimed chat of this agent under the owner lock.
 
@@ -407,11 +411,26 @@ async def finalize_claimed_inbounds(
     async with async_write_transaction(pool) as conn, conn.cursor() as cur:
         await lock_inbound_owner(conn, agent_id, incarnation=incarnation)
         await cur.execute(
-            "UPDATE inbound_messages SET status = 'done' "
-            "WHERE status = 'claimed' AND kind = 'chat' AND agent_id = %s",
-            (agent_id,),
+            "UPDATE inbound_messages SET status = 'done', "
+            "payload = CASE WHEN %s THEN COALESCE(payload, '{}'::jsonb) "
+            "|| jsonb_build_object('consumed_without_execution', true) ELSE payload END "
+            "WHERE status = 'claimed' AND kind = 'chat' AND agent_id = %s "
+            "RETURNING id, kind, content, "
+            "EXTRACT(EPOCH FROM (now() - created_at))::float8",
+            (unknown_execution, agent_id),
         )
-        return cur.rowcount
+        rows = await cur.fetchall()
+    for inbound_id, kind, content, age_s in rows if unknown_execution else ():
+        logger.warning(
+            "claimed inbound {inbound_id} consumed without execution evidence",
+            event="inbound_consumed_unknown",
+            agent_id=agent_id,
+            inbound_id=int(inbound_id),
+            kind=str(kind),
+            age_s=float(age_s),
+            content_preview=content[:200],
+        )
+    return len(rows)
 
 
 async def has_pending_inbound_after(

@@ -513,7 +513,9 @@ class AgentHost:
     ) -> AgentRuntime:
         """Reconcile claimed inbounds, then prepare the model."""
         checkpoints = checkpoints or TurnCheckpoints(self._checkpointer, self._graph)
-        await consume_claimed_inbounds(self._pool, agent_id, incarnation=incarnation)
+        await consume_claimed_inbounds(
+            self._pool, agent_id, incarnation=incarnation, unknown_execution=True
+        )
         return await build_runtime(
             agent_id,
             fingerprint,
