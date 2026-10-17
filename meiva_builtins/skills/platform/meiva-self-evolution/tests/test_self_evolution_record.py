@@ -8,6 +8,7 @@ from base.db import Database
 from meiva_builtins.skills.tests.skill_script import load_skill_script
 
 record_module = load_skill_script("platform", "meiva-self-evolution", "scripts", "record.py")
+rubric_module = load_skill_script("platform", "meiva-self-evolution", "scripts", "rubric.py")
 
 
 @pytest.fixture()
@@ -146,3 +147,194 @@ def test_msg_text_skips_thinking_and_tool_use_blocks(record: Any) -> None:
 
     assert record._msg_text(silent_turn) == ""
     assert record._msg_text(spoken_turn) == "Checking the logs now. image_url"
+
+
+_EVIDENCE_FIELDS = frozenset(
+    {
+        "telemetry_events",
+        "audit_events",
+        "tokens_in",
+        "tokens_out",
+        "turns",
+        "task_prompt_chars",
+        "prompt_source",
+        "final_output_chars",
+        "terminal_status",
+        "inbound_total",
+        "inbound_claimed",
+        "task_updates",
+        "task_state_changes",
+        "exec_ok",
+        "exec_failed",
+    }
+)
+
+
+def _usage_events() -> list[tuple[str, dict[str, Any]]]:
+    return [
+        ("llm_usage", {"model": "deepseek", "in_total": 1200, "out_total": 300}),
+        ("turn_end", {"duration_seconds": 4.0}),
+    ]
+
+
+def _user_inbound(content: str = "ship the evidence block") -> dict[str, Any]:
+    return {
+        "source": "user",
+        "content": content,
+        "is_broadcast": False,
+        "is_first_ever": True,
+        "is_in_collection_window": True,
+        "claimed": True,
+    }
+
+
+def _evidence_record(
+    record: Any,
+    database: Database,
+    *,
+    events: list[tuple[str, dict[str, Any]]],
+    inbounds: list[dict[str, Any]],
+    status: str | None,
+    task_receipts: dict[str, int] | None = None,
+) -> dict[str, Any]:
+    return record.build_record(
+        database=database,
+        agent_id=7,
+        week="2026-10-17",
+        events=events,
+        log_events=[],
+        inbounds=inbounds,
+        meta=("user", status, "delivered"),
+        task_receipts=task_receipts,
+    )
+
+
+def test_evidence_grade_none_without_telemetry(record: Any, database: Database) -> None:
+    rec = _evidence_record(record, database, events=[], inbounds=[], status="terminated")
+
+    assert rec["evidence"]["telemetry_events"] == 0
+    assert rec["evidence_grade"] == "none"
+    assert rec["unknown_reason"] == "no_telemetry"
+    assert rec["schema_version"] == 2
+
+
+def test_evidence_grade_partial_without_terminal_status(record: Any, database: Database) -> None:
+    rec = _evidence_record(
+        record,
+        database,
+        events=_usage_events(),
+        inbounds=[_user_inbound()],
+        status=None,
+    )
+
+    assert rec["evidence"]["terminal_status"] is None
+    assert rec["evidence_grade"] == "partial"
+    assert rec["unknown_reason"] == "no_terminal"
+
+
+def test_evidence_grade_partial_for_live_status(record: Any, database: Database) -> None:
+    rec = _evidence_record(
+        record,
+        database,
+        events=_usage_events(),
+        inbounds=[_user_inbound()],
+        status="idling",
+    )
+
+    assert rec["evidence"]["terminal_status"] == "idling"
+    assert rec["evidence_grade"] == "partial"
+    assert rec["unknown_reason"] == "no_terminal"
+
+
+def test_evidence_grade_complete_when_all_evidence_present(record: Any, database: Database) -> None:
+    rec = _evidence_record(
+        record,
+        database,
+        events=_usage_events(),
+        inbounds=[_user_inbound()],
+        status="terminated",
+    )
+
+    assert rec["evidence_grade"] == "complete"
+    assert rec["unknown_reason"] is None
+
+
+def test_evidence_grade_partial_without_task_prompt(record: Any, database: Database) -> None:
+    rec = _evidence_record(
+        record,
+        database,
+        events=_usage_events(),
+        inbounds=[],
+        status="terminated",
+    )
+
+    assert rec["evidence"]["task_prompt_chars"] == 0
+    assert rec["evidence"]["prompt_source"] == "none"
+    assert rec["evidence_grade"] == "partial"
+    assert rec["unknown_reason"] == "no_task"
+
+
+def test_legacy_record_without_evidence_keeps_downstream_reads(
+    record: Any, database: Database
+) -> None:
+    rec = _evidence_record(
+        record,
+        database,
+        events=_usage_events(),
+        inbounds=[_user_inbound()],
+        status="terminated",
+    )
+    legacy = {
+        key: value
+        for key, value in rec.items()
+        if key not in {"evidence", "evidence_grade", "unknown_reason", "schema_version"}
+    }
+
+    assert legacy.get("evidence") is None
+    assert legacy.get("evidence_grade") is None
+    assert legacy.get("unknown_reason") is None
+    assert record.label(legacy) == rec["label"]
+    assert rubric_module.scores(legacy) == rubric_module.scores(rec)
+
+
+def test_evidence_block_reports_prompt_source_and_task_receipts(
+    record: Any, database: Database
+) -> None:
+    spawner_inbound = {
+        "source": "agent:12",
+        "content": "peer brief",
+        "is_broadcast": False,
+        "is_first_ever": True,
+        "is_in_collection_window": True,
+        "claimed": False,
+    }
+    rec = record.build_record(
+        database=database,
+        agent_id=7,
+        week="2026-10-17",
+        events=[],
+        log_events=[],
+        inbounds=[spawner_inbound],
+        meta=("agent:12", "idling", "delivered"),
+        task_receipts={"note": 3, "status": 1, "results": 2, "state_changes": 1},
+    )
+
+    evidence = rec["evidence"]
+    assert evidence["prompt_source"] == "spawner"
+    assert evidence["inbound_total"] == 1
+    assert evidence["inbound_claimed"] == 0
+    assert evidence["task_updates"] == {"note": 3, "status": 1, "results": 2}
+    assert evidence["task_state_changes"] == 1
+    assert set(evidence) == _EVIDENCE_FIELDS
+
+    no_receipts = record.build_record(
+        database=database,
+        agent_id=7,
+        week="2026-10-17",
+        events=[],
+        log_events=[],
+        inbounds=[],
+        meta=("user", "terminated", "delivered"),
+    )["evidence"]
+    assert no_receipts["task_updates"] == {"note": 0, "status": 0, "results": 0}
+    assert no_receipts["task_state_changes"] == 0

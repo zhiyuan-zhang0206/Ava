@@ -41,6 +41,12 @@ statement = """
 """
 ```
 
+## evidence block and grading
+
+Each record's `evidence` block, its fields and the coverage grade derived from
+them are specified in
+[[meiva_builtins/skills/platform/meiva-self-evolution/docs/evidence-block-and-grading.meiva.okf.md|the evidence-block node]].
+
 ## Key dependencies
 - [[meiva_builtins/skills/docs/skills.meiva.okf.md|Skills index]] — full skills catalog
 - [[meiva/skills/docs/skills.meiva.okf.md|Skill System]] — the target of mining regressions is the skill library itself

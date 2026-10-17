@@ -331,7 +331,7 @@ def _inbounds_by_agent(
     """
     # Task prompts: the first-ever chat message per agent, regardless of age.
     cur.execute(
-        "SELECT DISTINCT ON (agent_id) id, agent_id, source, content "
+        "SELECT DISTINCT ON (agent_id) id, agent_id, source, content, claimed_at IS NOT NULL "
         "FROM inbound_messages "
         "WHERE agent_id = ANY(%s) AND kind = 'chat' "
         "AND (source = ANY(%s) OR source LIKE 'agent:%%' OR source = 'system') "
@@ -340,7 +340,7 @@ def _inbounds_by_agent(
     )
     first_ids: dict[int, int] = {}
     first_rows: dict[int, dict[str, Any]] = {}
-    for msg_id, agent_id, source, content in cur.fetchall():
+    for msg_id, agent_id, source, content, claimed in cur.fetchall():
         first_ids[agent_id] = msg_id
         first_rows[agent_id] = {
             "source": source,
@@ -348,11 +348,12 @@ def _inbounds_by_agent(
             "is_broadcast": False,
             "is_first_ever": True,
             "is_in_collection_window": False,
+            "claimed": claimed,
         }
     # Everything the agent actually received during this collection window.
     cur.execute(
         "WITH window_inbounds AS ("
-        "SELECT id, agent_id, source, content, created_at "
+        "SELECT id, agent_id, source, content, claimed_at IS NOT NULL AS claimed, created_at "
         "FROM inbound_messages "
         "WHERE agent_id = ANY(%s) AND kind = 'chat' "
         "AND (source = ANY(%s) OR source LIKE 'agent:%%' OR source = 'system') "
@@ -362,7 +363,7 @@ def _inbounds_by_agent(
         "GROUP BY source, content HAVING count(DISTINCT agent_id) > 1"
         ") "
         "SELECT inbound.id, inbound.agent_id, inbound.source, inbound.content, "
-        "broadcasts.source IS NOT NULL AS is_broadcast "
+        "broadcasts.source IS NOT NULL AS is_broadcast, inbound.claimed "
         "FROM window_inbounds inbound "
         "LEFT JOIN broadcasts ON broadcasts.source = inbound.source "
         "AND broadcasts.content = inbound.content "
@@ -370,7 +371,7 @@ def _inbounds_by_agent(
         [agent_ids, TASK_SOURCES, window],
     )
     out: dict[int, list[dict[str, Any]]] = defaultdict(list)
-    for msg_id, agent_id, source, content, is_broadcast in cur.fetchall():
+    for msg_id, agent_id, source, content, is_broadcast, claimed in cur.fetchall():
         if msg_id == first_ids.get(agent_id):
             first_rows[agent_id]["is_in_collection_window"] = True
             continue  # the task prompt — already first via prepend below
@@ -381,6 +382,7 @@ def _inbounds_by_agent(
                 "is_broadcast": is_broadcast,
                 "is_first_ever": False,
                 "is_in_collection_window": True,
+                "claimed": claimed,
             }
         )
     # Prepend the first-ever message so build_record still finds the initial
@@ -397,6 +399,39 @@ def _meta_by_agent(cur: psycopg.Cursor, ids: list[int]) -> dict[int, tuple]:
         [ids],
     )
     return {r[0]: (r[1], r[2], r[3]) for r in cur.fetchall()}
+
+
+def _task_receipts_by_agent(cur: psycopg.Cursor, ids: list[int]) -> dict[int, dict[str, int]]:
+    cur.execute(
+        "WITH status_receipts AS ("
+        "SELECT actor_agent_id, task_id, request->>'status' AS declared, "
+        "lag(request->>'status') OVER ("
+        "PARTITION BY actor_agent_id, task_id ORDER BY accepted_at, operation_key"
+        ") AS previous "
+        "FROM task_update_receipts "
+        "WHERE actor_agent_id = ANY(%s) AND request->>'status' IS NOT NULL"
+        "), state_changes AS ("
+        "SELECT actor_agent_id, count(*) AS changes FROM status_receipts "
+        "WHERE declared IS DISTINCT FROM COALESCE(previous, 'in_progress') "
+        "GROUP BY actor_agent_id"
+        ") "
+        "SELECT r.actor_agent_id, "
+        "count(*) FILTER ("
+        "WHERE r.request->>'note' IS NOT NULL AND r.request->>'status' IS NULL"
+        "), "
+        "count(*) FILTER (WHERE r.request->>'status' IS NOT NULL), "
+        "count(*) FILTER (WHERE r.request->>'results' IS NOT NULL), "
+        "COALESCE(max(c.changes), 0) "
+        "FROM task_update_receipts r "
+        "LEFT JOIN state_changes c ON c.actor_agent_id = r.actor_agent_id "
+        "WHERE r.actor_agent_id = ANY(%s) "
+        "GROUP BY r.actor_agent_id",
+        [ids, ids],
+    )
+    return {
+        row[0]: {"note": row[1], "status": row[2], "results": row[3], "state_changes": row[4]}
+        for row in cur.fetchall()
+    }
 
 
 def _test_label_ids(cur: psycopg.Cursor, ids: list[int]) -> set[int]:
@@ -457,6 +492,7 @@ def collect_with_counts(
     with database.connect() as conn, conn.cursor() as cur:
         inbounds = _inbounds_by_agent(cur, ids, window)
         meta = _meta_by_agent(cur, ids)
+        receipts = _task_receipts_by_agent(cur, ids)
         test_ids = set() if include_test else _test_label_ids(cur, ids)
     records = []
     excluded_test = 0
@@ -477,6 +513,7 @@ def collect_with_counts(
             inbounds.get(agent_id, []),
             meta[agent_id],
             database=database,
+            task_receipts=receipts.get(agent_id),
         )
         record["builtin_help_calls"], record["builtin_help_on_meiva"] = _builtin_help_counts(
             agent_events
@@ -547,7 +584,8 @@ def collect_one(
     ]
     with database.connect() as conn, conn.cursor() as cur:
         cur.execute(
-            "SELECT source, content, created_at > %s AS is_in_collection_window "
+            "SELECT source, content, created_at > %s AS is_in_collection_window, "
+            "claimed_at IS NOT NULL AS claimed "
             "FROM inbound_messages WHERE agent_id = %s AND kind = 'chat' "
             "ORDER BY created_at",
             [window_from, agent_id],
@@ -559,13 +597,17 @@ def collect_one(
                 "is_broadcast": False,
                 "is_first_ever": index == 0,
                 "is_in_collection_window": is_in_collection_window,
+                "claimed": claimed,
             }
-            for index, (source, content, is_in_collection_window) in enumerate(cur.fetchall())
+            for index, (source, content, is_in_collection_window, claimed) in enumerate(
+                cur.fetchall()
+            )
         ]
         cur.execute(
             "SELECT spawner, status, last_message_text FROM agents_meta WHERE id = %s", [agent_id]
         )
         meta = cur.fetchone()
+        receipts = _task_receipts_by_agent(cur, [agent_id]).get(agent_id)
     if meta is None:
         raise ValueError(f"no agents_meta row for agent {agent_id}")
     record = build_record(
@@ -577,6 +619,7 @@ def collect_one(
         meta,
         database=database,
         leak_paths=leak_paths,
+        task_receipts=receipts,
     )
     record["builtin_help_calls"], record["builtin_help_on_meiva"] = _builtin_help_counts(events)
     record["subprocess_calls"] = _subprocess_call_count(events)
