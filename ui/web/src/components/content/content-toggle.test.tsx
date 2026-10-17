@@ -1,9 +1,7 @@
-// ContentToggle: compound Details button renders + select sets mode.
-
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { cleanup, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { mockSetSettingCalls, resetMockSettings } from "@/test-support/user-settings-mock";
+import { mockSetSettingCalls, resetMockSettings, setMockSetting } from "@/test-support/user-settings-mock";
 
 import { ContentToggle } from "./content-toggle";
 
@@ -13,43 +11,29 @@ beforeEach(() => resetMockSettings());
 afterEach(cleanup);
 
 describe("ContentToggle", () => {
-  it("renders 'Details' label and All/Last/None select", () => {
+  it("summarizes the current details mode and links to its setting", () => {
     render(<ContentToggle />);
-    expect(screen.getByText("Details")).toBeTruthy();
-    const select = screen.getByRole("combobox", { name: "Details level" });
-    expect(select).toBeTruthy();
-    expect((select as HTMLSelectElement).value).toBe("none");
-    // All three options exist
-    expect(screen.getByText("All")).toBeTruthy();
-    expect(screen.getByText("Last")).toBeTruthy();
-    expect(screen.getByText("None")).toBeTruthy();
+    const link = screen.getByRole("link", { name: "Details: None" });
+    expect(link.getAttribute("href")).toBe("/control#display-timeline");
+    expect(screen.getByTestId("details-summary-mode").textContent).toBe("None");
   });
 
-  it("defaults to 'none' selected", () => {
+  it("stays keyboard reachable", () => {
     render(<ContentToggle />);
-    const select = screen.getByRole("combobox", { name: "Details level" });
-    expect((select as HTMLSelectElement).value).toBe("none");
+    const link = screen.getByTestId("details-summary");
+    expect(link.tagName).toBe("A");
+    expect(link.tabIndex).toBe(0);
   });
 
-  it("selecting Last writes the setting", () => {
+  it("reads a stored mode back into the summary", () => {
+    setMockSetting("display.expand_runs_mode", "last");
     render(<ContentToggle />);
-    const select = screen.getByRole("combobox", { name: "Details level" });
-    fireEvent.change(select, { target: { value: "last" } });
-    expect((select as HTMLSelectElement).value).toBe("last");
-    expect(mockSetSettingCalls()).toContainEqual({
-      key: "display.expand_runs_mode",
-      value: "last",
-    });
+    expect(screen.getByTestId("details-summary-mode").textContent).toBe("Last");
   });
 
-  it("selecting None writes the setting", () => {
+  it("offers no selector of its own in the composer", () => {
     render(<ContentToggle />);
-    const select = screen.getByRole("combobox", { name: "Details level" });
-    fireEvent.change(select, { target: { value: "none" } });
-    expect((select as HTMLSelectElement).value).toBe("none");
-    expect(mockSetSettingCalls()).toContainEqual({
-      key: "display.expand_runs_mode",
-      value: "none",
-    });
+    expect(screen.queryByRole("combobox")).toBeNull();
+    expect(mockSetSettingCalls()).toHaveLength(0);
   });
 });

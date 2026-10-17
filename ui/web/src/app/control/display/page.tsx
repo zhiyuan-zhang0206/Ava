@@ -44,14 +44,21 @@ import {
 } from "@/lib/timeline/timeline-width";
 import { themePackId, useThemePacks } from "@/lib/plugins/use-theme-packs";
 import { useDebouncedSetting, useUserSettings } from "@/lib/state/use-user-settings";
+import { type DetailsMode, useContentToggle, useContentToggleReset } from "@/lib/layout/content-toggle-store";
 import { FLEX } from "@/lib/layout/layout";
 import { RadioRow, SettingsSection, SliderRow, TimelineColorsSection, ToggleRow } from "./_rows";
+
+// meiva:ref ui/web/src/docs/frontend-components/home-shell-chrome/home-shell-chrome.meiva.okf.md#details-mode-owner
+function resetManualExpansions(): void {
+  useContentToggleReset.getState().bumpReset();
+}
 
 // ── Page ──
 
 export default function DisplaySettingsPage() {
   const t = useTranslations("displaySettings");
   const { settings, setSetting, isLoading } = useUserSettings();
+  const { detailsMode, setDetailsMode } = useContentToggle();
   const [widthRatio, setWidthRatio] = useDebouncedSetting<number>(
     "display.timeline_width_ratio",
     TIMELINE_WIDTH_RATIO_DEFAULT,
@@ -81,14 +88,6 @@ export default function DisplaySettingsPage() {
       </div>
     );
   }
-
-  // "Collapse details by default" reuses display.expand_runs_mode, the same
-  // setting the header's Details control reads (see lib/content-toggle-store.ts):
-  // a single global default, flipping it here is the same expand-all/collapse-all
-  // as flipping the header control. The row inverts the underlying setting's
-  // polarity — a "show" setting reads as "Collapse ... by default" — since that
-  // is how the feature reads to the user.
-  const expandRunsDefault = settings["display.expand_runs_mode"] === "all";
 
   // Compact-history retention (task #3698): number of older pages fetched
   // after a compact rewrites the history. -1 means All;
@@ -212,12 +211,18 @@ export default function DisplaySettingsPage() {
           format={(v) => `${Math.round(v * 100)}%`}
           disabled={isNarrow}
         />
-        <ToggleRow
+        <RadioRow
           icon={Rows3}
-          label="Collapse details by default"
-          description="A newly-toggled work block starts collapsed instead of open. Flipping this (or the header's Details chip) expands/collapses every work block at once"
-          value={!expandRunsDefault}
-          onChange={(v) => setSetting("display.expand_runs_mode", v ? "none" : "all")}
+          label="Timeline details"
+          description="How much of each work block the timeline expands on its own: every block, only the most recent one (following the stream), or none. This is the same choice the composer's Details summary reports; picking a mode again re-applies it, collapsing any blocks you expanded by hand."
+          options={[
+            { value: "all", label: "Expand all blocks" },
+            { value: "last", label: "Last block only" },
+            { value: "none", label: "Collapse all blocks" },
+          ]}
+          value={detailsMode}
+          onChange={(v) => { setDetailsMode(v as DetailsMode); resetManualExpansions(); }}
+          reapplyOnSelect
         />
         <ToggleRow
           icon={Sparkles}

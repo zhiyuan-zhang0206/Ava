@@ -63,6 +63,7 @@ export function RadioRow({
   options,
   value,
   onChange,
+  reapplyOnSelect = false,
 }: {
   icon: React.ComponentType<{ className?: string }>;
   label: string;
@@ -70,6 +71,7 @@ export function RadioRow({
   options: { value: string; label: string }[];
   value: string;
   onChange: (v: string) => void;
+  reapplyOnSelect?: boolean;
 }) {
   return (
     <div className={cn("items-start justify-between gap-4 px-3 py-2.5", FLEX)}>
@@ -87,6 +89,7 @@ export function RadioRow({
                   value={opt.value}
                   checked={value === opt.value}
                   onChange={() => onChange(opt.value)}
+                  onClick={() => { if (reapplyOnSelect && value === opt.value) onChange(opt.value); }}
                   className="size-3.5 accent-primary"
                 />
                 <span className="text-xs">{opt.label}</span>
