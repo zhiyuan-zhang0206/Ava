@@ -18,7 +18,8 @@ def read_rows(out: str) -> None:
         if "gateway_url_reader" in parameters:
             from cli.database import open_operator_database
 
-            database_factory = operator_database_factory(
+            gateway_factory: Any = operator_database_factory
+            database_factory = gateway_factory(
                 local_host=command.machine.host,
                 gateway_url_reader=lambda: command.config.view.gateway.gateway_url,
                 open_database=open_operator_database,

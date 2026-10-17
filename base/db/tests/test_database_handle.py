@@ -108,6 +108,69 @@ def test_the_config_carries_the_live_value_of_every_field(monkeypatch: pytest.Mo
     assert "handle_user" not in repr(_config())
 
 
+_RUNNER_URL = "postgresql://meiva_runner:sek@10.20.30.40:6433/meiva_main"
+
+
+def _runner_config() -> DbConfig:
+    return _config(db_url=_RUNNER_URL, pgbouncer_enabled=True)
+
+
+def _unresolvable(_config: DbConfig) -> connections.DirectResolution:
+    return connections.DirectResolution(
+        url=_RUNNER_URL,
+        is_direct=False,
+        reason="the database URL names 10.20.30.40:6433, which is another machine",
+    )
+
+
+def _never_asked(_config: DbConfig) -> connections.DirectResolution:
+    raise AssertionError("an ordinary dial must not resolve a direct URL")
+
+
+def test_a_required_direct_dial_refuses_a_url_it_cannot_resolve(
+    database_gate: ProcessDbGate, dialed: _Dialed
+) -> None:
+    handle = Database(_runner_config(), gate=database_gate, direct_url=_unresolvable)
+    with pytest.raises(connections.DirectUnavailableError) as caught:
+        handle.connect(direct=True)
+    assert "10.20.30.40:6433" in str(caught.value)
+    assert "another machine" in str(caught.value)
+    assert dialed.urls == []
+
+
+def test_a_refused_direct_pool_never_opens(database_gate: ProcessDbGate) -> None:
+    handle = Database(_runner_config(), gate=database_gate, direct_url=_unresolvable)
+    with pytest.raises(connections.DirectUnavailableError):
+        handle.pool(direct=True)
+
+
+def test_an_ordinary_dial_of_the_same_url_never_asks_for_a_direct_one(
+    database_gate: ProcessDbGate, dialed: _Dialed
+) -> None:
+    Database(_runner_config(), gate=database_gate, direct_url=_never_asked).connect()
+    assert dialed.urls == [_RUNNER_URL]
+
+
+def test_a_resolved_direct_dial_dials_what_the_resolver_returned(
+    database_gate: ProcessDbGate, dialed: _Dialed
+) -> None:
+    handle = Database(
+        _runner_config(),
+        gate=database_gate,
+        direct_url=lambda config: connections.DirectResolution(url=config.db_url, is_direct=True),
+    )
+    handle.connect(direct=True)
+    assert dialed.urls == [_RUNNER_URL]
+
+
+def test_a_handle_without_a_resolver_refuses_a_direct_dial(
+    database_gate: ProcessDbGate, dialed: _Dialed
+) -> None:
+    with pytest.raises(RuntimeError, match="direct_url resolver"):
+        Database(_runner_config(), gate=database_gate).connect(direct=True)
+    assert dialed.urls == []
+
+
 @pytest.mark.parametrize("operation", ["connect", "direct", "pool", "direct_pool", "async_pool"])
 def test_all_handle_dials_use_their_retained_authority_refusal(
     database_gate: ProcessDbGate, operation: str
@@ -119,7 +182,7 @@ def test_all_handle_dials_use_their_retained_authority_refusal(
             db_url="postgresql://meiva@127.0.0.1:1/x", db_authority_refusal="unadmitted runtime"
         ),
         gate=database_gate,
-        direct_url=lambda config: config.db_url,
+        direct_url=lambda config: connections.DirectResolution(url=config.db_url, is_direct=True),
     )
     with pytest.raises(connections.NoDatabaseAuthorityError, match="unadmitted runtime"):
         if operation == "connect":

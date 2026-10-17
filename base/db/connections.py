@@ -1,6 +1,7 @@
 """Postgres connection guards, URLs, direct connects, and sync + async pools."""
 
 from collections.abc import Callable
+from dataclasses import dataclass, field
 from functools import partial
 from typing import Any, LiteralString
 from urllib.parse import urlsplit
@@ -271,10 +272,18 @@ def guard_db_url(url: str, *, refusal: str | None = None) -> str:
     return url
 
 
-# Resolves the admin-plane (direct, never pooled) URL of the cluster a `DbConfig` names. The
-# composition root supplies it: the resolution reads the home's registry record, which sits
-# above this module (`base.cluster.dataplane.direct_url.ClusterDirectUrl`).
-DirectUrlResolver = Callable[[DbConfig], str]
+class DirectUnavailableError(RuntimeError):
+    pass
+
+
+@dataclass(frozen=True)
+class DirectResolution:
+    url: str = field(repr=False)
+    is_direct: bool
+    reason: str = ""
+
+
+DirectUrlResolver = Callable[[DbConfig], DirectResolution]
 
 
 def require_direct_url(direct_url: DirectUrlResolver | None) -> DirectUrlResolver:
@@ -286,9 +295,19 @@ def require_direct_url(direct_url: DirectUrlResolver | None) -> DirectUrlResolve
     return direct_url
 
 
+def require_direct(resolution: DirectResolution) -> str:
+    if not resolution.is_direct:
+        raise DirectUnavailableError(
+            "cannot open a direct (non-pooled) database connection: " + resolution.reason
+        )
+    return resolution.url
+
+
 def _dial_url(cfg: DbConfig, *, direct: bool, direct_url: DirectUrlResolver | None) -> str:
     """The URL to dial: the access URL, or the resolver's direct URL for an admin-plane dial."""
-    return require_direct_url(direct_url)(cfg) if direct else cfg.db_url
+    if not direct:
+        return cfg.db_url
+    return require_direct(require_direct_url(direct_url)(cfg))
 
 
 def connect(
