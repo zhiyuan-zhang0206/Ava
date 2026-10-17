@@ -2,11 +2,19 @@ from pathlib import Path
 
 import pytest
 
-from scripts.content_lint.code_comments.check import check
-from scripts.content_lint.code_comments.tests.cases import files, repository
+from scripts.content_lint.code_comments.check import Repository, check
+from scripts.content_lint.code_comments.tests.cases import DOC, files, note, repository
 from scripts.content_lint.lint_quiesced_loops import violations_in_source
 
-REF = "# meiva:ref pkg/docs/core.meiva.okf.md#positive-budget"
+RATIONALE = note(("The caller already proves the value.",), links=(DOC,))
+
+
+def codes(repo: Repository) -> list[str]:
+    return [item.code for item in check(repo, strict_paths=repo.files).findings]
+
+
+def source_with(*parts: str) -> dict[str, str]:
+    return {**files(), "pkg/core.py": "".join(parts)}
 
 
 @pytest.mark.parametrize(
@@ -19,13 +27,12 @@ REF = "# meiva:ref pkg/docs/core.meiva.okf.md#positive-budget"
         "# pyright: ignore[reportArgumentType, reportUnknownMemberType]",
     ],
 )
-def test_line_directive_uses_its_definition_contract(tmp_path: Path, directive: str) -> None:
-    source = files()
-    source["pkg/core.py"] = (
-        f"{REF}\ndef budget():\n    result = call(  {directive}\n        1,\n    )\n    return result\n"
-    )
-    repo = repository(tmp_path, source)
-    assert not check(repo, strict_paths=repo.files).findings
+def test_a_line_directive_uses_the_note_owned_by_its_definition(
+    tmp_path: Path, directive: str
+) -> None:
+    body = f"    value = call(  {directive}\n        1,\n    )\n    return value\n"
+    repo = repository(tmp_path, source_with(RATIONALE, "def budget():\n", body))
+    assert codes(repo) == []
 
 
 @pytest.mark.parametrize(
@@ -44,130 +51,134 @@ def test_line_directive_uses_its_definition_contract(tmp_path: Path, directive: 
     ],
 )
 def test_unbounded_or_prose_directives_stay_rejected(tmp_path: Path, directive: str) -> None:
-    source = files()
-    source["pkg/core.py"] = f"{REF}\ndef budget():\n    return call()  {directive}\n"
-    repo = repository(tmp_path, source)
-    assert any(f.code == "free-comment" for f in check(repo, strict_paths=repo.files).findings)
+    repo = repository(
+        tmp_path, source_with(RATIONALE, "def budget():\n    return call()  " + directive + "\n")
+    )
+    assert codes(repo) == ["free-comment"]
+
+
+def test_a_directive_without_a_bound_note_fails(tmp_path: Path) -> None:
+    repo = repository(tmp_path, {"pkg/core.py": "def budget():\n    return call()  # noqa: S603\n"})
+    assert codes(repo) == ["directive-owner"]
 
 
 @pytest.mark.parametrize(
     "body",
     [
-        f"{REF}\ndef budget():\n    return 1\n\ndef other():\n    return call()  # noqa: S603\n",
-        f"{REF}\ndef budget():\n    def nested():\n        return call()  # noqa: S603\n    return nested()\n",
+        RATIONALE
+        + "def budget():\n    return 1\n\ndef other():\n    return call()  # noqa: S603\n",
+        RATIONALE
+        + "def budget():\n    def nested():\n        return call()  # noqa: S603\n"
+        + "    return nested()\n",
+        note(("Module fact.",), links=(DOC,))
+        + "\ndef budget():\n    return call()  # noqa: S603\n",
     ],
 )
-def test_directive_cannot_borrow_sibling_or_outer_rationale(tmp_path: Path, body: str) -> None:
-    source = files()
-    source["pkg/core.py"] = body
-    repo = repository(tmp_path, source)
-    assert any(f.code == "directive-owner" for f in check(repo, strict_paths=repo.files).findings)
-
-
-def test_signature_and_method_directives_bind_the_method(tmp_path: Path) -> None:
-    source = files(code=["pkg/core.py:Worker.budget"])
-    source["pkg/core.py"] = (
-        "class Worker:\n"
-        "    def budget(\n"
-        "        self, value: bool = True,  # noqa: ARG002\n"
-        "    ):  # pyright: ignore[reportIncompatibleMethodOverride]\n"
-        f"        {REF}\n"
-        "        return 1\n"
-    )
-    repo = repository(tmp_path, source)
-    assert not check(repo, strict_paths=repo.files).findings
-
-
-def test_unchanged_unbound_directive_is_not_a_global_migration(tmp_path: Path) -> None:
-    source = files()
-    source["pkg/core.py"] += "def other():\n    return call()  # noqa: S603\n"
-    assert not check(repository(tmp_path, source)).findings
-
-
-@pytest.mark.parametrize("enclosing", ["module", "class"])
-def test_duplicate_definition_cannot_borrow_enclosing_rationale(
-    tmp_path: Path, enclosing: str
+def test_a_directive_cannot_borrow_sibling_outer_or_module_rationale(
+    tmp_path: Path, body: str
 ) -> None:
-    if enclosing == "module":
-        source = files(code=["pkg/core.py:<module>"])
-        source["pkg/core.py"] = (
-            f"{REF}\n\n"
-            "def budget():\n    return call()  # noqa: S603\n\n"
-            "def budget():\n    return 1\n"
-        )
-    else:
-        source = files(code=["pkg/core.py:Worker"])
-        source["pkg/core.py"] = (
-            f"{REF}\nclass Worker:\n"
-            "    def budget(self):\n        return call()  # noqa: S603\n"
-            "    def budget(self):\n        return 1\n"
-        )
-    repo = repository(tmp_path, source)
-    assert any(f.code == "directive-owner" for f in check(repo, strict_paths=repo.files).findings)
+    repo = repository(tmp_path, source_with(body))
+    assert codes(repo) == ["directive-owner"]
 
 
-@pytest.mark.parametrize("module_rationale", [False, True])
-def test_module_directive_cannot_borrow_the_next_function(
-    tmp_path: Path, module_rationale: bool
+def test_a_class_note_does_not_cover_its_method_directives(tmp_path: Path) -> None:
+    repo = repository(
+        tmp_path,
+        source_with(
+            "class Worker:\n",
+            note(("The protocol requires the parameter.",), links=(DOC,), indent=4),
+            "    def budget(self, value: bool = True):  # noqa: ARG002\n        return None\n",
+        ),
+    )
+    assert codes(repo) == ["directive-owner"]
+
+
+def test_a_method_note_covers_its_method_directives(tmp_path: Path) -> None:
+    repo = repository(
+        tmp_path,
+        source_with(
+            "class Worker:\n",
+            "    def budget(self, value: bool = True):  # noqa: ARG002\n",
+            note(("The protocol requires the parameter.",), links=(DOC,), indent=8),
+            "        return None\n",
+        ),
+    )
+    assert codes(repo) == []
+
+
+def test_signature_and_definition_directives_bind_the_definition(tmp_path: Path) -> None:
+    repo = repository(
+        tmp_path,
+        source_with(
+            RATIONALE,
+            "def budget(\n    value: bool = True,  # noqa: ARG002\n"
+            ") -> None:  # pyright: ignore[reportIncompatibleMethodOverride]\n    return None\n",
+        ),
+    )
+    assert codes(repo) == []
+
+
+def test_an_unbound_directive_outside_the_strict_scope_is_not_reported(
+    tmp_path: Path,
 ) -> None:
-    source = files(code=["pkg/core.py:<module>" if module_rationale else "pkg/core.py:budget"])
-    source["pkg/core.py"] = (
-        (f"{REF}\n\n" if module_rationale else "")
-        + "import external  # noqa: F401\ndef budget():\n"
-        + ("" if module_rationale else f"    {REF}\n")
-        + "    return 1\n"
+    repo = repository(
+        tmp_path,
+        source_with(
+            RATIONALE,
+            "def budget():\n    return 1\n\ndef other():\n    return call()  # noqa: S603\n",
+        ),
     )
-    repo = repository(tmp_path, source)
-    findings = check(repo, strict_paths=repo.files).findings
-    assert bool(findings) is not module_rationale
-    assert all(f.code == "directive-owner" for f in findings)
+    assert check(repo).findings == []
 
 
-def test_quiesce_marker_is_an_exact_bound_reference(tmp_path: Path) -> None:
-    source = files()
-    source["pkg/core.py"] = (
-        "def budget():\n"
-        "    # quiesce-exempt: meiva:ref pkg/docs/core.meiva.okf.md#positive-budget\n"
-        "    while True:\n"
-        "        sleep(1)\n"
+def test_a_link_only_note_does_not_justify_a_directive(tmp_path: Path) -> None:
+    repo = repository(
+        tmp_path,
+        source_with(note((), links=(DOC,)), "def budget():\n    return call()  # noqa: S603\n"),
     )
-    repo = repository(tmp_path, source)
-    assert not check(repo, strict_paths=repo.files).findings
+    assert codes(repo) == ["directive-owner"]
 
 
-@pytest.mark.parametrize("suffix", [" because it is needed", "-missing"])
-def test_quiesce_reference_is_validated_even_outside_strict_scope(
-    tmp_path: Path, suffix: str
-) -> None:
-    source = files()
-    source["pkg/core.py"] = (
-        f"def budget():\n    # quiesce-exempt: meiva:ref pkg/docs/core.meiva.okf.md#positive-budget{suffix}\n    while True:\n        sleep(1)\n"
+def test_a_bare_quiesce_marker_needs_a_bound_note(tmp_path: Path) -> None:
+    loop = "    # quiesce-exempt\n    while True:\n        sleep(1)\n"
+    bound = repository(tmp_path / "bound", source_with(RATIONALE + "def loop():\n", loop))
+    assert codes(bound) == []
+    unbound = repository(tmp_path / "unbound", {"pkg/core.py": "def loop():\n" + loop})
+    assert codes(unbound) == ["directive-owner"]
+
+
+def test_a_quiesce_marker_with_a_reason_is_free_prose(tmp_path: Path) -> None:
+    repo = repository(
+        tmp_path,
+        source_with(
+            RATIONALE,
+            "def loop():\n    # quiesce-exempt: never touches the database\n"
+            "    while True:\n        sleep(1)\n",
+        ),
     )
-    assert check(repository(tmp_path, source)).findings
+    assert codes(repo) == ["free-comment"]
+
+
+def test_the_stop_window_lint_keeps_its_own_marker_requirement() -> None:
+    marker = "    # quiesce-exempt: never touches the database\n"
+    loop = "    while True:\n        sleep(1)\n"
+    assert not violations_in_source("def budget():\n" + marker + loop)
+    assert violations_in_source("def budget():\n" + loop)
+    misplaced = "def budget():\n" + marker + "    value = 1\n" + loop
+    assert any("stale" in message for _, message in violations_in_source(misplaced))
 
 
 @pytest.mark.parametrize("path", ["pkg/core.py", "pkg/tests/test_core.py"])
 @pytest.mark.parametrize("call", ["gateway_access_from_settings()", "other()"])
-def test_ambient_marker_only_names_an_audited_call(tmp_path: Path, path: str, call: str) -> None:
-    source = {path: f"access = {call}  # ambient: B2\n"}
-    repo = repository(tmp_path, source)
+def test_an_ambient_marker_only_names_an_audited_call(tmp_path: Path, path: str, call: str) -> None:
+    repo = repository(tmp_path, {path: f"access = {call}  # ambient: B2\n"})
     findings = check(repo, strict_paths=repo.files).findings
     assert bool(findings) is (path != "pkg/core.py" or call != "gateway_access_from_settings()")
 
 
-def test_ambient_marker_cannot_include_prose(tmp_path: Path) -> None:
+def test_an_ambient_marker_cannot_include_prose(tmp_path: Path) -> None:
     repo = repository(
         tmp_path,
         {"pkg/core.py": "access = gateway_access_from_settings()  # ambient: B2 because needed\n"},
     )
-    assert any(f.code == "free-comment" for f in check(repo, strict_paths=repo.files).findings)
-
-
-def test_quiesce_consumer_keeps_loop_and_stale_marker_checks() -> None:
-    marker = "    # quiesce-exempt: meiva:ref pkg/docs/core.meiva.okf.md#positive-budget\n"
-    loop = "    while True:\n        sleep(1)\n"
-    source = "def budget():\n" + marker + loop
-    assert not violations_in_source(source)
-    assert violations_in_source("def budget():\n" + loop)
-    misplaced = "def budget():\n" + marker + "    value = 1\n" + loop
-    assert any("stale" in message for _, message in violations_in_source(misplaced))
+    assert [item.code for item in check(repo, strict_paths=repo.files).findings] == ["free-comment"]
