@@ -5,12 +5,12 @@ import sys
 import time
 import uuid
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime
 from pathlib import Path
 
 from base.host.permissions_helper.grants import gate, probe, triggers
-from base.host.permissions_helper.grants.catalog import Grant
+from base.host.permissions_helper.grants.catalog import Grant, PermissionItem
 from base.host.permissions_helper.grants.gate import GateReport, GateState
 from base.host.permissions_helper.grants.probe import HelperChannel
 from base.paths import meiva_home
@@ -78,27 +78,39 @@ def check(
     return report
 
 
-# meiva:ref services/desktop/permissions_helper/docs/onboarding.meiva.okf.md#no-dialog-without-a-human
-def onboard(
+def _ask_process_grants(
+    report: GateReport,
+    seat: GateHost,
+    pending: tuple[PermissionItem, ...],
+    echo: Callable[[str], None] | None,
+) -> str:
+    items = [item for item in pending if item.group == "desktop"]
+    if not items:
+        return ""
+    if not report.supports_request:
+        return (
+            "The running permissions helper cannot request grants: its build predates"
+            " request_grants_v1. Update the helper, then run the gate again."
+        )
+    if echo is not None:
+        echo("Asking the system for: " + ", ".join(item.id for item in items))
+    probe.request_process_grants(seat.client)
+    return ""
+
+
+def _ask_items(
+    seat: GateHost,
+    pending: tuple[PermissionItem, ...],
     *,
-    interactive: bool,
-    host: GateHost | None = None,
-    now: datetime | None = None,
-    timeout_s: float = REQUEST_TIMEOUT_S,
-    sleep: Callable[[float], None] = time.sleep,
-    echo: Callable[[str], None] | None = None,
-    request_item: Callable[..., str] = triggers.request_item,
-) -> GateReport:
-    seat = host or local_host()
-    report = check(host=seat, now=now)
-    if not interactive or report.state in (GateState.COMPLETE, GateState.NOT_APPLICABLE):
-        return report
-    pending = report.prompt_now()
-    if not pending:
-        return report
-    seat.workdir.mkdir(parents=True, exist_ok=True)
+    timeout_s: float,
+    sleep: Callable[[float], None],
+    echo: Callable[[str], None] | None,
+    request_item: Callable[..., str],
+) -> None:
     run_id = uuid.uuid4().hex[:8]
     for item in pending:
+        if item.group == "desktop":
+            continue
         if echo is not None:
             echo(f"Asking for: {item.title}")
         verdict = request_item(
@@ -113,7 +125,34 @@ def onboard(
         )
         if echo is not None:
             echo(f"  -> {verdict}")
-    return check(host=seat, now=now)
+
+
+# meiva:ref services/desktop/permissions_helper/docs/onboarding.meiva.okf.md#every-run-asks
+def onboard(
+    *,
+    host: GateHost | None = None,
+    now: datetime | None = None,
+    automatic: bool = True,
+    timeout_s: float = REQUEST_TIMEOUT_S,
+    sleep: Callable[[float], None] = time.sleep,
+    echo: Callable[[str], None] | None = None,
+    request_item: Callable[..., str] = triggers.request_item,
+) -> GateReport:
+    seat = host or local_host()
+    report = check(host=seat, now=now)
+    if report.state in (GateState.COMPLETE, GateState.NOT_APPLICABLE):
+        return report
+    pending = report.prompt_now() if automatic else report.requestable()
+    if not pending:
+        return report
+    unsupported = _ask_process_grants(report, seat, pending, echo)
+    _ask_items(
+        seat, pending, timeout_s=timeout_s, sleep=sleep, echo=echo, request_item=request_item
+    )
+    report = check(host=seat, now=now)
+    if unsupported:
+        report = replace(report, diagnostic=unsupported)
+    return report
 
 
 def observations(report: GateReport) -> dict[str, str]:
@@ -167,11 +206,11 @@ class GateService:
     def onboard(
         self,
         *,
-        interactive: bool,
+        automatic: bool = True,
         timeout_s: float = REQUEST_TIMEOUT_S,
         echo: Callable[[str], None] | None = None,
     ) -> GateReport:
-        return onboard(interactive=interactive, timeout_s=timeout_s, echo=echo)
+        return onboard(automatic=automatic, timeout_s=timeout_s, echo=echo)
 
     def defer(self) -> None:
         defer()

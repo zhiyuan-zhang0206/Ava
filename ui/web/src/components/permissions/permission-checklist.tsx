@@ -25,6 +25,7 @@ const STATE_TONE: Record<string, string> = {
   granted: "text-emerald-600 dark:text-emerald-400",
   denied: "text-destructive",
   not_determined: "text-amber-600 dark:text-amber-400",
+  stale: "text-amber-600 dark:text-amber-400",
   unknown: "text-muted-foreground",
 };
 
@@ -139,7 +140,9 @@ function Row({ row }: { row: PermissionItemRow }) {
         <div className="mt-1">{row.verify}</div>
       </TableCell>
       <TableCell className="align-top text-xs">
-        {row.blocking ? (
+        {row.state === "stale" ? (
+          <span className="text-muted-foreground">{row.restart || row.detail}</span>
+        ) : row.blocking ? (
           <div className="space-y-1">
             <a
               className={cn("items-center gap-1 underline-offset-2 hover:underline", FLEX)}

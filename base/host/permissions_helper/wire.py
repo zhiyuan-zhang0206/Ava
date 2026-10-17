@@ -27,6 +27,7 @@ class PingResult(TypedDict):
         bool
     ]  # marks the window each input lands on; serves `indicator_stop`
     clipboard_v1: NotRequired[bool]  # serves `clipboard_read` / `clipboard_write`
+    request_grants_v1: NotRequired[bool]
     mouse_hold_v1: NotRequired[
         bool
     ]  # serves `mouse_down` / `mouse_up` / `mouse_release_all`; `drag` takes button + modifiers
@@ -346,3 +347,8 @@ class FileListResult(TypedDict):
 
 class FileReadResult(TypedDict):
     content_b64: str
+
+
+class RequestGrantsResult(TypedDict):
+    screen_recording: bool
+    accessibility: bool

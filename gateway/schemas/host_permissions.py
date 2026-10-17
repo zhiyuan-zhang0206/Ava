@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict
 
 
 class PermissionItemRow(BaseModel):
@@ -32,14 +32,3 @@ class HostPermissionsPayload(BaseModel):
     required_total: int
     required_missing: int
     items: list[PermissionItemRow]
-
-
-class HostPermissionsRequest(BaseModel):
-    model_config = ConfigDict(frozen=True)
-
-    confirm_user_present: bool = Field(
-        description=(
-            "The caller attests a person is at the machine. Required: a pending"
-            " permission dialog blocks synthesized input machine-wide until answered."
-        )
-    )

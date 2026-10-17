@@ -286,11 +286,10 @@ def ensure_permissions_onboarding(ctx: ConvergeCtx) -> None:
     from services.desktop.permissions_helper import onboarding
 
     first_run = gate.read_record() is None
-    interactive = first_run and sys.stdin.isatty() and sys.stdout.isatty()
-    report = onboarding.onboard(interactive=interactive) if interactive else onboarding.check()
+    report = onboarding.onboard()
     if report.state in (gate.GateState.COMPLETE, gate.GateState.NOT_APPLICABLE):
         return
-    if interactive:
+    if first_run:
         print(checklist.render_text(report), file=sys.stderr)
         return
     print(f"  ! {checklist.headline(report)}", file=sys.stderr)
@@ -455,7 +454,7 @@ CONVERGE_STEPS: tuple[ConvergeStep, ...] = (
     # Drift is detected, never repaired here.
     ConvergeStep("local Git hook pointers", ensure_local_git_hooks),
     ConvergeStep(
-        "permissions onboarding (first run)",
+        "permissions onboarding",
         ensure_permissions_onboarding,
     ),
     ConvergeStep(

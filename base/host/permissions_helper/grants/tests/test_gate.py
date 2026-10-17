@@ -4,7 +4,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 from base.host.permissions_helper.grants import gate
-from base.host.permissions_helper.grants.catalog import PREFLIGHT_SERVICES, Grant
+from base.host.permissions_helper.grants.catalog import PING_KEYS, PREFLIGHT_SERVICES, Grant
 from base.host.permissions_helper.grants.probe import ProbeResult
 
 NOW = datetime(2026, 10, 17, 6, 0, tzinfo=UTC)
@@ -12,14 +12,14 @@ NOW = datetime(2026, 10, 17, 6, 0, tzinfo=UTC)
 
 def _result(**overrides: Grant) -> ProbeResult:
     grants = dict.fromkeys(PREFLIGHT_SERVICES, Grant.GRANTED)
+    booleans = dict.fromkeys(PING_KEYS, True)
     for item_id, grant in overrides.items():
-        for service in gate.item_for(item_id).services:
+        item = gate.item_for(item_id)
+        if item.ping_key:
+            booleans[item.ping_key] = grant is Grant.GRANTED
+        for service in item.services:
             grants[service] = grant
-    return ProbeResult(
-        grants=grants,
-        screen_recording=overrides.get("screen-recording") is not Grant.DENIED,
-        ax_trusted=overrides.get("accessibility") is not Grant.DENIED,
-    )
+    return ProbeResult(grants=grants, booleans=booleans, supports_request=True)
 
 
 def test_a_fully_granted_host_is_complete() -> None:
@@ -107,3 +107,28 @@ def test_deferring_records_later_without_inventing_a_grant(tmp_path: Path) -> No
     assert stored is not None
     assert stored.deferred and stored.state is gate.GateState.DEFERRED
     assert stored.grants == {}
+
+
+def test_a_grant_the_running_helper_has_not_read_is_stale_not_denied() -> None:
+    result = ProbeResult(
+        grants=dict.fromkeys(PREFLIGHT_SERVICES, Grant.GRANTED),
+        booleans={"preflight_screen": False, "ax_trusted": False},
+        supports_request=True,
+    )
+    report = gate.evaluate(result, now=NOW)
+    assert report.grant_for("screen-recording") is Grant.STALE
+    assert report.state is gate.GateState.ACTION_REQUIRED
+    assert report.prompt_now() == ()
+    assert report.requestable() == ()
+    assert [status.item.id for status in report.missing] == ["screen-recording", "accessibility"]
+
+
+def test_a_tri_state_row_keeps_its_denial_without_a_helper_boolean() -> None:
+    report = gate.evaluate(_result(**{"desktop-folder": Grant.DENIED}), now=NOW)
+    assert report.grant_for("desktop-folder") is Grant.DENIED
+    assert report.prompt_now() == ()
+
+
+def test_the_manual_pass_reaches_a_denied_grant() -> None:
+    report = gate.evaluate(_result(accessibility=Grant.DENIED), now=NOW)
+    assert [item.id for item in report.requestable()] == ["accessibility"]

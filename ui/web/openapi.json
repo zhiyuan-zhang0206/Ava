@@ -2773,18 +2773,8 @@
     "/api/host/permissions/request": {
       "post": {
         "summary": "Request Host Permissions",
-        "description": "Run the first-run pass: request every missing grant a dialog can still\nresolve, then re-read the matrix. Requires confirm_user_present -- a\npending dialog blocks synthesized input machine-wide until answered.",
+        "description": "Request every grant a system dialog can still resolve, then re-read the\nmatrix. This is the explicit path: an automatic pass asks only grants the\nuser has never been asked about, and a denied one stays manual. macOS shows\none dialog per bundle identity and answers later requests silently.",
         "operationId": "request_host_permissions_api_host_permissions_request_post",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/HostPermissionsRequest"
-              }
-            }
-          },
-          "required": true
-        },
         "responses": {
           "200": {
             "description": "Successful Response",
@@ -2792,16 +2782,6 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/HostPermissionsPayload"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
                 }
               }
             }
@@ -12137,20 +12117,6 @@
           "items"
         ],
         "title": "HostPermissionsPayload"
-      },
-      "HostPermissionsRequest": {
-        "properties": {
-          "confirm_user_present": {
-            "type": "boolean",
-            "title": "Confirm User Present",
-            "description": "The caller attests a person is at the machine. Required: a pending permission dialog blocks synthesized input machine-wide until answered."
-          }
-        },
-        "type": "object",
-        "required": [
-          "confirm_user_present"
-        ],
-        "title": "HostPermissionsRequest"
       },
       "ImageUrlContentBlock": {
         "properties": {

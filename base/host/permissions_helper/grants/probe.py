@@ -10,11 +10,13 @@ from typing import Protocol
 
 from base.host.permissions_helper.grants.catalog import (
     CATALOG,
+    PING_KEYS,
     PREFLIGHT_SERVICES,
     Grant,
     PermissionItem,
     RequestMode,
 )
+from base.host.permissions_helper.wire import RequestGrantsResult
 
 PROBE_WAIT_S = 10.0
 
@@ -31,6 +33,8 @@ _RESULT_WORDS: dict[int, Grant] = {
 
 class HelperChannel(Protocol):
     def ping(self) -> Mapping[str, object]: ...
+
+    def request_grants(self) -> RequestGrantsResult: ...
 
     def spawn_process(
         self,
@@ -50,19 +54,26 @@ class PermissionsProbeError(RuntimeError):
 @dataclass(frozen=True)
 class ProbeResult:
     grants: Mapping[str, Grant]
-    screen_recording: bool | None = None
-    ax_trusted: bool | None = None
+    booleans: Mapping[str, bool] = field(default_factory=dict[str, bool])
     helper_reachable: bool = True
+    supports_request: bool = False
     diagnostic: str = ""
     unread: tuple[str, ...] = field(default_factory=tuple)
 
     def grant_for(self, item: PermissionItem) -> Grant:
-        if item.id == "screen-recording" and self.screen_recording is not None:
-            return Grant.GRANTED if self.screen_recording else Grant.DENIED
-        if item.id == "accessibility" and self.ax_trusted is not None:
-            return Grant.GRANTED if self.ax_trusted else Grant.DENIED
         if item.mode is RequestMode.LIVE_EVENT:
             return Grant.UNKNOWN
+        record = self._record_grant(item)
+        if not item.ping_key:
+            return record
+        held = self.booleans.get(item.ping_key)
+        if held is None:
+            return record
+        if held:
+            return Grant.GRANTED
+        return Grant.STALE if record is Grant.GRANTED else record
+
+    def _record_grant(self, item: PermissionItem) -> Grant:
         observed = [self.grants.get(service, Grant.UNKNOWN) for service in item.services]
         if not observed:
             return Grant.UNKNOWN
@@ -166,7 +177,6 @@ def probe(
 ) -> ProbeResult:
     from base.host.permissions_helper.client import PermissionsHelperError
 
-    ping: Mapping[str, object] = {}
     try:
         ping = client.ping()
     except PermissionsHelperError as exc:
@@ -189,11 +199,24 @@ def probe(
         wait_s=wait_s,
         sleep=sleep,
     )
-    screen = ping.get("preflight_screen")
-    ax = ping.get("ax_trusted")
+    booleans: dict[str, bool] = {}
+    for key in PING_KEYS:
+        value = ping.get(key)
+        if isinstance(value, bool):
+            booleans[key] = value
     return ProbeResult(
         grants=grants,
-        screen_recording=screen if isinstance(screen, bool) else None,
-        ax_trusted=ax if isinstance(ax, bool) else None,
+        booleans=booleans,
+        supports_request=ping.get("request_grants_v1") is True,
         unread=tuple(item.id for item in CATALOG if item.mode is RequestMode.LIVE_EVENT),
     )
+
+
+# meiva:ref base/host/permissions_helper/grants/docs/grants.meiva.okf.md#requests-run-in-the-helper
+def request_process_grants(client: HelperChannel) -> RequestGrantsResult:
+    from base.host.permissions_helper.client import PermissionsHelperError
+
+    try:
+        return client.request_grants()
+    except PermissionsHelperError as exc:
+        raise PermissionsProbeError(f"grant request failed: {exc}") from exc

@@ -2,15 +2,11 @@ from __future__ import annotations
 
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends
 
 from base.host.permissions_helper.grants import checklist
 from base.host.permissions_helper.grants.gate import GateReport
-from gateway.schemas.host_permissions import (
-    HostPermissionsPayload,
-    HostPermissionsRequest,
-    PermissionItemRow,
-)
+from gateway.schemas.host_permissions import HostPermissionsPayload, PermissionItemRow
 from services.desktop.permissions_helper.onboarding import GateService
 
 router = APIRouter()
@@ -65,24 +61,16 @@ def recheck_host_permissions(
 @router.post(
     "/api/host/permissions/request",
     description=(
-        "Run the first-run pass: request every missing grant a dialog can still\n"
-        "resolve, then re-read the matrix. Requires confirm_user_present -- a\n"
-        "pending dialog blocks synthesized input machine-wide until answered."
+        "Request every grant a system dialog can still resolve, then re-read the\n"
+        "matrix. This is the explicit path: an automatic pass asks only grants the\n"
+        "user has never been asked about, and a denied one stays manual. macOS shows\n"
+        "one dialog per bundle identity and answers later requests silently."
     ),
 )
 def request_host_permissions(
-    body: HostPermissionsRequest,
     gate: Annotated[GateService, Depends(gate_service)],
 ) -> HostPermissionsPayload:
-    if not body.confirm_user_present:
-        raise HTTPException(
-            status_code=400,
-            detail=(
-                "confirm_user_present is required: raising permission dialogs needs a"
-                " person at the machine to answer them"
-            ),
-        )
-    return _payload(gate.onboard(interactive=True))
+    return _payload(gate.onboard(automatic=False))
 
 
 @router.post(

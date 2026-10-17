@@ -8,7 +8,7 @@ from typing import Any
 import pytest
 
 from base.host.permissions_helper.grants import checklist, gate
-from base.host.permissions_helper.grants.catalog import PREFLIGHT_SERVICES, Grant
+from base.host.permissions_helper.grants.catalog import PING_KEYS, PREFLIGHT_SERVICES, Grant
 from base.host.permissions_helper.grants.probe import ProbeResult
 from cli.commands import permissions as cmd
 from services.desktop.permissions_helper.onboarding import GateService
@@ -18,15 +18,15 @@ NOW = datetime(2026, 10, 17, 9, 0, tzinfo=UTC)
 
 def _report(**overrides: Grant) -> gate.GateReport:
     grants = dict.fromkeys(PREFLIGHT_SERVICES, Grant.GRANTED)
+    booleans = dict.fromkeys(PING_KEYS, True)
     for item_id, grant in overrides.items():
-        for service in gate.item_for(item_id).services:
+        item = gate.item_for(item_id)
+        if item.ping_key:
+            booleans[item.ping_key] = grant is Grant.GRANTED
+        for service in item.services:
             grants[service] = grant
     return gate.evaluate(
-        ProbeResult(
-            grants=grants,
-            screen_recording=overrides.get("screen-recording") is not Grant.DENIED,
-            ax_trusted=overrides.get("accessibility") is not Grant.DENIED,
-        ),
+        ProbeResult(grants=grants, booleans=booleans, supports_request=True),
         now=NOW,
     )
 
@@ -80,11 +80,11 @@ def test_json_output_is_the_checklist_payload(capsys: pytest.CaptureFixture[str]
     assert payload["required_missing"] == 1
 
 
-def test_onboard_refuses_to_prompt_without_a_tty(capsys: pytest.CaptureFixture[str]) -> None:
+def test_the_cli_onboard_is_the_manual_pass(capsys: pytest.CaptureFixture[str]) -> None:
     service = FakeService(_report())
-    assert cmd.run(_args(permissions_cmd="onboard"), service, interactive=False) == 0
+    assert cmd.run(_args(permissions_cmd="onboard"), service) == 0
     assert service.calls[0][0] == "onboard"
-    assert service.calls[0][1]["interactive"] is False
+    assert service.calls[0][1]["automatic"] is False
 
 
 def test_defer_says_plainly_that_nothing_was_granted(capsys: pytest.CaptureFixture[str]) -> None:

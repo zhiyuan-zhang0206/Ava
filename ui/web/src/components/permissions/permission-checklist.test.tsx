@@ -103,6 +103,26 @@ describe("PermissionChecklist", () => {
     expect(screen.getByText("Control Finder")).toBeTruthy();
   });
 
+  it("sends a grant the helper has not read to the restart, not to System Settings", async () => {
+    getHostPermissions.mockResolvedValue(
+      payload({
+        items: [
+          row({
+            state: "stale",
+            state_label: "granted in macOS; the helper has not read it yet",
+            restart: "Restart the permissions helper (`meiva permissions restart-helper`).",
+          }),
+        ],
+      }),
+    );
+    wrap(<PermissionChecklist />);
+    expect(
+      await screen.findByText("granted in macOS; the helper has not read it yet"),
+    ).toBeTruthy();
+    expect(screen.getByText(/Restart the permissions helper/)).toBeTruthy();
+    expect(screen.queryByText("Open System Settings")).toBeNull();
+  });
+
   it("re-checks against the system instead of trusting what it rendered", async () => {
     wrap(<PermissionChecklist />);
     await screen.findByText("Screen Recording");

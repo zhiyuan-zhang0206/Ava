@@ -280,6 +280,9 @@ check-typed-exception = true
 # checkout venv. The bootstrap is a code statement ahead of those imports by
 # design; E402 records that ordering, not a stray import.
 "scripts/host_ops/tcc/onboard-helper-grants.py" = ["E402"]
+# Same ordering as the tool above: the repository root has to be on sys.path
+# before the base.* imports, so E402 records that, not a stray import.
+"scripts/host_ops/tcc/request_grants_evidence.py" = ["E402"]
 # These are the helper-spawned child programs: each one performs a single fixed
 # OS action (list a folder, send one AppleEvent, query tccd) and reports the
 # outcome verbatim. S603 records the fixed argv built here; BLE001 is the point
