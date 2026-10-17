@@ -30,6 +30,7 @@ def reply_suggestion_policy(config: ConfigBoot) -> ReplySuggestionPolicy:
         gate_model=lambda: config.view.lm.reply_suggestion_gate_model,
         gate_threshold=lambda: config.view.lm.reply_suggestion_gate_threshold,
         max_input_tokens=lambda: config.view.lm.reply_suggestion_max_input_tokens,
+        max_candidates=lambda: config.view.lm.reply_suggestion_max_candidates,
     )
 
 

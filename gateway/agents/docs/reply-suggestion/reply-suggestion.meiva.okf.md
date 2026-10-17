@@ -37,18 +37,24 @@ simply not useful.
    must be cut keeps its newest words. `excerpt.py`'s `is_human_source` mirrors
    `inboundKind` in `ui/web/src/components/timeline/model/runs.ts` (the `user` /
    `ui:page:*` split); keep the pair in sync.
-3. Gate: `decide(reply_suggestion_gate_model, ...)` asks one `YesNo`, "would suggesting
-   a reply help the user at this point in the conversation?". Below
-   `reply_suggestion_gate_threshold` the answer is `not_useful`. This judges the value
-   of suggesting a reply, not whether the agent is blocked waiting for the user.
+3. Gate: `decide(reply_suggestion_gate_model, ...)` asks one `YesNo`, "does the agent's
+   last turn leave the user something to answer or decide?". Below
+   `reply_suggestion_gate_threshold` the answer is `not_useful`. This judges whether the
+   user owes the agent an answer, approval or choice: a progress report, a wait on another
+   agent or a running job, or a finished turn does not qualify. A suggestion the user has
+   no reason to send is worse than no suggestion.
 4. Draft: `reply_suggestion_model` with reasoning off (DeepSeek defaults to maximum
    effort, which makes a one-line draft run for tens of seconds). The fixed instruction
    is the system message, first in the request, so the provider's prompt cache covers it.
    One native structured-output call submits the `DraftReplies` schema through
    `with_structured_output(method="json_schema", strict=True, include_raw=True)`, returning
-   an object containing `suggestions`. The prompt specifies the task, not a JSON format.
-   The model chooses both the number and content from context; there is no preferred
-   count, three-candidate ceiling or question-type policy.
+   an object containing `suggestions`. The prompt specifies the task, not a JSON format. The instruction asks for one reply
+   when the user's next move is obvious, more only when the conversation really offers a
+   choice, and never more than `reply_suggestion_max_candidates` (default three, the
+   ceiling for a genuine choice). It also asks the first reply to a go/no-go or approval
+   question to be the shortest natural answer the user would send ("go" / "not yet"),
+   not a sentence. A response with more candidates than the bound is rejected as
+   `invalid_generation`, never truncated: the bound is a contract, not a hint.
    The default DeepSeek provider uses its Responses endpoint for this operation because
    its Anthropic-compatible endpoint supports only `output_config.effort`. The configured
    model, key, reasoning effort, timeout and output cap are preserved; ordinary agent chat
@@ -77,7 +83,7 @@ must not leave the watcher running after failed work ends.
 Cluster settings in `LmSettings`, read by the gateway from the configuration snapshot
 captured at its process start: `reply_suggestion_enabled`, `reply_suggestion_model`,
 `reply_suggestion_gate_model`, `reply_suggestion_gate_threshold`,
-`reply_suggestion_max_input_tokens`. A changed value takes effect on the next gateway
+`reply_suggestion_max_input_tokens`, `reply_suggestion_max_candidates`. A changed value takes effect on the next gateway
 restart. The per-user `behavior.replySuggestions` preference is separate and takes effect
 without one. Construction captures readers without reading models or policy. After the request
 passes the enabled, idle and excerpt checks, the draft model must be a registered

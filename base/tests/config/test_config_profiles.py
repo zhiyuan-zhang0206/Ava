@@ -281,6 +281,7 @@ def test_gateway_consumed_fields_declare_gateway_restart() -> None:
             "reply_suggestion_gate_model",
             "reply_suggestion_gate_threshold",
             "reply_suggestion_max_input_tokens",
+            "reply_suggestion_max_candidates",
         ),
     }
     for model, names in by_model.items():

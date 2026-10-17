@@ -20,10 +20,10 @@ from gateway.agents.reply_suggestion import service as service_module
 from gateway.agents.reply_suggestion.schemas import MAX_SUGGESTION_CHARS, DraftReplies
 from gateway.agents.reply_suggestion.service import (
     CACHE_ENTRIES,
-    DRAFT_INSTRUCTION,
     DRAFT_USAGE_KIND,
     GATE_USAGE_KIND,
     ReplySuggestionConfigurationError,
+    draft_instruction,
 )
 from gateway.agents.reply_suggestion.tests.support import (
     Harness,
@@ -157,7 +157,7 @@ async def test_a_passing_gate_drafts_with_the_instruction_first(
     ]
     (messages,) = harness.chat.invocations
     assert [type(m) for m in messages] == [SystemMessage, HumanMessage]
-    assert messages[0].content == DRAFT_INSTRUCTION
+    assert messages[0].content == draft_instruction(3)
     assert messages[1].content == harness.decide.calls[0][1]
     assert usage_rows == [
         {
@@ -293,7 +293,7 @@ async def test_invalid_candidates_are_rejected_as_a_whole(harness: Harness, repl
     [
         ["Continue."],
         ["Continue.", "Pause."],
-        ["Use A.", "Use B.", "Use C.", "Use D."],
+        ["Use A.", "Use B.", "Use C."],
     ],
 )
 async def test_model_candidate_count_and_order_reach_the_response(
@@ -306,6 +306,29 @@ async def test_model_candidate_count_and_order_reach_the_response(
     assert result.suggestions == candidates
     assert result.reason is None
     assert len(harness.chat.invocations) == 1
+
+
+async def test_more_candidates_than_the_bound_are_rejected_as_a_whole(
+    harness: Harness, usage_rows: list[dict[str, Any]]
+) -> None:
+    harness.chat.reply = json.dumps({"suggestions": ["A.", "B.", "C.", "D."]})
+
+    result = await harness.service.suggest(7)
+
+    assert (result.suggestions, result.reason) == ([], "invalid_generation")
+    assert len(usage_rows) == 1
+
+
+async def test_the_draft_instruction_states_the_configured_bound(
+    harness: Harness, usage_rows: list[dict[str, Any]]
+) -> None:
+    harness.settings.max_candidates = 2
+
+    await harness.service.suggest(7)
+
+    (messages,) = harness.chat.invocations
+    assert messages[0].content == draft_instruction(2)
+    assert "never more than 2" in messages[0].content
 
 
 @pytest.mark.parametrize(

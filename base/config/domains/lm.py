@@ -140,6 +140,25 @@ class LmSettings(EnvSettings):
         },
     )
 
+    reply_suggestion_max_candidates: int = Field(
+        default=3,
+        gt=0,
+        alias="MEIVA_REPLY_SUGGESTION_MAX_CANDIDATES",
+        description=(
+            "Upper bound on reply candidates for one suggestion. Users reported that four "
+            "or more candidates are noise: most turns deserve one reply, a real choice two, "
+            "and three is the ceiling. The draft instruction states the bound; a longer "
+            "model response is rejected as invalid_generation rather than truncated."
+        ),
+        json_schema_extra={
+            "restart_required": "gateway",
+            "writable": True,
+            "sensitive": False,
+            "capability": "gateway",
+            "scope": "cluster-pinned",
+        },
+    )
+
     reply_suggestion_max_input_tokens: int = Field(
         default=1500,
         gt=0,

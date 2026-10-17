@@ -39,16 +39,23 @@ CACHE_ENTRIES = 512
 
 USEFUL_REPLY = "useful_reply"
 GATE_QUESTION = YesNo(
-    question="Would suggesting a reply help the user at this point in the conversation?",
-    true_if="A reply suggestion would help the user respond.",
-    false_if="A reply suggestion would not help the user respond.",
+    question="Does the agent's last turn leave the user something to answer or decide?",
+    true_if="The agent asks the user to approve, choose, confirm or supply something.",
+    false_if=(
+        "The agent only reports progress, waits on another agent or a running job, or has finished."
+    ),
 )
 
 
-DRAFT_INSTRUCTION = (
-    "Draft short replies the user could send next in the user's language. "
-    "Decide the appropriate number of suggestions and their content from context."
-)
+def draft_instruction(max_candidates: int) -> str:
+    return (
+        "Draft replies the user could send next, in the user's language. "
+        "Give one reply when the user's next move is obvious; give more only when the "
+        f"conversation really offers a choice, and never more than {max_candidates}. "
+        "When the agent asks the user to approve or confirm going ahead, the first reply is "
+        "the shortest natural answer the user would send ('go' or 'not yet'), not a sentence."
+    )
+
 
 LoadMessages = Callable[[int], Sequence[BaseMessage]]
 AgentStatusReader = Callable[[int], AgentStatus]
@@ -63,6 +70,7 @@ class ReplySuggestionPolicy:
     gate_model: Callable[[], str]
     gate_threshold: Callable[[], float]
     max_input_tokens: Callable[[], int]
+    max_candidates: Callable[[], int]
 
 
 class ReplySuggestionConfigurationError(ValueError):
@@ -184,6 +192,7 @@ class ReplySuggestionService:
         self, agent_id: int, excerpt: ConversationExcerpt, catalog: ModelCatalog
     ) -> ReplySuggestionResponse:
         model_id = self._policy.model()
+        max_candidates = self._policy.max_candidates()
         llm = self._draft_model(model_id, catalog).with_structured_output(
             DraftReplies.model_json_schema(),
             method="json_schema",
@@ -193,7 +202,10 @@ class ReplySuggestionService:
         started = time.monotonic()
         try:
             response = await llm.ainvoke(
-                [SystemMessage(content=DRAFT_INSTRUCTION), HumanMessage(content=excerpt.text)]
+                [
+                    SystemMessage(content=draft_instruction(max_candidates)),
+                    HumanMessage(content=excerpt.text),
+                ]
             )
         except Exception as exc:
             failure = normalize_provider_transport_error(exc)
@@ -230,6 +242,16 @@ class ReplySuggestionService:
                 "reply suggestion draft for agent {agent_id} rejected: invalid candidates",
                 event="reply_suggestion_draft_rejected",
                 agent_id=agent_id,
+            )
+            return _none("invalid_generation")
+        if len(suggestions) > max_candidates:
+            logger.warning(
+                "reply suggestion draft for agent {agent_id} rejected: {count} candidates "
+                "exceed the bound of {max_candidates}",
+                event="reply_suggestion_draft_rejected",
+                agent_id=agent_id,
+                count=len(suggestions),
+                max_candidates=max_candidates,
             )
             return _none("invalid_generation")
         return ReplySuggestionResponse(suggestions=suggestions)
