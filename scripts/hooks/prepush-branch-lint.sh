@@ -32,4 +32,4 @@ base_sha="$(bash "$(dirname "$0")/prepush-base.sh")"
 
 [[ -x .venv/bin/pre-commit ]] || skip "missing .venv/bin/pre-commit; run env -u VIRTUAL_ENV uv sync"
 
-exec .venv/bin/pre-commit run --hook-stage pre-commit --from-ref "$base_sha" --to-ref HEAD
+exec .venv/bin/python scripts/provision/prepush_branch_diff.py "$base_sha" "${PRE_COMMIT_TO_REF:-}"
