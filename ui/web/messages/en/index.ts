@@ -5,7 +5,6 @@ import agentRow from "./agents/agentRow.json";
 import alerts from "./operations/alerts.json";
 import common from "./interface/common.json";
 import config from "./operations/config.json";
-import contentToggle from "./interface/contentToggle.json";
 import contextBreakdown from "./agents/contextBreakdown.json";
 import contextMeter from "./agents/contextMeter.json";
 import control from "./operations/control.json";
@@ -35,7 +34,6 @@ const messages = {
   alerts,
   common,
   config,
-  contentToggle,
   contextBreakdown,
   contextMeter,
   control,

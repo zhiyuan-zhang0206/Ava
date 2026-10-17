@@ -5,6 +5,7 @@ import {
   Bell,
   DollarSign,
   ExternalLink,
+  Gauge,
   HeartPulse,
   LayoutPanelTop,
   RefreshCw,
@@ -16,6 +17,7 @@ import { useTranslations } from "next-intl";
 import Link from "next/link";
 import { Fragment, useCallback, useRef, type ReactNode, useEffect } from "react";
 
+import { ContextMeter, CONTEXT_METER_WIDTH_CLASS } from "@/components/inspector/context-meter";
 import { LiveSectionsSkeleton, SectionSkeleton } from "@/components/inspector/inspector-panel-skeleton";
 import { InspectWidgetSection } from "@/components/inspector/inspector-widgets";
 import { Metric, Section } from "@/components/inspector/inspector-section";
@@ -28,6 +30,7 @@ import { useNow } from "@/lib/format/use-now";
 import { useBreakpoint } from "@/lib/layout/breakpoint";
 import { useAgentPages } from "@/lib/agents/use-agent-pages";
 import { useAgentRoster } from "@/lib/agents/use-agents";
+import { useTimelineStore } from "@/lib/timeline/timeline-store";
 import { useInspectorHours, useInspectorOpen } from "@/lib/inspector/inspector-panel-store";
 import {
   fetchWindowedInspect,
@@ -217,6 +220,12 @@ export function InspectorPanel({ agentId, embedded = false }: { agentId: number;
       />
     ),
   });
+  sections.push({
+    order: INSPECT_SECTION_ORDER.context,
+    tie: 0,
+    key: "context",
+    node: <ContextSection />,
+  });
   sections.push({ order: INSPECT_SECTION_ORDER.page, tie: 0, key: "page", node: <PageSection pages={pages} /> });
   if (liveData) {
     sections.push(
@@ -344,6 +353,52 @@ function InspectReadError({ message, retryLabel, pending, onRetry }: {
         {retryLabel}
       </button>
     </div>
+  );
+}
+
+function ContextSection() {
+  const t = useTranslations("inspector");
+  const contextTokens = useTimelineStore((s) => s.tokenUsage);
+  const maxContextTokens = useTimelineStore((s) => s.maxContextTokens);
+  const softCompactTokens = useTimelineStore((s) => s.softCompactTokens);
+  const hardCompactTokens = useTimelineStore((s) => s.hardCompactTokens);
+  if (contextTokens <= 0) return null;
+  const hasWindow = maxContextTokens > 0;
+  const percent = hasWindow
+    ? `${((contextTokens / maxContextTokens) * 100).toFixed(1)}%`
+    : "—";
+  return (
+    <Section icon={<Gauge className="size-3" />} title={t("sectionContext")} badge={percent}>
+      <div className="space-y-1.5">
+        <div className="px-0.5">
+          <ContextMeter
+            contextTokens={contextTokens}
+            maxContextTokens={maxContextTokens}
+            softCompactTokens={softCompactTokens}
+            hardCompactTokens={hardCompactTokens}
+            barWidthClassName={CONTEXT_METER_WIDTH_CLASS.wide}
+            showText={false}
+          />
+        </div>
+        <div className="grid grid-cols-2 gap-1">
+          <Metric
+            label={t("metricContextUsed")}
+            value={hasWindow
+              ? `${formatTokens(contextTokens)} / ${formatTokens(maxContextTokens)}`
+              : formatTokens(contextTokens)}
+            valueTestId="inspector-context-used"
+          />
+          {hardCompactTokens > 0 ? (
+            <Metric
+              label={t("metricContextLimits")}
+              value={`${formatTokens(softCompactTokens)} / ${formatTokens(hardCompactTokens)}`}
+              sub={t("metricContextLimitsHint")}
+              valueTestId="inspector-context-limits"
+            />
+          ) : null}
+        </div>
+      </div>
+    </Section>
   );
 }
 

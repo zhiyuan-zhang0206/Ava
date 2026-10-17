@@ -1,7 +1,7 @@
 ---
 type: doc
 title: Home shell chrome
-description: The home columns' title bars and the composer's read-only Details summary.
+description: The home columns' title bars and where the Details mode is chosen.
 tags:
 - frontend
 ---
@@ -29,22 +29,21 @@ code = ["ui/web/src/lib/layout/layout.ts:COLUMN_TITLE_BAR_CLASS", "ui/web/src/co
 tests = ["ui/web/src/components/context/to-user-document.test.tsx::To user Markdown::draws the panel title rule on the shared column title bar", "ui/web/src/components/context/shared-context-panel.test.tsx::uses the shared column title bar for the notice header"]
 ```
 
-## Details summary
+## Details mode
 
-The composer's Details chip is a summary, not a control: it renders the mode the
-`display.expand_runs_mode` setting currently holds and links to the row that
-writes it in Display settings. The three modes (All / Last / None) all live on
-that row, which also re-applies the current mode when it is picked again (the
+The mode the timeline expands work blocks to (`display.expand_runs_mode`: All /
+Last / None) is chosen in one place — the Display settings row — and nothing on
+the composer shows or changes it (user decision 2026-10-17: the home screen
+carries no Details control, not even a read-only summary; the chrome belongs in
+settings). That row re-applies the current mode when it is picked again (the
 manual-expansion reset). Because the picker's page unmounts the timeline, the
 reset is recorded as a pending flag in the store and consumed by whichever
-timeline mounts next — the token alone could not survive that gap. The composer
-never writes the setting, so the timeline has one writer for what its blocks
-expand to.
+timeline mounts next — a token alone could not survive that gap.
 
 ```meiva-contract
 id = "details-mode-owner"
 kind = "invariant"
-statement = "The Details mode has one writer: the Display settings row bound to display.expand_runs_mode, which keeps all three modes (All / Last / None) reachable. A pick leaves a pending reset that the next mounted timeline consumes, so re-picking the current mode still collapses manual expansions even though the picker's page had unmounted the timeline. The composer shows the current value read-only — nothing while the stored value is unknown — and links to that row; it never writes the setting."
-code = ["ui/web/src/components/content/content-toggle.tsx:ContentToggle", "ui/web/src/app/control/display/page.tsx:resetManualExpansions", "ui/web/src/lib/layout/content-toggle-store.ts:<module>", "ui/web/src/components/timeline/index.tsx:TimelineView"]
-tests = ["ui/web/src/components/content/content-toggle.test.tsx::ContentToggle::offers no selector of its own in the composer", "ui/web/src/components/content/content-toggle.test.tsx::ContentToggle::renders nothing while the stored mode is still unknown", "ui/web/src/app/control/display/page.test.tsx::DisplaySettingsPage::writes the details mode picked in settings", "ui/web/src/app/control/display/page.test.tsx::DisplaySettingsPage::re-applies the current mode when it is picked again", "ui/web/src/lib/layout/content-toggle-store.test.ts::useContentToggleReset::a re-pick leaves a pending reset for the next mounted timeline", "ui/web/src/components/timeline/timeline.test.tsx::Details mode re-pick made while the timeline was unmounted::collapses the manual expansions on the next mount"]
+statement = "The Details mode has one writer: the Display settings row bound to display.expand_runs_mode, which keeps all three modes (All / Last / None) reachable. A pick leaves a pending reset that the next mounted timeline consumes, so re-picking the current mode still collapses manual expansions even though the picker's page had unmounted the timeline. The home screen carries no Details control or summary of any kind; settings is the only entry point."
+code = ["ui/web/src/app/control/display/page.tsx:resetManualExpansions", "ui/web/src/lib/layout/content-toggle-store.ts:<module>", "ui/web/src/components/timeline/index.tsx:TimelineView"]
+tests = ["ui/web/src/app/control/display/page.test.tsx::DisplaySettingsPage::writes the details mode picked in settings", "ui/web/src/app/control/display/page.test.tsx::DisplaySettingsPage::re-applies the current mode when it is picked again", "ui/web/src/lib/layout/content-toggle-store.test.ts::useContentToggleReset::a re-pick leaves a pending reset for the next mounted timeline", "ui/web/src/components/timeline/timeline.test.tsx::Details mode re-pick made while the timeline was unmounted::collapses the manual expansions on the next mount"]
 ```

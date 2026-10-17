@@ -3294,10 +3294,7 @@ describe("block-level copy/fork actions (MessageCard overlay)", () => {
     expect(pill?.className).toContain("pointer-events-none");
     expect(pill?.className).toContain("group-hover/msgcard:pointer-events-auto");
     expect(pill?.className).toContain("focus-within:pointer-events-auto");
-    // Coarse-pointer (touch) devices opt out of the hover gate entirely —
-    // no real :hover there, so the pill must stay reachable without one.
-    expect(pill?.className).toContain("pointer-coarse:opacity-100");
-    expect(pill?.className).toContain("pointer-coarse:pointer-events-auto");
+    expect(pill?.className).toContain("pointer-coarse:hidden");
   });
 });
 
@@ -5051,6 +5048,41 @@ describe("TimelineView sticky work block (task #2601)", () => {
       expect(toggle.className).toContain("after:bg-border");
       expect(toggle.className).not.toContain("0_2px_0_0_var(--background)");
     });
+  });
+
+  it("keeps an expanded work block pinned through a rapid scroll burst", async () => {
+    const items = [
+      makeItem({ item_id: "1.0", kind: "agent_reasoning", payload: "thinking" }),
+      makeItem({ item_id: "1.1", kind: "agent_code", payload: "code" }),
+      makeItem({ item_id: "1.2", kind: "code_output", payload: "output" }),
+    ];
+
+    const { container } = render(<TimelineView items={items} />);
+    const viewport = container.querySelector('[data-slot="scroll-area-viewport"]')!;
+    Object.defineProperty(viewport, "clientHeight", { value: 600, configurable: true });
+    Object.defineProperty(viewport, "scrollHeight", { value: 8000, configurable: true });
+    vi.spyOn(viewport, "getBoundingClientRect").mockReturnValue(makeMockRect(0, 800, 800));
+    const turnEl = container.querySelector('[data-turn-expanded="true"]')!;
+    vi.spyOn(turnEl, "getBoundingClientRect").mockReturnValue(makeMockRect(10, 700, 690));
+
+    fireEvent.scroll(viewport);
+    await waitFor(() => {
+      expect(screen.getByTestId("turn-toggle").getAttribute("data-stuck")).toBe("true");
+    });
+
+    for (const top of [1200, 2400, 3600, 4800, 6000]) {
+      act(() => {
+        viewport.scrollTop = top;
+        fireEvent.scroll(viewport);
+      });
+      await waitFor(() => {
+        const toggle = screen.getByTestId("turn-toggle");
+        expect(toggle.getAttribute("data-stuck")).toBe("true");
+        expect(toggle.className).toContain("sticky");
+        expect(toggle.className).not.toContain("group-data-[fast-scrolling");
+      });
+    }
+    expect(container.querySelector('[data-fast-scrolling="true"]')).toBeNull();
   });
 
   it("only marks the closest/latest work block as stuck when multiple blocks cross top", async () => {

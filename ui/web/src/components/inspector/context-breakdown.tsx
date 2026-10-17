@@ -28,6 +28,7 @@ export interface ContextButtonProps {
   maxContextTokens: number;
   softCompactTokens: number;
   hardCompactTokens: number;
+  showText?: boolean;
 }
 
 /** The collapsed readout's numeric text hides below sm (QA sweep 2026-09-18

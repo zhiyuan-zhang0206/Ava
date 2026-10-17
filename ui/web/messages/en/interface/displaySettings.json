@@ -45,5 +45,7 @@
   "replySuggestionsDesc": "After an agent finishes a turn, suggest replies when they would help you respond. The model chooses how many suggestions to provide. They appear as grey text in the empty input. Use Up/Down to choose, Right to fill the input, then Enter to send. Typing hides the suggestions.",
   "modelPicker": "Model picker",
   "english": "English",
-  "chinese": "中文"
+  "chinese": "中文",
+  "composerContextMeter": "Context window in the composer",
+  "composerContextMeterDesc": "Show a context-window gauge beside the composer. Off by default — the numbers live in the inspector's Context section, and an enabled gauge is a bare bar with no text."
 }

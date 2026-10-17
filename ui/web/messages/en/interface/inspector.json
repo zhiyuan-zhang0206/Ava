@@ -47,5 +47,9 @@
   "windowedUnavailable": "Windowed inspector data unavailable",
   "retryWindowed": "Retry windowed data",
   "openRunTimeline": "Open run timeline",
-  "jumpNotice": "Notification"
+  "jumpNotice": "Notification",
+  "sectionContext": "Context",
+  "metricContextUsed": "Used",
+  "metricContextLimits": "Wind-down / compact",
+  "metricContextLimitsHint": "soft / hard"
 }
