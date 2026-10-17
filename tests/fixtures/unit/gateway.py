@@ -31,14 +31,14 @@ def gateway_unit(
     (`gateway.tests.agents.gateway_auth`), so endpoint tests carry no auth headers.
     Tests that exercise rejection drop it with `without_credentials(client)`.
     """
-    from base.paths import meiva_home
+    from base import paths
     from gateway.cluster.process_boot import LOADED_IMAGE, GatewayProcess
 
     config = snapshot_process_config()
     config.boot()
     machine_identity.set(role="gateway")
     process = GatewayProcess(
-        home=meiva_home(),
+        home=paths.meiva_home(),
         config=config,
         image=LOADED_IMAGE,
         machine=machine_identity,
