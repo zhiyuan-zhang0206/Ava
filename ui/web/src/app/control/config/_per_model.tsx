@@ -36,7 +36,7 @@ function shadowedLayers(
   return out;
 }
 
-// meiva:ref ui/web/src/app/control/config/docs/configuration.meiva.okf.md#model-failure-keeps-config-editable
+// meiva:link ui/web/src/app/control/config/docs/configuration.meiva.okf.md
 export function PerModelPanel({
   id,
   onFocusField,

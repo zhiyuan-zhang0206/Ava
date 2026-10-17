@@ -32,10 +32,4 @@ it before deciding.
 
 ## Contracts
 
-```meiva-contract
-id = "panel-write-observation"
-kind = "invariant"
-statement = """The files.write / append / edit wraps call the layer below exactly once and return or propagate its outcome untouched; a panel write is recorded only after a successful call, and recording never raises. panel_path matches only this agent's <workspace>/to_user.md; the wraps see the caller's raw path, so a relative one resolves against the tracked meiva.cwd. The wraps carry no docstrings, so the rendered SDK keeps the original files.* contracts."""
-code = ["meiva_builtins/plugins/meiva_to_user/plugin.py:wrapped_write", "meiva_builtins/plugins/meiva_to_user/written.py:panel_path", "meiva_builtins/plugins/meiva_to_user/written.py:record_panel_write"]
-tests = ["meiva_builtins/plugins/meiva_to_user/tests/test_written_recording.py::test_the_write_wrap_records_a_panel_write", "meiva_builtins/plugins/meiva_to_user/tests/test_written_recording.py::test_the_write_wrap_lets_its_exception_through_untouched", "meiva_builtins/plugins/meiva_to_user/tests/test_written_recording.py::test_a_relative_panel_path_resolves_like_the_core"]
-```
+The files.write / append / edit wraps call the layer below exactly once and return or propagate its outcome untouched; a panel write is recorded only after a successful call, and recording never raises. panel_path matches only this agent's <workspace>/to_user.md; the wraps see the caller's raw path, so a relative one resolves against the tracked meiva.cwd. The wraps carry no docstrings, so the rendered SDK keeps the original files.* contracts.

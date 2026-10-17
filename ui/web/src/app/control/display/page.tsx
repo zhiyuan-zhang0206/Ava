@@ -48,7 +48,7 @@ import { type DetailsMode, useContentToggle, useContentToggleReset } from "@/lib
 import { FLEX } from "@/lib/layout/layout";
 import { RadioRow, SettingsSection, SliderRow, TimelineColorsSection, ToggleRow } from "./_rows";
 
-// meiva:ref ui/web/src/docs/frontend-components/home-shell-chrome/home-shell-chrome.meiva.okf.md#details-mode-owner
+// meiva:link ui/web/src/docs/frontend-components/home-shell-chrome/home-shell-chrome.meiva.okf.md
 function resetManualExpansions(): void {
   useContentToggleReset.getState().bumpReset();
 }

@@ -1,4 +1,4 @@
-# meiva:ref base/agents/history/docs/range-read-contracts.meiva.okf.md#history-range-inputs
+# meiva:link base/agents/history/docs/range-read-contracts.meiva.okf.md
 from __future__ import annotations
 
 from collections.abc import Sequence

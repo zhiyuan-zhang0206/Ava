@@ -361,7 +361,7 @@ def uninstall() -> Installation | None:
         # A `LOADING` marker is not an installation: leave it in place (a load may be
         # in flight; a failed attempt stays un-retried), a fresh install overwrites it.
         return None
-    # meiva:ref meiva/docs/sdk-surface/install-lifetime.meiva.okf.md#atexit-owner-follows-the-installation
+    # meiva:link meiva/docs/sdk-surface/install-lifetime.meiva.okf.md
     atexit.unregister(installation.sampling.close)
     setattr(meiva_module(), SLOT, None)
     _run(list(installation.undo))

@@ -1,4 +1,6 @@
-// meiva:ref ui/web/src/docs/frontend-state/shared-context.meiva.okf.md#refresh-ownership
+// meiva:note
+// The global SSE fold invalidates document queries on root file changes and reconnect. Explicit refresh, mount and window focus re-read the document and attachment stamps; attachments are not recursively watched. A changed attachment version refreshes its resource URL even when the Markdown text is unchanged.
+// meiva:link ui/web/src/docs/frontend-state/shared-context.meiva.okf.md
 "use client";
 
 import { useQuery } from "@tanstack/react-query";

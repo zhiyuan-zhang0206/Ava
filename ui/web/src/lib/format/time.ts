@@ -110,7 +110,9 @@ export interface FormatUpcomingOptions {
   timeZone?: string;
 }
 
-// meiva:ref ui/web/src/lib/format/docs/time.meiva.okf.md#day-context
+// meiva:note
+// formatUpcoming renders an upcoming instant as a 12-hour clock time plus the day context its viewer-local calendar date requires, and never as a bare clock time for a future day: clock only later today, 'Tomorrow' on the next local date, a weekday name from two to six days, a day count with the date from seven to 29 days, and the date alone from 30 days. The boundary is local midnight, not 24 elapsed hours, so a DST day still counts as one day. A past instant keeps the shared relative wording and an unparseable input yields an em dash.
+// meiva:link ui/web/src/lib/format/docs/time.meiva.okf.md
 export function formatUpcoming(
   iso: string | Date,
   now: Date = new Date(),

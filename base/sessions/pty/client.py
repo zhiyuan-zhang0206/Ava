@@ -168,7 +168,9 @@ def has_session(name: str) -> bool:
         return False
 
 
-# meiva:ref base/sessions/pty/docs/pty_sessions/host-generation.meiva.okf.md#service-host-generation
+# meiva:note
+# The service mints one generation id per process and reports it on ping; a restarted service always answers a different one. An absent service still answers queries as 'no sessions', so a consumer that acts on absence reads the generation first and treats None as unknown.
+# meiva:link base/sessions/pty/docs/pty_sessions/host-generation.meiva.okf.md
 def host_generation(*, socket_path: Path | None = None) -> str | None:
     try:
         return cast("str | None", request("ping", socket_path=socket_path).get("host_generation"))

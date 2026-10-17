@@ -7,7 +7,9 @@ from pathlib import Path
 _SCRIPTS = Path(__file__).resolve().parents[1]
 _WEB = "ui/web/"
 _CODE = (".ts", ".tsx", ".js", ".mjs", ".mts")
-# meiva:ref scripts/provision/docs/prepush-selection.meiva.okf.md#type-artifact-inputs
+# meiva:note
+# _TYPE_INPUTS names the canonical schema/type artifacts without runtime imports (openapi.json, types-generated.ts): their consumers are proven by project tsc and the codegen-freshness hook, so a change confined to them schedules no related Vitest run while a changed runtime source still does.
+# meiva:link scripts/provision/docs/prepush-selection.meiva.okf.md
 _TYPE_INPUTS = {"ui/web/openapi.json", "ui/web/src/lib/contracts/types-generated.ts"}
 _GLOBAL = {
     "ui/web/package.json",
@@ -20,7 +22,9 @@ _GLOBAL = {
     "ui/web/next.config.ts",
     "ui/web/postcss.config.mjs",
 }
-# meiva:ref scripts/provision/docs/prepush-selection.meiva.okf.md#disk-consumer-inputs
+# meiva:note
+# _DISK_CONSUMERS pairs each input read from disk outside Vitest's import graph (fixtures, locale files, css, layout, gate html) with the contract test that proves it; a new out-of-graph reader must join the table or its push-stage verification silently disappears. The input side is matched by prefix against the contribution paths.
+# meiva:link scripts/provision/docs/prepush-selection.meiva.okf.md
 _DISK_CONSUMERS = (
     ("ui/web/src/", "src/lib/auth/localstorage-policy.test.ts"),
     ("ui/web/messages/", "src/i18n/messages-layout.test.ts"),
@@ -38,12 +42,14 @@ _DISK_CONSUMERS = (
 )
 
 
-# meiva:ref scripts/provision/docs/prepush-selection.meiva.okf.md#fixed-command-execution
+# meiva:link scripts/provision/docs/prepush-selection.meiva.okf.md
 def _query(*args: str) -> str:
     return subprocess.run(["git", *args], check=True, capture_output=True, text=True).stdout
 
 
-# meiva:ref scripts/provision/docs/prepush-selection.meiva.okf.md#branch-contribution-scope
+# meiva:note
+# The selection range is the branch contribution — merge-base(origin/main, HEAD)..HEAD, resolved by scripts/hooks/prepush-base.sh — never an old remote push tip. Renames and deletions keep both sides visible: --no-renames splits a rename into its deletion and addition. An unknown range is an error, never an empty change set.
+# meiva:link scripts/provision/docs/prepush-selection.meiva.okf.md
 def contribution() -> list[str]:
     base = subprocess.run(
         ["bash", str(_SCRIPTS / "hooks" / "prepush-base.sh")],
@@ -60,7 +66,9 @@ def _run(tool: str, command: list[str]) -> int:
     ).returncode
 
 
-# meiva:ref scripts/provision/docs/prepush-selection.meiva.okf.md#empty-related-collection-is-not-green
+# meiva:note
+# Vitest's `related` mode defaults passWithNoTests=true; the selector overrides it to false: an empty affected collection is missing evidence, never a passing test run.
+# meiva:link scripts/provision/docs/prepush-selection.meiva.okf.md
 def _vitest(paths: list[str], *, related: bool = False) -> int:
     return _run(
         "vitest",

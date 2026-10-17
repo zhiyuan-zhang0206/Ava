@@ -42,10 +42,4 @@ content. Forms, `<base>`, frames, popups and top-level navigation remain closed.
 A relative path inside the page cannot resolve — the endpoint has no directory —
 so a report using local assets must inline them or use absolute URLs.
 
-```meiva-contract
-id = "resource-disposition"
-kind = "invariant"
-statement = "A referenced HTML document renders inline under a script-only CSP sandbox and never `allow-same-origin`, so its scripts run in an opaque origin that cannot read the gateway's cookies, localStorage or authenticated API; media, PDFs and inert text render under the plain sandbox, while archives, office documents, executables and unknown types stay attachments."
-code = ["gateway/agents/to_user/document.py:response_policy", "gateway/agents/to_user/document.py:resource_response"]
-tests = ["gateway/agents/to_user/tests/test_document.py::test_html_renders_inline_in_a_script_only_sandbox", "gateway/agents/to_user/tests/test_document.py::test_passive_files_render_inline_without_scripts", "gateway/agents/to_user/tests/test_document.py::test_active_archives_and_unknown_files_stay_attachments"]
-```
+A referenced HTML document renders inline under a script-only CSP sandbox and never `allow-same-origin`, so its scripts run in an opaque origin that cannot read the gateway's cookies, localStorage or authenticated API; media, PDFs and inert text render under the plain sandbox, while archives, office documents, executables and unknown types stay attachments.

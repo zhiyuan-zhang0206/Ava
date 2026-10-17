@@ -1,6 +1,6 @@
 export const REFERENCE_PARAM = "reference";
 
-// meiva:ref ui/web/src/docs/frontend-state/navigation-history.meiva.okf.md#panel-navigation-history
+// meiva:link ui/web/src/docs/frontend-state/navigation-history.meiva.okf.md
 export function readReferences(url: URL, agentId: number): string[] {
   if (Number(url.searchParams.get("agent_id")) !== agentId) return [];
   return url.searchParams.getAll(REFERENCE_PARAM);

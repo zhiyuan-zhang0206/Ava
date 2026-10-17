@@ -30,13 +30,7 @@ reported once. The 2026-08 malformed-frontmatter incident (an
 description) shipped green because the old glob scanned only one and two
 levels; the depth fix is pinned by tests.
 
-```meiva-contract
-id = "skill-desc-scan-universe"
-kind = "invariant"
-statement = "Every repo-shipped SKILL.md under meiva_builtins/skills/, meiva_builtins/plugins/ and .agents/skills/ is materialized through the same SkillIndex.build the runtime loader uses, so the lint cannot drift from the loader; entries resolving to the same real file are reported once, and an entry whose frontmatter fails the runtime parse or lacks required fields is reported as an error and skipped for the remaining gates."
-code = ["scripts/content_lint/lint_skill_descriptions.py:_skill_entries", "scripts/content_lint/lint_skill_descriptions.py:main"]
-tests = ["scripts/content_lint/tests/test_lint_skill_descriptions.py::test_three_deep_skill_with_bad_frontmatter_is_rejected", "scripts/content_lint/tests/test_lint_skill_descriptions.py::test_three_deep_skill_with_good_frontmatter_passes", "scripts/content_lint/tests/test_lint_skill_descriptions.py::test_missing_required_field_is_rejected"]
-```
+Every repo-shipped SKILL.md under meiva_builtins/skills/, meiva_builtins/plugins/ and .agents/skills/ is materialized through the same SkillIndex.build the runtime loader uses, so the lint cannot drift from the loader; entries resolving to the same real file are reported once, and an entry whose frontmatter fails the runtime parse or lacks required fields is reported as an error and skipped for the remaining gates.
 
 ## Description length
 
@@ -56,13 +50,7 @@ is ~12 words, 80 CJK characters are 80 meaningful characters — so a CJK
 character and a word each count as one unit, which tracks information
 content (and prompt tokens) far better.
 
-```meiva-contract
-id = "skill-desc-length-gate"
-kind = "invariant"
-statement = "A description over the 80-unit hard ceiling prints one error and exits 1; the 50-unit soft target is not enforced by this lint — the sweeper's skill-desc class flags 50-80 descriptions for judgment. The length is measured through the shared count_words in base/packages/text_budget.py (one CJK code point or one non-CJK alphanumeric run is one unit; underscores do not join runs), and the constants move only as a deliberate change in the same PR, justified in the commit message."
-code = ["scripts/content_lint/lint_skill_descriptions.py:_HARD_CEILING", "scripts/content_lint/lint_skill_descriptions.py:_SOFT_TARGET", "scripts/content_lint/lint_skill_descriptions.py:main"]
-tests = ["scripts/content_lint/tests/test_lint_skill_descriptions.py::test_description_over_hard_ceiling_is_rejected", "scripts/content_lint/tests/test_lint_skill_descriptions.py::test_description_at_the_ceiling_passes_and_one_unit_over_fails"]
-```
+A description over the 80-unit hard ceiling prints one error and exits 1; the 50-unit soft target is not enforced by this lint — the sweeper's skill-desc class flags 50-80 descriptions for judgment. The length is measured through the shared count_words in base/packages/text_budget.py (one CJK code point or one non-CJK alphanumeric run is one unit; underscores do not join runs), and the constants move only as a deliberate change in the same PR, justified in the commit message.
 
 ## Identity gate
 
@@ -73,13 +61,5 @@ converges to in the load dir: a plugin's root SKILL.md sits at
 `skills/<p>/SKILL.md` — the load-dir leaf is the plugin name, not the
 `skills` container. The runtime loader refuses a mismatch at scan time; a
 repo skill must never ship one.
-
-```meiva-contract
-id = "skill-desc-identity-gate"
-kind = "invariant"
-statement = "The frontmatter name must fold (dash and underscore are one name) to the same key as the skill's load-dir leaf — for a plugin's root SKILL.md the leaf is the plugin name, not the skills container — and a mismatch prints one error and exits 1, matching the runtime loader's refusal."
-code = ["scripts/content_lint/lint_skill_descriptions.py:main"]
-tests = ["scripts/content_lint/tests/test_lint_skill_descriptions.py::test_frontmatter_name_not_folding_to_dir_rejected", "scripts/content_lint/tests/test_lint_skill_descriptions.py::test_plugin_root_skill_folds_against_plugin_name", "scripts/content_lint/tests/test_lint_skill_descriptions.py::test_dash_dir_and_dash_frontmatter_pass"]
-```
 
 Parent: [[scripts/content_lint/docs/content_lint.meiva.okf.md]].

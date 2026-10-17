@@ -43,14 +43,6 @@ tags: [services, lifecycle]
 
 Parent: [[services/supervision/meiva_root/docs/meiva_root.meiva.okf.md]].
 
-```meiva-contract
-id = "helper-ancestry-watch"
-kind = "invariant"
-statement = "The root supervisor reads the helper marker its spawning helper stamped into the environment on its own process, and retires itself only after two consecutive readings find that pid off its ancestor chain. One reading can be a transient process-table error, and retiring a serving tree on it would turn a diagnostic into an outage; a process without the marker (Linux, a direct-spawn development root) is never retired. Retirement reports the registered helper_chain_broken event with process=root, stops the tree and releases the instance lock so the helper keeper seeds a replacement from the same seed."
-code = ["services/supervision/meiva_root/helper_chain.py:HelperChainWatch.run"]
-tests = ["services/supervision/meiva_root/tests/test_helper_chain.py::test_retires_on_the_confirming_broken_reading", "services/supervision/meiva_root/tests/test_helper_chain.py::test_a_single_broken_reading_does_not_retire", "services/supervision/meiva_root/tests/test_meiva_root_daemon.py::test_retires_when_the_helper_ancestry_is_gone"]
-```
-
 Retiring on a replaced helper is one instance of the rule every generated tree
 follows: a component is never retried inside its own container generation, and a
 replacement generation is one new chance for the supervisor to rebuild it. The

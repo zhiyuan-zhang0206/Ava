@@ -15,7 +15,7 @@ from base.packages.skills.tree import Skill, identifier, target
 from base.paths import meiva_home, repo_plugins_dir, repo_root
 
 
-# meiva:ref base/packages/docs/composer-commands.meiva.okf.md#catalog-lazy-boundary
+# meiva:link base/packages/docs/composer-commands.meiva.okf.md
 def _commands_enabled() -> bool:
     if settings.has_domain("agent"):
         return settings.agent.commands_enabled
@@ -27,7 +27,7 @@ def _commands_enabled() -> bool:
     return value.strip().lower() in {"1", "true", "yes", "on"}
 
 
-# meiva:ref base/packages/docs/composer-commands.meiva.okf.md#command-expansion
+# meiva:link base/packages/docs/composer-commands.meiva.okf.md
 class Command(TypedDict):
     name: str
     description: str
@@ -36,7 +36,7 @@ class Command(TypedDict):
     skill_target: str | None
 
 
-# meiva:ref base/packages/docs/composer-commands.meiva.okf.md#command-discovery
+# meiva:link base/packages/docs/composer-commands.meiva.okf.md
 def command_dirs(skills: Sequence[Skill]) -> list[tuple[Path, tuple[str, ...]]]:
     dirs: list[tuple[Path, tuple[str, ...]]] = [
         (repo_root() / "meiva_builtins" / "commands", ()),
@@ -54,7 +54,7 @@ def command_dirs(skills: Sequence[Skill]) -> list[tuple[Path, tuple[str, ...]]]:
     return dirs
 
 
-# meiva:ref base/packages/docs/composer-commands.meiva.okf.md#command-discovery
+# meiva:link base/packages/docs/composer-commands.meiva.okf.md
 def scan_dir(d: Path, base_ns: tuple[str, ...]) -> dict[str, Command]:
     out: dict[str, Command] = {}
     if not d.is_dir():
@@ -81,7 +81,7 @@ def scan_dir(d: Path, base_ns: tuple[str, ...]) -> dict[str, Command]:
     return out
 
 
-# meiva:ref base/packages/docs/composer-commands.meiva.okf.md#command-discovery
+# meiva:link base/packages/docs/composer-commands.meiva.okf.md
 def skill_commands(skills: Sequence[Skill]) -> dict[str, Command]:
     out: dict[str, Command] = {}
     for sk in skills:
@@ -96,7 +96,7 @@ def skill_commands(skills: Sequence[Skill]) -> dict[str, Command]:
     return out
 
 
-# meiva:ref base/packages/docs/composer-commands.meiva.okf.md#command-discovery
+# meiva:link base/packages/docs/composer-commands.meiva.okf.md
 def discover_commands(skills: Sequence[Skill]) -> list[Command]:
     if not _commands_enabled():
         return []
@@ -106,7 +106,7 @@ def discover_commands(skills: Sequence[Skill]) -> list[Command]:
     return [out[name] for name in sorted(out)]
 
 
-# meiva:ref base/packages/docs/composer-commands.meiva.okf.md#command-expansion
+# meiva:link base/packages/docs/composer-commands.meiva.okf.md
 class Invocation(NamedTuple):
     command: Command
     typed_name: str
@@ -116,7 +116,7 @@ class Invocation(NamedTuple):
 _INVOCATION = re.compile(r"(?:\A|(?<=\s))/(\S+)")
 
 
-# meiva:ref base/packages/docs/composer-commands.meiva.okf.md#command-expansion
+# meiva:link base/packages/docs/composer-commands.meiva.okf.md
 def split_commands(content: str, commands: Sequence[Command]) -> list[Invocation] | None:
     catalog = {match_key(c["name"]): c for c in commands}
     hits = [
@@ -133,7 +133,7 @@ def split_commands(content: str, commands: Sequence[Command]) -> list[Invocation
     return chain
 
 
-# meiva:ref base/packages/docs/composer-commands.meiva.okf.md#command-expansion
+# meiva:link base/packages/docs/composer-commands.meiva.okf.md
 def _expand_one(inv: Invocation) -> str:
     name = inv.typed_name
     if inv.command["skill_target"]:
@@ -148,7 +148,7 @@ def _expand_one(inv: Invocation) -> str:
     return out
 
 
-# meiva:ref base/packages/docs/composer-commands.meiva.okf.md#command-expansion
+# meiva:link base/packages/docs/composer-commands.meiva.okf.md
 def expand_command(content: str, commands: Sequence[Command]) -> str:
     if not content.startswith("/"):
         return content
@@ -158,7 +158,7 @@ def expand_command(content: str, commands: Sequence[Command]) -> str:
     return "\n\n".join(_expand_one(inv) for inv in chain)
 
 
-# meiva:ref base/packages/docs/composer-commands.meiva.okf.md#catalog-lazy-boundary
+# meiva:link base/packages/docs/composer-commands.meiva.okf.md
 @dataclass(frozen=True)
 class CommandCatalog:
     skills: Callable[[], Sequence[Skill]]

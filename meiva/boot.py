@@ -1,4 +1,12 @@
-# meiva:ref meiva/docs/boot-contracts.meiva.okf.md#cold-sdk-entry
+# meiva:note
+# The SDK entry completes its own namespace imports before allowing lazy plugin loading.
+# A bare non-agent import leaves context unbound and does not import database, Redis,
+# HTTP or model connection stacks. Process clients retain their supplied configuration
+# and build connections only on first use; installation clients outlive an attachment,
+# while bound calls retain the attachment's own producer. A reload must preserve the
+# first-loaded code image and process-context slots instead of relabeling or clearing
+# already-running code.
+# meiva:link meiva/docs/boot-contracts.meiva.okf.md
 
 from __future__ import annotations
 

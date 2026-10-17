@@ -1,4 +1,6 @@
-# meiva:ref base/cluster/authority/docs/group-grants.meiva.okf.md#capability-grant-convergence
+# meiva:note
+# Group convergence is idempotent, does not change LOGIN, covers future tables and fails a VACUUM skip instead of reporting successful maintenance.
+# meiva:link base/cluster/authority/docs/group-grants.meiva.okf.md
 from __future__ import annotations
 
 from typing import LiteralString

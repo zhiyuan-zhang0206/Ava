@@ -27,7 +27,9 @@ class _SpawnClient(PermissionsHelperClient):
         self._spawn = spawn
 
     def spawn_process(self, *args: Any, **kwargs: Any) -> client.SpawnResult:  # pyright: ignore[reportIncompatibleMethodOverride]
-        # meiva:ref tests/harness/docs/helper-process-tests.meiva.okf.md#helper-spawn-double
+        # meiva:note
+        # The helper spawn double records argv, environment and output destinations without opening a helper socket; helper refusal remains loud and has no fallback launch.
+        # meiva:link tests/harness/docs/helper-process-tests.meiva.okf.md
         return self._spawn(*args, **kwargs)
 
 
@@ -44,7 +46,7 @@ def _current_process_record(*, generation: str | None = None) -> SessionRecord:
     )
 
 
-# meiva:ref tests/harness/docs/helper-process-tests.meiva.okf.md#helper-record-and-identity
+# meiva:link tests/harness/docs/helper-process-tests.meiva.okf.md
 def test_new_session_preserves_login_shell_env_stderr_and_record(
     unit_home: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -211,7 +213,7 @@ def test_kill_signals_record_pid_and_unlinks_only_after_confirmed_death(
             child.wait()
 
 
-# meiva:ref tests/harness/docs/helper-process-tests.meiva.okf.md#helper-record-and-identity
+# meiva:link tests/harness/docs/helper-process-tests.meiva.okf.md
 def test_graceful_delivery_tolerates_whole_second_create_time_drift(
     unit_home: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -330,7 +332,9 @@ def test_parent_chain_guard_rejects_a_helper_outside_the_chain(
     assert not parent_chain_intact(chain.get)
 
 
-# meiva:ref tests/harness/docs/helper-process-tests.meiva.okf.md#helper-ancestor-chain
+# meiva:note
+# A root supervisor between a unit and the permissions helper does not break the helper ancestry check; malformed markers, broken intermediate links and an unrelated helper are rejected.
+# meiva:link tests/harness/docs/helper-process-tests.meiva.okf.md
 def test_parent_chain_guard_accepts_the_helper_above_an_intermediate(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -360,7 +364,9 @@ def test_parent_chain_guard_stops_at_the_depth_bound(
     assert not parent_chain_intact(links.get)
 
 
-# meiva:ref tests/harness/docs/helper-process-tests.meiva.okf.md#helper-probe-executable
+# meiva:note
+# The real ancestor-chain probe launches the current interpreter with a fixed repository probe script and test-owned paths, then checks the reported ancestry for an intact or unrelated helper.
+# meiva:link tests/harness/docs/helper-process-tests.meiva.okf.md
 def _run_probe_chain(marker_dir: Path, *, marker_value: str | None = None) -> str:
     env = None
     if marker_value is not None:

@@ -305,7 +305,7 @@ _EVENTS_RETRY_POLICY = Policy(
 )
 
 
-# meiva:ref meiva_builtins/skills/platform/meiva-self-evolution/docs/collection.meiva.okf.md#inbound-scoping
+# meiva:link meiva_builtins/skills/platform/meiva-self-evolution/docs/collection.meiva.okf.md
 def _inbounds_by_agent(
     cur: psycopg.Cursor, agent_ids: list[int], window_from: datetime, window_to: datetime
 ) -> dict[int, list[dict[str, Any]]]:
@@ -544,7 +544,7 @@ def collect_one(
     *,
     database: Database,
 ) -> dict[str, Any]:
-    # meiva:ref meiva_builtins/skills/platform/meiva-self-evolution/docs/collection.meiva.okf.md#inbound-scoping
+    # meiva:link meiva_builtins/skills/platform/meiva-self-evolution/docs/collection.meiva.okf.md
     week = week or default_week()
     now = datetime.now(UTC)
     window_from = now - timedelta(days=7)

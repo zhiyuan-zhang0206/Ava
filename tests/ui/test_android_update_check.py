@@ -133,7 +133,9 @@ def _run(
     interact: bool = False,
     platform: str = "android",
 ) -> dict[str, object]:
-    # meiva:ref tests/docs/tests.meiva.okf.md#android-update-prompt-harness
+    # meiva:note
+    # Each Android update prompt case executes the checked-in injected script with canned native command results and reads only the elements it appended.
+    # meiva:link tests/docs/tests.meiva.okf.md
     scenario = {
         "config": {
             "platform": platform,

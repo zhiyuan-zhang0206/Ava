@@ -26,13 +26,7 @@ a deliberate change in the same PR, justified in the commit message; the raise t
 8000 and the band are recorded in
 [the ceiling decision](../../../docs/decisions/engineering/design/simplification/2026-07-29-okf-node-ceiling.md).
 
-```meiva-contract
-id = "okf-size-ceiling"
-kind = "invariant"
-statement = "Each node is measured in characters against a repo-wide hard ceiling with a non-blocking headroom band that reports the size and the room left, and in lines against a line-ceiling backstop; a breach reports E007 and fails the run, the message names the split-out child's directory, and the constants move only as a deliberate change in the same PR, justified in the commit message."
-code = ["scripts/content_lint/lint_meiva_okf.py:MAX_LINES", "scripts/content_lint/lint_meiva_okf.py:MAX_CHARS", "scripts/content_lint/lint_meiva_okf.py:WARN_MARGIN", "scripts/content_lint/lint_meiva_okf.py:_SPLIT_HINT", "scripts/content_lint/lint_meiva_okf.py:_split_home", "scripts/content_lint/lint_meiva_okf.py:_size_errors"]
-tests = ["scripts/content_lint/tests/test_lint_meiva_okf_headroom.py::test_warns_inside_the_margin_without_blocking", "scripts/content_lint/tests/test_lint_meiva_okf_headroom.py::test_silent_at_the_margin_boundary", "scripts/content_lint/tests/test_lint_meiva_okf_headroom.py::test_over_the_ceiling_errors_and_does_not_also_warn", "scripts/content_lint/tests/test_lint_meiva_okf.py::test_split_hint_names_the_child_directory_inside_the_layer", "scripts/content_lint/tests/test_lint_meiva_okf.py::test_a_many_short_lines_node_hits_the_line_backstop"]
-```
+Each node is measured in characters against a repo-wide hard ceiling with a non-blocking headroom band that reports the size and the room left, and in lines against a line-ceiling backstop; a breach reports E007 and fails the run, the message names the split-out child's directory, and the constants move only as a deliberate change in the same PR, justified in the commit message.
 
 ## Wikilink edges
 
@@ -49,13 +43,7 @@ fallback is reported (W011) while the link still works, so the path is fixed
 rather than discovered broken later. Code samples are not links — inline code
 spans and fenced blocks are masked out of the scan.
 
-```meiva-contract
-id = "okf-wikilink-edges"
-kind = "invariant"
-statement = "Wikilinks resolve only inside the .meiva.okf.md node graph, through the graph builder's resolver; a miss is reported, a target that names a real non-node markdown file on the decision / plan / convention axes is reported with that remedy, and a directory-qualified target that resolves only by unique-basename fallback is reported while the link still works. Inline code spans and fenced blocks are not edges."
-code = ["scripts/content_lint/lint_meiva_okf.py:WIKILINK_RE", "scripts/content_lint/lint_meiva_okf.py:_non_node_target", "scripts/content_lint/lint_meiva_okf.py:_literal_denotations", "scripts/content_lint/lint_meiva_okf.py:_wikilink_error", "scripts/content_lint/lint_meiva_okf.py:_mask_code"]
-tests = ["scripts/content_lint/tests/test_lint_meiva_okf_wikilinks.py::test_non_node_target_names_the_file_and_the_remedy", "scripts/content_lint/tests/test_lint_meiva_okf_wikilinks.py::test_target_that_exists_nowhere_reports_a_plain_miss", "scripts/content_lint/tests/test_lint_meiva_okf_wikilinks.py::test_wikilinks_inside_code_are_not_edges", "scripts/content_lint/tests/test_lint_meiva_okf_wikilinks.py::test_ambiguous_basename_does_not_resolve", "scripts/content_lint/tests/test_lint_meiva_okf_wikilinks.py::test_wrong_path_rescued_by_the_basename_fallback_warns"]
-```
+Wikilinks resolve only inside the .meiva.okf.md node graph, through the graph builder's resolver; a miss is reported, a target that names a real non-node markdown file on the decision / plan / convention axes is reported with that remedy, and a directory-qualified target that resolves only by unique-basename fallback is reported while the link still works. Inline code spans and fenced blocks are not edges.
 
 ## Concatenation defects
 
@@ -69,12 +57,6 @@ line-preserving blank, and is anchored on punctuation immediately before the
 marker — an inline mention like "C#" or a header's own repeated `#` does not
 fire.
 
-```meiva-contract
-id = "okf-concatenation-defects"
-kind = "invariant"
-statement = "A header or bullet marker glued directly onto the preceding text with no blank line, and the same header line twice in a row, are blocking defects; detection runs on the raw text with line-preserving masking of fenced blocks and inline code, anchored on punctuation so an inline mention like C# and a header's own repeated hash run do not fire."
-code = ["scripts/content_lint/lint_meiva_okf.py:_FENCE_RE", "scripts/content_lint/lint_meiva_okf.py:_INLINE_CODE_RE", "scripts/content_lint/lint_meiva_okf.py:_HEADER_GLUE_RE", "scripts/content_lint/lint_meiva_okf.py:_BULLET_GLUE_RE", "scripts/content_lint/lint_meiva_okf.py:_HEADER_LINE_RE", "scripts/content_lint/lint_meiva_okf.py:_mask_code", "scripts/content_lint/lint_meiva_okf.py:_concat_glue_errors", "scripts/content_lint/lint_meiva_okf.py:_duplicate_header_errors"]
-tests = ["scripts/content_lint/tests/test_lint_meiva_okf_concatenation.py::test_header_glued_after_wikilink_blocks", "scripts/content_lint/tests/test_lint_meiva_okf_concatenation.py::test_bullet_glued_after_plain_word_blocks", "scripts/content_lint/tests/test_lint_meiva_okf_concatenation.py::test_language_name_before_hash_is_not_flagged", "scripts/content_lint/tests/test_lint_meiva_okf_concatenation.py::test_hash_comment_inside_fenced_code_is_not_flagged", "scripts/content_lint/tests/test_lint_meiva_okf_concatenation.py::test_duplicate_consecutive_header_blocks"]
-```
+A header or bullet marker glued directly onto the preceding text with no blank line, and the same header line twice in a row, are blocking defects; detection runs on the raw text with line-preserving masking of fenced blocks and inline code, anchored on punctuation so an inline mention like C# and a header's own repeated hash run do not fire.
 
 Parent: [[scripts/content_lint/docs/content_lint.meiva.okf.md]].

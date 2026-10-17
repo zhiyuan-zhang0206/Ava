@@ -1,5 +1,7 @@
 #!/usr/bin/env python3
-# meiva:ref meiva_builtins/skills/platform/meiva-self-evolution/docs/coverage-sentinel.meiva.okf.md#coverage-sentinel
+# meiva:note
+# Every scan prints one headline: `batch <total> runs · judgeable <n> (<share>) · unknown <n> (<reason counts>) · scored <n>`. A run is judgeable when its label is `ok`, `fumbled` or `failed`; the share is judgeable over total, and `n/a` when the window is empty; `scored` counts runs whose `rubric.scores(record)["overall"]` is not `None`, so it tracks what the rubric could actually judge. `daily_scan.alert_verdict` decides the exit code in one order: an empty window is a data-quality failure of the source (`empty-window`, unless the TEST- filter explains it), a judgeable share below the floor is `data-quality: low-coverage` naming the largest unknown reason, a `failed` or `fumbled` run is `regression`, and anything else exits 0. `alert_exit` returns that verdict's code, and the render prints the low-coverage alert line but never lists an unknown run as worth mining.
+# meiva:link meiva_builtins/skills/platform/meiva-self-evolution/docs/coverage-sentinel.meiva.okf.md
 """Daily incremental self-evolution scan.
 
 Collects the past N days (default 1) of real agent runs into a trace

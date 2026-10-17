@@ -13,7 +13,7 @@ def _pool() -> str:
 RESERVED = {"MEMORY.md", "AGENTS.md", "index.md", "log.md"}
 
 
-# meiva:ref meiva_builtins/plugins/meiva_memory/skills/scripts/docs/rebuild-memory-index.meiva.okf.md#indexed-entries
+# meiva:link meiva_builtins/plugins/meiva_memory/skills/scripts/docs/rebuild-memory-index.meiva.okf.md
 def frontmatter(rel):
     with open(os.path.join(_pool(), rel), encoding="utf-8") as f:
         content = f.read()
@@ -26,7 +26,7 @@ def frontmatter(rel):
         return {}
 
 
-# meiva:ref meiva_builtins/plugins/meiva_memory/skills/scripts/docs/rebuild-memory-index.meiva.okf.md#indexed-entries
+# meiva:link meiva_builtins/plugins/meiva_memory/skills/scripts/docs/rebuild-memory-index.meiva.okf.md
 def collect():
     files = []
     for dirpath, _dirnames, filenames in os.walk(_pool()):
@@ -90,7 +90,9 @@ content = ""
 if os.path.exists(memory_path):
     with open(memory_path, encoding="utf-8") as f:
         content = f.read()
-# meiva:ref meiva_builtins/plugins/meiva_memory/skills/scripts/docs/rebuild-memory-index.meiva.okf.md#pointer-rebuild
+# meiva:note
+# The module rewrites MEMORY.md in place: everything up to the exact `## Pointers` heading line is preserved (a prose mention does not match), followed by one `- [title](rel) — description` line per root note and one `- [dir/](dir/index.md) — n notes` line per topic directory with subdirectory counts; the index cap is enforced by the pool's pre-commit hook (MEIVA_MEMORY_INDEX_CAP, default 16000), not by this script.
+# meiva:link meiva_builtins/plugins/meiva_memory/skills/scripts/docs/rebuild-memory-index.meiva.okf.md
 heading = re.search(r"^## Pointers[ \t]*$", content, re.M)
 head = content[: heading.start()] if heading else (content.rstrip("\n") + "\n\n").lstrip("\n")
 new = head + "## Pointers\n\n\n" + "\n".join(lines) + "\n"

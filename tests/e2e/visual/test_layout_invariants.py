@@ -21,7 +21,7 @@ from tests.e2e.visual.stubbed_home import (
     wait_layout_settled,
 )
 
-# meiva:ref tests/e2e/visual/docs/layout-invariants.meiva.okf.md#layout-invariant-tiers
+# meiva:link tests/e2e/visual/docs/layout-invariants.meiva.okf.md
 VIEWPORTS = [320, 390, 768]
 
 
@@ -130,7 +130,7 @@ def _capture_inspector_states(page: Page, panel: Locator, prefix: str) -> None:
     page.screenshot(path=str(evidence / f"{prefix}-scroll.png"))
 
 
-# meiva:ref tests/e2e/visual/docs/layout-invariants.meiva.okf.md#scroll-surface-reveal
+# meiva:link tests/e2e/visual/docs/layout-invariants.meiva.okf.md
 def test_timeline_scrollbar_hover_reveal(playwright_browser: Browser, frontend_target: str) -> None:
     ctx = new_context(playwright_browser, 1280)
     try:
@@ -286,7 +286,7 @@ def test_fleet_layout_invariants(
         ctx.close()
 
 
-# meiva:ref tests/e2e/visual/docs/layout-invariants.meiva.okf.md#on-screen-keyboard-contract
+# meiva:link tests/e2e/visual/docs/layout-invariants.meiva.okf.md
 VIEWPORT_HEIGHT = 664
 KEYBOARD_HEIGHT = 480
 
@@ -432,7 +432,7 @@ _PANE_BEFORE_TRANSITION_MS = (
 
 
 def _wait_for_pane_settled(page: Page, header_selector: str, *, poll_ms: int = 20) -> None:
-    # meiva:ref tests/e2e/visual/docs/layout-invariants.meiva.okf.md#sticky-pane-settle
+    # meiva:link tests/e2e/visual/docs/layout-invariants.meiva.okf.md
     locator = page.locator(header_selector)
     duration_ms = locator.evaluate(_PANE_BEFORE_TRANSITION_MS)
     page.wait_for_timeout(duration_ms)

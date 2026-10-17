@@ -12,16 +12,16 @@ from base.log import logger
 
 from .template import validate
 
-# meiva:ref meiva_builtins/plugins/meiva_memory/docs/memory-write-check.meiva.okf.md#write-check-duplicates
+# meiva:link meiva_builtins/plugins/meiva_memory/docs/memory-write-check.meiva.okf.md
 _SEARCH_K = 5
 
-# meiva:ref meiva_builtins/plugins/meiva_memory/docs/memory-write-check.meiva.okf.md#write-check-duplicates
+# meiva:link meiva_builtins/plugins/meiva_memory/docs/memory-write-check.meiva.okf.md
 _QUERY_CHAR_CAP = 4000
 
 _LOG_LABEL = "memory-write-check"
 
 
-# meiva:ref meiva_builtins/plugins/meiva_memory/docs/memory-write-check.meiva.okf.md#write-check-duplicates
+# meiva:link meiva_builtins/plugins/meiva_memory/docs/memory-write-check.meiva.okf.md
 @dataclass(frozen=True)
 class Duplicate:
     path: Path
@@ -29,7 +29,7 @@ class Duplicate:
     description: str
 
 
-# meiva:ref meiva_builtins/plugins/meiva_memory/docs/memory-write-check.meiva.okf.md#write-check-rules
+# meiva:link meiva_builtins/plugins/meiva_memory/docs/memory-write-check.meiva.okf.md
 @dataclass(frozen=True)
 class NoteReport:
     path: Path
@@ -41,7 +41,7 @@ class NoteReport:
         return bool(self.rule_errors or self.duplicates)
 
 
-# meiva:ref meiva_builtins/plugins/meiva_memory/docs/memory-write-check.meiva.okf.md#write-check-duplicates
+# meiva:link meiva_builtins/plugins/meiva_memory/docs/memory-write-check.meiva.okf.md
 def _query_of(path: Path) -> str | None:
     try:
         content = path.read_text(encoding="utf-8")
@@ -58,7 +58,9 @@ def _query_of(path: Path) -> str | None:
     return query[:_QUERY_CHAR_CAP] or None
 
 
-# meiva:ref meiva_builtins/plugins/meiva_memory/docs/memory-write-check.meiva.okf.md#write-check-degrade
+# meiva:note
+# A duplicate search that cannot be answered — the gateway or the indexer unavailable, or an HTTP error status carrying no wire reason — leaves that note without duplicate findings, so its rule findings stand; the HTTP failure is logged at error, never raises into the turn, and the httpx import stays deferred, off the boot path.
+# meiva:link meiva_builtins/plugins/meiva_memory/docs/memory-write-check.meiva.okf.md
 async def _search(
     query: str, *, deadline: float, context: MeivaContext
 ) -> list[memory_client.MemorySearchResult] | None:
@@ -86,7 +88,7 @@ async def _search(
         return None
 
 
-# meiva:ref meiva_builtins/plugins/meiva_memory/docs/memory-write-check.meiva.okf.md#write-check-duplicates
+# meiva:link meiva_builtins/plugins/meiva_memory/docs/memory-write-check.meiva.okf.md
 async def _duplicates_of(
     pool: Path, relative: str, *, threshold: float, deadline: float, context: MeivaContext
 ) -> tuple[Duplicate, ...]:
@@ -130,7 +132,7 @@ async def _check_one(
     return NoteReport(root / relative, tuple(errors), duplicates)
 
 
-# meiva:ref meiva_builtins/plugins/meiva_memory/docs/memory-write-check.meiva.okf.md#write-check-rules
+# meiva:link meiva_builtins/plugins/meiva_memory/docs/memory-write-check.meiva.okf.md
 async def check_written_notes(
     shared: set[str],
     personal: set[str],
@@ -160,7 +162,7 @@ async def check_written_notes(
     return [report for report in reports if report.has_findings]
 
 
-# meiva:ref meiva_builtins/plugins/meiva_memory/docs/memory-write-check.meiva.okf.md#write-check-rules
+# meiva:link meiva_builtins/plugins/meiva_memory/docs/memory-write-check.meiva.okf.md
 def render_reminder(reports: list[NoteReport]) -> str:
     lines = ["Memory write check on the notes written by the call above:"]
     for report in reports:

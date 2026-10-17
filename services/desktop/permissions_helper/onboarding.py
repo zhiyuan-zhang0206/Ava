@@ -54,7 +54,9 @@ def local_host() -> GateHost:
     )
 
 
-# meiva:ref services/desktop/permissions_helper/docs/onboarding.meiva.okf.md#request-is-not-evidence
+# meiva:note
+# After requesting, the gate re-probes and reports what the system says. A child that reports 'granted' while the system still denies leaves the item denied, and a request that raised no dialog (macOS answers a denied or already-asked grant silently) leaves the grant exactly as it was.
+# meiva:link services/desktop/permissions_helper/docs/onboarding.meiva.okf.md
 def check(
     *,
     host: GateHost | None = None,
@@ -129,7 +131,9 @@ def _ask_items(
             echo(f"  -> {verdict}")
 
 
-# meiva:ref services/desktop/permissions_helper/docs/onboarding.meiva.okf.md#every-run-asks
+# meiva:note
+# onboard probes first and then asks. An automatic pass (the converge step, so every start) requests exactly the rows the system reports not_determined -- Screen Recording and Accessibility through the helper's `request_grants`, folders and Automation targets through their own children. A row whose record is denied is not asked again automatically, and a stale row (record granted, helper not restarted) is never asked at all: neither can be resolved by another dialog. An explicit pass (the `meiva permissions onboard` verb, the console's Ask button) also asks denied prompt-mode rows, which is the only way back to a denied grant without a terminal. No caller attests that a person is present: a dialog nobody answers stays pending, and that cost was chosen over discovering a missing grant in the middle of a task.
+# meiva:link services/desktop/permissions_helper/docs/onboarding.meiva.okf.md
 def onboard(
     *,
     host: GateHost | None = None,
@@ -174,7 +178,7 @@ def defer(*, now: datetime | None = None, host: GateHost | None = None) -> None:
     gate.mark_deferred(now=now, path=seat.record_path)
 
 
-# meiva:ref services/desktop/permissions_helper/docs/onboarding.meiva.okf.md#restart-runs-outside-the-tree
+# meiva:link services/desktop/permissions_helper/docs/onboarding.meiva.okf.md
 def restart_helper() -> str:
     return (
         "The permissions helper re-reads a grant only at process start, and it is the"

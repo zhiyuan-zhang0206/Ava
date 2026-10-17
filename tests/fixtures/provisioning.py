@@ -1,4 +1,6 @@
-# meiva:ref tests/fixtures/docs/native-provisioning.meiva.okf.md#native-test-isolation
+# meiva:note
+# Native fixture cleanup covers every public per-test table, uses a private home and test-only URLs, and keeps the full-run selection guard active.
+# meiva:link tests/fixtures/docs/native-provisioning.meiva.okf.md
 from __future__ import annotations
 
 import functools

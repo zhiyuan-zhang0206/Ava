@@ -437,7 +437,7 @@ describe("selecting", () => {
   });
 });
 
-// meiva:ref ui/web/src/docs/frontend-components/run-timeline/axis-and-keyboard.meiva.okf.md#row-gesture-and-navigation
+// meiva:link ui/web/src/docs/frontend-components/run-timeline/axis-and-keyboard.meiva.okf.md
 function wheel(target: Element, init: WheelEventInit, count = 1) {
   act(() => {
    for (let i = 0; i < count; i++) {

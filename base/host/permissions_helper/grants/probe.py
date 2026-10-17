@@ -127,7 +127,7 @@ def read_result(path: Path) -> str | None:
         return None
 
 
-# meiva:ref base/host/permissions_helper/grants/docs/grants.meiva.okf.md#one-probe-for-every-surface
+# meiva:link base/host/permissions_helper/grants/docs/grants.meiva.okf.md
 def run_preflight(
     client: HelperChannel,
     *,
@@ -212,7 +212,9 @@ def probe(
     )
 
 
-# meiva:ref base/host/permissions_helper/grants/docs/grants.meiva.okf.md#requests-run-in-the-helper
+# meiva:note
+# A system dialog is raised by the helper process itself, through the `request_grants` wire method. The symptom of the alternative, measured on this helper: a spawned child calls AXIsProcessTrusted(), inherits its launch chain's trust, and AXIsProcessTrustedWithOptions(prompt: true) then returns true without showing a dialog -- nothing is requested and the caller believes a grant was asked for. The grant belongs to the helper's code identity, so only the helper asking can be answered for the identity that will use it. macOS shows one dialog per bundle identity and answers later requests for the same grant silently, so a repeated request is free and 'no dialog appeared' is never evidence: the gate re-probes and reports what the system says. One call asks for both desktop grants; the booleans it returns are the same process's view and can be stale, so they are diagnostics, not evidence.
+# meiva:link base/host/permissions_helper/grants/docs/grants.meiva.okf.md
 def request_process_grants(client: HelperChannel) -> RequestGrantsResult:
     from base.host.permissions_helper.client import PermissionsHelperError
 

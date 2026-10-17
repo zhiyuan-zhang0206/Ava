@@ -33,7 +33,7 @@ class Clause:
     version: Version
 
 
-# meiva:ref base/packages/plugins/docs/manifest.meiva.okf.md#closed-manifest-grammar
+# meiva:link base/packages/plugins/docs/manifest.meiva.okf.md
 def parse_range(raw: str) -> tuple[Clause, ...]:
     parts = [p for p in CLAUSE_SPLIT_RE.split(raw.strip()) if p]
     if not parts:
@@ -57,7 +57,7 @@ def _has_upper(clauses: tuple[Clause, ...]) -> bool:
     return any(c.op in UPPER_OPS for c in clauses)
 
 
-# meiva:ref base/packages/plugins/docs/manifest.meiva.okf.md#closed-manifest-grammar
+# meiva:link base/packages/plugins/docs/manifest.meiva.okf.md
 def range_allows(raw: str, version: str) -> bool:
     ver = parse_version(version)
     if ver is None:
@@ -440,7 +440,7 @@ def validate(data: dict[str, Any]) -> PluginManifest:
     )
 
 
-# meiva:ref base/packages/plugins/docs/manifest.meiva.okf.md#closed-manifest-grammar
+# meiva:link base/packages/plugins/docs/manifest.meiva.okf.md
 def load_manifest(pkg_dir: Path) -> PluginManifest:
     path = pkg_dir / MANIFEST_FILENAME
     if not path.is_file():
@@ -464,14 +464,14 @@ def load_manifest(pkg_dir: Path) -> PluginManifest:
     return validate(data)
 
 
-# meiva:ref base/packages/plugins/docs/manifest.meiva.okf.md#closed-manifest-grammar
+# meiva:link base/packages/plugins/docs/manifest.meiva.okf.md
 def load_optional_manifest(pkg_dir: Path) -> PluginManifest | None:
     if not (pkg_dir / MANIFEST_FILENAME).is_file():
         return None
     return load_manifest(pkg_dir)
 
 
-# meiva:ref base/packages/plugins/docs/manifest.meiva.okf.md#host-compatibility-fails-closed
+# meiva:link base/packages/plugins/docs/manifest.meiva.okf.md
 def check_host_engine(manifest: PluginManifest, host_version: str) -> list[str]:
     errors: list[str] = []
     for _host, raw_range in manifest.engines.items():
@@ -486,7 +486,7 @@ def check_host_engine(manifest: PluginManifest, host_version: str) -> list[str]:
 _COMMIT_TIMEOUT_S = 10.0
 
 
-# meiva:ref base/packages/plugins/docs/manifest.meiva.okf.md#host-compatibility-fails-closed
+# meiva:link base/packages/plugins/docs/manifest.meiva.okf.md
 def host_contract_errors_dir(pkg_dir: Path, *, repo: Path | None = None) -> list[str]:
     try:
         manifest = load_optional_manifest(pkg_dir)
@@ -502,7 +502,7 @@ def host_contract_errors_dir(pkg_dir: Path, *, repo: Path | None = None) -> list
     return check_host_engine(manifest, host) + check_host_commit(manifest, target)
 
 
-# meiva:ref base/packages/plugins/docs/manifest.meiva.okf.md#host-compatibility-fails-closed
+# meiva:link base/packages/plugins/docs/manifest.meiva.okf.md
 def check_host_commit(manifest: PluginManifest, repo: Path) -> list[str]:
     sha = manifest.requires_commit
     if sha is None:

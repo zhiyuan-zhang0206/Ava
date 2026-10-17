@@ -72,7 +72,7 @@ export type AgentEntry =
   | { id: number; status: "loading" }
   | { id: number; status: "failed" };
 
-// meiva:ref ui/web/src/docs/frontend-components/run-timeline/axis-and-keyboard.meiva.okf.md#row-gesture-and-navigation
+// meiva:link ui/web/src/docs/frontend-components/run-timeline/axis-and-keyboard.meiva.okf.md
 export function RunTimelineRows({
   entries,
   base,

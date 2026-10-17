@@ -1,4 +1,6 @@
-# meiva:ref base/agents/messages/docs/token-estimation.meiva.okf.md#unicode-token-weight
+# meiva:note
+# Native whitespace scanning preserves CJK and other character weights for all Unicode characters and large text runs.
+# meiva:link base/agents/messages/docs/token-estimation.meiva.okf.md
 from __future__ import annotations
 
 import re

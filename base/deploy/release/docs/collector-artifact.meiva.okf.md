@@ -59,20 +59,8 @@ The regression tests scale every number down and keep the bound's shape:
 without `Content-Length`, a connection that never sends headers, a late close)
 and pins the wait accounting with `ManualTimers`.
 
-```meiva-contract
-id = "bounded-download-attempt"
-kind = "invariant"
-statement = "One collector download operation holds a single absolute deadline (started + total_budget) that every attempt and every retry wait is charged to; each socket read is preceded by a remaining-budget check, the empty read that ends the body is checked too, each request opens with min(socket_timeout_s, remaining), and a backoff is clamped to the remaining budget, so the residual overshoot is one in-flight read bounded by that request's socket timeout (at most min(socket_timeout_s, total_budget_s))."
-code = ["base/deploy/release/collector_artifact.py:stream_download", "base/deploy/release/collector_artifact.py:download_with_retry", "base/deploy/release/collector_artifact.py:DownloadLimits", "base/deploy/release/tests/test_collector_artifact_retry.py:<module>"]
-tests = ["base/deploy/release/tests/test_collector_artifact_retry.py::test_a_dripping_mirror_cannot_outlive_the_operation_deadline", "base/deploy/release/tests/test_collector_artifact_retry.py::test_a_connection_that_never_sends_headers_ends_within_the_socket_guard", "base/deploy/release/tests/test_collector_artifact_retry.py::test_a_body_that_closes_after_the_deadline_is_not_a_success", "base/deploy/release/tests/test_collector_artifact_retry.py::test_a_wait_never_runs_past_the_deadline", "cli/commands/observability/tests/converge_otel_collector/test_session_filelog_receivers_are_disjoint_and_bound.py::test_stream_download_writes_all_chunks", "cli/commands/observability/tests/converge_otel_collector/test_session_filelog_receivers_are_disjoint_and_bound.py::test_stream_download_honors_socket_timeout"]
-```
+One collector download operation holds a single absolute deadline (started + total_budget) that every attempt and every retry wait is charged to; each socket read is preceded by a remaining-budget check, the empty read that ends the body is checked too, each request opens with min(socket_timeout_s, remaining), and a backoff is clamped to the remaining budget, so the residual overshoot is one in-flight read bounded by that request's socket timeout (at most min(socket_timeout_s, total_budget_s)).
 
-```meiva-contract
-id = "download-wait-closure"
-kind = "invariant"
-statement = "The collector download waits its retry backoff through the caller's timers, clamped to the budget the attempts left, so a wait never runs past the operation's deadline; reported elapsed and remaining times use the same clock, a ManualTimers records the waits instead of blocking, and the retry loop stays in base/host/net/resilience.py."
-code = ["base/deploy/release/collector_artifact.py:download_with_retry", "base/deploy/release/tests/test_collector_artifact_retry.py:test_download_with_retry_preserves_contract"]
-tests = ["base/deploy/release/tests/test_collector_artifact_retry.py::test_download_with_retry_preserves_contract", "base/deploy/release/tests/test_collector_artifact_retry.py::test_a_retry_wait_is_spent_from_the_same_budget", "base/host/net/tests/test_resilience.py::TestWaitHooks::test_retry_uses_the_callers_own_wait"]
-```
+The collector download waits its retry backoff through the caller's timers, clamped to the budget the attempts left, so a wait never runs past the operation's deadline; reported elapsed and remaining times use the same clock, a ManualTimers records the waits instead of blocking, and the retry loop stays in base/host/net/resilience.py.
 
 Parent: [[base/deploy/docs/deploy.meiva.okf.md|Deployment primitives]].

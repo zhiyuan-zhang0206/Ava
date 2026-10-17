@@ -1,4 +1,4 @@
-# meiva:ref meiva/web/docs/web.meiva.okf.md#webdeps-split
+# meiva:link meiva/web/docs/web.meiva.okf.md
 
 from __future__ import annotations
 

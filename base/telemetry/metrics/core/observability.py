@@ -20,8 +20,12 @@ _SDK_ATTR = {k: f"attributes_{k}" for k in SDK_CALL_KEYS}
 
 
 def core_metrics() -> list[MetricSpec]:
-    # meiva:ref base/telemetry/metrics/docs/core-observability.meiva.okf.md#query-measurement-scope
-    # meiva:ref base/telemetry/metrics/docs/core-observability.meiva.okf.md#compaction-effectiveness-denominator
+    # meiva:note
+    # Core observability queries read declared event payloads and usage-time cost snapshots. Exec outcomes exclude exec_envelope; unknown exec spellings remain visible. Missing/unknown syntax-fix and halt labels belong to their other buckets.
+    # meiva:link base/telemetry/metrics/docs/core-observability.meiva.okf.md
+    # meiva:note
+    # The soft share denominator is completed compact_summary plus auto events carrying reminder_shown. Manual requests and historical unattributed events are excluded. The preparation target counts only compact_summary with reminder_shown=true; proactive summaries alone cannot satisfy it. No soft completions yield zero when the denominator exists, while no completions yield no data.
+    # meiva:link base/telemetry/metrics/docs/core-observability.meiva.okf.md
     specs: list[MetricSpec] = []
     specs.append(
         MetricSpec(

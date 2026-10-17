@@ -50,7 +50,7 @@ export function useContentToggle(): ContentToggleState {
 }
 
 
-// meiva:ref ui/web/src/docs/frontend-components/home-shell-chrome/home-shell-chrome.meiva.okf.md#details-mode-owner
+// meiva:link ui/web/src/docs/frontend-components/home-shell-chrome/home-shell-chrome.meiva.okf.md
 import { create } from "zustand";
 
 interface ContentToggleResetState {

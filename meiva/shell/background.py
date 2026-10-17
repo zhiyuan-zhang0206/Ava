@@ -1,4 +1,4 @@
-# meiva:ref meiva/shell/docs/shell.meiva.okf.md#background-notice-fires-on-command-exit
+# meiva:link meiva/shell/docs/shell.meiva.okf.md
 from __future__ import annotations
 
 import re
@@ -84,7 +84,7 @@ def validate_notify(notify: str | None) -> str | None:
 
 
 def write_launch_file(line: str, path: Path) -> str:
-    # meiva:ref meiva/shell/docs/shell.meiva.okf.md#background-notice-fires-on-command-exit
+    # meiva:link meiva/shell/docs/shell.meiva.okf.md
     quoted = shlex.quote(str(path))
     path.write_text(f"command rm -f -- {quoted}\n{line}\n")
     return f". {quoted}"
@@ -100,7 +100,7 @@ def notified_line(
     keep: bool,
     notify: str | None = None,
 ) -> str:
-    # meiva:ref meiva/shell/docs/shell.meiva.okf.md#background-notice-fires-on-command-exit
+    # meiva:link meiva/shell/docs/shell.meiva.okf.md
     notify = validate_notify(notify)
     if "\n" in cmd or "\r" in cmd:
         raise ValueError(

@@ -23,10 +23,4 @@ not estimates. `input` includes cache tokens. Persisted prefix usage stays
 unrounded so segment boundaries cannot change accumulation; span subtraction
 rounds dollars at the existing nine-decimal precision.
 
-```meiva-contract
-id = "history-range-inputs"
-kind = "invariant"
-statement = "Exact segment reads preserve heads and anchors; immutable segment offsets and unrounded usage prefixes keep window and full-history costs identical."
-code = ["base/agents/history/checkpoint_segment.py:<module>", "base/agents/history/hierarchy/usage.py:<module>", "base/agents/history/hierarchy/store.py:<module>"]
-tests = ["services/derived/insights/run_timeline/tests/test_projection.py::test_cross_segment_nodes_equal_full_history_including_cost_and_zero_tokens", "base/agents/history/hierarchy/tests/test_hierarchy_usage.py::test_cost_sums_only_recorded_calls_and_counts_them", "base/agents/history/hierarchy/tests/test_hierarchy_store.py::test_generation_costs_are_summed_per_chunk_job_and_per_grouping_check"]
-```
+Exact segment reads preserve heads and anchors; immutable segment offsets and unrounded usage prefixes keep window and full-history costs identical.

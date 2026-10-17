@@ -5,7 +5,7 @@ from dataclasses import dataclass
 from enum import StrEnum
 
 
-# meiva:ref base/packages/docs/text-budget.meiva.okf.md#text-units
+# meiva:link base/packages/docs/text-budget.meiva.okf.md
 class Unit(StrEnum):
     CHARS = "chars"
     WORDS = "words"
@@ -17,13 +17,13 @@ _CJK_CHARACTER = re.compile("[\u3040-\u30ff\u3400-\u4dbf\u4e00-\u9fff\uac00-\ud7
 _WORD_RUN = re.compile(r"[^\W_]+")
 
 
-# meiva:ref base/packages/docs/text-budget.meiva.okf.md#text-units
+# meiva:link base/packages/docs/text-budget.meiva.okf.md
 def count_words(text: str) -> int:
     without_cjk = _CJK_CHARACTER.sub(" ", text)
     return len(_CJK_CHARACTER.findall(text)) + len(_WORD_RUN.findall(without_cjk))
 
 
-# meiva:ref base/packages/docs/text-budget.meiva.okf.md#text-units
+# meiva:link base/packages/docs/text-budget.meiva.okf.md
 def measure(text: str, unit: Unit) -> int:
     if unit is Unit.CHARS:
         return len(text)
@@ -34,14 +34,14 @@ def measure(text: str, unit: Unit) -> int:
     raise ValueError(f"unknown unit: {unit!r}")
 
 
-# meiva:ref base/packages/docs/text-budget.meiva.okf.md#length-budget
+# meiva:link base/packages/docs/text-budget.meiva.okf.md
 class Level(StrEnum):
     OK = "ok"
     SOFT = "soft"
     OVER = "over"
 
 
-# meiva:ref base/packages/docs/text-budget.meiva.okf.md#length-budget
+# meiva:link base/packages/docs/text-budget.meiva.okf.md
 @dataclass(frozen=True)
 class LengthBudget:
     unit: Unit
@@ -58,7 +58,7 @@ class LengthBudget:
             )
 
 
-# meiva:ref base/packages/docs/text-budget.meiva.okf.md#length-budget
+# meiva:link base/packages/docs/text-budget.meiva.okf.md
 @dataclass(frozen=True)
 class Verdict:
     measured: int
@@ -72,7 +72,7 @@ class Verdict:
         return self.budget.hard - self.measured
 
 
-# meiva:ref base/packages/docs/text-budget.meiva.okf.md#length-budget
+# meiva:link base/packages/docs/text-budget.meiva.okf.md
 def evaluate(text: str, budget: LengthBudget) -> Verdict:
     measured = measure(text, budget.unit)
     if budget.hard > 0 and measured > budget.hard:

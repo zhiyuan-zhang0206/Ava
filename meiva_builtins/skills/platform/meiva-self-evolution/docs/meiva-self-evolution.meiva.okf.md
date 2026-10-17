@@ -30,21 +30,6 @@ Output data lands in `$MEIVA_HOME/self_evolution/` (per-deployment private), not
 counts as a run's task, and which inbounds may be read for it, is the
 [collection contract](collection.meiva.okf.md).
 
-```meiva-contract
-id = "record-assembly"
-kind = "invariant"
-code = ["meiva_builtins/skills/platform/meiva-self-evolution/scripts/record.py:<module>"]
-tests = [
-  "meiva_builtins/skills/platform/meiva-self-evolution/tests/test_self_evolution_record.py::test_exec_outcome_classification",
-  "meiva_builtins/skills/platform/meiva-self-evolution/tests/test_self_evolution_record.py::test_count_tool_calls_ignores_syntax_warnings",
-  "meiva_builtins/skills/platform/meiva-self-evolution/tests/test_self_evolution_record.py::test_broadcast_instruction_is_excluded_from_per_agent_corrections",
-  "meiva_builtins/skills/platform/meiva-self-evolution/tests/test_self_evolution_record.py::test_msg_text_skips_thinking_and_tool_use_blocks",
-]
-statement = """
-`record.py` shapes one self-evolution dataset record from telemetry events, log events, inbound messages, and checkpoint transcripts while staying separate from `collect.py`'s database and HTTP transport. `count_tool_calls` parses executed code with `SyntaxWarning` suppressed so agent regex escapes do not leak into schedule stderr. `_is_exec_fail` matches only terminal failure event names (`exec_envelope` is a wrapper, not a failure). `_msg_text` extracts human-visible text from checkpoint message blocks and skips `thinking` and `tool_use` blocks so silent tool turns do not serialize as `"thinking tool_use"`. Broadcast inbound instructions are excluded from per-agent `corrections` and `followup_prompts`.
-"""
-```
-
 ## evidence block and grading
 
 Each record's `evidence` block, its fields and the coverage grade derived from
@@ -53,22 +38,7 @@ them are specified in
 
 ## Score abstention
 
-```meiva-contract
-id = "score-abstention"
-kind = "invariant"
-code = [
-  "meiva_builtins/skills/platform/meiva-self-evolution/scripts/rubric.py:abstain_reason",
-  "meiva_builtins/skills/platform/meiva-self-evolution/scripts/evaluate.py:gather",
-]
-tests = [
-  "meiva_builtins/skills/platform/meiva-self-evolution/tests/test_self_evolution_rubric.py::test_empty_trace_no_longer_scores_perfect",
-  "meiva_builtins/skills/platform/meiva-self-evolution/tests/test_self_evolution_rubric.py::test_missing_precondition_abstains",
-  "meiva_builtins/skills/platform/meiva-self-evolution/tests/test_self_evolution_rubric.py::test_scorable_trace_returns_numbers",
-]
-statement = """
 `rubric.scores()` returns `overall=None` and names the missing evidence in `abstain`, instead of scoring a trace it has no evidence for. Scoring saturates at 1.0 when nothing was recorded: `has_output` is the only evidence-bearing completion term, and every efficiency term is best when the run did nothing. The record's `evidence_grade` owns the judgement: anything other than `complete` abstains with the record's own `unknown_reason` (`no_telemetry`, `no_task`, `no_terminal`). Records written before the evidence block exists fall back to the same three checks on their own fields. `evaluate.gather` normalizes `task_prompt` through `task_prompt_of`, keeps abstained replays in `per_task` but out of `n` and the mean, and records `abstain:<reason>` as their verification reason.
-"""
-```
 
 ## Key dependencies
 - [[meiva_builtins/skills/docs/skills.meiva.okf.md|Skills index]] — full skills catalog

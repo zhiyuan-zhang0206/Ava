@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# meiva:ref scripts/audit/docs/schema-drift.meiva.okf.md#schema-drift
+# meiva:link scripts/audit/docs/schema-drift.meiva.okf.md
 
 from __future__ import annotations
 
@@ -73,7 +73,7 @@ def _split_top_level(body: str) -> list[str]:
     return parts
 
 
-# meiva:ref scripts/audit/docs/schema-drift.meiva.okf.md#baseline-parsing
+# meiva:link scripts/audit/docs/schema-drift.meiva.okf.md
 def schema_columns(sql: str) -> dict[str, list[str]]:
     text = strip_comments(sql)
     tables: dict[str, list[str]] = {}
@@ -145,7 +145,7 @@ def compare(schema: dict[str, list[str]], live: dict[str, dict[str, str]]) -> Dr
     return drift
 
 
-# meiva:ref scripts/audit/docs/schema-drift.meiva.okf.md#drift-classes
+# meiva:link scripts/audit/docs/schema-drift.meiva.okf.md
 def classify_table(name: str, declared: set[str]) -> str:
     match = _PARTITION.match(name)
     if match and match.group("parent") in declared:

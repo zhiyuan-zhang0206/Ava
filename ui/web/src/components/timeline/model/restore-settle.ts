@@ -5,7 +5,9 @@ import type { SavedScroll } from "@/lib/layout/scroll-memory";
 import { materializeBeforeAnchor } from "./materialize-prefix";
 import { resolveSavedTimelineAnchor } from "./use-timeline-window";
 
-// meiva:ref ui/web/src/docs/frontend-components/timeline-view/continuous-segments.meiva.okf.md#restore-settles-its-anchor
+// meiva:note
+// An applied reading bookmark keeps re-asserting its saved anchor offset while the rows around it settle, and no position is recorded while a restore is pending or unsettled. The guard releases when a layout change observes the anchor at its saved offset, when the entry shows different content, or when the reader takes over (wheel, key, touch, scrollbar, send); a switch away inside the settle therefore keeps the saved bookmark.
+// meiva:link ui/web/src/docs/frontend-components/timeline-view/continuous-segments.meiva.okf.md
 export function settleSavedTimelineScroll(
   viewport: HTMLElement,
   saved: SavedScroll,

@@ -11,13 +11,7 @@ The ordinary field editor, cluster default-model selector and per-model resolved
 view load independently. Failure to load a model catalog must not disable the
 ordinary field editor or leave the model views claiming to load forever.
 
-```meiva-contract
-id = "model-failure-keeps-config-editable"
-kind = "invariant"
-statement = "A failed model request produces a visible unavailable state and prevents model editing, while ordinary configuration fields remain editable. Provider exception text is not rendered."
-code = ["ui/web/src/app/control/config/_per_model.tsx:PerModelPanel", "ui/web/src/app/control/config/_default_model.tsx:DefaultModelPanel"]
-tests = ["ui/web/src/app/control/config/page.test.tsx::ConfigPage without a model catalog::reports model failure while preserving ordinary configuration editing", "ui/web/src/app/control/config/_default_model.test.tsx::keeps the default model read-only when the catalog fails"]
-```
+A failed model request produces a visible unavailable state and prevents model editing, while ordinary configuration fields remain editable. Provider exception text is not rendered.
 
 Per-model values resolve shared code defaults, model code defaults and explicit
 configuration. There is no extra per-model store: row labels reveal the existing

@@ -131,7 +131,9 @@ export function InspectorPanel({ agentId, embedded = false }: { agentId: number;
     (windowedQuery.error !== null && windowedData !== undefined) ||
     (widgetsQuery.error !== null && widgetsQuery.data !== undefined);
 
-  // meiva:ref ui/web/src/docs/frontend-components/inspector/queries-and-refresh.meiva.okf.md#cost-activity-controls
+  // meiva:note
+  // The Cost + Activity section header owns the panel's only manual refresh and its window picker. The refresh re-fires only the windowed statistics read; the picker re-scopes that same read and offers only cumulative-since-spawn (All), the last 5m, and the supported 1h / 24h / 7d windows. Neither control touches the current-state or widget reads, and a retention-clamped selection labels itself with the applied hours.
+  // meiva:link ui/web/src/docs/frontend-components/inspector/queries-and-refresh.meiva.okf.md
   const refreshCostActivity = useCallback(() => {
     void windowedQuery.refetch();
   }, [windowedQuery]);
@@ -176,7 +178,7 @@ export function InspectorPanel({ agentId, embedded = false }: { agentId: number;
 
   if (!open) return null;
 
-  // meiva:ref ui/web/src/docs/frontend-components/inspector/inspector.meiva.okf.md#section-order
+  // meiva:link ui/web/src/docs/frontend-components/inspector/inspector.meiva.okf.md
   const sections: { order: number; tie: number; key: string; node: ReactNode }[] = [];
   const runLinkNode = (
     <div className={cn("items-center gap-2", FLEX)}>

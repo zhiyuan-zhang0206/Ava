@@ -33,12 +33,6 @@ re-raise a refresh failure the surface no longer owns, while an installation
 left in place still reports that failure at interpreter exit. This is finite
 cleanup, not a promise of a nonzero exit code or of delivery after a hard exit.
 
-```meiva-contract
-id = "atexit-owner-follows-the-installation"
-kind = "invariant"
-statement = "The process-lifetime sampling close is registered with, and removed by, the installation that owns it: uninstalling the SDK surface unregisters that owner's close, so a removed surface cannot re-raise its refresh failure at interpreter exit, while an installation left in place (the bare-SDK process) still reports one."
-code = ["meiva/sdk_surface/install.py:install", "meiva/sdk_surface/install.py:uninstall"]
-tests = ["meiva/tests/namespaces/sdk_surface/test_sampling_atexit.py::test_installation_atexit_reports_failure_without_promising_a_nonzero_exit", "meiva/tests/namespaces/sdk_surface/test_sampling_atexit.py::test_uninstalled_surface_leaves_no_atexit_callback"]
-```
+The process-lifetime sampling close is registered with, and removed by, the installation that owns it: uninstalling the SDK surface unregisters that owner's close, so a removed surface cannot re-raise its refresh failure at interpreter exit, while an installation left in place (the bare-SDK process) still reports one.
 
 Parent: [[sdk-surface.meiva.okf.md]].

@@ -6,13 +6,15 @@ from pathlib import Path
 
 import pytest
 
+from scripts.agent_surface import (
+    discover_agent_surface_modules,
+    top_level_surface,
+)
 from scripts.lint.agent_docstrings import (
     SKILL_REF_RE,
-    discover_agent_surface_modules,
     docstring_violations,
     is_in_scope,
     module_doc_child_reference_violations,
-    top_level_surface,
 )
 
 

@@ -17,19 +17,18 @@ class ParserSymbol(ParserRecord):
     name: str
     line: int = Field(ge=1)
     end_line: int = Field(ge=1)
-    parameters: list[str]
-    ambiguous: bool
     callable: bool
 
 
 class ParserNote(ParserRecord):
-    kind: Literal[NoteKind.COMMENT, NoteKind.DOCSTRING, NoteKind.UNUSED_STRING]
+    kind: Literal[NoteKind.COMMENT, NoteKind.NOTE, NoteKind.DOCSTRING, NoteKind.UNUSED_STRING]
     line: int = Field(ge=1)
     end_line: int = Field(ge=1)
     text: str
     owner: str
     lexical_owner: str = Field(min_length=1)
     raw_text: str = Field(min_length=1)
+    links: list[str] = Field(default_factory=list)
 
 
 class ParserSource(ParserRecord):
@@ -50,14 +49,7 @@ def parse_source(item: ParserSource) -> Source:
     for name, value in item.symbols.items():
         if value.name != name or value.end_line < value.line:
             raise ValueError(f"invalid TypeScript symbol: {path}:{name}")
-        symbols[name] = Symbol(
-            name,
-            value.line,
-            value.end_line,
-            tuple(value.parameters),
-            value.ambiguous,
-            value.callable,
-        )
+        symbols[name] = Symbol(name, value.line, value.end_line, value.callable)
     if "<module>" not in symbols:
         raise ValueError(f"missing TypeScript module: {path}")
     notes: list[Note] = []
@@ -73,6 +65,7 @@ def parse_source(item: ParserSource) -> Source:
                 value.owner,
                 value.lexical_owner,
                 value.raw_text,
+                tuple(value.links),
             )
         )
     return Source(path, symbols, tuple(notes))

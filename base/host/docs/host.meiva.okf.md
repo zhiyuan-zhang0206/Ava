@@ -52,13 +52,7 @@ Bootstrap fetches use this owner. Provider and Redis-listener
 loops still have dedicated contracts; the remaining Redis audit is a
 [future item](../../../future/infra/engineering/retry-consumer-contracts.md).
 
-```meiva-contract
-id = "retry-caller-wait"
-kind = "invariant"
-statement = "retry() sleeps through the module wait hook by default; a caller that passes its own wait (sleep=timers.sleep) waits through it at every retry, so a ManualTimers records the waits and advances virtual time while the module hook records nothing."
-code = ["base/host/net/resilience.py:retry", "base/host/net/tests/test_resilience.py:TestWaitHooks.test_retry_uses_the_callers_own_wait"]
-tests = ["base/host/net/tests/test_resilience.py::TestWaitHooks::test_retry_uses_the_callers_own_wait"]
-```
+retry() sleeps through the module wait hook by default; a caller that passes its own wait (sleep=timers.sleep) waits through it at every retry, so a ManualTimers records the waits and advances virtual time while the module hook records nothing.
 
 `base/host/net/ports.py` is the port for an HTTP request whose answer a test controls.
 `UrlOpener` has `urllib.request.urlopen`'s shape (a request or a URL and a timeout in, a readable

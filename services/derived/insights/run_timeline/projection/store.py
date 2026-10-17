@@ -1,4 +1,4 @@
-# meiva:ref services/derived/insights/run_timeline/docs/range-projection.meiva.okf.md#indexed-history-windows
+# meiva:link services/derived/insights/run_timeline/docs/range-projection.meiva.okf.md
 from __future__ import annotations
 
 from datetime import datetime

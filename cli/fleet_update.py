@@ -1,4 +1,6 @@
-# meiva:ref cli/docs/fleet-update.meiva.okf.md#no-application-imports
+# meiva:note
+# cli.fleet_update imports no application code — no base, cli, gateway, services, agent or meiva modules — so the halves run from a bare operator checkout.
+# meiva:link cli/docs/fleet-update.meiva.okf.md
 
 from __future__ import annotations
 
@@ -164,7 +166,7 @@ def _host_refusals(alias: str, facts: dict[str, str]) -> list[str]:
     return reasons
 
 
-# meiva:ref cli/docs/fleet-update-window.meiva.okf.md#preflight-refusals
+# meiva:link cli/docs/fleet-update-window.meiva.okf.md
 def _preflight(s: Session, args: argparse.Namespace, new: str) -> tuple[list[str], str | None]:
     reasons: list[str] = []
     heads: dict[str, str] = {}
@@ -188,7 +190,7 @@ def _preflight(s: Session, args: argparse.Namespace, new: str) -> tuple[list[str
     return reasons, resolved
 
 
-# meiva:ref cli/docs/fleet-update-window.meiva.okf.md#keep-decision-subprocess
+# meiva:link cli/docs/fleet-update-window.meiva.okf.md
 def keep_decision(
     s: Session, old: str | None, new: str, *, timeout: float = KEEP_TIMEOUT_S
 ) -> list[str]:
@@ -227,7 +229,7 @@ def keep_decision(
     return keeps
 
 
-# meiva:ref cli/docs/fleet-update-window.meiva.okf.md#stored-schedules-refusal
+# meiva:link cli/docs/fleet-update-window.meiva.okf.md
 def _stored_schedules(s: Session, args: argparse.Namespace, new: str) -> None:
     out = s.run(
         args.gateway,
@@ -263,7 +265,7 @@ def silence_program() -> str:
     return Path(__file__).with_name("fleet_alert_silence.py").read_text()
 
 
-# meiva:ref cli/docs/fleet-update-window.meiva.okf.md#silence-window
+# meiva:link cli/docs/fleet-update-window.meiva.okf.md
 def _silence(s: Session, args: argparse.Namespace, verb: str, comment: str = "") -> None:
     hours = getattr(args, "silence_hours", 0)
     tail = f" --hours {hours:g} --comment {shlex.quote(comment)}" if verb == "open" else ""
@@ -273,7 +275,7 @@ def _silence(s: Session, args: argparse.Namespace, verb: str, comment: str = "")
             s.say(f"WARNING: alert silence not {verb}: {line.removeprefix('SILENCE ')}")
 
 
-# meiva:ref cli/docs/fleet-update.meiva.okf.md#update-half-ordering
+# meiva:link cli/docs/fleet-update.meiva.okf.md
 def down(s: Session, args: argparse.Namespace) -> None:
     new = _git("rev-parse", "--verify", f"{args.new}^{{commit}}").stdout.strip()
     if not new:
@@ -351,7 +353,7 @@ def machine_names(s: Session, aliases: list[str]) -> dict[str, str]:
     return names
 
 
-# meiva:ref cli/docs/fleet-update.meiva.okf.md#up-completion-gates
+# meiva:link cli/docs/fleet-update.meiva.okf.md
 def _roster(s: Session, args: argparse.Namespace, program: str) -> tuple[list[dict[str, Any]], str]:
     names = machine_names(s, [args.gateway, *args.runner])
     wanted = set(names.values())

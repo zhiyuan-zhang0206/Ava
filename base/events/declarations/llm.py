@@ -5,7 +5,9 @@ from typing import Literal, NotRequired, TypedDict
 from base.events.vocabulary import LLM_ERROR_FAMILY, EventSpec, telemetry_event
 
 
-# meiva:ref base/events/docs/llm-payloads.meiva.okf.md#usage-time-price-snapshot
+# meiva:note
+# LLM usage events preserve the rates in force at the call and its computed USD cost; readers must not reprice history against the current registry. Calls with unknown prices omit the cost/rate snapshot and set unpriced, while calls is one on every metered call.
+# meiva:link base/events/docs/llm-payloads.meiva.okf.md
 class LlmUsage(TypedDict):
     model: str
     calls: int
@@ -45,7 +47,9 @@ class LlmRetry(TypedDict):
     duration_seconds: float
 
 
-# meiva:ref base/events/docs/llm-payloads.meiva.okf.md#provider-error-dimensions
+# meiva:note
+# billing is independent of the transient/permanent error class: exhausted credit can require human action in either class. error_type preserves the provider body error.type alone, while error.code may affect billing classification without replacing error_type.
+# meiva:link base/events/docs/llm-payloads.meiva.okf.md
 class LlmProviderError(TypedDict):
     error_class: str
     provider: str

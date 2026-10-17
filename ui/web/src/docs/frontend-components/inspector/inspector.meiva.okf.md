@@ -51,19 +51,6 @@ inspect traffic. Closing aborts the in-flight reads.
 its error boundary via `resetKey`, not `key=`), so each switch also restores the
 scroll-to-top reset the former remount gave a new selection.
 
-```meiva-contract
-id = "section-order"
-kind = "invariant"
-statement = "The panel renders one merged sorted list: the Open run timeline entry (50) first, the merged Cost + Activity section (75), then page (100), shells (200), liveness (300) and the configuration overlay (400), and the open notice (800) last. Plugin widgets keep their own order and slot between those keys; ties stack built-in sections first, then widgets by (plugin, id). The non-embedded header carries the title alone — no category or section filter — and embedded panels render no header."
-code = [
-  "ui/web/src/lib/inspector/inspector-widgets.ts:INSPECT_SECTION_ORDER",
-  "ui/web/src/components/inspector/inspector-panel.tsx:InspectorPanel",
-]
-tests = [
-  "ui/web/src/components/inspector/inspector-panel.test.tsx::InspectorPanel section layout::renders the run timeline entry first, Cost + Activity second, then the runtime sections",
-  "ui/web/src/components/inspector/inspector-panel.test.tsx::InspectorPanel section layout::embedded: renders without the header bar or the category selector",
-  "ui/web/src/components/inspector/inspector-panel.test.tsx::InspectorPanel plugin widgets::slots a widget into the section order (750: between the configuration overlay and the notice)",
-]
-```
+The panel renders one merged sorted list: the Open run timeline entry (50) first, the merged Cost + Activity section (75), then page (100), shells (200), liveness (300) and the configuration overlay (400), and the open notice (800) last. Plugin widgets keep their own order and slot between those keys; ties stack built-in sections first, then widgets by (plugin, id). The non-embedded header carries the title alone — no category or section filter — and embedded panels render no header.
 
 Parent: [[ui/web/src/docs/frontend-components/frontend-components.meiva.okf.md]].

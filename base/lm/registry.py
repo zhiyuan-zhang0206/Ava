@@ -1,4 +1,6 @@
-# meiva:ref base/lm/docs/model-configuration.meiva.okf.md#model-tuning-registry
+# meiva:note
+# `ModelTuning` field names match flat `base.config` settings fields one-for-one, with `DEFAULT_TUNING` fully populated as the shared floor and `None` serving as the topology-independent unset sentinel across `explain_setting` and `resolve_setting` (`shared-default < model-default < explicit`). `validate_models` and `validate_spec` require `attach_modalities` to be a subset of `media_types`, require every spawnable model to declare `context_window`, `knowledge_cutoff`, `effort_levels`, a current price, a concrete `tuning.reasoning_effort` within `effort_levels`, and `max_output_tokens` on Anthropic-protocol bindings, and require acyclic `superseded_by` chains, valid `fast_of` standard targets, and non-spawnable `unavailable_fallback` sources pointing to spawnable replacements. `resolve_available_model` and `normalize_overlay_llm_model` settle withdrawn models to their declared fallback in one hop and return `(requested, resolved)` when rewriting an overlay.
+# meiva:link base/lm/docs/model-configuration.meiva.okf.md
 from __future__ import annotations
 
 from collections.abc import Collection, Mapping

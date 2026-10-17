@@ -5,7 +5,9 @@ from typing import Literal, NotRequired, TypedDict
 from base.events.vocabulary import EventSpec, telemetry_event
 
 
-# meiva:ref base/events/docs/maintenance-payloads.meiva.okf.md#ci-usage-reconciliation
+# meiva:note
+# One ci_usage_daily event per reconciliation day (05:00-05:00 cluster time): the CI workflow's runs and ceil-billed minutes for the window, split by attribution and OS; the attribution source is the legacy [Meiva-<id>] prefix, read from PR titles and commit subjects only when present (new PR titles carry none — user ruling 2026-10-16). est_usd is the private-repo overage equivalent at the GitHub-hosted rates; the repo is currently public, so minutes are the billing fact. Per-agent detail lives in the attribution ledger, not here.
+# meiva:link base/events/docs/maintenance-payloads.meiva.okf.md
 class CiUsageDaily(TypedDict):
     day: str
     window_start: str
@@ -28,7 +30,9 @@ class DebtSweepDaily(TypedDict):
     worker_agent_id: int
 
 
-# meiva:ref base/events/docs/maintenance-payloads.meiva.okf.md#pr-flow-daily-gauge
+# meiva:note
+# PrFlowDaily is one event per complete cluster-tz day in the trailing window, re-emitted on every run so the whole window stays inside Prometheus retention; every numeric field is absolute per-day state (an ObservableGauge), never a sum, and fields are absent when the day has no such sample (no merges -> no percentiles; an unreachable flaky source omits flake_new_quarantines rather than claiming zero).
+# meiva:link base/events/docs/maintenance-payloads.meiva.okf.md
 class PrFlowDaily(TypedDict):
     day: str
     merged_count: int
@@ -41,7 +45,9 @@ class PrFlowRun(TypedDict):
     queue_depth: NotRequired[int]
 
 
-# meiva:ref base/events/docs/maintenance-payloads.meiva.okf.md#ci-runs-daily-dedup
+# meiva:note
+# One absolute-state ci_runs_daily sample per complete cluster-time day and repository. Classification labels overlap; white_run_share alone deduplicates instant skips, superseded runs and abandoned PR heads in that priority order. Per-PR percentiles are absent when no completed PR has attributed runs. first_pass_pr_share is v1's run-level approximation: attributed non-noise, non-zombie runs have no red conclusion and no retry attempt.
+# meiva:link base/events/docs/maintenance-payloads.meiva.okf.md
 class CiRunsDaily(TypedDict):
     repo: str
     day: str
@@ -70,7 +76,9 @@ class CiRunsDaily(TypedDict):
     first_pass_pr_share: NotRequired[float]
 
 
-# meiva:ref base/events/docs/maintenance-payloads.meiva.okf.md#ci-workflow-window
+# meiva:note
+# ci_workflow_window reports trailing-window absolute workflow state keyed by repository and workflow name, emitted with the same daily sampler. Execution percentiles omit zombie wall-clock artifacts and zero-execution runs rather than treating an empty population as a real zero.
+# meiva:link base/events/docs/maintenance-payloads.meiva.okf.md
 class CiWorkflowWindow(TypedDict):
     repo: str
     workflow: str
@@ -122,7 +130,9 @@ class UnderstandingChunkFailed(TypedDict):
     error: str
 
 
-# meiva:ref base/events/docs/maintenance-payloads.meiva.okf.md#understanding-chunk-gap
+# meiva:note
+# understanding_chunk_gap reports the stretches of a chunk that no node will describe — the runs after the first uncovered run of a chunk that overlapped existing nodes, and the turns a closing chunk's boundary snapshot lacks. The rest of the chunk was described.
+# meiva:link base/events/docs/maintenance-payloads.meiva.okf.md
 class UnderstandingChunkGap(TypedDict):
     agent_id: int
     job_id: int
@@ -153,7 +163,9 @@ class UnderstandingCallRecordFailed(TypedDict):
     error: str
 
 
-# meiva:ref base/events/docs/maintenance-payloads.meiva.okf.md#understanding-rebuild-failure
+# meiva:note
+# understanding_rebuild_failed marks a rebuild closed as failed after its last allowed attempt; the agent's leaves stay as they were (no partial replacement), and the failure is never silent.
+# meiva:link base/events/docs/maintenance-payloads.meiva.okf.md
 class UnderstandingRebuildFailed(TypedDict):
     agent_id: int
     rebuild_id: int
@@ -161,14 +173,18 @@ class UnderstandingRebuildFailed(TypedDict):
     error: str
 
 
-# meiva:ref base/events/docs/maintenance-payloads.meiva.okf.md#understanding-leaf-out-of-order
+# meiva:note
+# A level-1 node that landed before one that already has a parent reports understanding_leaf_out_of_order; nothing repairs it automatically and the agent's upper levels need a manual build.
+# meiva:link base/events/docs/maintenance-payloads.meiva.okf.md
 class UnderstandingLeafOutOfOrder(TypedDict):
     agent_id: int
     job_id: int
     span_end: int
 
 
-# meiva:ref base/events/docs/maintenance-payloads.meiva.okf.md#understanding-backlog
+# meiva:note
+# understanding_backlog samples the chunk queue once per consumer round: rows waiting, rows in flight, and how long the oldest waiting row has waited. A growing age is a consumer that does not keep up.
+# meiva:link base/events/docs/maintenance-payloads.meiva.okf.md
 class UnderstandingBacklog(TypedDict):
     pending: int
     running: int

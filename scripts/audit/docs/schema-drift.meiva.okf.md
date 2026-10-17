@@ -45,13 +45,7 @@ keep the check red. The allowlist is per invocation, never a committed
 default, and it cannot silence a missing object — a baseline entry that the
 database lacks stays a failure.
 
-```meiva-contract
-id = "schema-drift"
-kind = "invariant"
-statement = "The audit reports extra and missing tables and columns in both directions, writes the same findings with their classes as JSON on request, subtracts an explicit per-run allowlist of table and table.column entries from the extra objects only, and exits 1 while any difference remains and 0 when the two sides agree."
-code = ["scripts/audit/schema_drift.py:<module>", "scripts/audit/schema_drift.py:compare", "scripts/audit/schema_drift.py:main"]
-tests = ["scripts/audit/tests/test_schema_drift.py::test_compare_reports_extra_and_missing_tables", "scripts/audit/tests/test_schema_drift.py::test_compare_reports_a_declared_column_absent_from_the_database", "scripts/audit/tests/test_schema_drift.py::test_render_prints_clean_without_drift"]
-```
+The audit reports extra and missing tables and columns in both directions, writes the same findings with their classes as JSON on request, subtracts an explicit per-run allowlist of table and table.column entries from the extra objects only, and exits 1 while any difference remains and 0 when the two sides agree.
 
 ## Baseline parsing
 
@@ -66,13 +60,7 @@ that case is the trap: treating a keyword-looking column as a constraint
 silently loses a declaration and turns a clean database into "extra column".
 `ALTER TABLE ... ADD COLUMN [IF NOT EXISTS]` adds to the table it names.
 
-```meiva-contract
-id = "baseline-parsing"
-kind = "invariant"
-statement = "Baseline parsing strips comments outside string literals, reads a CREATE TABLE body to its matching closing parenthesis, skips only the parts whose first token is a constraint keyword so a column named key stays a column, and merges every ALTER TABLE ADD COLUMN delta into the table it names."
-code = ["scripts/audit/schema_drift.py:strip_comments", "scripts/audit/schema_drift.py:schema_columns"]
-tests = ["scripts/audit/tests/test_schema_drift.py::test_strip_comments_keeps_dashes_inside_a_string_literal", "scripts/audit/tests/test_schema_drift.py::test_schema_columns_skips_table_level_constraints", "scripts/audit/tests/test_schema_drift.py::test_schema_columns_keeps_a_column_named_key", "scripts/audit/tests/test_schema_drift.py::test_schema_columns_applies_alter_table_add_column"]
-```
+Baseline parsing strips comments outside string literals, reads a CREATE TABLE body to its matching closing parenthesis, skips only the parts whose first token is a constraint keyword so a column named key stays a column, and merges every ALTER TABLE ADD COLUMN delta into the table it names.
 
 ## Drift classes
 
@@ -96,12 +84,6 @@ the registered prefixes in `schema_drift.py`; that constant is the explicit
 registration, and an unregistered table reports as `historical`, which is the
 truthful answer — drift nobody has explained yet.
 
-```meiva-contract
-id = "drift-classes"
-kind = "invariant"
-statement = "An extra table is design/runtime-partition only when its parent is a declared table and its suffix is six digits or default, design/runtime-ddl only for a registered runtime DDL prefix, and historical otherwise; an extra column is dangerous only when it is NOT NULL without a default."
-code = ["scripts/audit/schema_drift.py:classify_table", "scripts/audit/schema_drift.py:classify_column"]
-tests = ["scripts/audit/tests/test_schema_drift.py::test_classify_table_recognises_a_partition_of_a_declared_parent", "scripts/audit/tests/test_schema_drift.py::test_classify_table_does_not_invent_a_class_for_an_undeclared_parent", "scripts/audit/tests/test_schema_drift.py::test_classify_table_recognises_an_undeclared_runtime_ddl_table", "scripts/audit/tests/test_schema_drift.py::test_classify_column_flags_a_required_column_without_a_default", "scripts/audit/tests/test_schema_drift.py::test_classify_column_treats_a_defaulted_column_as_historical"]
-```
+An extra table is design/runtime-partition only when its parent is a declared table and its suffix is six digits or default, design/runtime-ddl only for a registered runtime DDL prefix, and historical otherwise; an extra column is dangerous only when it is NOT NULL without a default.
 
 Parent: [[scripts/audit/docs/audit.meiva.okf.md]].

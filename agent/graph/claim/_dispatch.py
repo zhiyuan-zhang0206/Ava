@@ -482,7 +482,9 @@ async def _handle_resurrect(
     )
 
 
-# meiva:ref agent/graph/docs/context-notes/context-notes.meiva.okf.md#fork-keeps-inherited-head
+# meiva:note
+# A fork appends its lifecycle marker and its own context notes after the inherited history and never rewrites that history: the inherited messages stay byte-identical so the first fork of a checkpoint reuses the provider prefix cache its source warmed. The marker states that the identity, memory and skill notes above it belong to the source; the shared memory index is not re-grafted.
+# meiva:link agent/graph/docs/context-notes/context-notes.meiva.okf.md
 async def _handle_fork(
     agent_id: int,
     item: ClaimedInbound,
