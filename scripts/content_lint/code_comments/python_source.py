@@ -5,13 +5,15 @@ import re
 import tokenize
 from collections import Counter
 from collections.abc import Collection
-from dataclasses import replace
+from dataclasses import dataclass, replace
 from itertools import pairwise
 
 from scripts.content_lint.code_comments.directives import (
     ambient_call_lines,
     comment_kind,
-    is_quiesce_reference,
+    comment_text,
+    link_target,
+    note_header,
 )
 from scripts.content_lint.code_comments.fixtures import fixture_owners
 from scripts.content_lint.code_comments.model import Note, NoteKind, Source, Symbol
@@ -118,17 +120,11 @@ class SymbolCollector(ast.NodeVisitor):
     ) -> None:
         self.scope.append(node.name)
         name = ".".join(self.scope)
-        parameters: tuple[str, ...] = ()
-        if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef):
-            args = node.args
-            parameters = tuple(arg.arg for arg in [*args.posonlyargs, *args.args, *args.kwonlyargs])
         start = min([node.lineno, *(item.lineno for item in node.decorator_list)])
         self.symbols[name] = Symbol(
             name,
             start,
             node.end_lineno or node.lineno,
-            parameters,
-            name in self.symbols,
             isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef),
         )
         self.definitions.append(
@@ -219,7 +215,116 @@ def definition_identities(definitions: list[Symbol]) -> list[Symbol]:
     return result
 
 
-# meiva:ref scripts/content_lint/code_comments/docs/code_comments.meiva.okf.md#python-entry-shebang
+@dataclass(frozen=True)
+class Block:
+    line: int
+    end_line: int
+    column: int
+    kind: NoteKind
+    text: str
+    links: tuple[str, ...]
+    raw_text: str
+
+
+def _note_body(
+    comments: list[tuple[int, int, str]],
+    index: int,
+    ambient: frozenset[int],
+    column: int,
+    raw: list[str],
+) -> tuple[list[str], int, int]:
+    body: list[str] = []
+    last = comments[index][0]
+    cursor = index + 1
+    while cursor < len(comments):
+        next_line, next_column, next_text = comments[cursor]
+        if (
+            next_column != column
+            or next_line != last + 1
+            or note_header(next_text)
+            or link_target(next_text) is not None
+            or comment_kind(next_text, next_line, ambient) != NoteKind.COMMENT
+        ):
+            break
+        body.append(comment_text(next_text))
+        raw.append(next_text)
+        last = next_line
+        cursor += 1
+    return body, cursor, last
+
+
+def _note_links(
+    comments: list[tuple[int, int, str]],
+    cursor: int,
+    column: int,
+    raw: list[str],
+    last: int,
+    links: list[str] | None = None,
+) -> tuple[list[str], int, int]:
+    links = list(links or [])
+    while cursor < len(comments):
+        next_line, next_column, next_text = comments[cursor]
+        target = link_target(next_text)
+        if next_column != column or next_line != last + 1 or target is None:
+            break
+        links.append(target)
+        raw.append(next_text)
+        last = next_line
+        cursor += 1
+    return links, cursor, last
+
+
+def _note_block(
+    comments: list[tuple[int, int, str]],
+    index: int,
+    ambient: frozenset[int],
+    *,
+    with_body: bool,
+) -> tuple[Block, int]:
+    line, column, text = comments[index]
+    raw = [text]
+    if with_body:
+        body, cursor, last = _note_body(comments, index, ambient, column, raw)
+        seed: list[str] = []
+    else:
+        body, cursor, last = [], index + 1, line
+        target = link_target(text)
+        seed = [target] if target is not None else []
+    links, cursor, last = _note_links(comments, cursor, column, raw, last, seed)
+    block = Block(
+        line, last, column, NoteKind.NOTE, "\n".join(body).strip("\n"), tuple(links), "\n".join(raw)
+    )
+    return block, cursor
+
+
+def comment_blocks(comments: list[tuple[int, int, str]], ambient: frozenset[int]) -> list[Block]:
+    blocks: list[Block] = []
+    index = 0
+    while index < len(comments):
+        line, column, text = comments[index]
+        if note_header(text):
+            block, index = _note_block(comments, index, ambient, with_body=True)
+            blocks.append(block)
+            continue
+        if link_target(text) is not None:
+            block, index = _note_block(comments, index, ambient, with_body=False)
+            blocks.append(block)
+            continue
+        blocks.append(
+            Block(
+                line,
+                line,
+                column,
+                comment_kind(text, line, ambient),
+                comment_text(text),
+                (),
+                text,
+            )
+        )
+        index += 1
+    return blocks
+
+
 def parse_python(path: str, text: str) -> Source:
     tree = ast.parse(text, filename=path)
     collector = SymbolCollector(text, fixture_owners(tree))
@@ -234,7 +339,8 @@ def parse_python(path: str, text: str) -> Source:
         )
         for note in collector.notes
     ]
-    ambient_lines = ambient_call_lines(path, tree)
+    ambient = ambient_call_lines(path, tree)
+    comments: list[tuple[int, int, str]] = []
     for item in tokenize.generate_tokens(io.StringIO(text).readline):
         if item.type != tokenize.COMMENT:
             continue
@@ -242,23 +348,33 @@ def parse_python(path: str, text: str) -> Source:
             r"#!/usr/bin/(?:env python(?:3(?:\.12)?)?|python3(?:\.12)?)", item.string
         ):
             continue
-        kind = comment_kind(item.string, item.start[0], ambient_lines)
-        machine_reference = kind == NoteKind.LINT_DIRECTIVE or is_quiesce_reference(item.string)
+        comments.append((item.start[0], item.start[1], item.string))
+    for block in comment_blocks(comments, ambient):
+        machine = block.kind in {NoteKind.LINT_DIRECTIVE, NoteKind.MACHINE}
+        standalone = not collector.lines[block.line - 1][: block.column].strip()
+        anchor = block.end_line
         lexical_owner = comment_owner(
-            collector.definitions, item.start[0], following=not machine_reference
+            collector.definitions, anchor, following=standalone and not machine
         )
         owner = (
             lexical_owner
-            if machine_reference
-            else comment_owner(collector.symbols.values(), item.start[0])
+            if machine
+            else comment_owner(collector.symbols.values(), anchor, following=True)
         )
         scope = enclosing_definition(
-            collector.definitions,
-            item.start[0],
-            following=not machine_reference and not item.line[: item.start[1]].strip(),
+            collector.definitions, anchor, following=standalone and not machine
         ).lexical_key
         collector.notes.append(
-            Note(kind, item.start[0], item.end[0], item.string, owner, scope, item.string)
+            Note(
+                block.kind,
+                block.line,
+                block.end_line,
+                block.text,
+                owner,
+                scope,
+                block.raw_text,
+                block.links,
+            )
         )
     return Source(
         path,

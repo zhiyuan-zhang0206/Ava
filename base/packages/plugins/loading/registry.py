@@ -41,7 +41,7 @@ def _declared(plugin: str, face: str, contribute: Callable[[], object]) -> Plugi
     return contributions
 
 
-# meiva:ref base/packages/plugins/docs/runtime-contributions.meiva.okf.md#runtime-face-admission
+# meiva:link base/packages/plugins/docs/runtime-contributions.meiva.okf.md
 def declarations(
     faces: Sequence[str] = ALL_FACES, report: load_report.Reporter | None = None
 ) -> list[tuple[str, Path, PluginContributions]]:
@@ -85,7 +85,7 @@ def loaded_state_classes() -> frozenset[type[BaseModel]]:
     return frozenset(classes)
 
 
-# meiva:ref base/packages/plugins/docs/runtime-contributions.meiva.okf.md#runtime-face-admission
+# meiva:link base/packages/plugins/docs/runtime-contributions.meiva.okf.md
 def build_registry(
     faces: Sequence[str] = ALL_FACES,
     report: load_report.Reporter | None = None,

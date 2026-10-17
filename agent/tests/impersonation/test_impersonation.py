@@ -130,7 +130,9 @@ async def test_hold_ends_before_claim_or_compaction(
     hook.assert_not_awaited()
 
 
-# meiva:ref agent/tests/impersonation/docs/checkpoint-receipt.meiva.okf.md#checkpoint-receipt-retry
+# meiva:note
+# After a receipt write fails, retrying settlement does not apply the same non-idempotent delta to the checkpoint twice.
+# meiva:link agent/tests/impersonation/docs/checkpoint-receipt.meiva.okf.md
 async def test_checkpoint_receipt_prevents_reapplying_non_idempotent_delta(
     monkeypatch: pytest.MonkeyPatch,
     incarnation: RuntimeIncarnation,

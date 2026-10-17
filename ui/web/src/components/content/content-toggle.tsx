@@ -10,7 +10,7 @@ import { FLEX } from "@/lib/layout/layout";
 
 export const DETAILS_SETTINGS_HREF = "/control#display-timeline";
 
-// meiva:ref ui/web/src/docs/frontend-components/home-shell-chrome/home-shell-chrome.meiva.okf.md#details-mode-owner
+// meiva:link ui/web/src/docs/frontend-components/home-shell-chrome/home-shell-chrome.meiva.okf.md
 export function ContentToggle() {
   const t = useTranslations("contentToggle");
   const { detailsMode, isLoading } = useContentToggle();

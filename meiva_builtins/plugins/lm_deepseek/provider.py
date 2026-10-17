@@ -1,4 +1,4 @@
-# meiva:ref meiva_builtins/plugins/docs/plugins.meiva.okf.md#lm-deepseek-provider
+# meiva:link meiva_builtins/plugins/docs/plugins.meiva.okf.md
 from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any

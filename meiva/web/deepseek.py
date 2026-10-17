@@ -1,4 +1,4 @@
-# meiva:ref meiva/web/docs/providers.meiva.okf.md#web-deepseek-provider
+# meiva:link meiva/web/docs/providers.meiva.okf.md
 
 from __future__ import annotations
 
@@ -73,7 +73,7 @@ def _post(
 
     def _send() -> bytes:
         pacer.acquire()
-        # meiva:ref meiva/web/docs/providers.meiva.okf.md#web-deepseek-provider
+        # meiva:link meiva/web/docs/providers.meiva.okf.md
         request = urllib.request.Request(  # noqa: S310
             endpoint,
             data=payload,

@@ -40,7 +40,7 @@ export const BAR_DIVIDER_CLASS =
 
 export const BAR_MIN_HEIGHT_CLASS = "min-h-11";
 
-// meiva:ref ui/web/src/docs/frontend-components/home-shell-chrome/home-shell-chrome.meiva.okf.md#column-title-divider
+// meiva:link ui/web/src/docs/frontend-components/home-shell-chrome/home-shell-chrome.meiva.okf.md
 export const COLUMN_TITLE_BAR_CLASS = `relative ${BAR_HEIGHT_CLASS} ${BAR_DIVIDER_CLASS}`;
 export const COLUMN_TITLE_BAR_WRAP_CLASS = `relative ${BAR_MIN_HEIGHT_CLASS} ${BAR_DIVIDER_CLASS}`;
 

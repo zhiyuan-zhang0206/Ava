@@ -40,21 +40,6 @@ Because the sibling builds its gateway client from the shared endpoint, a parent
 resolvable gateway endpoint cannot derive one; the block's builder still receives that endpoint and
 ignores it.
 
-```meiva-contract
-id = "client-set-single-owner"
-kind = "invariant"
-statement = "A ClientSet closes every client it builds, the gateway client included; its constructors' builders are the only way a client enters it. A with_gateway sibling shares the endpoint and the other builders and builds no event pipeline; it closes the gateway client its builder returns, so use_client — which hands in a caller-owned client — never closes the sibling, and the caller keeps ownership of that client."
-code = [
-  "base/agents/context/clients.py:<module>",
-  "base/agents/context/clients.py:ClientSet.close",
-  "base/agents/context/clients.py:ClientSet.with_gateway",
-]
-tests = [
-  "base/agents/context/tests/test_clients.py::test_close_releases_the_gateway_client_the_set_built_and_the_next_use_rebuilds",
-  "base/agents/context/tests/test_clients.py::test_a_derived_gateway_never_reaches_the_owner_it_came_from",
-  "base/agents/context/tests/test_clients.py::test_closing_a_derived_sibling_releases_the_client_its_builder_returned",
-  "meiva/tests/namespaces/gateway_client/test_gateway_client_base_url.py::test_use_client_leaves_the_caller_client_open_and_restores_the_bound_context",
-]
-```
+A ClientSet closes every client it builds, the gateway client included; its constructors' builders are the only way a client enters it. A with_gateway sibling shares the endpoint and the other builders and builds no event pipeline; it closes the gateway client its builder returns, so use_client — which hands in a caller-owned client — never closes the sibling, and the caller keeps ownership of that client.
 
 Parent: [[../../docs/agents.meiva.okf.md|agent contracts]].

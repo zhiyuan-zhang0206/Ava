@@ -13,13 +13,7 @@ Composition roots supply the active skill reader through `CommandCatalog`.
 
 ## Catalog boundary
 
-```meiva-contract
-id = "catalog-lazy-boundary"
-kind = "invariant"
-statement = "Ordinary text bypasses catalog discovery. Disabled commands do not read skills or command files. Enabled discovery reads the current skill source and command files on each call; discovery failures remain visible to command callers."
-code = ["base/packages/composer_commands.py:CommandCatalog", "base/packages/composer_commands.py:_commands_enabled"]
-tests = ["base/packages/tests/test_composer_commands.py::test_catalog_plain_text_does_not_read_skills", "base/packages/tests/test_composer_commands.py::test_catalog_plain_text_does_not_read_command_files", "base/packages/tests/test_composer_commands.py::test_expand_passthrough_when_disabled", "base/packages/tests/test_composer_commands.py::test_the_catalog_reads_its_skill_source_on_every_call", "base/packages/tests/test_composer_commands.py::test_catalog_reads_command_files_afresh"]
-```
+Ordinary text bypasses catalog discovery. Disabled commands do not read skills or command files. Enabled discovery reads the current skill source and command files on each call; discovery failures remain visible to command callers.
 
 Ordinary text means a message that does not start with `/`; a slash inside prose
 or after leading whitespace is not an invocation. This check belongs before
@@ -36,13 +30,7 @@ exercise the agent-domain setting, not a full gateway startup.
 
 ## Discovery and names
 
-```meiva-contract
-id = "command-discovery"
-kind = "invariant"
-statement = "Discovery merges active skills and command files in override order, with later identical names winning, and returns names sorted. File commands override same-named skills. Names display colon-separated namespaces with dash spelling; imported argument-hint metadata is accepted. Malformed frontmatter is skipped, while missing directories are empty."
-code = ["base/packages/composer_commands.py:command_dirs", "base/packages/composer_commands.py:scan_dir", "base/packages/composer_commands.py:skill_commands", "base/packages/composer_commands.py:discover_commands"]
-tests = ["base/packages/tests/test_composer_commands.py::test_discover_dedups_later_source_wins", "base/packages/tests/test_composer_commands.py::test_discover_sorted_by_name", "base/packages/tests/test_composer_commands.py::test_explicit_command_overrides_skill_as_command", "base/packages/tests/test_composer_commands.py::test_builtin_source_ignores_legacy_root_and_keeps_user_override", "base/packages/tests/test_composer_commands.py::test_skill_carried_commands_walk_the_skills_it_is_given", "base/packages/tests/test_composer_commands.py::test_scan_dir_renders_canonical_namespace_spelling", "base/packages/tests/test_composer_commands.py::test_scan_dir_reads_claude_code_argument_hint", "base/packages/tests/test_composer_commands.py::test_scan_dir_skips_malformed_frontmatter", "base/packages/tests/test_composer_commands.py::test_scan_dir_missing_dir_is_empty", "base/packages/tests/test_composer_commands.py::test_discover_empty_when_disabled"]
-```
+Discovery merges active skills and command files in override order, with later identical names winning, and returns names sorted. File commands override same-named skills. Names display colon-separated namespaces with dash spelling; imported argument-hint metadata is accepted. Malformed frontmatter is skipped, while missing directories are empty.
 
 Sources, from lowest to highest precedence:
 
@@ -68,13 +56,7 @@ continue to fail enabled discovery.
 
 ## Expansion inside one message
 
-```meiva-contract
-id = "command-expansion"
-kind = "invariant"
-statement = "Expansion is source-neutral and produces one string: known command segments expand in typed order with their own free text, joined by a blank line. Unknown leading names pass through; unknown later slash tokens remain argument text. Every command follows the same chaining rules, including lifecycle commands and repeated commands. Skills expand to load-and-follow instructions rather than copied skill bodies."
-code = ["base/packages/composer_commands.py:Command", "base/packages/composer_commands.py:Invocation", "base/packages/composer_commands.py:split_commands", "base/packages/composer_commands.py:_expand_one", "base/packages/composer_commands.py:expand_command"]
-tests = ["base/packages/tests/test_composer_commands.py::test_chain_is_exactly_the_single_expansions_concatenated", "base/packages/tests/test_composer_commands.py::test_chain_expands_every_command_in_the_order_typed", "base/packages/tests/test_composer_commands.py::test_chain_gives_each_command_its_own_argument", "base/packages/tests/test_composer_commands.py::test_unknown_leading_name_passes_the_whole_chain_through", "base/packages/tests/test_composer_commands.py::test_slash_token_that_is_not_a_command_stays_in_the_argument", "base/packages/tests/test_composer_commands.py::test_missing_space_between_commands_is_one_unknown_name", "base/packages/tests/test_composer_commands.py::test_lifecycle_command_chains_like_any_other", "base/packages/tests/test_composer_commands.py::test_repeating_one_command_expands_it_twice", "base/packages/tests/test_composer_commands.py::test_command_record_carries_no_chaining_policy", "base/packages/tests/test_composer_commands.py::test_expand_is_source_neutral", "base/packages/tests/test_composer_commands.py::test_skill_as_command_namespaced", "base/packages/tests/test_composer_commands.py::test_underscore_command_spelling_still_expands"]
-```
+Expansion is source-neutral and produces one string: known command segments expand in typed order with their own free text, joined by a blank line. Unknown leading names pass through; unknown later slash tokens remain argument text. Every command follows the same chaining rules, including lifecycle commands and repeated commands. Skills expand to load-and-follow instructions rather than copied skill bodies.
 
 One send remains one message. Splitting a chain into separate messages would
 allow separate claim turns to answer without the other commands' context or

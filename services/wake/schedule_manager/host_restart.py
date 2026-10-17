@@ -8,7 +8,7 @@ from base import telemetry
 _log = logging.getLogger(__name__)
 
 
-# meiva:ref services/wake/schedule_manager/docs/host-replacement.meiva.okf.md#host-replacement-restart
+# meiva:link services/wake/schedule_manager/docs/host-replacement.meiva.okf.md
 class AutoRestartLedger:
     def __init__(self) -> None:
         self._attempts: dict[int, list[float]] = {}
@@ -36,7 +36,7 @@ class AutoRestartLedger:
         self._intents = {sid: intent for sid, intent in self._intents.items() if sid in known}
 
 
-# meiva:ref services/wake/schedule_manager/docs/host-replacement.meiva.okf.md#host-replacement-restart
+# meiva:link services/wake/schedule_manager/docs/host-replacement.meiva.okf.md
 def emit_auto_restart(
     schedule_id: int, previous_generation: str, generation: str, restarts_in_window: int
 ) -> None:
@@ -53,7 +53,7 @@ def emit_auto_restart(
     )
 
 
-# meiva:ref services/wake/schedule_manager/docs/host-replacement.meiva.okf.md#host-replacement-restart
+# meiva:link services/wake/schedule_manager/docs/host-replacement.meiva.okf.md
 def emit_auto_restart_suppressed(
     schedule_id: int,
     previous_generation: str,

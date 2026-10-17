@@ -7,19 +7,7 @@ tags: [base, process, supervision]
 
 # Session host generation
 
-```meiva-contract
-id = "host-generation"
-kind = "invariant"
-statement = "A backend names the generation of the process that hosts its sessions and answers None when it cannot tell. A changed generation means the host was replaced and every session it held ended with it, which is one new chance for a supervised resident process; a silent death inside one generation stays that component's own failure."
-code = [
-  "base/sessions/protocol.py:SessionBackend",
-  "base/sessions/backend.py:PtySessionBackend",
-]
-tests = [
-  "base/sessions/pty/tests/test_service_epoch.py::test_the_host_generation_names_one_serving_generation",
-  "base/sessions/pty/tests/test_service_epoch.py::test_a_replaced_service_answers_a_new_generation",
-]
-```
+A backend names the generation of the process that hosts its sessions and answers None when it cannot tell. A changed generation means the host was replaced and every session it held ended with it, which is one new chance for a supervised resident process; a silent death inside one generation stays that component's own failure.
 
 One rule serves both recoveries that follow it: a root retires itself when the
 permissions helper that spawned it is replaced, and a schedule is relaunched when

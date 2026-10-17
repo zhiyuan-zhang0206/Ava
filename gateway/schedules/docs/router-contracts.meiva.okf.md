@@ -16,13 +16,7 @@ transcript is available, the stored crash error remains a distinct fallback.
 Only the agent-backed natural-language draft operation requires a model catalog;
 ordinary schedule management keeps its existing independent requirements.
 
-```meiva-contract
-id = "sql-returning-contract"
-kind = "invariant"
-statement = "Schedule values remain bound SQL parameters; interpolated projection columns are the module-owned fixed column list. Inserts and updates use RETURNING after creating or locking their target, so non-null row assertions express database postconditions rather than validating user input. Full reads keep a separate missing-row 404."
-code = ["gateway/schedules/router.py:update_blocking", "gateway/schedules/router.py:create_blocking", "gateway/schedules/router.py:fetch_full_blocking", "gateway/schedules/router.py:control_blocking"]
-tests = ["gateway/tests/extensions/test_schedules_api.py::TestCreate::test_create_returns_full_view_and_initial_version", "gateway/tests/extensions/test_schedules_api.py::TestReadUpdateDelete::test_get_missing_404", "gateway/tests/extensions/test_schedules_api.py::TestReadUpdateDelete::test_put_description_only_writes_no_new_version", "gateway/tests/extensions/test_schedules_api.py::TestReadUpdateDelete::test_put_enabled_change_routes_through_immediate_session_sync"]
-```
+Schedule values remain bound SQL parameters; interpolated projection columns are the module-owned fixed column list. Inserts and updates use RETURNING after creating or locking their target, so non-null row assertions express database postconditions rather than validating user input. Full reads keep a separate missing-row 404.
 
 ## Relationship to Other Nodes
 

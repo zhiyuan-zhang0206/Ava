@@ -22,7 +22,7 @@ const Inspector = dynamic(() => import("@/components/inspector/inspector-panel")
   loading: () => <InspectorPanelSkeleton />,
 });
 
-// meiva:ref ui/web/src/docs/frontend-state/shared-context.meiva.okf.md#panel-composition
+// meiva:link ui/web/src/docs/frontend-state/shared-context.meiva.okf.md
 export function SharedContextPanel({ agentId, document, notices, noticesFailed, mobile, onClose }: {
   agentId: number;
   document: ReturnType<typeof useToUser>;

@@ -1,4 +1,6 @@
-// meiva:ref ui/app/docs/android-updates.meiva.okf.md#android-update-prompt
+// meiva:note
+// The injected prompt asks the native check once per session, renders the bar only for an available build, and falls back to the download page when an install fails. Each case runs the checked-in script in a Node VM with canned command results.
+// meiva:link ui/app/docs/android-updates.meiva.okf.md
 (function () {
   var cfg = window.__MEIVA_APP__;
   if (!cfg || cfg.platform !== "android" || !cfg.version) return;

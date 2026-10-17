@@ -187,7 +187,9 @@ def _note_failed_attempt(
             setattr(exc, RETRY_REMAINING_ATTR, remaining_seconds)
 
 
-# meiva:ref agent/graph/llm/docs/turn-records.meiva.okf.md#turn-end-owner
+# meiva:note
+# Every turn_end record carries its owning agent's id, passed explicitly at the emit site: the process-wide log binding is the no-agent sentinel and the Inspector activity projection drops unattributed records.
+# meiva:link agent/graph/llm/docs/turn-records.meiva.okf.md
 async def llm_attempt(
     state: _state.AgentState,
     runtime: Runtime[MeivaContext],

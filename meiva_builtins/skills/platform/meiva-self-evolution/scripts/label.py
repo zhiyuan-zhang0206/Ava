@@ -1,4 +1,6 @@
-# meiva:ref meiva_builtins/skills/platform/meiva-self-evolution/docs/evidence-block-and-grading.meiva.okf.md#unknown-label
+# meiva:note
+# `label.label` returns `unknown` when the record carries an `evidence_grade` other than `complete`, and otherwise defers to `_rule_label`, whose tiers are unchanged: `failed` when the run terminated with no output and no side-channel delivery, or ended on a failed exec; `fumbled` when it crossed a re-prompt, correction, peer-feedback, scaled exec-failure or compaction threshold; `ok` when no negative signal fired. A record without an `evidence_grade` key takes `_rule_label` directly, so older datasets keep their labels, and `LABELS` lists all four tiers.
+# meiva:link meiva_builtins/skills/platform/meiva-self-evolution/docs/evidence-block-and-grading.meiva.okf.md
 from __future__ import annotations
 
 from typing import Any

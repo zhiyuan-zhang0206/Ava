@@ -141,7 +141,7 @@ def reconcile_config_image[C: BaseModel](
     return candidate, cls_keys - disk_keys, disk_keys - cls_keys
 
 
-# meiva:ref base/packages/plugins/docs/plugin-config/plugin-config.meiva.okf.md#schema-reconciliation
+# meiva:link base/packages/plugins/docs/plugin-config/plugin-config.meiva.okf.md
 def merge_disk_image_schema(plugin: str, cls: type[BaseModel]) -> tuple[set[str], set[str]]:
     config_path = disk_image_path(plugin)
 
@@ -221,7 +221,7 @@ def overlay_config_classes(
     }
 
 
-# meiva:ref base/packages/plugins/docs/plugin-config/plugin-config.meiva.okf.md#overlay-admission
+# meiva:link base/packages/plugins/docs/plugin-config/plugin-config.meiva.okf.md
 def resolve_overlay_targets(
     overlay: dict[str, object], configs: Mapping[str, BaseModel] | None = None
 ) -> dict[str, tuple[str | None, str]]:
@@ -317,7 +317,7 @@ def _range_validator(
     return check
 
 
-# meiva:ref base/packages/plugins/docs/plugin-config/plugin-config.meiva.okf.md#framework-range-validators
+# meiva:link base/packages/plugins/docs/plugin-config/plugin-config.meiva.okf.md
 _FRAMEWORK_RANGE_VALIDATORS: dict[str, Callable[[object], str | None]] = {
     "reasoning_effort": _validate_reasoning_effort_range,
     "heartbeat_pause_max_seconds": _range_validator(gt=0),
@@ -351,7 +351,7 @@ def _validate_framework_overlay_ranges(updates: dict[str, object]) -> None:
             raise InvalidConfigOverlay(f"overlay key {field!r} {error}")
 
 
-# meiva:ref base/packages/plugins/docs/plugin-config/plugin-config.meiva.okf.md#overlay-admission
+# meiva:link base/packages/plugins/docs/plugin-config/plugin-config.meiva.okf.md
 def validate_config_overlay_shape(
     overlay: dict[str, object], configs: Mapping[str, BaseModel] | None = None
 ) -> None:
@@ -487,7 +487,7 @@ def service_config_packet(plugin: str, config: BaseModel) -> str:
     )
 
 
-# meiva:ref base/packages/plugins/docs/plugin-config/plugin-config.meiva.okf.md#service-birth-snapshot
+# meiva:link base/packages/plugins/docs/plugin-config/plugin-config.meiva.okf.md
 def read_service_config[C: BaseModel](plugin: str, cls: type[C]) -> C | None:
     from base.host.env.bootstrap import service_plugin_config_packet
 

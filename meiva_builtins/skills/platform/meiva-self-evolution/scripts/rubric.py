@@ -99,7 +99,7 @@ def _has_process_telemetry(rec: dict[str, Any]) -> bool:
     )
 
 
-# meiva:ref meiva_builtins/skills/platform/meiva-self-evolution/docs/meiva-self-evolution.meiva.okf.md#score-abstention
+# meiva:link meiva_builtins/skills/platform/meiva-self-evolution/docs/meiva-self-evolution.meiva.okf.md
 def abstain_reason(rec: dict[str, Any]) -> str | None:
     grade = rec.get("evidence_grade")
     if grade is not None:

@@ -24,21 +24,9 @@ agent explicitly — the process-wide log binding is the no-agent `-` sentinel
 since the explicit-ownership change — because the Inspector activity projection
 keys node durations by the record's `agent_id` and drops unattributed records.
 
-```meiva-contract
-id = "node-exit-aggregation"
-kind = "invariant"
-statement = "Normal and cancelled node exits accumulate per agent and flush as one aggregated node_exit event at the turn boundary; an exception exit emits immediately at INFO with its live traceback; every path re-raises. A full buffer flushes at the cap, so a skipped flush path cannot grow it without bound."
-code = ["agent/graph/node_log.py:flush_node_exit_aggregate", "agent/graph/node_log.py:_accumulate_node_exit", "agent/graph/node_log.py:node_lifecycle"]
-tests = ["agent/graph/tests/test_node_log.py::test_node_lifecycle_aggregates_ok_exit_until_flush", "agent/graph/tests/test_node_log.py::test_node_lifecycle_aggregates_cancelled_exit_until_flush", "agent/graph/tests/test_node_log.py::test_node_lifecycle_emits_exception_with_traceback", "agent/graph/tests/test_node_log.py::test_node_lifecycle_flushes_aggregate_at_safety_cap"]
-```
+Normal and cancelled node exits accumulate per agent and flush as one aggregated node_exit event at the turn boundary; an exception exit emits immediately at INFO with its live traceback; every path re-raises. A full buffer flushes at the cap, so a skipped flush path cannot grow it without bound.
 
-```meiva-contract
-id = "node-exit-owner"
-kind = "invariant"
-statement = "Every node_exit record carries its owning agent's id, passed explicitly at the emit site: the process-wide log binding is the no-agent sentinel, and agent-keyed consumers (the Inspector activity projection) drop records without it."
-code = ["agent/graph/node_log.py:flush_node_exit_aggregate", "agent/graph/node_log.py:node_lifecycle"]
-tests = ["agent/tests/test_node_exit_attribution.py::test_node_exit_records_carry_the_owning_agent"]
-```
+Every node_exit record carries its owning agent's id, passed explicitly at the emit site: the process-wide log binding is the no-agent sentinel, and agent-keyed consumers (the Inspector activity projection) drop records without it.
 
 ## Timeline snapshots
 
@@ -64,13 +52,7 @@ empty full window used to blank the timeline); no system-prompt special-casing:
 the full-window path includes it, the incremental path never contains it, and
 id-replace merging keeps one copy.
 
-```meiva-contract
-id = "timeline-snapshot-cursor"
-kind = "invariant"
-statement = "Snapshots are incremental per agent: cursor 0, a shrunk history and an explicit full_window all render the full tail window, while an empty window publishes nothing on either path and still logs node_enter. The cursor advances to the full message count only after a successful publish; msg_count always reports the full history length."
-code = ["agent/graph/node_log.py:node_lifecycle", "agent/graph/node_log.py:SNAPSHOT_CURSOR"]
-tests = ["agent/graph/tests/test_node_log.py::test_node_lifecycle_incremental_second_enter_emits_only_new_messages", "agent/graph/tests/test_node_log.py::test_node_lifecycle_cursor_reset_after_shrink_forces_full_window", "agent/graph/tests/test_node_log.py::test_node_lifecycle_render_failure_does_not_advance_cursor", "agent/graph/tests/test_node_log.py::test_node_lifecycle_full_window_flag_forces_full_snapshot"]
-```
+Snapshots are incremental per agent: cursor 0, a shrunk history and an explicit full_window all render the full tail window, while an empty window publishes nothing on either path and still logs node_enter. The cursor advances to the full message count only after a successful publish; msg_count always reports the full history length.
 
 ## Stall probe
 
@@ -85,10 +67,4 @@ dump rather than crash. 0 (the production default) is a no-op, the claim node
 is exempt (it parks in the idle wait for hours), and nodes run one at a time, so
 the one global timer never collides.
 
-```meiva-contract
-id = "stall-probe-arming"
-kind = "invariant"
-statement = "The stall dump arms only above a positive threshold and never for an exempt node; the task dump fires at the threshold, faulthandler 2s later, and both are disarmed on the way out. Dumps target the interpreter's original stderr descriptor (a process without one skips the dump), and the task dump renders each task's full await chain down to the leaf awaited line."
-code = ["agent/graph/node_log.py:_stall_dump_guard", "agent/graph/node_log.py:_STALL_GUARD_EXEMPT", "agent/graph/node_log.py:_real_stderr", "agent/graph/node_log.py:awaiter_chain_lines", "agent/graph/node_log.py:dump_async_tasks"]
-tests = ["agent/graph/tests/test_node_log.py::test_stall_guard_disabled_is_noop", "agent/graph/tests/test_node_log.py::test_stall_guard_exempts_claim_node", "agent/graph/tests/test_node_log.py::test_stall_guard_arms_with_threshold_and_cancels", "agent/graph/tests/test_node_log.py::test_stall_guard_cancels_on_exception", "agent/graph/tests/test_node_log.py::test_stall_guard_survives_redirected_stderr", "agent/graph/tests/test_node_log.py::test_dump_async_tasks_names_the_full_await_chain"]
-```
+The stall dump arms only above a positive threshold and never for an exempt node; the task dump fires at the threshold, faulthandler 2s later, and both are disarmed on the way out. Dumps target the interpreter's original stderr descriptor (a process without one skips the dump), and the task dump renders each task's full await chain down to the leaf awaited line.

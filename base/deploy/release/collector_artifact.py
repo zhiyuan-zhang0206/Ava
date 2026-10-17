@@ -75,7 +75,7 @@ class DownloadProgress:
     received: int = 0
 
 
-# meiva:ref base/deploy/release/docs/collector-artifact.meiva.okf.md#bounded-download-attempt
+# meiva:link base/deploy/release/docs/collector-artifact.meiva.okf.md
 def stream_download(
     url: str,
     dest: Path,
@@ -146,7 +146,7 @@ def _download_policy(limits: DownloadLimits) -> Policy:
     )
 
 
-# meiva:ref base/deploy/release/docs/collector-artifact.meiva.okf.md#download-wait-closure
+# meiva:link base/deploy/release/docs/collector-artifact.meiva.okf.md
 def download_with_retry(
     url: str, tarball: Path, *, open_url: UrlOpener, timers: Timers, limits: DownloadLimits
 ) -> None:

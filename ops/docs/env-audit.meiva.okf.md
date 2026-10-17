@@ -52,42 +52,4 @@ tags: []
   emits `env_unauthorized_write` (audit/anomaly), and logs an error. The guard runs at the gateway
   config read boundary (`GET /api/config`).
 
-## Spawn, snapshot model vision, and spawner validation contract
-
-```meiva-contract
-id = "spawn-and-snapshot-contract"
-kind = "invariant"
-code = [
-    "ops/agents/tests/test_agents_internals.py:<module>",
-]
-tests = [
-    "ops/agents/tests/test_agents_internals.py::TestSpawnAgent::test_snapshot_reports_effective_model_vision_support",
-    "ops/agents/tests/test_agents_internals.py::TestSpawnAgent::test_snapshot_effective_model_follows_the_birth_stamp",
-]
-statement = """
-`ops/agents/tests/test_agents_internals.py` verifies durable birth configuration,
-lifecycle messages, snapshot effective-model vision support, and caller spawner
-validation against a real database:
-- The create+launch split (`create_agent_row` + `publish_inbound_wake`) inserts
-  `agents` (`status='idling'`, `spawner='user'`, `pid=None`) and `agents_meta`
-  without inserting an inbound notification row.
-- Birth-time lineage is stamped into both `spawner` and `born_spawner`, and a
-  spawner-assigned label is stored with `label_user_set=TRUE` so the labeler's
-  CAS (`WHERE label IS NULL AND NOT label_user_set`) skips it while an unlabeled
-  spawn stays `NULL` + `FALSE`.
-- `spawn_agent(config={...})` persists `agents_meta.config_overlay` and
-  `select_one` resolves `supports_vision` from the effective model (overlay over
-  birth stamp over live default, after `unavailable_fallback` resolution),
-  returning `True` for vision-capable models (`claude-sonnet-5`) and `False` for
-  text-only models (`glm-5.3`) or withdrawn vision models falling back to a
-  text-only model.
-- `insert_checkpoint` directly inserts a simplified LangGraph checkpoint row
-  (`channel_versions` and `compact_boundary`) bypassing `PostgresSaver`
-  serialization overhead, and `TestSpawnerValidation` verifies that malformed
-  `agent:` spawner values (`agent:None`, `agent:`, `agent:abc`, `agent:0`,
-  `agent:-1`) raise `ValueError` while valid `agent:<positive-id>`, `user`, and
-  external spawner strings succeed.
-"""
-```
-
 Parent: [[base/docs/base.meiva.okf.md|base library]].

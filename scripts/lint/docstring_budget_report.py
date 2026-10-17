@@ -9,9 +9,11 @@ import ast
 import sys
 from pathlib import Path
 
-from scripts.lint.agent_docstrings import (
+from scripts.agent_surface import (
     discover_agent_surface_modules,
     discover_plugin_namespace_modules,
+)
+from scripts.lint.agent_docstrings import (
     is_agent_visible,
     is_in_scope,
     plugin_wrap_targets,

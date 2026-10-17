@@ -50,7 +50,9 @@ def test_memory_root_rejects_missing_machine_roles() -> None:
         gateway_config_from_boot(owner)
 
 
-# meiva:ref gateway/tests/routers/docs/memory-graph-fixture.meiva.okf.md#memory-graph-repo-disables-auto-maintenance
+# meiva:note
+# Automatic maintenance triggered by `git commit` detaches by default (maintenance.autoDetach, falling back to gc.autoDetach) and its background process keeps the repository's object-database lock (.git/objects/maintenance.lock) after the commit command returns; a fixture whose checkout is copied right after the commit disables auto-maintenance (maintenance.auto=false, gc.auto=0) so no maintenance process exists to race the copy.
+# meiva:link gateway/tests/routers/docs/memory-graph-fixture.meiva.okf.md
 def _init_repo(root: Path) -> None:
     (root / "MEMORY.md").write_text("# index")
     (root / "notes").mkdir()
@@ -87,6 +89,8 @@ def test_graph_builds_once_per_pool_revision(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     """Two requests on the same HEAD share one build; a new commit rebuilds."""
+    # meiva:note
+    # The argv is a locally built literal git command, so no shell interprets it.
     root = tmp_path / "pool"
     root.mkdir()
     _init_repo(root)

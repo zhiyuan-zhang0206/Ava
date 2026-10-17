@@ -38,11 +38,3 @@ install commands, but the manifest and download locations are fixed in Rust and
 never come from the page.
 
 Parent node: [[app.meiva.okf.md|Meiva App]].
-
-```meiva-contract
-id = "android-update-prompt"
-kind = "invariant"
-statement = "The injected prompt asks the native check once per session, renders the bar only for an available build, and falls back to the download page when an install fails. Each case runs the checked-in script in a Node VM with canned command results."
-code = ["ui/app/src-tauri/scripts/update-check.js:<module>"]
-tests = ["tests/ui/test_android_update_check.py::test_offers_a_newer_build_with_an_install_action", "tests/ui/test_android_update_check.py::test_a_failed_install_falls_back_to_the_download_page"]
-```

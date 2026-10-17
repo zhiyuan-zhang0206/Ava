@@ -17,24 +17,24 @@ _FRONTMATTER_OPEN = "---\n"
 _MEMORY_INDEX_FILE = "MEMORY.md"
 _PER_AGENT_MEMORY_DIRNAME = "memory"
 
-# meiva:ref meiva_builtins/plugins/meiva_memory/docs/memory-inheritance.meiva.okf.md#inheritable-block-fences
+# meiva:link meiva_builtins/plugins/meiva_memory/docs/memory-inheritance.meiva.okf.md
 INHERITABLE_OPEN = "<!-- meiva:inheritable -->"
 INHERITABLE_CLOSE = "<!-- /meiva:inheritable -->"
 
-# meiva:ref meiva_builtins/plugins/meiva_memory/docs/memory-inheritance.meiva.okf.md#inherited-note-assembly
+# meiva:link meiva_builtins/plugins/meiva_memory/docs/memory-inheritance.meiva.okf.md
 _FRAMING = (
     "Memory your ancestors chose to share with descendants (depth {depth}, "
     "nearest ancestor first). Use it as remembered guidance; verify "
     "facts that conflict with current evidence."
 )
 
-# meiva:ref meiva_builtins/plugins/meiva_memory/docs/memory-inheritance.meiva.okf.md#inherited-size-guardrails
+# meiva:link meiva_builtins/plugins/meiva_memory/docs/memory-inheritance.meiva.okf.md
 _BLOCK_TRUNCATION = "[truncated at {cap} chars — full entry: {path}]"
 _TOTAL_TRUNCATION = (
     "[truncated: the {budget}-char inherited-memory budget is reached — "
     "further blocks omitted; read the ancestors' memory/ entries directly]"
 )
-# meiva:ref meiva_builtins/plugins/meiva_memory/docs/memory-inheritance.meiva.okf.md#inherited-chain-read
+# meiva:link meiva_builtins/plugins/meiva_memory/docs/memory-inheritance.meiva.okf.md
 _REMOTE_FOOTER = "Ancestors on other machines (not readable from here): {rows}."
 
 
@@ -46,7 +46,7 @@ class _InheritedBlock:
     text: str
 
 
-# meiva:ref meiva_builtins/plugins/meiva_memory/docs/memory-inheritance.meiva.okf.md#inheritable-block-fences
+# meiva:link meiva_builtins/plugins/meiva_memory/docs/memory-inheritance.meiva.okf.md
 def _frontmatter_parts(content: str) -> tuple[str, str] | None:
     if not content.startswith(_FRONTMATTER_OPEN):
         return None
@@ -56,7 +56,7 @@ def _frontmatter_parts(content: str) -> tuple[str, str] | None:
     return parts[1], parts[2]
 
 
-# meiva:ref meiva_builtins/plugins/meiva_memory/docs/memory-inheritance.meiva.okf.md#inheritable-block-fences
+# meiva:link meiva_builtins/plugins/meiva_memory/docs/memory-inheritance.meiva.okf.md
 def parse_inheritable_blocks(text: str) -> list[str]:
     text = text.replace("\r\n", "\n")
     parts = _frontmatter_parts(text)
@@ -87,7 +87,7 @@ def parse_inheritable_blocks(text: str) -> list[str]:
     return blocks
 
 
-# meiva:ref meiva_builtins/plugins/meiva_memory/docs/memory-inheritance.meiva.okf.md#inherited-chain-read
+# meiva:link meiva_builtins/plugins/meiva_memory/docs/memory-inheritance.meiva.okf.md
 def _ancestor_chain(agent_id: int, ctx: MeivaContext) -> list[dict[str, Any]] | None:
     import httpx
 
@@ -101,7 +101,7 @@ def _ancestor_chain(agent_id: int, ctx: MeivaContext) -> list[dict[str, Any]] | 
         return None
 
 
-# meiva:ref meiva_builtins/plugins/meiva_memory/docs/memory-inheritance.meiva.okf.md#inherited-chain-read
+# meiva:link meiva_builtins/plugins/meiva_memory/docs/memory-inheritance.meiva.okf.md
 def _collect_blocks(
     agent_id: int, depth: int, ctx: MeivaContext
 ) -> tuple[list[_InheritedBlock], list[dict[str, Any]]]:
@@ -145,13 +145,13 @@ def _collect_blocks(
     return blocks, remote
 
 
-# meiva:ref meiva_builtins/plugins/meiva_memory/docs/memory-inheritance.meiva.okf.md#inherited-note-assembly
+# meiva:link meiva_builtins/plugins/meiva_memory/docs/memory-inheritance.meiva.okf.md
 def _section(block: _InheritedBlock, text: str) -> str:
     label = f" ({block.ancestor_label})" if block.ancestor_label else ""
     return f"## ancestor #{block.ancestor_id}{label} — memory/{block.entry_path.name}\n\n{text}"
 
 
-# meiva:ref meiva_builtins/plugins/meiva_memory/docs/memory-inheritance.meiva.okf.md#inherited-size-guardrails
+# meiva:link meiva_builtins/plugins/meiva_memory/docs/memory-inheritance.meiva.okf.md
 def _group_blocks(
     blocks: list[_InheritedBlock], block_cap: int
 ) -> list[tuple[_InheritedBlock, str]]:
@@ -182,7 +182,7 @@ def _group_blocks(
     return grouped
 
 
-# meiva:ref meiva_builtins/plugins/meiva_memory/docs/memory-inheritance.meiva.okf.md#inherited-size-guardrails
+# meiva:link meiva_builtins/plugins/meiva_memory/docs/memory-inheritance.meiva.okf.md
 def _fit_sections(
     grouped: list[tuple[_InheritedBlock, str]], total_cap: int
 ) -> tuple[list[str], bool]:
@@ -207,7 +207,7 @@ def _fit_sections(
     return sections, cutoff
 
 
-# meiva:ref meiva_builtins/plugins/meiva_memory/docs/memory-inheritance.meiva.okf.md#inherited-note-assembly
+# meiva:link meiva_builtins/plugins/meiva_memory/docs/memory-inheritance.meiva.okf.md
 def inherited_memory_note(ctx: MeivaContext) -> HumanMessage | None:
     slices = ctx.require_agent()
     if slices.sandbox.eval_isolation:

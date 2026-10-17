@@ -24,7 +24,7 @@ def test_budget_is_thirty_forty_percent_of_a_1m_window(*, model_catalog: ModelCa
 
 
 def test_deepseek_budget_is_374k_soft_512k_hard(*, model_catalog: ModelCatalog) -> None:
-    # meiva:ref base/packages/tests/lm/docs/contracts.meiva.okf.md#scaled-budget
+    # meiva:link base/packages/tests/lm/docs/contracts.meiva.okf.md
     budget = resolve_context_budget(
         "deepseek-flash",
         catalog=model_catalog,
@@ -74,7 +74,7 @@ def test_fractions_are_configurable(*, model_catalog: ModelCatalog) -> None:
 
 
 def test_ceiling_caps_the_hard_threshold(*, model_catalog: ModelCatalog) -> None:
-    # meiva:ref base/packages/tests/lm/docs/contracts.meiva.okf.md#scaled-budget
+    # meiva:link base/packages/tests/lm/docs/contracts.meiva.okf.md
     budget = resolve_context_budget(
         "deepseek-flash",
         catalog=model_catalog,

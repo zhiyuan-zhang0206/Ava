@@ -64,28 +64,8 @@ performing it.
 
 ## Contracts
 
-```meiva-contract
-id = "no-application-imports"
-kind = "invariant"
-statement = "cli.fleet_update imports no application code — no base, cli, gateway, services, agent or meiva modules — so the halves run from a bare operator checkout."
-code = ["cli/fleet_update.py:<module>"]
-tests = ["cli/tests/fleet_update/test_fleet_update.py::test_the_macos_one_shot_start_passes_the_home_and_os_job_gates"]
-```
+Runners stop first and start last — the gateway stops after every runner and starts before every runner; NEW is fetched on every host before any stop; the switch follows the stops; the drift checks run last and every one runs, so a red never skips the smoke or the refresh; the first failure ends the half with no rollback (refusals exit 2, failures exit 1).
 
-```meiva-contract
-id = "update-half-ordering"
-kind = "invariant"
-statement = "Runners stop first and start last — the gateway stops after every runner and starts before every runner; NEW is fetched on every host before any stop; the switch follows the stops; the drift checks run last and every one runs, so a red never skips the smoke or the refresh; the first failure ends the half with no rollback (refusals exit 2, failures exit 1)."
-code = ["cli/fleet_update.py:down", "cli/fleet_update.py:up", "cli/fleet_update.py:_drift_checks", "cli/fleet_update.py:main"]
-tests = ["cli/tests/fleet_update/test_fleet_update.py::test_runners_stop_first_and_start_last", "cli/tests/fleet_update/test_fleet_update.py::test_drift_checks_run_after_the_smoke_and_the_refresh", "cli/tests/fleet_update/test_fleet_update.py::test_a_red_drift_check_fails_up_with_its_detail", "cli/tests/fleet_update/test_fleet_update.py::test_every_red_drift_check_is_reported_not_only_the_first", "cli/tests/fleet_update/test_fleet_update.py::test_the_first_failure_stops_the_half"]
-```
-
-```meiva-contract
-id = "up-completion-gates"
-kind = "invariant"
-statement = "Before up completes: every listed machine is online on the roster with checkout and running code on one commit — re-read on the poll interval until --roster-timeout; a listed host is matched by the machine name it reports, a name with no row fails, unlisted machines are reported and never block; the gateway has smoke-tested each listed agent-runner; and every host ran meiva packages refresh, which replaces a differing local copy and never forces."
-code = ["cli/fleet_update.py:_roster", "cli/fleet_update.py:machine_names", "cli/fleet_update.py:_refresh", "cli/fleet_update.py:up"]
-tests = ["cli/tests/fleet_update/test_fleet_update.py::test_the_roster_is_re_read_while_heartbeats_catch_up", "cli/tests/fleet_update/test_fleet_update.py::test_a_roster_that_never_agrees_fails_with_its_last_state", "cli/tests/fleet_update/test_fleet_update.py::test_a_listed_host_with_no_roster_row_is_an_error", "cli/tests/fleet_update/test_fleet_update.py::test_the_roster_name_comes_from_the_host_not_its_ssh_alias", "cli/tests/fleet_update/test_fleet_update.py::test_packages_refresh_reports_and_never_forces"]
-```
+Before up completes: every listed machine is online on the roster with checkout and running code on one commit — re-read on the poll interval until --roster-timeout; a listed host is matched by the machine name it reports, a name with no row fails, unlisted machines are reported and never block; the gateway has smoke-tested each listed agent-runner; and every host ran meiva packages refresh, which replaces a differing local copy and never forces.
 
 Parent: [[cli/docs/cli.meiva.okf.md]].

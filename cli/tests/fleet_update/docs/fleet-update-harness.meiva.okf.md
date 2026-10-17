@@ -30,20 +30,8 @@ prove the decision ran, over which revisions, or did not run at all.
 
 ## Contracts
 
-```meiva-contract
-id = "harness-order-guards"
-kind = "invariant"
-statement = "The in-memory cluster refuses production's forbidden order at the offending command — a gateway stop or start while a runner is up, a runner start before the gateway, a switch before its stop, a macOS start that is not the one-shot LaunchAgent — and the pre-verify simulation accepts only the gateway, only against NEW, with the table read before the worktree check and the check before any stop of the run."
-code = ["cli/tests/fleet_update/fleet_update_cluster.py:Cluster", "cli/tests/fleet_update/fleet_update_cluster.py:Cluster._effect", "cli/tests/fleet_update/fleet_update_cluster.py:Cluster._verify"]
-tests = ["cli/tests/fleet_update/test_fleet_update.py::test_runners_stop_first_and_start_last", "cli/tests/fleet_update/test_fleet_update.py::test_the_first_failure_stops_the_half", "cli/tests/fleet_update/test_fleet_update.py::test_stored_schedules_are_checked_against_new_before_anything_stops"]
-```
+The in-memory cluster refuses production's forbidden order at the offending command — a gateway stop or start while a runner is up, a runner start before the gateway, a switch before its stop, a macOS start that is not the one-shot LaunchAgent — and the pre-verify simulation accepts only the gateway, only against NEW, with the table read before the worktree check and the check before any stop of the run.
 
-```meiva-contract
-id = "keep-decision-stub"
-kind = "invariant"
-statement = "Tests never run the real keep-decision script: the stub writes its payload into the fake checkout and appends each invocation's argv to a sibling file, so a test can tell whether the decision ran and over which revisions."
-code = ["cli/tests/fleet_update/fleet_update_cluster.py:stub_decision", "cli/tests/fleet_update/fleet_update_cluster.py:decision_argvs", "cli/tests/fleet_update/conftest.py:env"]
-tests = ["cli/tests/fleet_update/test_fleet_update_keep.py::test_the_decision_judges_the_unswitched_head_and_a_rerun_judges_nothing", "cli/tests/fleet_update/test_fleet_update_keep.py::test_restart_all_skips_the_decision", "cli/tests/fleet_update/test_fleet_update_keep.py::test_a_missing_decision_script_stops_everything"]
-```
+Tests never run the real keep-decision script: the stub writes its payload into the fake checkout and appends each invocation's argv to a sibling file, so a test can tell whether the decision ran and over which revisions.
 
 Parent: [[cli/docs/cli.meiva.okf.md]].

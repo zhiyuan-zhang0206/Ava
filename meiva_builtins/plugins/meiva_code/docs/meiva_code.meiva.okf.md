@@ -16,23 +16,6 @@ tags:
 
 ## Declared hooks
 
-### System prompt injection (×2)
-
-#### Coding prompt sections {#coding-prompt-sections}
-
-```meiva-contract
-id = "coding-prompt-sections"
-kind = "invariant"
-code = ["meiva_builtins/plugins/meiva_code/_prompt_sections.py:<module>"]
-tests = [
-  "meiva_builtins/plugins/meiva_code/tests/meiva_code_plugin/test_read_wrap_corrupted_state_field_raises.py::test_coding_tools_section_skips_framework_expanded_modules",
-  "meiva_builtins/plugins/meiva_code/tests/meiva_code_plugin/test_read_wrap_corrupted_state_field_raises.py::test_coding_tools_section_all_expanded_keeps_preamble_only",
-]
-statement = """
-`_prompt_sections.py` is kept separate from `agent_runtime.py` because `coding_tools_section` renders `cwd`, `files`, and `shell` stubs through `meiva.help`, whereas `agent_runtime.py` does not import `meiva`. Modules already in `effective_sdk_expand` (exact path match) are skipped so their contracts are not rendered twice, while the coding preamble (`AGENTS.md`, `rg` over recursive `grep`/`find`, isolated git worktree + PR workflow, narrowest-first verification, and persistent shell sessions) always renders. `engineering_workflow_section` is off by default and renders only when `meiva_code_workflow` is in `system_prompt_extra`.
-"""
-```
-
 ### Context file auto-injection (in-memory, inside the exec turn)
 
 ```python

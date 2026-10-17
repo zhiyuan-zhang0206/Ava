@@ -706,7 +706,9 @@ describe("uploadFiles", () => {
   }
 
   beforeEach(() => {
-    // meiva:ref ui/web/src/docs/frontend-state/api-requests.meiva.okf.md#upload-transport-fixture
+    // meiva:note
+    // The XMLHttpRequest test constructor returns a fully initialized instance and exposes that same instance before uploadFiles installs its handlers. Tests drive progress, load and failure callbacks on the instance used by the request.
+    // meiva:link ui/web/src/docs/frontend-state/api-requests.meiva.okf.md
     function FakeXHR() {
       inst = makeXhr();
       return inst;

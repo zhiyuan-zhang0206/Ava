@@ -23,7 +23,9 @@ def state_handle() -> PluginStateHandle[MeivaCodeState]:
     return PluginStateHandle(MeivaCodeState, "meiva_code")
 
 
-# meiva:ref meiva_builtins/plugins/meiva_code/docs/runtime-notes.meiva.okf.md#after-exec-messages
+# meiva:note
+# The after-exec hook returns a messages delta containing pending cwd and project-skills notes. It consumes cwd_note and emits the project-skills note once per compaction version; without pending notes it returns None.
+# meiva:link meiva_builtins/plugins/meiva_code/docs/runtime-notes.meiva.okf.md
 class _InjectCwdNotesAfterExecHook(Hook):
     async def __call__(
         self,
@@ -89,7 +91,9 @@ def _foreign_workspace(cwd: Path, agent_id: int) -> str | None:
     return owner if owner.isdigit() and owner != str(agent_id) else None
 
 
-# meiva:ref meiva_builtins/plugins/meiva_code/docs/runtime-notes.meiva.okf.md#logical-cwd
+# meiva:note
+# After initialization, a valid persisted logical cwd is preserved, except a cwd inside another agent's workspace (a fork inherits the source's cwd channel): that one is replaced by the invoking agent's workspace, because a workspace is agent identity rather than project context. An absent or unusable cwd is likewise replaced by the invoking agent's workspace, or home when no agent identity exists. The workspaces root comes from `base.paths.workspaces_root()`, its single owner. This does not change the Python process cwd.
+# meiva:link meiva_builtins/plugins/meiva_code/docs/runtime-notes.meiva.okf.md
 class ValidateCwdAfterInitHook(Hook):
     async def __call__(
         self,

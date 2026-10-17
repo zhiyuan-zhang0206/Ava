@@ -85,4 +85,3 @@ meiva.tasks.update(task_id, owner=other_agent_id, operation_key=str(uuid4()))   
 ## Reference
 
 - [[meiva_builtins/plugins/meiva_fleet/docs/tasks/task_lifecycle/task_lifecycle_mechanics.meiva.okf.md|State, Concurrency & Event Log]] — the lifecycle state machine, `SELECT FOR UPDATE` locking and the audit event log
-- [[meiva_builtins/plugins/meiva_fleet/docs/tasks/task_lifecycle/task_lifecycle_sdk_help.meiva.okf.md|Generated SDK Help]] — the `create_and_assign` SDK docstring source and its typed contract

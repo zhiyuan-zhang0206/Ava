@@ -1,4 +1,4 @@
-# meiva:ref services/derived/insights/run_timeline/docs/range-projection.meiva.okf.md#bounded-projection-preparation
+# meiva:link services/derived/insights/run_timeline/docs/range-projection.meiva.okf.md
 from __future__ import annotations
 
 import argparse

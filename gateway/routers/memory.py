@@ -37,7 +37,7 @@ router = APIRouter()
 
 @dataclass(frozen=True)
 class MemorySearchInputs:
-    # meiva:ref gateway/routers/docs/memory.meiva.okf.md#bounded-search
+    # meiva:link gateway/routers/docs/memory.meiva.okf.md
     embedding_backend: Callable[[], str]
     backend: Callable[[], str]
     uri: Callable[[], str]
@@ -51,13 +51,13 @@ class MemorySearchInputs:
 
 
 def build_search_gate(max_concurrency: int) -> asyncio.Semaphore:
-    # meiva:ref gateway/routers/docs/memory.meiva.okf.md#bounded-search
+    # meiva:link gateway/routers/docs/memory.meiva.okf.md
     return asyncio.Semaphore(max_concurrency)
 
 
 @asynccontextmanager
 async def _bounded_semaphore(semaphore: asyncio.Semaphore, budget: float) -> AsyncGenerator[None]:
-    # meiva:ref gateway/routers/docs/memory.meiva.okf.md#bounded-search
+    # meiva:link gateway/routers/docs/memory.meiva.okf.md
     try:
         await asyncio.wait_for(semaphore.acquire(), timeout=budget)
     except TimeoutError as exc:
@@ -72,7 +72,7 @@ _RESERVED_NAMES = frozenset({"index.md", "log.md", "MEMORY.md"})
 
 
 def _build_memory_graph(memory_root: Path) -> MemoryGraphResponse:
-    # meiva:ref gateway/routers/docs/memory.meiva.okf.md#graph-projection
+    # meiva:link gateway/routers/docs/memory.meiva.okf.md
     if not memory_root.is_dir():
         return MemoryGraphResponse(nodes=[], edges=[], warnings=["memory_root not found"])
 
@@ -113,7 +113,7 @@ def _parent_folder_id(folder_id: str) -> str:
 def _folder_structure(
     nodes: list[MemoryGraphNode], memory_root: Path
 ) -> tuple[list[MemoryGraphNode], list[MemoryGraphEdge]]:
-    # meiva:ref gateway/routers/docs/memory.meiva.okf.md#graph-projection
+    # meiva:link gateway/routers/docs/memory.meiva.okf.md
     if not nodes:
         return [], []
 
@@ -171,7 +171,7 @@ def _node_from_note(note: Note) -> MemoryGraphNode:
 
 
 def primary_tag(tags: list[str]) -> str:
-    # meiva:ref gateway/routers/docs/memory.meiva.okf.md#graph-projection
+    # meiva:link gateway/routers/docs/memory.meiva.okf.md
     domain = [t for t in tags if not t.startswith("type/")]
     if domain:
         return domain[0]
@@ -187,7 +187,7 @@ async def _backend_topk(
     fingerprint: str,
     inputs: MemorySearchInputs,
 ) -> list[ChunkHit]:
-    # meiva:ref gateway/routers/docs/memory.meiva.okf.md#bounded-search
+    # meiva:link gateway/routers/docs/memory.meiva.okf.md
     from services.derived.memory_indexer.backends import factory
 
     return await factory.get_backend(
@@ -232,7 +232,7 @@ async def _backend_topk(
     ),
 )
 async def post_memory_search(request: Request, body: MemorySearchRequest) -> MemorySearchResponse:
-    # meiva:ref gateway/routers/docs/memory.meiva.okf.md#bounded-search
+    # meiva:link gateway/routers/docs/memory.meiva.okf.md
     from services.derived.memory_indexer.embeddings import factory as _embedding_factory
 
     inputs: MemorySearchInputs = request.app.state.memory_search_inputs
@@ -271,7 +271,7 @@ async def post_memory_search(request: Request, body: MemorySearchRequest) -> Mem
 
 
 def _candidate_count(inputs: MemorySearchInputs, body: MemorySearchRequest) -> int:
-    # meiva:ref gateway/routers/docs/memory.meiva.okf.md#bounded-search
+    # meiva:link gateway/routers/docs/memory.meiva.okf.md
     return inputs.dedup_candidates() if body.purpose == "dedup" else inputs.rerank_candidates()
 
 
@@ -306,7 +306,7 @@ async def _vector_candidates(
     deadline: float,
     count: int,
 ) -> list[ChunkHit]:
-    # meiva:ref gateway/routers/docs/memory.meiva.okf.md#bounded-search
+    # meiva:link gateway/routers/docs/memory.meiva.okf.md
     from services.derived.memory_indexer.embeddings.base import EmbeddingAPIError
 
     gate = request.app.state.memory_search_gate
@@ -357,7 +357,9 @@ async def _vector_candidates(
     ),
 )
 async def post_memory_refresh(request: Request) -> MemoryRefreshResponse:
-    # meiva:ref gateway/routers/docs/memory.meiva.okf.md#refresh-owner
+    # meiva:note
+    # Refresh updates the same captured memory_root that the app reads. Its keep-local and track-branch values are read from the existing process configuration for each request. Git runs off the ASGI event loop so another request can complete while a refresh waits.
+    # meiva:link gateway/routers/docs/memory.meiva.okf.md
     from base.deploy.git import memory_repo
 
     config = request.app.state.gateway_process.config.view.general
@@ -371,7 +373,7 @@ async def post_memory_refresh(request: Request) -> MemoryRefreshResponse:
 
 
 def _pool_revision(root: Path) -> str | None:
-    # meiva:ref gateway/routers/docs/memory.meiva.okf.md#graph-revision
+    # meiva:link gateway/routers/docs/memory.meiva.okf.md
     try:
         out = subprocess.run(  # noqa: S603
             ["git", "-C", str(root), "rev-parse", "HEAD"],
@@ -388,7 +390,7 @@ def _pool_revision(root: Path) -> str | None:
 
 
 class MemoryGraphCache:
-    # meiva:ref gateway/routers/docs/memory.meiva.okf.md#graph-revision
+    # meiva:link gateway/routers/docs/memory.meiva.okf.md
     def __init__(self, *, max_entries: int = 4) -> None:
         self._max_entries = max_entries
         self._graphs: OrderedDict[tuple[str, str], MemoryGraphResponse] = OrderedDict()
@@ -414,7 +416,7 @@ class MemoryGraphCache:
     description=("Return concept notes and cross-links from the gateway memory bundle."),
 )
 def get_memory_graph(request: Request) -> MemoryGraphResponse:
-    # meiva:ref gateway/routers/docs/memory.meiva.okf.md#graph-revision
+    # meiva:link gateway/routers/docs/memory.meiva.okf.md
     root = request.app.state.gateway_config.memory_root
     revision = _pool_revision(root)
     if revision is None:
@@ -438,7 +440,9 @@ def get_memory_graph(request: Request) -> MemoryGraphResponse:
     ),
 )
 def get_memory_note(request: Request, path: str) -> MemoryNoteResponse:
-    # meiva:ref gateway/routers/docs/memory.meiva.okf.md#note-containment
+    # meiva:note
+    # A note path must resolve inside memory_root to a readable Markdown note. Absolute paths, traversal, null bytes, missing files and invalid frontmatter share the 404 surface rather than exposing filesystem errors.
+    # meiva:link gateway/routers/docs/memory.meiva.okf.md
     root = request.app.state.gateway_config.memory_root.resolve()
     rel = Path(path)
     if rel.is_absolute() or rel.suffix != ".md":

@@ -42,36 +42,12 @@ graph, exactly as on the full checkout.
 
 ## Contracts
 
-```meiva-contract
-id = "component-keep-decision"
-kind = "invariant"
-statement = "A component is kept only when no changed file of OLD..NEW lies in the union of its dependency closures at both revisions; roots are the tracked files under its dirs with tests and docs excluded, watch entries are bare files, never expanded, and a file deleted in NEW still counts through the old revision's closure; OLD == NEW short-circuits to keep-everything — the rerun of an interrupted down."
-code = ["scripts/host_ops/fleet_update_keep.py:Component", "scripts/host_ops/fleet_update_keep.py:COMPONENTS", "scripts/host_ops/fleet_update_keep.py:component_surfaces", "scripts/host_ops/fleet_update_keep.py:decide"]
-tests = ["scripts/host_ops/tests/test_fleet_update_keep.py::test_no_change_keeps_everything", "scripts/host_ops/tests/test_fleet_update_keep.py::test_a_pty_change_restarts_only_pty", "scripts/host_ops/tests/test_fleet_update_keep.py::test_a_transitive_dependency_restarts_the_consumer", "scripts/host_ops/tests/test_fleet_update_keep.py::test_a_browser_dependency_restarts_the_browser", "scripts/host_ops/tests/test_fleet_update_keep.py::test_an_unrelated_change_keeps_both", "scripts/host_ops/tests/test_fleet_update_keep.py::test_a_deleted_surface_file_restarts_its_component", "scripts/host_ops/tests/test_fleet_update_keep.py::test_an_added_file_under_a_component_dir_restarts_it"]
-```
+A component is kept only when no changed file of OLD..NEW lies in the union of its dependency closures at both revisions; roots are the tracked files under its dirs with tests and docs excluded, watch entries are bare files, never expanded, and a file deleted in NEW still counts through the old revision's closure; OLD == NEW short-circuits to keep-everything — the rerun of an interrupted down.
 
-```meiva-contract
-id = "component-roots-and-watch"
-kind = "invariant"
-statement = "Roots are the tracked files under the component dirs with tests and docs excluded; watch entries enter the surface as bare files; a surface node that is a directory covers everything below it; the closure follows dependency chains and survives cycles."
-code = ["scripts/host_ops/fleet_update_keep.py:Surface", "scripts/host_ops/fleet_update_keep.py:roots_at", "scripts/host_ops/fleet_update_keep.py:closure", "scripts/host_ops/fleet_update_keep.py:hit_files"]
-tests = ["scripts/host_ops/tests/test_fleet_update_keep.py::test_tests_and_docs_under_a_component_are_not_roots", "scripts/host_ops/tests/test_fleet_update_keep.py::test_a_watch_file_restarts_its_component", "scripts/host_ops/tests/test_fleet_update_keep.py::test_roots_at_skips_tests_and_docs_and_watch_files", "scripts/host_ops/tests/test_fleet_update_keep.py::test_the_closure_follows_chains_and_survives_cycles", "scripts/host_ops/tests/test_fleet_update_keep.py::test_a_surface_directory_covers_everything_below_it"]
-```
+Roots are the tracked files under the component dirs with tests and docs excluded; watch entries enter the surface as bare files; a surface node that is a directory covers everything below it; the closure follows dependency chains and survives cycles.
 
-```meiva-contract
-id = "keep-decision-fail-closed"
-kind = "invariant"
-statement = "In a judged window (OLD != NEW) every failure — an unresolvable revision, a git or worktree failure — prints one message on stderr and exits non-zero, and a component whose dirs or watch entries match no tracked file at either revision restarts; the caller must then restart everything rather than guess a keep."
-code = ["scripts/host_ops/fleet_update_keep.py:main", "scripts/host_ops/fleet_update_keep.py:decide"]
-tests = ["scripts/host_ops/tests/test_fleet_update_keep.py::test_a_component_with_no_matching_root_restarts_conservatively", "scripts/host_ops/tests/test_fleet_update_keep.py::test_a_watch_file_absent_at_both_revisions_restarts_conservatively", "scripts/host_ops/tests/test_fleet_update_keep.py::test_a_bad_revision_fails"]
-```
+In a judged window (OLD != NEW) every failure — an unresolvable revision, a git or worktree failure — prints one message on stderr and exits non-zero, and a component whose dirs or watch entries match no tracked file at either revision restarts; the caller must then restart everything rather than guess a keep.
 
-```meiva-contract
-id = "scratch-worktree-cleanup"
-kind = "invariant"
-statement = "Both revisions are checked out into one temporary worktree parent, and the judgment dismantles them — worktrees removed, pruned, parent deleted — so no registered worktree survives."
-code = ["scripts/host_ops/fleet_update_keep.py:decide", "scripts/host_ops/fleet_update_keep.py:_worktree", "scripts/host_ops/fleet_update_keep.py:_dismantle"]
-tests = ["scripts/host_ops/tests/test_fleet_update_keep.py::test_a_pty_change_restarts_only_pty", "scripts/host_ops/tests/test_fleet_update_keep.py::test_a_mid_decision_failure_leaves_no_scratch_worktree"]
-```
+Both revisions are checked out into one temporary worktree parent, and the judgment dismantles them — worktrees removed, pruned, parent deleted — so no registered worktree survives.
 
 Parent: [[scripts/docs/scripts.meiva.okf.md]].

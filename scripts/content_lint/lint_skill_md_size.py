@@ -13,7 +13,7 @@ from base.packages.text_budget import LengthBudget, Level, Unit, evaluate
 
 _REPO_ROOT = Path(__file__).resolve().parent.parent.parent
 
-# meiva:ref scripts/content_lint/docs/content_lint.meiva.okf.md#skill-md-size-ceiling
+# meiva:link scripts/content_lint/docs/content_lint.meiva.okf.md
 _TRANSITIONAL_FLOOR = 250
 _HARD_CEILING = 300
 
@@ -27,7 +27,7 @@ _SKILL_MD_GLOBS = [
 ]
 
 
-# meiva:ref scripts/content_lint/docs/content_lint.meiva.okf.md#skill-md-size-ceiling
+# meiva:link scripts/content_lint/docs/content_lint.meiva.okf.md
 def _skill_md_files(root: Path) -> list[Path]:
     files: list[Path] = []
     for pattern in _SKILL_MD_GLOBS:
@@ -35,7 +35,7 @@ def _skill_md_files(root: Path) -> list[Path]:
     return sorted({p.resolve() for p in files})
 
 
-# meiva:ref scripts/content_lint/docs/content_lint.meiva.okf.md#skill-md-size-ceiling
+# meiva:link scripts/content_lint/docs/content_lint.meiva.okf.md
 def main(_argv: list[str] | None = None, *, repo_root: Path | None = None) -> int:
     root = repo_root or _REPO_ROOT
     budget = LengthBudget(Unit.LINES, hard=_HARD_CEILING, soft=_TRANSITIONAL_FLOOR)

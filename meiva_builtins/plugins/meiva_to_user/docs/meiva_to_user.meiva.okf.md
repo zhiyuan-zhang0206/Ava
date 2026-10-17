@@ -82,18 +82,4 @@ within its limit; `every_time` reminds on every over-limit write.
 
 ## Contracts
 
-```meiva-contract
-id = "soft-limit-reminder"
-kind = "invariant"
-statement = """The after_exec check is a no-op without a recorded write; otherwise it always clears the record, reads the panel off-loop and compares against to_user_soft_limit_words: over the limit it adds one NoteTag.TO_USER_SOFT_LIMIT note carrying the count and the limit, back within the limit it re-arms silently. It never blocks, rewrites or rejects a write and never fails the turn (unreadable panel -> logged and skipped; eval_isolation skips). once_per_compaction (default) reminds at most once per window, re-armed by a compaction and by coming back within the limit; every_time reminds on every over-limit write."""
-code = ["meiva_builtins/plugins/meiva_to_user/agent_runtime.py:_ToUserLimitHook", "meiva_builtins/plugins/meiva_to_user/_state.py:MeivaToUserState"]
-tests = ["meiva_builtins/plugins/meiva_to_user/tests/test_to_user_limit_hook.py::test_no_recorded_write_is_a_noop", "meiva_builtins/plugins/meiva_to_user/tests/test_to_user_limit_hook.py::test_an_over_limit_panel_gets_one_reminder_with_both_figures", "meiva_builtins/plugins/meiva_to_user/tests/test_to_user_limit_hook.py::test_once_per_compaction_rearms_after_a_compaction"]
-```
-
-```meiva-contract
-id = "shared-word-metric"
-kind = "invariant"
-statement = """Panel words come from the shared count_words (base/packages/text_budget.py): every CJK character counts one, every maximal run of letters/digits counts one with underscore not merging runs, and punctuation and whitespace count nothing. The plugin imports the shared metric and keeps no second implementation, so the panel and every other budget read one rule set; the rules are owned by base/packages/docs/text-budget.meiva.okf.md."""
-code = ["meiva_builtins/plugins/meiva_to_user/agent_runtime.py:_ToUserLimitHook.__call__"]
-tests = ["meiva_builtins/plugins/meiva_to_user/tests/test_to_user_limit_hook.py::test_the_reminder_count_is_the_shared_word_metric", "meiva_builtins/plugins/meiva_to_user/tests/test_to_user_limit_hook.py::test_an_over_limit_panel_gets_one_reminder_with_both_figures"]
-```
+The after_exec check is a no-op without a recorded write; otherwise it always clears the record, reads the panel off-loop and compares against to_user_soft_limit_words: over the limit it adds one NoteTag.TO_USER_SOFT_LIMIT note carrying the count and the limit, back within the limit it re-arms silently. It never blocks, rewrites or rejects a write and never fails the turn (unreadable panel -> logged and skipped; eval_isolation skips). once_per_compaction (default) reminds at most once per window, re-armed by a compaction and by coming back within the limit; every_time reminds on every over-limit write.

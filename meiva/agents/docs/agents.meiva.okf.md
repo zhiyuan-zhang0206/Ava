@@ -62,14 +62,3 @@ Every creation and fork requires an explicit 1–128 character `idempotency_key`
 `retry_launch` retains that observation and a caller key; see [[launch-retry.meiva.okf.md]].
 
 `send_message` is asynchronous insert — returns immediately, does not wait for target agent to receive or process. Target agent is woken if idle.
-
-## Generated SDK help
-
-```meiva-contract
-id = "api-spawn"
-kind = "api"
-statement = "Start a new agent; does not block.\n\nAn explicit `idempotency_key` identifies this creation or fork. Reuse the\nsame key, inputs and caller identity to recover its original agent after a\nlost response; use a new key for another agent. Acceptance does not prove\nexecution, and uncertain transport outcomes are not automatically retried.\n\n`prompt` is the first message — make it self-contained; omit it to leave the agent idling.\n`machine` defaults to yours. `config_overlay` carries per-agent config fields; keys it does\nnot name follow the shared default. Identity config you do not name (model, reasoning effort,\nthe inject/expand lists, prompt shaping) is frozen at spawn; operational knobs follow the\nshared default. `fork_from` copies another agent's conversation and keeps its config: the\noverlay may then only add entries to `skills_to_inject_into_system_prompt` /\n`skills_to_expand_at_start` (anything else raises ForkConfigChangeNotAllowed).\n`{\"eval_isolation\": True, \"eval_network_allowlist\": [\"web\"]}` isolates the agent, allowing\nonly the listed `web` / `understand`; `mcps` and `ui` are off."
-code = ["meiva/agents/__init__.py:spawn"]
-tests = ["meiva/tests/namespaces/sdk_surface/test_namespace_surface_pin.py::test_the_agent_visible_names_of_a_core_namespace_are_pinned"]
-api = "meiva.agents.spawn"
-```

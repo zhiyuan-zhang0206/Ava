@@ -1,4 +1,6 @@
-# meiva:ref meiva_builtins/plugins/meiva_code/docs/meiva_code.meiva.okf.md#coding-prompt-sections
+# meiva:note
+# `_prompt_sections.py` is kept separate from `agent_runtime.py` because `coding_tools_section` renders `cwd`, `files`, and `shell` stubs through `meiva.help`, whereas `agent_runtime.py` does not import `meiva`. Modules already in `effective_sdk_expand` (exact path match) are skipped so their contracts are not rendered twice, while the coding preamble (`AGENTS.md`, `rg` over recursive `grep`/`find`, isolated git worktree + PR workflow, narrowest-first verification, and persistent shell sessions) always renders. `engineering_workflow_section` is off by default and renders only when `meiva_code_workflow` is in `system_prompt_extra`.
+# meiva:link meiva_builtins/plugins/meiva_code/docs/meiva_code.meiva.okf.md
 from __future__ import annotations
 
 import contextlib

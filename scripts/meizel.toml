@@ -1,9 +1,9 @@
-exports = ["audit", "ci", "codegen", "data_plane_ops", "host_ops", "lint", "model_registry", "post_deploy_visual", "provision", "structure", "verify"]
+exports = ["agent_surface.py", "audit", "ci", "codegen", "data_plane_ops", "host_ops", "lint", "model_registry", "post_deploy_visual", "provision", "structure", "verify"]
 
 [uses]
 "audit" = ["ci"]
 "ci" = ["structure"]
-"codegen" = ["structure"]
-"content_lint" = ["audit", "codegen", "structure"]
-"lint" = ["content_lint", "structure"]
+"codegen" = []
+"content_lint" = ["agent_surface.py", "audit", "codegen"]
+"lint" = ["agent_surface.py", "content_lint", "structure"]
 "tests" = ["ci", "codegen", "host_ops", "lint", "verify"]

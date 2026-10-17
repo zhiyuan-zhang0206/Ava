@@ -25,7 +25,7 @@ _IDLE: dict[str, Any] = {
 _ROW = ("name", "online", "identity_mismatch", "head_sha", "running_sha", "serve_agent_runner")
 
 
-# meiva:ref cli/tests/fleet_update/docs/fleet-update-harness.meiva.okf.md#harness-order-guards
+# meiva:link cli/tests/fleet_update/docs/fleet-update-harness.meiva.okf.md
 class Cluster:
     def __init__(self, old: str, new: str) -> None:
         self.old = old
@@ -195,7 +195,7 @@ class Cluster:
         return rc
 
 
-# meiva:ref cli/tests/fleet_update/docs/fleet-update-harness.meiva.okf.md#keep-decision-stub
+# meiva:link cli/tests/fleet_update/docs/fleet-update-harness.meiva.okf.md
 def stub_decision(repo: Path, payload: dict[str, Any]) -> Path:
     path = repo / "scripts" / "host_ops" / "fleet_update_keep.py"
     path.parent.mkdir(parents=True, exist_ok=True)

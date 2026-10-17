@@ -33,7 +33,7 @@ class _Outcome:
     publish_end_snapshot: bool = False
 
 
-# meiva:ref agent/graph/docs/context-window/replacement.meiva.okf.md#clean-replacement
+# meiva:link agent/graph/docs/context-window/replacement.meiva.okf.md
 def _markers_only(messages: list[BaseMessage]) -> list[BaseMessage]:
     kept: list[BaseMessage] = []
     subject_kept = False
@@ -48,7 +48,7 @@ def _markers_only(messages: list[BaseMessage]) -> list[BaseMessage]:
     return kept
 
 
-# meiva:ref agent/graph/docs/context-window/replacement.meiva.okf.md#compact-failure-boundary
+# meiva:link agent/graph/docs/context-window/replacement.meiva.okf.md
 def _cancel_outcome(ctx: MeivaContext, agent_id: int, st: BatchState) -> _Outcome:
     if st.compact_payload is not None and st.compact_payload[2] is not None:
         emit_compact_finished(
@@ -69,7 +69,7 @@ def _cancel_outcome(ctx: MeivaContext, agent_id: int, st: BatchState) -> _Outcom
     )
 
 
-# meiva:ref agent/graph/docs/context-window/replacement.meiva.okf.md#clean-replacement
+# meiva:link agent/graph/docs/context-window/replacement.meiva.okf.md
 async def _compact_outcome(
     ctx: MeivaContext, state: _state.AgentState, agent_id: int, st: BatchState
 ) -> _Outcome:

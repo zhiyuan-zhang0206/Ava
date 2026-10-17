@@ -213,7 +213,7 @@ def _unquoted(annotation: Any) -> Any:
     return _SourceText(annotation) if isinstance(annotation, str) else annotation
 
 
-# meiva:ref agent/extensions/docs/catalog.meiva.okf.md#catalog-reports-load-facts
+# meiva:link agent/extensions/docs/catalog.meiva.okf.md
 def entry_point_signature(entry_point: type) -> str:
     signature = inspect.signature(entry_point)
     signature = signature.replace(
@@ -257,7 +257,7 @@ class Catalog:
     plugins: tuple[PluginView, ...]
 
     def plugin(self, name: str) -> PluginView:
-        # meiva:ref agent/extensions/docs/catalog.meiva.okf.md#catalog-reports-load-facts
+        # meiva:link agent/extensions/docs/catalog.meiva.okf.md
         known = {p.name for p in self.plugins}
         resolved = names.find(name, known) or name
         for view in self.plugins:
@@ -273,7 +273,7 @@ class UnknownPluginError(Exception):
     pass
 
 
-# meiva:ref agent/extensions/docs/catalog.meiva.okf.md#catalog-reports-load-facts
+# meiva:link agent/extensions/docs/catalog.meiva.okf.md
 def build_catalog() -> Catalog:
     from agent.state import plugin_state_schema
     from base.packages.plugins.loading.registry import declarations
@@ -334,7 +334,7 @@ def _repo_plugins_dir() -> Path:
     return paths.repo_plugins_dir()
 
 
-# meiva:ref agent/extensions/docs/catalog.meiva.okf.md#manifest-diff-scope
+# meiva:link agent/extensions/docs/catalog.meiva.okf.md
 def declared_vs_registered(view: PluginView) -> tuple[DiffEntry, ...]:
     entries: list[DiffEntry] = []
     for surface in SURFACES:
@@ -353,7 +353,7 @@ def declared_vs_registered(view: PluginView) -> tuple[DiffEntry, ...]:
     return tuple(entries)
 
 
-# meiva:ref agent/extensions/docs/catalog.meiva.okf.md#manifest-diff-scope
+# meiva:link agent/extensions/docs/catalog.meiva.okf.md
 def _declared_identifiers(manifest: PluginManifest, key: str) -> set[str]:
     declared = manifest.contributions.get(key)
     if declared is None:

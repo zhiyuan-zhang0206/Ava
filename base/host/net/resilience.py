@@ -98,6 +98,8 @@ def agent_phase(span: float) -> float:
     return span * (os.getpid() % 1000) / 1000.0
 
 
+# meiva:note
+# Jitter exists to spread retries, not to keep a secret, so the non-cryptographic generator is the intended one.
 def jittered(delay: float, span: float = 1.0, mode: str = "agent") -> float:
     """``delay`` plus jitter, never negative.
 
@@ -261,7 +263,7 @@ class Policy:
     on_final_failure: Callable[[Exception], None] | None = None
 
 
-# meiva:ref base/host/docs/host.meiva.okf.md#retry-caller-wait
+# meiva:link base/host/docs/host.meiva.okf.md
 def retry(
     policy: Policy, *, sleep: Callable[[float], None] | None = None
 ) -> Callable[[Callable[[], T]], T]:

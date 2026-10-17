@@ -38,43 +38,7 @@ that rationale under the structured-comment gate, so the naming rule N818 is
 silenced for this module in `pyproject.toml` per-file-ignores. The cross-face
 load rules live in [[docs/plugins/declared-contributions.meiva.okf.md|declared contributions]].
 
-```meiva-contract
-id = "widget-declaration"
-kind = "invariant"
-statement = "A widget is closed-set data: its kind comes from WIDGET_KINDS, unknown kinds and unknown fields are refused at validation (or skipped at render), and the spec carries no callables or queries. The gateway resolves each widget's payload per agent server-side; an empty payload drops the widget from the response."
-code = [
-  "base/packages/plugins/surface/inspector.py:WIDGET_KINDS",
-  "base/packages/plugins/surface/inspector.py:InspectWidgetSpec",
-]
-tests = [
-  "base/packages/plugins/tests/test_inspector.py::test_unknown_kind_refused",
-  "base/packages/plugins/tests/test_inspector.py::test_unknown_fields_refused",
-  "base/packages/plugins/tests/test_inspector.py::test_buttons_field_is_gone",
-]
-```
-
-```meiva-contract
-id = "widget-order-and-title"
-kind = "invariant"
-statement = "order is any int; the panel's built-in section keys leave room to slot a widget anywhere, and equal orders stack the kernel's sections first, then widgets by (plugin, id). title is an optional section header; without it the widget renders headerless, except kinds the console titles by default (taskList uses the console's own localized \"Tasks\")."
-code = ["base/packages/plugins/surface/inspector.py:InspectWidgetSpec"]
-tests = [
-  "base/packages/plugins/tests/test_inspector.py::test_any_int_order_is_accepted",
-  "base/packages/plugins/tests/test_inspector.py::test_title_must_be_non_empty_when_present",
-]
-```
-
-```meiva-contract
-id = "widget-registration"
-kind = "invariant"
-statement = "The data registry admits a face whole: a duplicate widget id within one plugin refuses that plugin (DuplicateInspectWidget), the same id across plugins is admitted, and each spec's plugin is filled from the registry entry, overriding an author-supplied value. Nothing is registered process-wide."
-code = ["base/packages/plugins/surface/inspector.py:DuplicateInspectWidget"]
-tests = [
-  "base/packages/plugins/tests/test_inspector.py::test_duplicate_id_within_one_plugin_refused",
-  "base/packages/plugins/tests/test_inspector.py::test_same_id_across_plugins_allowed",
-  "base/packages/plugins/tests/test_inspector.py::test_admission_replaces_an_author_supplied_plugin",
-]
-```
+A widget is closed-set data: its kind comes from WIDGET_KINDS, unknown kinds and unknown fields are refused at validation (or skipped at render), and the spec carries no callables or queries. The gateway resolves each widget's payload per agent server-side; an empty payload drops the widget from the response.
 
 ## Key Dependencies
 

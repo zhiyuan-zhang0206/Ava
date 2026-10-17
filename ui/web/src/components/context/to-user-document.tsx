@@ -19,7 +19,7 @@ function pushedEntry(): boolean {
   return (window.history.state as Record<string, unknown> | null)?.[PUSHED_ENTRY] === true;
 }
 
-// meiva:ref ui/web/src/docs/frontend-state/navigation-history.meiva.okf.md#panel-navigation-history
+// meiva:link ui/web/src/docs/frontend-state/navigation-history.meiva.okf.md
 export function ToUserDocumentView({ agentId, document, failed, pending, refresh, mobile }: {
   agentId: number;
   document: ToUserDocument | undefined;

@@ -308,7 +308,9 @@ def test_init_keep_local_fresh_repo_inits_without_remote(
     *,
     machine_identity: MachineIdentity,
 ) -> None:
-    # meiva:ref base/deploy/git/tests/docs/memory-repo-tests.meiva.okf.md#initialization-command-recorder
+    # meiva:note
+    # The existing initialization test records list-shaped subprocess argv and verifies that a fresh keep-local checkout initializes locally without clone or remote access. Its narrow Pyright annotation covers the dynamically typed argv item obtained through the existing subprocess replacement.
+    # meiva:link base/deploy/git/tests/docs/memory-repo-tests.meiva.okf.md
     machine_identity.set(role="agent-runner", name="test-host-2")
     monkeypatch.setattr(memory_repo.settings.general, "memory_keep_local", True)
     monkeypatch.setattr(memory_repo, "is_initialized", lambda: False)
@@ -330,6 +332,8 @@ def test_init_keep_local_fresh_repo_inits_without_remote(
     def _fake_run(*args: object, **kwargs: object) -> None:
         cmd = args[0]
         assert isinstance(cmd, list)
+        # meiva:note
+        # The recorder takes object-typed argv items, so this narrow ignore covers one dynamically typed list element.
         run_cmds.append(cmd)  # pyright: ignore[reportUnknownArgumentType]
         if cmd[:2] == ["git", "init"]:
             _md().mkdir(parents=True, exist_ok=True)

@@ -100,7 +100,7 @@ class GateReport:
         return tuple(rows)
 
 
-# meiva:ref base/host/permissions_helper/grants/docs/grants.meiva.okf.md#record-and-runtime-planes
+# meiva:link base/host/permissions_helper/grants/docs/grants.meiva.okf.md
 def _detail(result: ProbeResult, item: PermissionItem) -> str:
     if result.grant_for(item) is Grant.STALE:
         return (
@@ -110,7 +110,9 @@ def _detail(result: ProbeResult, item: PermissionItem) -> str:
     return ""
 
 
-# meiva:ref base/host/permissions_helper/grants/docs/grants.meiva.okf.md#live-probe-only
+# meiva:note
+# A host state is computed from the probe of the same call. The record under $MEIVA_HOME stores the last observation and the user's deferral flag; it is written from a probe and never read as evidence, so a cached 'granted' can neither hide a revoked grant nor invent one.
+# meiva:link base/host/permissions_helper/grants/docs/grants.meiva.okf.md
 def evaluate(
     result: ProbeResult, *, deferred: bool = False, now: datetime | None = None
 ) -> GateReport:
@@ -217,7 +219,9 @@ def write_record(record: OnboardingRecord, path: Path | None = None) -> None:
     target.write_text(record.to_json())
 
 
-# meiva:ref base/host/permissions_helper/grants/docs/grants.meiva.okf.md#deferred-is-not-a-grant
+# meiva:note
+# Recording 'later' keeps the host in the restricted family: the state becomes deferred, complete stays false, and the next gate run asks again. A complete run clears the flag.
+# meiva:link base/host/permissions_helper/grants/docs/grants.meiva.okf.md
 def mark_deferred(*, now: datetime | None = None, path: Path | None = None) -> OnboardingRecord:
     record = read_record(path)
     if record is None:

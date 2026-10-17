@@ -1,4 +1,4 @@
-# meiva:ref base/agents/context/docs/clients.meiva.okf.md#client-set-single-owner
+# meiva:link base/agents/context/docs/clients.meiva.okf.md
 from __future__ import annotations
 
 import threading
@@ -161,7 +161,7 @@ class ClientSet:
             return self._gateway
 
     def with_gateway(self, builder: Callable[[str], httpx.Client]) -> ClientSet:
-        # meiva:ref base/agents/context/docs/clients.meiva.okf.md#client-set-single-owner
+        # meiva:link base/agents/context/docs/clients.meiva.okf.md
         return ClientSet(
             gateway_url=self._gateway_url,
             database=self._database,

@@ -12,12 +12,12 @@ from base.packages.text_budget import LengthBudget, Level, Unit, evaluate
 
 _REPO_ROOT = Path(__file__).resolve().parent.parent.parent
 
-# meiva:ref scripts/lint/docs/agents-md-size.meiva.okf.md#agents-md-size-ceiling
+# meiva:link scripts/lint/docs/agents-md-size.meiva.okf.md
 _TRANSITIONAL_FLOOR = 200
 _HARD_CEILING = 245
 
 
-# meiva:ref scripts/lint/docs/agents-md-size.meiva.okf.md#agents-md-size-ceiling
+# meiva:link scripts/lint/docs/agents-md-size.meiva.okf.md
 def main(_argv: list[str] | None = None, *, repo_root: Path | None = None) -> int:
     agents_md = (repo_root or _REPO_ROOT) / "AGENTS.md"
     if not agents_md.exists():

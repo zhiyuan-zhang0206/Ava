@@ -15,22 +15,6 @@ A scan that cannot judge its window must not report it as healthy. The headline
 states the share it could judge on every run, and a window below the floor alerts
 as a data-quality problem instead of pretending either health or a regression.
 
-```meiva-contract
-id = "coverage-sentinel"
-kind = "invariant"
-code = ["meiva_builtins/skills/platform/meiva-self-evolution/scripts/daily_scan.py:<module>"]
-tests = [
-  "meiva_builtins/skills/platform/meiva-self-evolution/tests/test_self_evolution_daily_scan.py::test_coverage_headline_reports_the_judgeable_share",
-  "meiva_builtins/skills/platform/meiva-self-evolution/tests/test_self_evolution_daily_scan.py::test_low_coverage_alerts_with_the_data_quality_reason",
-  "meiva_builtins/skills/platform/meiva-self-evolution/tests/test_self_evolution_daily_scan.py::test_empty_window_alerts_as_an_empty_window",
-  "meiva_builtins/skills/platform/meiva-self-evolution/tests/test_self_evolution_daily_scan.py::test_regression_keeps_its_own_reason",
-  "meiva_builtins/skills/platform/meiva-self-evolution/tests/test_self_evolution_daily_scan.py::test_unknown_share_below_the_floor_keeps_the_scan_quiet",
-]
-statement = """
-Every scan prints one headline: `batch <total> runs · judgeable <n> (<share>) · unknown <n> (<reason counts>) · scored <n>`. A run is judgeable when its label is `ok`, `fumbled` or `failed`; the share is judgeable over total, and `n/a` when the window is empty; `scored` counts runs whose `rubric.scores(record)["overall"]` is not `None`, so it tracks what the rubric could actually judge. `daily_scan.alert_verdict` decides the exit code in one order: an empty window is a data-quality failure of the source (`empty-window`, unless the TEST- filter explains it), a judgeable share below the floor is `data-quality: low-coverage` naming the largest unknown reason, a `failed` or `fumbled` run is `regression`, and anything else exits 0. `alert_exit` returns that verdict's code, and the render prints the low-coverage alert line but never lists an unknown run as worth mining.
-"""
-```
-
 ## Where the floor comes from
 
 `settings.general.self_evolution_coverage_alert_floor` (alias

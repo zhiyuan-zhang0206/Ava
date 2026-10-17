@@ -251,7 +251,7 @@ class TestWaitHooks:
         assert seen == [1.0, 2.0]
 
     def test_retry_uses_the_callers_own_wait(self, retry_waits: list[float]) -> None:
-        # meiva:ref base/host/docs/host.meiva.okf.md#retry-caller-wait
+        # meiva:link base/host/docs/host.meiva.okf.md
         seen: list[float] = []
         run = retry(
             Policy(max_attempts=3, backoff=ExponentialBackoff(1.0, 2.0, 8.0), jitter="none"),

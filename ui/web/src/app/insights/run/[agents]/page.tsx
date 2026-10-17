@@ -50,7 +50,9 @@ const NO_AGENTS: number[] = [];
 
 const pathFor = (ids: readonly number[]) => `/insights/run/${ids.join(",")}`;
 
-// meiva:ref ui/web/src/docs/frontend-components/run-timeline/window-reads.meiva.okf.md#agent-view-ownership
+// meiva:note
+// The URL preserves agents in addition order without duplicates and the last agent cannot be removed. Message indices belong to their snapshot: replacing it invalidates the selection before effects run. Block selection and arrow selection exclude each other. The context card follows the selected agent and selected message/node, otherwise the last request in view of the first loaded agent. The page owns legend highlighting so zoom and pan retain it.
+// meiva:link ui/web/src/docs/frontend-components/run-timeline/window-reads.meiva.okf.md
 export default function AgentViewPage({ params }: { params: Promise<{ agents: string }> }) {
   const t = useTranslations("runTimeline");
 

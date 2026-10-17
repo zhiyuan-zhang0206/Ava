@@ -179,7 +179,6 @@ select = [
     "RET",          # return statements
     "Q",            # quotes
     "RSE",          # raise statements
-    "ERA",          # commented-out code
     "DTZ",          # datetime timezone
     "S",            # bandit security
     "TID251", "TID253",  # banned imports; package-relative style has a separate owner
@@ -234,24 +233,24 @@ check-typed-exception = true
 # `<pkg>/**/tests/` (tests live beside the code they prove).
 "tests/*" = ["S101", "PLR2004", "SLF001", "ARG001", "ARG002", "ANN", "FBT", "RUF001", "RUF002", "RUF003"]
 "**/tests/*" = ["S101", "PLR2004", "SLF001", "ARG001", "ARG002", "ANN", "FBT", "RUF001", "RUF002", "RUF003"]
-"demos/*" = ["RUF001", "RUF002", "RUF003", "ARG001", "ERA001", "S108"]
+"demos/*" = ["RUF001", "RUF002", "RUF003", "ARG001", "S108"]
 # schedules/* are version-controlled deployment templates (runnable scripts
 # referenced by the ops docs), not runtime source: exempt them from source-level
 # rules (typing, ambiguous unicode, security heuristics) so they stay readable.
 # DTZ is deliberately NOT exempt: these scripts decide when things fire, so a
 # naive datetime here is a scheduling bug, not a style nit.
-"schedules/*" = ["ANN", "RUF003", "S", "PTH", "TID", "I", "UP", "ERA", "Q", "RET", "ARG", "PLR2004", "T201"]
+"schedules/*" = ["ANN", "RUF003", "S", "PTH", "TID", "I", "UP", "Q", "RET", "ARG", "PLR2004", "T201"]
 # FBT: a boolean positional in a test is the value-under-test (e.g.
 # `validate("browser_enabled", True)`), not a real boolean-trap call site.
 # .agents/skills (the kernel-contributor project skills) carry the same kind of
 # runnable reference CLIs (e.g. meiva-self-development's changelog generator).
-".agents/skills/*/reference/*.py" = ["ERA001", "T20", "B904", "F841", "RUF059", "PLW1510", "S110", "S112", "S603", "C401", "PLR0915", "N806"]
+".agents/skills/*/reference/*.py" = ["T20", "B904", "F841", "RUF059", "PLW1510", "S110", "S112", "S603", "C401", "PLR0915", "N806"]
 # Skill scripts are runnable CLIs the agent invokes via bash: print() is their
 # stdout contract (T20); they drive the OS through hardcoded subprocess commands
 # (open / screencapture / osascript / pbcopy) writing to a /tmp scratch dir, so
 # the subprocess/temp-file security lints are noise (S603, S108); boolean flags
 # and best-effort subprocess.run are fine here (FBT, PLW1510, PTH, ANN).
-"meiva_builtins/skills/*/scripts/*.py" = ["ERA001", "T20", "S603", "S108", "FBT", "PLW1510", "PTH", "ANN"]
+"meiva_builtins/skills/*/scripts/*.py" = ["T20", "S603", "S108", "FBT", "PLW1510", "PTH", "ANN"]
 # These three skills' scripts/ moved out of a former reference/*.py or
 # skill_support/** path (path_imports fix, Rule 6) unchanged: same relaxation
 # their content had there, so the move itself does not force an unrelated
@@ -266,14 +265,14 @@ check-typed-exception = true
 # and launched through an API, not executed as a file). Not the maintained
 # live path, so the same broad relaxation as .agents/skills/*/reference/*.py
 # above applies.
-"meiva_builtins/skills/*/references/*.py" = ["ERA001", "T20", "B904", "F841", "RUF059", "PLW1510", "S110", "S112", "S603", "C401", "PLR0915", "N806", "ANN201", "DTZ005", "PTH123"]
+"meiva_builtins/skills/*/references/*.py" = ["T20", "B904", "F841", "RUF059", "PLW1510", "S110", "S112", "S603", "C401", "PLR0915", "N806", "ANN201", "DTZ005", "PTH123"]
 # Project skills under .agents/skills/ ship the same kind of runnable CLI
 # scripts — same exemptions apply.
-".agents/skills/*/scripts/*.py" = ["ERA001", "T20", "S603", "S108", "S310", "FBT", "PLW1510", "PTH", "ANN"]
+".agents/skills/*/scripts/*.py" = ["T20", "S603", "S108", "S310", "FBT", "PLW1510", "PTH", "ANN"]
 # Same intent for skill reference files bundled inside a plugin's skill package
 # (a plugin can ship its own skill tree under meiva_builtins/plugins/<name>/skills/...).
-"meiva_builtins/plugins/*/skills/**/reference/*.py" = ["ERA001", "T20", "B904", "F841", "RUF059", "PLW1510", "S110", "S112", "S603", "C401", "PLR0915", "N806"]
-"meiva_builtins/plugins/*/skills/**/scripts/*.py" = ["ERA001", "T20", "S603", "S108", "FBT", "PLW1510", "PTH", "ANN"]
+"meiva_builtins/plugins/*/skills/**/reference/*.py" = ["T20", "B904", "F841", "RUF059", "PLW1510", "S110", "S112", "S603", "C401", "PLR0915", "N806"]
+"meiva_builtins/plugins/*/skills/**/scripts/*.py" = ["T20", "S603", "S108", "FBT", "PLW1510", "PTH", "ANN"]
 "scripts/**" = ["ANN", "T20"]
 # This operator tool inserts the repository root on sys.path before importing
 # first-party modules, so it can run from any working directory with the
@@ -1105,11 +1104,6 @@ reportUnknownArgumentType = "error"
 
 [[tool.pyright.executionEnvironments]]
 root = "scripts/ci/tests"
-reportUnknownMemberType = "error"
-reportUnknownArgumentType = "error"
-
-[[tool.pyright.executionEnvironments]]
-root = "scripts/codegen/sdk_surface/tests"
 reportUnknownMemberType = "error"
 reportUnknownArgumentType = "error"
 

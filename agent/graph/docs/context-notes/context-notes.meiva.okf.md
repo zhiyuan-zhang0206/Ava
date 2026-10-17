@@ -25,17 +25,6 @@ Notes tell the agent what changed and what to do, in its own terms.
 - **Fork keeps the inherited head (2026-10-17)**: `_handle_fork` leaves the copied messages untouched and appends the `lifecycle_fork` marker plus `fork_notes()` at the tail. The shared memory index stays NOT `on_fork` (cluster-wide; grafting it duplicated the index — the timezone rule). An earlier head rebuild that stripped the source-identity notes broke the prefix cache the fork rides ([decision](../../../../docs/decisions/agents/context/2026-10-17-fork-keeps-inherited-prefix.md)).
 - **Fork tail-graft skills (task #2694)**: the fork inbound's payload carries `tail_skills` — inject-list skills the fork's config added beyond the source's, minus what the fork's expand list already grafts. `_handle_fork` resolves them (the shared `resolve_prompt_skills`, warn-and-skip) and appends one note with their full SKILL.md bodies AFTER the fork marker and `fork_notes()` — the tail, never the cached prefix. Tagged `preloaded_skills` like the framework's preloaded-skills note. Expand-list additions need no extra mechanism: the fork's own preloaded-skills note already covers them.
 
-```meiva-contract
-id = "fork-keeps-inherited-head"
-kind = "invariant"
-statement = "A fork appends its lifecycle marker and its own context notes after the inherited history and never rewrites that history: the inherited messages stay byte-identical so the first fork of a checkpoint reuses the provider prefix cache its source warmed. The marker states that the identity, memory and skill notes above it belong to the source; the shared memory index is not re-grafted."
-code = ["agent/graph/claim/_dispatch.py:_handle_fork"]
-tests = [
-  "agent/tests/claim/test_claim.py::test_claim_fork_preserves_the_inherited_prefix",
-  "agent/tests/claim/test_claim.py::test_claim_fork_kind_appends_identity_marker_and_continues",
-]
-```
-
 ### Memory Injection (`plugins/meiva_memory/notes.py` + `inherit.py`, declared by the plugin)
 - Both stores belong to `meiva_memory`; disabling it removes stores, SDK surface, notes, and discipline section together. The three notes — shared pool index, per-agent index, and the `inheritable` blocks read from the ancestor chain — their ranks, switches, fork behavior, and guardrails are documented in [[agent/graph/docs/context-notes/memory-injection.meiva.okf.md|Memory Injection]].
 
@@ -49,7 +38,6 @@ tests = [
 - Standing context notes (exec timeout / cluster timezone / agent id / preloaded skills / the two memory indexes / the chain-inherited memory blocks) laid down behind the system prompt whenever the window is established
 - Message history (user messages + agent replies + tool call results)
 - Current turn input
-
 
 ## Key Dependencies
 

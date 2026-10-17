@@ -58,7 +58,7 @@ def test_plugin_key_missing_in_both_channels_raises(
 def test_plugin_key_ignores_legacy_settings_field(
     monkeypatch: pytest.MonkeyPatch, *, model_catalog: ModelCatalog
 ) -> None:
-    # meiva:ref base/packages/tests/lm/docs/contracts.meiva.okf.md#provider-key-channel
+    # meiva:link base/packages/tests/lm/docs/contracts.meiva.okf.md
     monkeypatch.setattr(settings.lm, "deepseek_api_key", "sk-test")
     monkeypatch.delenv("DEEPSEEK_API_KEY", raising=False)
     monkeypatch.setattr(dotenv_file, "read_env_aliases", dict)

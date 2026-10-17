@@ -18,12 +18,4 @@ Set `MEIVA_TEST_INSTALLED_SOURCE` to an isolated older checkout with its own rea
 `.venv` to repeat this test against that runtime. A default run proves the current
 installation only; it does not establish compatibility with an older revision.
 
-```meiva-contract
-id = "installed-runtime-writer"
-kind = "invariant"
-statement = "The external maintenance script uses the selected installation's interpreter and real writer while preserving schedule enabled/stopped state and the pause journal; it stores the new body without executing it."
-code = ["scripts/host_ops/tests/test_update_schedule_script.py:test_external_file_uses_installed_runtime_and_real_writer"]
-tests = ["scripts/host_ops/tests/test_update_schedule_script.py::test_external_file_uses_installed_runtime_and_real_writer"]
-```
-
 Parent: [[scripts/docs/scripts.meiva.okf.md]].

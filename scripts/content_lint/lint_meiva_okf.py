@@ -23,10 +23,10 @@ from base.packages.docs.okf_graph import logical_path
 from base.packages.text_budget import LengthBudget, Level, Unit, evaluate
 from scripts.codegen.build_okf_data import resolve_wikilink
 
-# meiva:ref scripts/content_lint/docs/lint-meiva-okf.meiva.okf.md#okf-node-schema
+# meiva:link scripts/content_lint/docs/lint-meiva-okf.meiva.okf.md
 ALLOWED_TYPES = {"doc", "memory"}
 FORBIDDEN_KEYS = {"cluster", "layer", "process", "owner", "views", "parent"}
-# meiva:ref scripts/content_lint/docs/lint-meiva-okf-size-and-links.meiva.okf.md#okf-size-ceiling
+# meiva:link scripts/content_lint/docs/lint-meiva-okf-size-and-links.meiva.okf.md
 MAX_LINES = 200
 MAX_CHARS = 8000
 WARN_MARGIN = 800
@@ -35,18 +35,18 @@ _SPLIT_HINT = (
     "the parent edge; the docs/ layer stands for its package directory, so here "
     "that is '{home}') — see docs/conventions/doc-maintenance.md."
 )
-# meiva:ref scripts/content_lint/docs/lint-meiva-okf.meiva.okf.md#okf-docs-layer
+# meiva:link scripts/content_lint/docs/lint-meiva-okf.meiva.okf.md
 _LAYER_EXEMPT = (".github/",)
 _CODE_SUFFIXES = frozenset({".py", ".pyi", ".ts", ".tsx"})
 _CODE_NAMES = frozenset({"SKILL.md", "package.json"})
-# meiva:ref scripts/content_lint/docs/lint-meiva-okf-size-and-links.meiva.okf.md#okf-wikilink-edges
+# meiva:link scripts/content_lint/docs/lint-meiva-okf-size-and-links.meiva.okf.md
 WIKILINK_RE = re.compile(r"\[\[([^\]|]+)(?:\|[^\]]*)?\]\]")
 
-# meiva:ref scripts/content_lint/docs/lint-meiva-okf-size-and-links.meiva.okf.md#okf-concatenation-defects
+# meiva:link scripts/content_lint/docs/lint-meiva-okf-size-and-links.meiva.okf.md
 _FENCE_RE = re.compile(r"^\s*```")
 _INLINE_CODE_RE = re.compile(r"`[^`\n]*`")
 
-# meiva:ref scripts/content_lint/docs/lint-meiva-okf-size-and-links.meiva.okf.md#okf-concatenation-defects
+# meiva:link scripts/content_lint/docs/lint-meiva-okf-size-and-links.meiva.okf.md
 _HEADER_GLUE_RE = re.compile(r"(?<=[^\sA-Za-z0-9#])#{1,6} (?=[A-Za-z0-9`(])")
 _BULLET_GLUE_RE = re.compile(r"(?<=[^\s-])- (?=[A-Za-z0-9`(*])")
 _HEADER_LINE_RE = re.compile(r"^#{1,6} ")
@@ -67,7 +67,7 @@ class LintError:
         return f"{self.path}:{self.line}: {self.code}: {self.msg}"
 
 
-# meiva:ref scripts/content_lint/docs/lint-meiva-okf.meiva.okf.md#okf-node-universe
+# meiva:link scripts/content_lint/docs/lint-meiva-okf.meiva.okf.md
 def find_files(paths: list[str]) -> list[Path]:
     if not paths:
         paths = ["."]
@@ -105,12 +105,12 @@ def parse_frontmatter(text: str) -> tuple[dict, str, int]:
     return {}, text, 0
 
 
-# meiva:ref scripts/content_lint/docs/lint-meiva-okf.meiva.okf.md#okf-node-universe
+# meiva:link scripts/content_lint/docs/lint-meiva-okf.meiva.okf.md
 def collect_all_paths(repo_root: Path) -> set[str]:
     return {f.relative_to(repo_root).as_posix() for f in find_files([str(repo_root)])}
 
 
-# meiva:ref scripts/content_lint/docs/lint-meiva-okf.meiva.okf.md#okf-overview-position
+# meiva:link scripts/content_lint/docs/lint-meiva-okf.meiva.okf.md
 def _dual_node_error(filepath: Path, repo_root: Path, all_paths: set[str]) -> LintError | None:
     stem = filepath.name[: -len(".meiva.okf.md")]
     try:
@@ -147,7 +147,7 @@ def _holds_code(directory: Path) -> bool:
     )
 
 
-# meiva:ref scripts/content_lint/docs/lint-meiva-okf.meiva.okf.md#okf-docs-layer
+# meiva:link scripts/content_lint/docs/lint-meiva-okf.meiva.okf.md
 def _layer_home(rel: str, repo_root: Path) -> str:
     directories = posixpath.dirname(rel).split("/") if "/" in rel else []
     for depth in range(len(directories), 0, -1):
@@ -158,7 +158,7 @@ def _layer_home(rel: str, repo_root: Path) -> str:
     return posixpath.join(head, "docs", name)
 
 
-# meiva:ref scripts/content_lint/docs/lint-meiva-okf.meiva.okf.md#okf-docs-layer
+# meiva:link scripts/content_lint/docs/lint-meiva-okf.meiva.okf.md
 def layer_error(filepath: Path, repo_root: Path) -> LintError | None:
     try:
         rel = filepath.resolve().relative_to(repo_root).as_posix()
@@ -188,7 +188,7 @@ def _repo_rel(filepath: Path, repo_root: Path) -> str:
         return filepath.name
 
 
-# meiva:ref scripts/content_lint/docs/lint-meiva-okf-size-and-links.meiva.okf.md#okf-size-ceiling
+# meiva:link scripts/content_lint/docs/lint-meiva-okf-size-and-links.meiva.okf.md
 def _split_home(rel: str, stem: str) -> str:
     directory = posixpath.dirname(rel)
     if posixpath.basename(posixpath.dirname(logical_path(rel))) == stem:
@@ -196,7 +196,7 @@ def _split_home(rel: str, stem: str) -> str:
     return posixpath.join(directory, stem) + "/"
 
 
-# meiva:ref scripts/content_lint/docs/lint-meiva-okf-size-and-links.meiva.okf.md#okf-wikilink-edges
+# meiva:link scripts/content_lint/docs/lint-meiva-okf-size-and-links.meiva.okf.md
 def _non_node_target(target: str, repo_root: Path) -> str | None:
     if "://" in target:
         return None
@@ -222,7 +222,7 @@ def _non_node_target(target: str, repo_root: Path) -> str | None:
     return hits[0].relative_to(repo_root).as_posix()
 
 
-# meiva:ref scripts/content_lint/docs/lint-meiva-okf-size-and-links.meiva.okf.md#okf-wikilink-edges
+# meiva:link scripts/content_lint/docs/lint-meiva-okf-size-and-links.meiva.okf.md
 def _literal_denotations(rel_path: str, target: str) -> set[str]:
     stem = target.lstrip("/")
     if not stem.endswith(".meiva.okf.md"):
@@ -265,7 +265,7 @@ def _wikilink_error(
     return None
 
 
-# meiva:ref scripts/content_lint/docs/lint-meiva-okf.meiva.okf.md#okf-node-schema
+# meiva:link scripts/content_lint/docs/lint-meiva-okf.meiva.okf.md
 def _tags_errors(path_str: str, fm: dict) -> list[LintError]:
     errors: list[LintError] = []
     if "tags" not in fm:
@@ -284,7 +284,7 @@ def _tags_errors(path_str: str, fm: dict) -> list[LintError]:
     return errors
 
 
-# meiva:ref scripts/content_lint/docs/lint-meiva-okf.meiva.okf.md#okf-node-schema
+# meiva:link scripts/content_lint/docs/lint-meiva-okf.meiva.okf.md
 def _forbidden_key_errors(path_str: str, fm: dict) -> list[LintError]:
     errors: list[LintError] = []
     for key in FORBIDDEN_KEYS:
@@ -301,7 +301,7 @@ def _forbidden_key_errors(path_str: str, fm: dict) -> list[LintError]:
     return errors
 
 
-# meiva:ref scripts/content_lint/docs/lint-meiva-okf-size-and-links.meiva.okf.md#okf-concatenation-defects
+# meiva:link scripts/content_lint/docs/lint-meiva-okf-size-and-links.meiva.okf.md
 def _mask_code(text: str) -> str:
     lines = text.split("\n")
     out = []
@@ -318,7 +318,7 @@ def _mask_code(text: str) -> str:
     return "\n".join(out)
 
 
-# meiva:ref scripts/content_lint/docs/lint-meiva-okf-size-and-links.meiva.okf.md#okf-concatenation-defects
+# meiva:link scripts/content_lint/docs/lint-meiva-okf-size-and-links.meiva.okf.md
 def _concat_glue_errors(path_str: str, text: str, fm_end_line: int) -> list[LintError]:
     errors: list[LintError] = []
     body_lines = text.split("\n")[fm_end_line:]
@@ -373,7 +373,7 @@ def _duplicate_header_errors(path_str: str, text: str, fm_end_line: int) -> list
     return errors
 
 
-# meiva:ref scripts/content_lint/docs/lint-meiva-okf-size-and-links.meiva.okf.md#okf-size-ceiling
+# meiva:link scripts/content_lint/docs/lint-meiva-okf-size-and-links.meiva.okf.md
 def _size_errors(path_str: str, filepath: Path, text: str, rel_path: str) -> list[LintError]:
     errors: list[LintError] = []
     line_verdict = evaluate(text, LengthBudget(Unit.LINES, hard=MAX_LINES))
@@ -414,7 +414,7 @@ def _size_errors(path_str: str, filepath: Path, text: str, rel_path: str) -> lis
     return errors
 
 
-# meiva:ref scripts/content_lint/docs/lint-meiva-okf.meiva.okf.md#okf-node-schema
+# meiva:link scripts/content_lint/docs/lint-meiva-okf.meiva.okf.md
 def _required_field_errors(path_str: str, fm: dict[str, Any]) -> list[LintError]:
     errors: list[LintError] = []
     fm_type = fm.get("type")
