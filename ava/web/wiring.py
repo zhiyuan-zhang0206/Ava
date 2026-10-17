@@ -1,5 +1,3 @@
-"""Build the `WebDeps` of this process from its SDK installation: configuration, providers, ports."""
-
 from __future__ import annotations
 
 from collections.abc import Callable
@@ -8,28 +6,48 @@ from functools import partial
 from ava.sdk_surface import settings as sdk_settings
 from ava.sdk_surface.injection_check import begin_check
 from ava.security import finding_delivery_active, record_model_finding, scan_content
-from ava.web.deps import BraveConfig, FetchModel, JinaConfig, WebDeps
+from ava.web.deps import BraveConfig, FetchDeps, FetchModel, JinaConfig, SearchDeps
 from base.config.service_read import ConfigAuthority
+from base.host.env.agent_slices import ModelOverrides
 from base.host.net.ports import SYSTEM_URL_OPENER
 from base.lm import factory
+from base.lm.catalog import ModelCatalog
 
-__all__ = ["web_deps", "web_deps_for"]
-
-
-def web_deps() -> WebDeps:
-    """The deps for one web call, read from the configuration owner of the SDK installation."""
-    return web_deps_for(sdk_settings.config_authority())
+__all__ = ["fetch_deps", "fetch_deps_for", "search_deps", "search_deps_for"]
 
 
-def web_deps_for(authority: ConfigAuthority) -> WebDeps:
-    """The deps for one web call, read from `authority`."""
-    return WebDeps(
+def search_deps() -> SearchDeps:
+    return search_deps_for(sdk_settings.config_authority())
+
+
+def search_deps_for(authority: ConfigAuthority) -> SearchDeps:
+    return SearchDeps(
         brave=BraveConfig(
             api_key=authority.service_field_value("brave_api_key"),
             endpoint=authority.service_field_value("web_brave_search_endpoint"),
             timeout_s=authority.service_field_value("web_search_timeout_seconds"),
             max_count=authority.service_field_value("web_max_search_results"),
         ),
+        open_url=SYSTEM_URL_OPENER,
+        scan=_scan,
+    )
+
+
+def fetch_deps() -> FetchDeps:
+    return fetch_deps_for(
+        sdk_settings.config_authority(),
+        catalog=sdk_settings.model_catalog(),
+        overrides=sdk_settings.model_overrides(),
+    )
+
+
+def fetch_deps_for(
+    authority: ConfigAuthority,
+    *,
+    catalog: ModelCatalog,
+    overrides: ModelOverrides,
+) -> FetchDeps:
+    return FetchDeps(
         jina=JinaConfig(
             api_key=authority.service_field_value("jina_api_key"),
             reader_base=authority.service_field_value("web_jina_reader_base"),
@@ -45,8 +63,8 @@ def web_deps_for(authority: ConfigAuthority) -> WebDeps:
             ),
             timeout_seconds=authority.service_field_value("llm_invoke_timeout_seconds"),
             llm_override=authority.service_field_value("llm_override"),
-            catalog=sdk_settings.model_catalog(),
-            overrides=sdk_settings.model_overrides(),
+            catalog=catalog,
+            overrides=overrides,
         ),
         open_url=SYSTEM_URL_OPENER,
         build_chat_model=factory.build_chat_model,

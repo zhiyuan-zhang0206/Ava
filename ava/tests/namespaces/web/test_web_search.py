@@ -7,7 +7,7 @@ import json
 import threading
 import time
 import urllib.error
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any
 from unittest.mock import patch
@@ -17,11 +17,10 @@ from pydantic import SecretStr
 
 import ava
 from ava.sdk_surface.batch import DEFAULT_BATCH_MAX_CONCURRENT
-from ava.sdk_surface.installation import Installation
 from ava.sdk_surface.settings import config_authority
 from ava.tests.namespaces.web._web_helpers import FakeResp, WebHarness
 from ava.tests.namespaces.web._web_helpers import web_harness as web_harness
-from ava.web import SearchError, WebError, wiring
+from ava.web import SearchError, WebError, plans, runner, wiring
 from base.config import settings
 from base.config.service_read import ConfigAuthority
 
@@ -254,7 +253,7 @@ def test_endpoint_defaults_pin_before_literals(web_harness: WebHarness) -> None:
     assert (
         settings.web.web_brave_search_endpoint == "https://api.search.brave.com/res/v1/web/search"
     )
-    assert web_harness.deps.jina.reader_base == "https://r.jina.ai/"
+    assert web_harness.fetch_deps.jina.reader_base == "https://r.jina.ai/"
 
 
 def test_search_hits_configured_endpoint(web_harness: WebHarness) -> None:
@@ -275,9 +274,7 @@ def test_search_hits_configured_endpoint(web_harness: WebHarness) -> None:
     assert captured["url"].startswith("https://search.relay.example/api?")
 
 
-def test_search_uses_two_owned_boots_and_live_updates(
-    model_installation: Installation, tmp_path: Path
-) -> None:
+def test_search_uses_two_owned_boots_and_live_updates(tmp_path: Path) -> None:
     """The deps follow the configuration owner they are built from, including later owner writes."""
     import os
 
@@ -291,9 +288,8 @@ def test_search_uses_two_owned_boots_and_live_updates(
         return FakeResp(_make_brave_response([]))
 
     def search(authority: ConfigAuthority) -> list[list[ava.web.SearchResult]]:
-        harness = WebHarness(wiring.web_deps_for(authority))
-        with harness.urlopen_returns(side_effect=capture):
-            return harness.search(["q"], count=20)
+        deps = replace(wiring.search_deps_for(authority), open_url=capture)
+        return runner.run_search(plans.plan_search(["q"], 20, None), deps, ava.web.SearchResult)
 
     try:
         with patch.dict(os.environ):
@@ -337,18 +333,36 @@ class _RecordingAuthority(ConfigAuthority):
         return ConfigAuthority.service_field_value(self, name)
 
 
-def test_web_deps_read_each_setting_once(web_harness: WebHarness) -> None:
-    """One call reads each web setting once, when its deps are built: not per use or per retry."""
+def test_search_deps_read_only_brave_fields(web_harness: WebHarness) -> None:
     base = config_authority()
     authority = _RecordingAuthority(base.runtime, base.all_domains, base.env_path)
-    wiring.web_deps_for(authority)
+    wiring.search_deps_for(authority)
+    assert sorted(authority.reads) == [
+        "brave_api_key",
+        "web_brave_search_endpoint",
+        "web_max_search_results",
+        "web_search_timeout_seconds",
+    ]
+
+
+def test_fetch_deps_read_no_brave_fields(web_harness: WebHarness) -> None:
+    base = config_authority()
+    authority = _RecordingAuthority(base.runtime, base.all_domains, base.env_path)
+    model = web_harness.fetch_deps.fetch_model
+    wiring.fetch_deps_for(authority, catalog=model.catalog, overrides=model.overrides)
     assert sorted(authority.reads) == sorted(set(authority.reads))
-    assert {"brave_api_key", "web_search_timeout_seconds", "jina_api_key"} <= set(authority.reads)
+    assert not {
+        "brave_api_key",
+        "web_brave_search_endpoint",
+        "web_search_timeout_seconds",
+        "web_max_search_results",
+    } & set(authority.reads)
+    assert {"jina_api_key", "web_fetch_model"} <= set(authority.reads)
 
 
 def test_search_reads_the_installation_it_is_called_under(web_harness: WebHarness) -> None:
     """`ava.web.search` builds its deps from the SDK installation of the process."""
-    assert wiring.web_deps().brave == web_harness.deps.brave
+    assert wiring.search_deps().brave == web_harness.search_deps.brave
 
 
 # ─── search signature ───

@@ -9,7 +9,7 @@ import urllib.parse
 import urllib.request
 from typing import Any
 
-from ava.web.deps import WebDeps
+from ava.web.deps import FetchDeps
 from ava.web.errors import FetchError
 from ava.web.policy import WEB_READ_POLICY
 from base.host.net.resilience import retry
@@ -64,7 +64,7 @@ def _raise_if_wall(url: str, title: str, content: str) -> None:
     )
 
 
-def _read_page(url: str, max_chars: int, deps: WebDeps) -> tuple[str, str, str, bool]:
+def _read_page(url: str, max_chars: int, deps: FetchDeps) -> tuple[str, str, str, bool]:
     """Fetch the page main body as markdown. Returns `(title, url, content,
     truncated)` where `truncated` is True when the body exceeded `max_chars`.
 
@@ -146,7 +146,7 @@ def _answer(
     content: str,
     truncated: bool,
     effort: str | ReasoningEffort | None,
-    deps: WebDeps,
+    deps: FetchDeps,
 ) -> str:
     """Have a model answer `prompt` against the fetched page content.
 
@@ -187,7 +187,7 @@ def _answer(
 
 
 def fetch_one(
-    url: str, prompt: str, max_chars: int, effort: str | ReasoningEffort | None, deps: WebDeps
+    url: str, prompt: str, max_chars: int, effort: str | ReasoningEffort | None, deps: FetchDeps
 ) -> str:
     """Read one page and answer one prompt — the synchronous unit of work.
 
