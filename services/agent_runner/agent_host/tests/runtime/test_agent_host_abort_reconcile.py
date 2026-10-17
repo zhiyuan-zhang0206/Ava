@@ -17,6 +17,7 @@ class _ReconcileSpy:
     def __init__(self) -> None:
         self.calls: list[tuple[object, int]] = []
         self.bound: list[RuntimeIncarnation | None] = []
+        self.unknown_execution: list[bool] = []
         self.fail_with: BaseException | None = None
 
     async def __call__(
@@ -25,9 +26,11 @@ class _ReconcileSpy:
         agent_id: int,
         *,
         incarnation: RuntimeIncarnation | None,
+        unknown_execution: bool = False,
     ) -> None:
         self.calls.append((pool, agent_id))
         self.bound.append(incarnation)
+        self.unknown_execution.append(unknown_execution)
         if self.fail_with is not None:
             raise self.fail_with
 
