@@ -24,7 +24,10 @@ tags: [services, lifecycle]
   `process=agent_host` and exits `HELPER_CHAIN_BROKEN_EXIT_CODE`; a process the
   helper did not spawn carries no marker and never retires. Detection timing is
   `--helper-chain-interval` and `--helper-chain-confirm-rounds` (5 s and 2 by
-  default).
+  default). The macOS helper smoke seeds its root with a 3600 s interval,
+  because its conflict phase deliberately keeps an orphan alive across a helper
+  replacement to sample attribution in that window (task #3380); disabling the
+  watch there is what keeps that measurement meaningful.
 - Linux: `systemd/direct caller -> meiva-root -> application services`. There is
   no permissions helper, and “root” does not mean UID 0. Automatic boot uses
   only systemd; ordinary convergence registers/enables the exact home unit with
