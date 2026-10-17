@@ -45,5 +45,7 @@
   "replySuggestionsDesc": "agent 的回合结束后，如果拟回复有助于你回应，就在空输入框里以灰色文字展示建议。候选数量由模型根据上下文决定。上下方向键切换候选，右方向键填入输入框，再按回车发送。开始打字即隐藏建议。",
   "modelPicker": "模型选择器",
   "english": "English",
-  "chinese": "中文"
+  "chinese": "中文",
+  "composerContextMeter": "在输入区显示上下文窗口",
+  "composerContextMeterDesc": "在输入框旁显示上下文窗口进度条。默认关闭——具体数字在右侧检查器的「上下文」区；开启后也只显示进度条，不显示文字。"
 }

@@ -852,40 +852,53 @@ describe("Composer input lifecycle", () => {
   });
 });
 
-describe("Composer token display", () => {
-  it("contextTokens=0 shows invisible spacer (no layout jump)", () => {
-    render(<Composer {...baseProps} mode="idle" contextTokens={0} />);
-    const span = screen.getByTestId("composer-meta");
-    expect(span.textContent).toBe(" ");
+describe("Composer context meter (opt-in)", () => {
+  it("renders no context readout by default — those numbers live in the inspector", () => {
+    render(
+      <Composer
+        {...baseProps}
+        mode="idle"
+        contextTokens={26000}
+        maxContextTokens={1000000}
+        softCompactTokens={600000}
+        hardCompactTokens={800000}
+      />,
+    );
+    expect(screen.queryByTestId("context-meter")).toBeNull();
+    expect(screen.queryByTestId("context-meter-button")).toBeNull();
+    expect(screen.queryByTestId("context-meter-ghost")).toBeNull();
+    expect(screen.getByTestId("composer-meta").textContent).toBe(" ");
+  });
+
+  it("keeps the layout spacer when the agent has no LLM call yet", () => {
+    render(<Composer {...baseProps} mode="idle" contextTokens={0} showContextMeter />);
+    expect(screen.getByTestId("composer-meta").textContent).toBe(" ");
   });
 
   it("shows the loading ghost while the token snapshot is pending (cold switch)", () => {
-    renderComposer(<Composer {...baseProps} mode="idle" contextTokens={0} contextPending />);
+    renderComposer(
+      <Composer {...baseProps} mode="idle" contextTokens={0} contextPending showContextMeter />,
+    );
     expect(screen.getByTestId("context-meter-ghost")).toBeTruthy();
     expect(screen.queryByTestId("context-meter-button")).toBeNull();
     expect(screen.getByTestId("composer-meta").textContent).toBe("");
   });
 
-  it("contextTokens > 0 shows formatted context token count", () => {
-    renderComposer(<Composer {...baseProps} mode="idle" contextTokens={5000} />);
-    const span = screen.getByTestId("composer-meta");
-    expect(span.textContent).toBe("Context: 5.0k tokens");
-  });
-
-  it("maxContextTokens > 0 shows current/max format", () => {
+  it("shows the bare gauge — never the numeric readout — when opted in", () => {
     renderComposer(
-      <Composer {...baseProps} mode="idle" contextTokens={26000} maxContextTokens={1000000} />,
+      <Composer
+        {...baseProps}
+        mode="idle"
+        contextTokens={26000}
+        maxContextTokens={1000000}
+        softCompactTokens={600000}
+        hardCompactTokens={800000}
+        showContextMeter
+      />,
     );
     const span = screen.getByTestId("composer-meta");
-    expect(span.textContent).toBe("Context: 26.0k/1.00M tokens");
-  });
-
-  it("maxContextTokens=0 hides the /max segment", () => {
-    renderComposer(
-      <Composer {...baseProps} mode="idle" contextTokens={5000} maxContextTokens={0} />,
-    );
-    const span = screen.getByTestId("composer-meta");
-    expect(span.textContent).toBe("Context: 5.0k tokens");
+    expect(span.querySelector('[data-testid="context-meter"]')).toBeTruthy();
+    expect(span.textContent).toBe("");
   });
 });
 
@@ -899,6 +912,7 @@ describe("Composer context breakdown panel", () => {
         maxContextTokens={1000000}
         softCompactTokens={600000}
         hardCompactTokens={800000}
+        showContextMeter
         agentId={7}
       />,
     );
@@ -926,6 +940,7 @@ describe("Composer context breakdown panel", () => {
         maxContextTokens={1000000}
         softCompactTokens={600000}
         hardCompactTokens={800000}
+        showContextMeter
         agentId={7}
       />,
     );
@@ -1212,15 +1227,18 @@ describe("Composer slash commands", () => {
     await waitFor(() => expect(meta()).toBe("a focus"));
   });
 
-  it("no hint row for an unknown command or a command with an empty hint — falls back to context", async () => {
+  it("no hint row for an unknown command or a command with an empty hint — falls back to the readout", async () => {
     commandList = abc;
-    const meta = () => screen.getByTestId("composer-meta").textContent;
-    renderComposer(<Composer {...baseProps} mode="idle" contextTokens={500} />);
+    const meta = () => screen.getByTestId("composer-meta");
+    renderComposer(<Composer {...baseProps} mode="idle" contextTokens={500} showContextMeter />);
     const ta = screen.getByTestId("composer-input");
+    const gauge = () => meta().querySelector('[data-testid="context-meter"]');
     fireEvent.change(ta, { target: { value: "/alpha " } });
-    await waitFor(() => expect(meta()).toBe("Context: 500 tokens"));
+    await waitFor(() => expect(meta().textContent).toBe(""));
+    expect(gauge()).toBeTruthy();
     fireEvent.change(ta, { target: { value: "/zzz " } });
-    expect(meta()).toBe("Context: 500 tokens");
+    expect(meta().textContent).toBe("");
+    expect(gauge()).toBeTruthy();
   });
 
   it("Enter on a partial name fills `/<name> ` and waits — does not send", async () => {
@@ -1635,24 +1653,5 @@ describe("Composer sessionStorage draft persistence", () => {
     expect((screen.getByTestId<HTMLTextAreaElement>("composer-input")).value).toBe("");
 
     expect(sessionStorage.getItem(draftKey(7))).toBe("text for 7");
-  });
-});
-
-describe("Composer top-right details slot", () => {
-  it("renders the details slot at the right edge of the meta row", () => {
-    renderComposer(
-      <Composer {...baseProps} mode="idle" details={<button type="button">DETAILS</button>} />,
-    );
-    expect(screen.getByRole("button", { name: "DETAILS" })).toBeTruthy();
-    const metaRow = screen.getByTestId("composer-meta").closest("div");
-    const cluster = screen.getByRole("button", { name: "DETAILS" }).parentElement!;
-    expect(cluster.className).toContain("ml-auto");
-    expect(metaRow?.contains(cluster)).toBe(true);
-  });
-
-  it("renders no right-edge cluster when neither slot is given", () => {
-    renderComposer(<Composer {...baseProps} mode="idle" />);
-    const metaRow = screen.getByTestId("composer-meta").closest("div");
-    expect(metaRow?.querySelector(".ml-auto")).toBeNull();
   });
 });

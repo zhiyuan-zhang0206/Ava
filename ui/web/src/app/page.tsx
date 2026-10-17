@@ -13,7 +13,6 @@ import { AlertsBadge } from "@/components/notifications/alerts-badge";
 import { CodeHighlighterPreloader } from "@/components/content/code-highlighter-preloader";
 import { ErrorBoundary } from "@/components/connection/error-boundary";
 import { Composer } from "@/components/conversation/composer";
-import { ContentToggle } from "@/components/content/content-toggle";
 import { PermissionBanner } from "@/components/permissions/permission-banner";
 import { HeaderBar } from "@/components/shell/header-bar";
 import { HomeLayout } from "@/components/shell/home-layout";
@@ -407,7 +406,7 @@ function HomeContent({
               agentId={activeId}
               agentTerminated={activeAgent?.status === "terminated"}
               suggestions={replySuggestion}
-              details={<ContentToggle />}
+              showContextMeter={userSettings["display.composer_context_meter"] === true}
             >
               <UploadButton
                 agentId={activeId}

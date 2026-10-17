@@ -167,6 +167,24 @@ describe("DisplaySettingsPage", () => {
     expect(screen.queryByRole("radio", { name: "Collapse all blocks" })).toBeNull();
   });
 
+  it("shows the composer context meter off by default and persists the opt-in", async () => {
+    vi.mocked(api.putSetting).mockResolvedValue({
+      key: "display.composer_context_meter", value: true, updated_at: "2026-10-17T00:00:00Z",
+    });
+    renderPage();
+
+    const label = await screen.findByText("Context window in the composer");
+    const toggle = label.parentElement?.parentElement?.parentElement?.querySelector<HTMLButtonElement>(
+      '[role="switch"]',
+    );
+    expect(toggle?.getAttribute("aria-checked")).toBe("false");
+
+    fireEvent.click(toggle!);
+    await waitFor(() =>
+      expect(api.putSetting).toHaveBeenCalledWith("display.composer_context_meter", true),
+    );
+  });
+
   it("writes the details mode picked in settings", async () => {
     renderPage();
 

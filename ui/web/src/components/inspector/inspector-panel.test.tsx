@@ -11,6 +11,7 @@ import {
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { InspectorPanel } from "./inspector-panel";
+import { useTimelineStore } from "@/lib/timeline/timeline-store";
 import { InspectorToggle } from "./inspector-toggle";
 import { BAR_DIVIDER_CLASS, BAR_HEIGHT_CLASS } from "@/lib/layout/layout";
 import type * as TimeFormat from "@/lib/format/time";
@@ -1797,5 +1798,27 @@ describe("internal duration evidence never renders (task #3869)", () => {
       screen.queryByText("Some recorded turns have no duration; throughput is unavailable."),
     ).toBeNull();
     expect(screen.queryByText("42.5")).toBeNull();
+  });
+});
+
+describe("InspectorPanel Context section", () => {
+  afterEach(() => {
+    act(() => { useTimelineStore.getState().applyTokenUsage(0, 0, 0, 0, 0); });
+  });
+
+  it("shows occupancy and the wind-down/compact thresholds from the live token slice", async () => {
+    act(() => {
+      useTimelineStore.getState().applyTokenUsage(109_600, 0, 1_000_000, 374_000, 512_000);
+    });
+    render(<InspectorPanel agentId={1} />);
+    await waitFor(() => expect(screen.getByText("Context")).toBeTruthy());
+    expect(screen.getByTestId("inspector-context-used").textContent).toBe("109.6k / 1.00M");
+    expect(screen.getByTestId("inspector-context-limits").textContent).toBe("374.0k / 512.0k");
+  });
+
+  it("renders no Context section before the first LLM call", async () => {
+    render(<InspectorPanel agentId={1} />);
+    await waitFor(() => expect(screen.getByText("Cost + Activity")).toBeTruthy());
+    expect(screen.queryByText("Context")).toBeNull();
   });
 });

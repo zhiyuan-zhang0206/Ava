@@ -19,6 +19,7 @@ import {
   Clock,
   Eye,
   EyeOff,
+  Gauge,
   History,
   Languages,
   MessageSquareText,
@@ -59,6 +60,8 @@ export default function DisplaySettingsPage() {
   const t = useTranslations("displaySettings");
   const { settings, setSetting, isLoading } = useUserSettings();
   const { detailsMode, setDetailsMode } = useContentToggle();
+  const setComposerContextMeter = (value: boolean) =>
+    setSetting("display.composer_context_meter", value);
   const [widthRatio, setWidthRatio] = useDebouncedSetting<number>(
     "display.timeline_width_ratio",
     TIMELINE_WIDTH_RATIO_DEFAULT,
@@ -214,7 +217,7 @@ export default function DisplaySettingsPage() {
         <RadioRow
           icon={Rows3}
           label="Timeline details"
-          description="How much of each work block the timeline expands on its own: every block, only the most recent one (following the stream), or none. This is the same choice the composer's Details summary reports; picking a mode again re-applies it, collapsing any blocks you expanded by hand."
+          description="How much of each work block the timeline expands on its own: every block, only the most recent one (following the stream), or none. Picking a mode again re-applies it, collapsing any blocks you expanded by hand."
           options={[
             { value: "all", label: "Expand all blocks" },
             { value: "last", label: "Last block only" },
@@ -250,10 +253,17 @@ export default function DisplaySettingsPage() {
       <TimelineColorsSection />
 
       <SettingsSection id="display-context-bar" title="Context usage bar">
+        <ToggleRow
+          icon={Gauge}
+          label={t("composerContextMeter")}
+          description={t("composerContextMeterDesc")}
+          value={settings["display.composer_context_meter"] === true}
+          onChange={setComposerContextMeter}
+        />
         <RadioRow
           icon={Ruler}
           label="Usage bar width"
-          description="Width of the collapsed context-usage bar at the bottom of the composer; the expanded breakdown panel is unaffected"
+          description="Width of the opt-in context-usage bar beside the composer; the inspector's Context section is unaffected"
           options={[
             { value: "compact", label: "Compact" },
             { value: "comfortable", label: "Comfortable (default)" },

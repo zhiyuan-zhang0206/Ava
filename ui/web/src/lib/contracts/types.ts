@@ -817,12 +817,8 @@ export const USER_SETTING_DEFAULTS: Record<string, unknown> = {
   // (see lib/timeline-width.ts for clamping + the 1280px ceiling). 0.4 =
   // 768px on a 1920px screen — the pre-setting fixed width from #714.
   "display.timeline_width_ratio": 0.4,
-  // Default-expanded state of "N steps" run blocks. The Details control in the
-  // header (ContentToggle) and the "Collapse details by default" row in the
-  // Display settings both control this flag — acting as expand-all /
-  // collapse-all across every run. Default "none": steps start collapsed
-  // (user ruling 2026-09-17).
   "display.expand_runs_mode": "none",
+  "display.composer_context_meter": false,
   // Inspector side-panel open/closed — a workspace preference shared by the
   // composer's toggle and the timeline layout. Default CLOSED (user ruling
   // 2026-08-23, superseding the 2026-08-05 floating desktop panel); the
