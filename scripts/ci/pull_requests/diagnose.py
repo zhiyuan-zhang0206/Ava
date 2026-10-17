@@ -16,7 +16,9 @@ _DIAGNOSE_LOG_TAIL = 4000
 _DIAGNOSE_MAX_JOB_LOGS = 8
 _DIAGNOSE_MAX_SYNTHETIC_PRS = 3
 
-# meiva:ref scripts/ci/pull_requests/docs/diagnostics.meiva.okf.md#failure-signature-table
+# meiva:note
+# _FAILURE_SIGNATURES is ordered and first match wins: each entry is (regex over the failing log, classification, suggested action) matched case-insensitively; with no match, a check whose name contains "lint" classifies as a deterministic lint failure and anything else as unclassified. The classification and action strings are the operator-facing diagnosis text.
+# meiva:link scripts/ci/pull_requests/docs/diagnostics.meiva.okf.md
 _FAILURE_SIGNATURES: list[tuple[str, str, str]] = [
     (
         r"over the 800-line hard ceiling",
@@ -46,7 +48,7 @@ _FAILURE_SIGNATURES: list[tuple[str, str, str]] = [
 ]
 
 
-# meiva:ref scripts/ci/pull_requests/docs/diagnostics.meiva.okf.md#best-effort-evidence
+# meiva:link scripts/ci/pull_requests/docs/diagnostics.meiva.okf.md
 def _pr_view(pr: str, repo: str, fields: str, *, host: Host) -> dict[str, object] | None:
     try:
         result = host.run(
@@ -133,7 +135,9 @@ def _synthetic_test_prs(pr: str, repo: str, *, host: Host) -> list[dict[str, obj
     ][:_DIAGNOSE_MAX_SYNTHETIC_PRS]
 
 
-# meiva:ref scripts/ci/pull_requests/docs/diagnostics.meiva.okf.md#pr-level-issues
+# meiva:note
+# For an OPEN PR: mergeable=CONFLICTING reports merge_conflict; a recorded base behind main reports stale_base with both shas; an unreadable base freshness reports base_unreadable rather than silence. Merged and closed PRs have mergeable=UNKNOWN and a base behind main by definition — neither is reported as a problem.
+# meiva:link scripts/ci/pull_requests/docs/diagnostics.meiva.okf.md
 def _pr_level_issues(
     view: dict[str, object], pr: str, repo: str, *, host: Host
 ) -> list[dict[str, object]]:

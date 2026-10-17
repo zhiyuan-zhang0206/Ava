@@ -42,11 +42,3 @@ Sync and async connection fixtures share these guards. Async pools use
 check_connection and autocommit, and inbound listeners own a dedicated
 reconnecting subscription that closes on teardown. Tests needing a particular
 agent channel construct that listener explicitly.
-
-```meiva-contract
-id = "native-test-isolation"
-kind = "invariant"
-statement = "Native fixture cleanup covers every public per-test table, uses a private home and test-only URLs, and keeps the full-run selection guard active."
-code = ["tests/fixtures/provisioning.py:<module>"]
-tests = ["tests/contracts/test_lint_truncate_isolation.py::test_truncate_list_covers_every_public_table", "tests/harness/test_home_isolation.py::test_home_is_not_the_operators_real_home", "tests/harness/test_home_isolation.py::test_data_plane_and_gateway_urls_are_not_the_real_ones", "tests/fixtures/tests/test_full_run_guard.py::test_full_run_guard_decision"]
-```

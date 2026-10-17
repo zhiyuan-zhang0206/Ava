@@ -14,7 +14,9 @@ MEMORY_SEARCH_MAX_RETRIES = 2
 MEMORY_SEARCH_TIMEOUT_MARGIN_S = 3.0
 
 
-# meiva:ref base/agents/context/gateway_client/docs/memory-search.meiva.okf.md#default-timeout
+# meiva:note
+# The default per-attempt HTTP timeout is the context's current memory-search deadline plus MEMORY_SEARCH_TIMEOUT_MARGIN_S.
+# meiva:link base/agents/context/gateway_client/docs/memory-search.meiva.okf.md
 def memory_search_timeout(context: MeivaContext) -> transport.TransportTimeout:
 
     import httpx
@@ -26,7 +28,7 @@ def memory_search_timeout(context: MeivaContext) -> transport.TransportTimeout:
     return httpx.Timeout(budget)
 
 
-# meiva:ref base/agents/context/gateway_client/docs/memory-search.meiva.okf.md#wire-results
+# meiva:link base/agents/context/gateway_client/docs/memory-search.meiva.okf.md
 class MemorySearchResult(NamedTuple):
     path: str
     description: str
@@ -35,7 +37,9 @@ class MemorySearchResult(NamedTuple):
     chunk: str
 
 
-# meiva:ref base/agents/context/gateway_client/docs/memory-search.meiva.okf.md#request-budget
+# meiva:note
+# An explicit timeout becomes the request's deadline_seconds and the HTTP timeout adds the margin. Without an explicit timeout the request omits deadline_seconds. attempts bounds transport attempts; the default is two.
+# meiva:link base/agents/context/gateway_client/docs/memory-search.meiva.okf.md
 def memory_search(
     query: str,
     k: int,

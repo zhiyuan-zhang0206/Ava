@@ -1,4 +1,4 @@
-# meiva:ref meiva/tests/fixtures/docs/sdk-composition.meiva.okf.md#fixture-clock-owner
+# meiva:link meiva/tests/fixtures/docs/sdk-composition.meiva.okf.md
 
 from __future__ import annotations
 

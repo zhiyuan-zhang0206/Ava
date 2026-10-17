@@ -22,7 +22,7 @@ def _absolute(path: str | Path) -> Path:
     return cwd.get() / target if cwd is not None else _meiva_files.resolve(target)
 
 
-# meiva:ref meiva_builtins/plugins/meiva_to_user/docs/panel-write-check.meiva.okf.md#panel-write-observation
+# meiva:link meiva_builtins/plugins/meiva_to_user/docs/panel-write-check.meiva.okf.md
 def panel_path(path: str | Path, *, agent_id: int) -> Path | None:
     target = _absolute(path).resolve()
     if target.name != DOCUMENT_FILENAME:

@@ -23,7 +23,9 @@ function covers(data: RunTimelineResponse | undefined, view: Viewport | null): b
   return window.from <= view.from && window.to >= view.to;
 }
 
-// meiva:ref ui/web/src/docs/frontend-components/run-timeline/window-reads.meiva.okf.md#snapshot-window-reads
+// meiva:note
+// The initial read requests the latest 24 hours and at most 5000 message blocks. Settled viewport reads wait 300 ms, reuse the initial snapshot, and skip windows already completely covered. Removing an agent cancels its request. Preparation retries only explicit queued/indexing/busy states; permanent failures surface. A snapshot-expired error from a window, message or context read invalidates the initial owner. Failed ranges retain initial data and manual retry targets active queries only.
+// meiva:link ui/web/src/docs/frontend-components/run-timeline/window-reads.meiva.okf.md
 export function useTimelineWindows(ids: readonly number[], viewport: Viewport | null) {
   const client = useQueryClient();
   const [settled, setSettled] = useState<Viewport | null>(null);

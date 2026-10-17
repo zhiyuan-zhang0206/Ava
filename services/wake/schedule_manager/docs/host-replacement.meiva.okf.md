@@ -7,27 +7,7 @@ tags: [gateway, schedules]
 
 # Schedule recovery across a session host replacement
 
-```meiva-contract
-id = "host-replacement-restart"
-kind = "invariant"
-statement = "An enabled running schedule whose launch belongs to a previous generation of the session host is relaunched once in the current generation without a new desired revision, through the same one-attempt launch latch and capped per rolling window. A silent death inside the current generation, an attempt whose generation is unknown, and every schedule that is not running stay terminal errors."
-code = [
-  "services/wake/schedule_manager/manager.py:ScheduleManager",
-  "services/wake/schedule_manager/manager.py:INTERRUPTED_HOST_REPLACED",
-  "services/wake/schedule_manager/manager.py:auto_restart_max_per_window",
-  "services/wake/schedule_manager/manager.py:auto_restart_window_seconds",
-  "services/wake/schedule_manager/host_restart.py:AutoRestartLedger",
-  "services/wake/schedule_manager/host_restart.py:emit_auto_restart",
-  "services/wake/schedule_manager/host_restart.py:emit_auto_restart_suppressed",
-]
-tests = [
-  "services/wake/schedule_manager/tests/test_manager_state.py::test_a_replaced_session_host_relaunches_the_schedule_once",
-  "services/wake/schedule_manager/tests/test_manager_state.py::test_a_second_silent_death_in_the_same_generation_is_terminal",
-  "services/wake/schedule_manager/tests/test_manager_state.py::test_an_attempt_from_before_the_column_is_not_relaunched",
-  "services/wake/schedule_manager/tests/test_manager_state.py::test_the_window_cap_stops_relaunching_a_host_that_keeps_restarting",
-  "services/wake/schedule_manager/tests/test_manager_state.py::test_a_refused_launch_does_not_consume_the_auto_restart_budget",
-]
-```
+An enabled running schedule whose launch belongs to a previous generation of the session host is relaunched once in the current generation without a new desired revision, through the same one-attempt launch latch and capped per rolling window. A silent death inside the current generation, an attempt whose generation is unknown, and every schedule that is not running stay terminal errors.
 
 The host is this machine's pty-sessions service; its generation is the `ping`
 identity described in
@@ -52,16 +32,6 @@ the cause was an OOM kill or an operator's `kill -9`. Keeping that case terminal
 a choice, not an omission: it keeps a deliberate kill deliberate and a crash loop
 from becoming a restart loop, and it costs one explicit restart when the cause is
 unknown.
-
-```meiva-contract
-id = "session-host-absent"
-kind = "invariant"
-statement = "While the session host does not answer, one reconcile pass takes no action: no session is declared lost, no schedule changes status, and no launch is attempted."
-code = ["services/wake/schedule_manager/manager.py:ScheduleManager"]
-tests = [
-  "services/wake/schedule_manager/tests/test_manager_state.py::test_an_unreachable_session_host_marks_nothing_lost",
-]
-```
 
 The session layer reads an absent service as "no sessions" — true, because its
 sessions ended with it — and that answer would otherwise mark every resident

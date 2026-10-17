@@ -1,4 +1,4 @@
-# meiva:ref base/deploy/release/docs/collector-artifact.meiva.okf.md#bounded-download-attempt
+# meiva:link base/deploy/release/docs/collector-artifact.meiva.okf.md
 from __future__ import annotations
 
 import http.server
@@ -48,7 +48,7 @@ def test_download_with_retry_preserves_contract(
     retry_waits: list[float],
     failures: int,
 ) -> None:
-    # meiva:ref base/deploy/release/docs/collector-artifact.meiva.okf.md#download-wait-closure
+    # meiva:link base/deploy/release/docs/collector-artifact.meiva.okf.md
     errors = [OSError(f"reset {i}") for i in range(1, failures + 1)]
     timers = ManualTimers(start=10.0)
     tarball = tmp_path / "t.tar.gz"

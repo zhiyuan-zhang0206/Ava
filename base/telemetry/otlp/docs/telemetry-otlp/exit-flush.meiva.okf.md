@@ -23,23 +23,7 @@ never becomes a rescue writer or runs provider teardown itself.
 
 ## Two wait classes, one deadline
 
-```meiva-contract
-id = "two-wait-classes-one-deadline"
-kind = "invariant"
-statement = "A stop takes one real deadline: the writer observation completes or expires before the exporter observation starts, and each native stage receives only the deadline's remaining real time — never the original allowance, and zero once it is spent. A virtualized clock may drive a cancellable cooldown, but never a native stop observation or its budget."
-code = [
-  "base/telemetry/otlp/telemetry_otlp.py:OtlpBackend.shutdown",
-  "base/telemetry/otlp/telemetry_otlp.py:remaining_time",
-  "base/telemetry/otlp/telemetry_otlp_exporting.py:ExportingEventPipeline.stop",
-]
-tests = [
-  "base/telemetry/tests/otlp/test_otlp_worker_lifecycle.py::test_two_stage_stop_hands_stage_two_the_real_remaining_time",
-  "base/telemetry/tests/otlp/test_otlp_worker_lifecycle.py::test_zero_timeout_stage_one_leaves_the_exporter_untouched",
-  "base/telemetry/tests/otlp/test_otlp_worker_lifecycle.py::test_blocked_writer_and_blocked_exporter_release_in_stages",
-  "base/telemetry/tests/otlp/test_exit_flush_deadline.py::test_the_exit_flush_takes_no_clock_seam",
-  "base/telemetry/tests/otlp/test_exit_flush_deadline.py::test_remaining_time_hands_a_stage_only_the_real_remainder",
-]
-```
+A stop takes one real deadline: the writer observation completes or expires before the exporter observation starts, and each native stage receives only the deadline's remaining real time — never the original allowance, and zero once it is spent. A virtualized clock may drive a cancellable cooldown, but never a native stop observation or its budget.
 
 Waits are two classes. A **cooldown** is the process's own time policy — like
 the collector retry gate, it owns no thread or handle and is no completion

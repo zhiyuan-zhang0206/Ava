@@ -46,7 +46,7 @@ class TestProviderConstruction:
     def test_gpt_enables_responses_api_reasoning_summary(
         self, monkeypatch: pytest.MonkeyPatch, *, model_catalog: ModelCatalog
     ) -> None:
-        # meiva:ref base/packages/tests/lm/docs/contracts.meiva.okf.md#reasoning-visibility
+        # meiva:link base/packages/tests/lm/docs/contracts.meiva.okf.md
         monkeypatch.setenv("OPENAI_API_KEY", "k")
         from langchain_openai import ChatOpenAI
 
@@ -397,7 +397,7 @@ class TestProviderConstruction:
     def test_deepseek_gateway_popped_key_falls_back_to_env_file(
         self, monkeypatch: pytest.MonkeyPatch, *, model_catalog: ModelCatalog
     ) -> None:
-        # meiva:ref base/packages/tests/lm/docs/contracts.meiva.okf.md#provider-key-channel
+        # meiva:link base/packages/tests/lm/docs/contracts.meiva.okf.md
         monkeypatch.delenv("DEEPSEEK_API_KEY", raising=False)
         monkeypatch.setattr(
             dotenv_file,

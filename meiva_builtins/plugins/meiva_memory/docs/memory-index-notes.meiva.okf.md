@@ -38,13 +38,7 @@ warning. The note returns None
 when the layer is off (or eval-isolated) and when the index file is missing or
 empty.
 
-```meiva-contract
-id = "memory-index-note"
-kind = "invariant"
-statement = "The shared index note renders the pool's MEMORY.md (meiva.memory.PATH) as one system note; the injected text is scanned with scan_content and, when flagged, is armed with a visible warning prefix while its content is kept; the note is suppressed by eval isolation and by the injection gate."
-code = ["meiva_builtins/plugins/meiva_memory/notes.py:_FRAMING", "meiva_builtins/plugins/meiva_memory/notes.py:memory_index_note"]
-tests = ["meiva_builtins/plugins/meiva_memory/tests/test_meiva_memory_notes.py::test_memory_index_injection_guard", "meiva_builtins/plugins/meiva_memory/tests/test_meiva_memory_notes.py::test_memory_index_note_is_suppressed_for_eval_isolation", "meiva_builtins/plugins/meiva_memory/tests/test_meiva_memory_notes.py::test_memory_index_notes_keep_two_live_roots_separate"]
-```
+The shared index note renders the pool's MEMORY.md (meiva.memory.PATH) as one system note; the injected text is scanned with scan_content and, when flagged, is armed with a visible warning prefix while its content is kept; the note is suppressed by eval isolation and by the injection gate.
 
 ## The per-agent index
 
@@ -56,13 +50,7 @@ them on demand. The framing names location and mechanics only and must not claim
 relative paths resolve — the old claim misled agents into writing memory beside
 the tracked cwd (audit #577); that statement belongs to the SDK core.
 
-```meiva-contract
-id = "per-agent-memory-index"
-kind = "invariant"
-statement = "The per-agent index note reads the agent's own store (workspace_dir(agent_id) + memory/MEMORY.md) — never another agent's — and is suppressed by the layer gate or an unestablished agent id."
-code = ["meiva_builtins/plugins/meiva_memory/notes.py:per_agent_memory_note", "meiva_builtins/plugins/meiva_memory/notes.py:PER_AGENT_FRAMING", "meiva_builtins/plugins/meiva_memory/notes.py:_NO_CONTENT", "meiva_builtins/plugins/meiva_memory/notes.py:_PER_AGENT_MEMORY_DIRNAME"]
-tests = ["meiva_builtins/plugins/meiva_memory/tests/test_meiva_memory_notes.py::test_personal_index_uses_hosted_turn_identity", "meiva_builtins/plugins/meiva_memory/tests/test_meiva_memory_notes.py::test_personal_index_skips_unestablished_identity", "meiva_builtins/plugins/meiva_memory/tests/test_meiva_memory_notes.py::test_context_notes_skips_the_stores_that_are_off"]
-```
+The per-agent index note reads the agent's own store (workspace_dir(agent_id) + memory/MEMORY.md) — never another agent's — and is suppressed by the layer gate or an unestablished agent id.
 
 ## The per-agent soft cap
 
@@ -71,13 +59,7 @@ the index — the index is still injected in full; the note only nudges, it neve
 truncates. The count is the shared line measure and the judgment is the shared
 budget's soft threshold: a cap of 0 or less reads as ok, disabling the check.
 
-```meiva-contract
-id = "per-agent-index-soft-cap"
-kind = "invariant"
-statement = "Above memory_per_agent_index_max_lines a maintenance nudge is appended below the index — the index is still injected in full (never truncated); the count is the shared line measure and the judgment is the shared budget's soft threshold, with a cap of 0 or less disabling it."
-code = ["meiva_builtins/plugins/meiva_memory/notes.py:_OVER_CAP_NOTE", "meiva_builtins/plugins/meiva_memory/notes.py:_per_agent_maintenance_suffix"]
-tests = ["meiva_builtins/plugins/meiva_memory/tests/test_meiva_memory_notes.py::test_the_over_cap_index_keeps_the_full_body_and_gets_the_nudge", "meiva_builtins/plugins/meiva_memory/tests/test_meiva_memory_notes.py::test_the_index_at_the_cap_gets_no_nudge", "meiva_builtins/plugins/meiva_memory/tests/test_meiva_memory_notes.py::test_a_cap_of_zero_disables_the_nudge", "meiva_builtins/plugins/meiva_memory/tests/test_meiva_memory_notes.py::test_the_cap_counts_lines_not_characters"]
-```
+Above memory_per_agent_index_max_lines a maintenance nudge is appended below the index — the index is still injected in full (never truncated); the count is the shared line measure and the judgment is the shared budget's soft threshold, with a cap of 0 or less disabling it.
 
 ## Key Dependencies
 

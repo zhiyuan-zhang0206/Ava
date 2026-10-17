@@ -23,10 +23,4 @@ in-app entry to return to. Selecting another agent drops the previous chain; it
 belongs to the agent that was open. External links keep opening in a new tab and
 non-Markdown resources keep their own document.
 
-```meiva-contract
-id = "panel-navigation-history"
-kind = "invariant"
-statement = "The panel's document chain lives in the URL as `?agent_id=…&reference=…`: opening a linked document pushes a history entry, a popstate traversal restores the chain it selects, and the panel's Back control calls `history.back()` for entries it pushed while a chain without history rewrites its own entry instead of leaving the app. Selecting another agent drops the previous chain."
-code = ["ui/web/src/components/context/to-user-document.tsx:ToUserDocumentView", "ui/web/src/lib/context/reference-url.ts:readReferences", "ui/web/src/lib/agents/use-agents.ts:useAgents"]
-tests = ["ui/web/src/components/context/to-user-document.test.tsx::To user navigation history::puts the opened document in the URL and follows Back and Forward to it", "ui/web/src/components/context/to-user-document.test.tsx::To user navigation history::walks browser history from the panel's back control, falling back to the parent", "ui/web/src/components/context/to-user-document.test.tsx::To user document bar::groups the document time with the refresh control at the right edge"]
-```
+The panel's document chain lives in the URL as `?agent_id=…&reference=…`: opening a linked document pushes a history entry, a popstate traversal restores the chain it selects, and the panel's Back control calls `history.back()` for entries it pushed while a chain without history rewrites its own entry instead of leaving the app. Selecting another agent drops the previous chain.

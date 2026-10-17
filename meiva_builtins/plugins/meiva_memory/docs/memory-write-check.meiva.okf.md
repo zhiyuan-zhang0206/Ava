@@ -64,30 +64,9 @@ A finding becomes one `memory_write_check` system note after the exec result; no
 adds nothing. Nothing is blocked, rewritten or raised: a timeout, an unavailable search
 or any unexpected error is logged and the notes go unreported.
 
+Every written note — shared and personal — is checked against the pool validator's single-note rules (template/validate.py::validate_note); only the notes with findings are reported, shared notes first, each group in path order, and a note that is gone or is not a note is skipped. Nothing is changed, blocked or rejected: the findings come back as one reminder.
 
-```meiva-contract
-id = "write-check-rules"
-kind = "invariant"
-statement = "Every written note — shared and personal — is checked against the pool validator's single-note rules (template/validate.py::validate_note); only the notes with findings are reported, shared notes first, each group in path order, and a note that is gone or is not a note is skipped. Nothing is changed, blocked or rejected: the findings come back as one reminder."
-code = ["meiva_builtins/plugins/meiva_memory/write_checks.py:check_written_notes", "meiva_builtins/plugins/meiva_memory/write_checks.py:NoteReport", "meiva_builtins/plugins/meiva_memory/write_checks.py:render_reminder"]
-tests = ["meiva_builtins/plugins/meiva_memory/tests/test_memory_write_check_hook.py::test_rule_violations_are_named_per_file", "meiva_builtins/plugins/meiva_memory/tests/test_memory_write_check_hook.py::test_one_reminder_covers_every_note_of_the_call", "meiva_builtins/plugins/meiva_memory/tests/test_memory_write_check_hook.py::test_index_files_and_vanished_notes_are_skipped", "meiva_builtins/plugins/meiva_memory/tests/test_memory_write_check_hook.py::test_the_check_never_changes_a_note", "meiva_builtins/plugins/meiva_memory/tests/test_memory_write_check_hook.py::test_an_over_cap_note_is_named_with_its_character_count"]
-```
-
-```meiva-contract
-id = "write-check-duplicates"
-kind = "invariant"
-statement = "A written shared note is searched against the pool with purpose dedup: the query is the note's description then body, capped at 4000 characters; k = 5, with the note itself set aside, so an already-indexed note leaves four candidates, and only the five closest others are considered. Candidates at or above memory_write_dedup_threshold are named with their probability. Personal notes are not searched."
-code = ["meiva_builtins/plugins/meiva_memory/write_checks.py:_SEARCH_K", "meiva_builtins/plugins/meiva_memory/write_checks.py:_QUERY_CHAR_CAP", "meiva_builtins/plugins/meiva_memory/write_checks.py:_query_of", "meiva_builtins/plugins/meiva_memory/write_checks.py:_duplicates_of", "meiva_builtins/plugins/meiva_memory/write_checks.py:Duplicate"]
-tests = ["meiva_builtins/plugins/meiva_memory/tests/test_memory_write_check_hook.py::test_the_search_asks_for_the_five_closest_notes", "meiva_builtins/plugins/meiva_memory/tests/test_memory_write_check_hook.py::test_a_probable_duplicate_is_named_with_its_probability", "meiva_builtins/plugins/meiva_memory/tests/test_memory_write_check_hook.py::test_the_note_itself_is_never_its_own_duplicate", "meiva_builtins/plugins/meiva_memory/tests/test_memory_write_check_hook.py::test_only_the_five_closest_others_are_considered", "meiva_builtins/plugins/meiva_memory/tests/test_memory_write_check_hook.py::test_the_threshold_is_configurable", "meiva_builtins/plugins/meiva_memory/tests/test_memory_write_check_hook.py::test_personal_notes_get_the_rules_but_no_duplicate_search"]
-```
-
-```meiva-contract
-id = "write-check-degrade"
-kind = "invariant"
-statement = "A duplicate search that cannot be answered — the gateway or the indexer unavailable, or an HTTP error status carrying no wire reason — leaves that note without duplicate findings, so its rule findings stand; the HTTP failure is logged at error, never raises into the turn, and the httpx import stays deferred, off the boot path."
-code = ["meiva_builtins/plugins/meiva_memory/write_checks.py:_search"]
-tests = ["meiva_builtins/plugins/meiva_memory/tests/test_memory_write_check_hook.py::test_an_unavailable_search_leaves_the_rules_findings_alone"]
-```
+A written shared note is searched against the pool with purpose dedup: the query is the note's description then body, capped at 4000 characters; k = 5, with the note itself set aside, so an already-indexed note leaves four candidates, and only the five closest others are considered. Candidates at or above memory_write_dedup_threshold are named with their probability. Personal notes are not searched.
 
 ## Key Dependencies
 

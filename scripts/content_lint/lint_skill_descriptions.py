@@ -15,12 +15,12 @@ from base.packages.text_budget import count_words
 
 _REPO_ROOT = Path(__file__).resolve().parent.parent.parent
 
-# meiva:ref scripts/content_lint/docs/lint-skill-descriptions.meiva.okf.md#skill-desc-length-gate
+# meiva:link scripts/content_lint/docs/lint-skill-descriptions.meiva.okf.md
 _HARD_CEILING = 80
 _SOFT_TARGET = 50
 
 
-# meiva:ref scripts/content_lint/docs/lint-skill-descriptions.meiva.okf.md#skill-desc-scan-universe
+# meiva:link scripts/content_lint/docs/lint-skill-descriptions.meiva.okf.md
 def _skill_entries(root: Path) -> list[SkillFile]:
     index = SkillIndex.build(
         [
@@ -51,13 +51,13 @@ def main(_argv: list[str] | None = None, *, repo_root: Path | None = None) -> in
             continue
         rel = skill_md.relative_to(root)
 
-        # meiva:ref scripts/content_lint/docs/lint-skill-descriptions.meiva.okf.md#skill-desc-scan-universe
+        # meiva:link scripts/content_lint/docs/lint-skill-descriptions.meiva.okf.md
         if entry.error is not None:
             print(f"{rel}: {entry.error}")
             errors += 1
             continue
 
-        # meiva:ref scripts/content_lint/docs/lint-skill-descriptions.meiva.okf.md#skill-desc-length-gate
+        # meiva:link scripts/content_lint/docs/lint-skill-descriptions.meiva.okf.md
         description = entry.description
         if description is None:
             raise RuntimeError(f"skill index contract violated for {skill_md}")
@@ -70,7 +70,9 @@ def main(_argv: list[str] | None = None, *, repo_root: Path | None = None) -> in
             )
             errors += 1
 
-        # meiva:ref scripts/content_lint/docs/lint-skill-descriptions.meiva.okf.md#skill-desc-identity-gate
+        # meiva:note
+        # The frontmatter name must fold (dash and underscore are one name) to the same key as the skill's load-dir leaf — for a plugin's root SKILL.md the leaf is the plugin name, not the skills container — and a mismatch prints one error and exits 1, matching the runtime loader's refusal.
+        # meiva:link scripts/content_lint/docs/lint-skill-descriptions.meiva.okf.md
         parts = entry.folder.relative_to(root).parts
         if (
             len(parts) == 4

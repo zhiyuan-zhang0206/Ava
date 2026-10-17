@@ -38,18 +38,6 @@ DeepSeek allows 5 requests per second per account across Search and Fetch and an
 
 The pacer is built where the deps are built (`wiring.py`) and handed to the provider through `RequestPacer`, so one SDK call cannot burst past the account limit. Two concurrent `meiva.web` calls in one process each pace themselves: the account limit is shared, the pacer is not.
 
-```meiva-contract
-id = "web-deepseek-provider"
-kind = "invariant"
-statement = "The DeepSeek path authenticates with DEEPSEEK_API_KEY, clamps count to the DeepSeek result ceiling, maps each result to SearchResult with kind web and the snippet-or-summary text, acquires the injected pacer before every request attempt so the account QPS holds, and raises SearchError or FetchError carrying the provider's own error message."
-code = ["meiva/web/deepseek.py:<module>", "meiva/web/deepseek.py:_post._send", "meiva/web/deepseek.py:search_one", "meiva/web/deepseek.py:read_page"]
-tests = ["meiva/tests/namespaces/web/test_web_deepseek.py::test_search_maps_deepseek_results", "meiva/tests/namespaces/web/test_web_deepseek.py::test_search_clamps_count_to_the_provider_cap", "meiva/tests/namespaces/web/test_web_deepseek.py::test_batch_request_starts_respect_the_configured_qps", "meiva/tests/namespaces/web/test_web_deepseek.py::test_fetch_reports_an_unreadable_page"]
-```
+The DeepSeek path authenticates with DEEPSEEK_API_KEY, clamps count to the DeepSeek result ceiling, maps each result to SearchResult with kind web and the snippet-or-summary text, acquires the injected pacer before every request attempt so the account QPS holds, and raises SearchError or FetchError carrying the provider's own error message.
 
-```meiva-contract
-id = "web-provider-selection"
-kind = "invariant"
-statement = "web_search_provider and web_fetch_reader select the provider when the deps are built, both default to the incumbent brave and jina, and a provider switch leaves the fetch answer step and the injection check unchanged."
-code = ["meiva/web/wiring.py:search_deps_for", "meiva/web/wiring.py:fetch_deps_for", "meiva/web/runner.py:run_search", "meiva/web/reader.py:read_page"]
-tests = ["meiva/tests/namespaces/web/test_web_deepseek.py::test_default_provider_is_unchanged", "meiva/tests/namespaces/web/test_web_deepseek.py::test_fetch_reads_the_page_from_the_deepseek_endpoint", "meiva/tests/namespaces/web/test_web_deepseek.py::test_search_deps_reads_provider_settings"]
-```
+web_search_provider and web_fetch_reader select the provider when the deps are built, both default to the incumbent brave and jina, and a provider switch leaves the fetch answer step and the injection check unchanged.

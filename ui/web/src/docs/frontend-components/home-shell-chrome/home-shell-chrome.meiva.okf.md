@@ -21,13 +21,7 @@ same line as its neighbours. The notice header above it takes the fixed variant
 for the same reason. Both variants are `relative`: the rule is the bar's own
 `after` element, painted against the bar and not against the section around it.
 
-```meiva-contract
-id = "column-title-divider"
-kind = "invariant"
-statement = "Every home column title bar is BAR_HEIGHT_PX tall and paints BAR_DIVIDER_CLASS's inset rule, so the Agent Tree, Timeline and right-panel dividers sit on one line; the right panel's document bar takes the wrapping variant (44px minimum, growing only when its content cannot fit one line) and its notice header takes the fixed variant — neither draws a border on its section."
-code = ["ui/web/src/lib/layout/layout.ts:COLUMN_TITLE_BAR_CLASS", "ui/web/src/components/context/to-user-document.tsx:ToUserDocumentView", "ui/web/src/components/context/shared-context-panel.tsx:SharedContextPanel"]
-tests = ["ui/web/src/components/context/to-user-document.test.tsx::To user Markdown::draws the panel title rule on the shared column title bar", "ui/web/src/components/context/shared-context-panel.test.tsx::uses the shared column title bar for the notice header"]
-```
+Every home column title bar is BAR_HEIGHT_PX tall and paints BAR_DIVIDER_CLASS's inset rule, so the Agent Tree, Timeline and right-panel dividers sit on one line; the right panel's document bar takes the wrapping variant (44px minimum, growing only when its content cannot fit one line) and its notice header takes the fixed variant — neither draws a border on its section.
 
 ## Details summary
 
@@ -41,10 +35,4 @@ timeline mounts next — the token alone could not survive that gap. The compose
 never writes the setting, so the timeline has one writer for what its blocks
 expand to.
 
-```meiva-contract
-id = "details-mode-owner"
-kind = "invariant"
-statement = "The Details mode has one writer: the Display settings row bound to display.expand_runs_mode, which keeps all three modes (All / Last / None) reachable. A pick leaves a pending reset that the next mounted timeline consumes, so re-picking the current mode still collapses manual expansions even though the picker's page had unmounted the timeline. The composer shows the current value read-only — nothing while the stored value is unknown — and links to that row; it never writes the setting."
-code = ["ui/web/src/components/content/content-toggle.tsx:ContentToggle", "ui/web/src/app/control/display/page.tsx:resetManualExpansions", "ui/web/src/lib/layout/content-toggle-store.ts:<module>", "ui/web/src/components/timeline/index.tsx:TimelineView"]
-tests = ["ui/web/src/components/content/content-toggle.test.tsx::ContentToggle::offers no selector of its own in the composer", "ui/web/src/components/content/content-toggle.test.tsx::ContentToggle::renders nothing while the stored mode is still unknown", "ui/web/src/app/control/display/page.test.tsx::DisplaySettingsPage::writes the details mode picked in settings", "ui/web/src/app/control/display/page.test.tsx::DisplaySettingsPage::re-applies the current mode when it is picked again", "ui/web/src/lib/layout/content-toggle-store.test.ts::useContentToggleReset::a re-pick leaves a pending reset for the next mounted timeline", "ui/web/src/components/timeline/timeline.test.tsx::Details mode re-pick made while the timeline was unmounted::collapses the manual expansions on the next mount"]
-```
+The Details mode has one writer: the Display settings row bound to display.expand_runs_mode, which keeps all three modes (All / Last / None) reachable. A pick leaves a pending reset that the next mounted timeline consumes, so re-picking the current mode still collapses manual expansions even though the picker's page had unmounted the timeline. The composer shows the current value read-only — nothing while the stored value is unknown — and links to that row; it never writes the setting.

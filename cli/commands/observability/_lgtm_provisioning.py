@@ -34,7 +34,7 @@ _DASHBOARD_SOURCE_KEY = "$dashboard-source"
 DASHBOARD_FOLDER = "Meiva"
 
 
-# meiva:ref cli/commands/observability/docs/lgtm/dashboard-provisioning.meiva.okf.md#dashboard-provisioning-cutover
+# meiva:link cli/commands/observability/docs/lgtm/dashboard-provisioning.meiva.okf.md
 def _render_meiva_ops_dashboard(
     dest: Path,
     hashes_path: Path,
@@ -73,7 +73,7 @@ def _render_meiva_ops_dashboard(
     print(f"  lgtm native: meiva-ops dashboard re-rendered (sha256 {digest[:12]})")
 
 
-# meiva:ref cli/commands/observability/docs/lgtm/dashboard-provisioning.meiva.okf.md#dashboard-provisioning-cutover
+# meiva:link cli/commands/observability/docs/lgtm/dashboard-provisioning.meiva.okf.md
 def _install_dashboard_fallback(
     dest: Path,
     hashes_path: Path,
@@ -152,7 +152,7 @@ def dashboard_panels(path: Path) -> list[Any]:
     return cast("list[Any]", panels) if isinstance(panels, list) else []
 
 
-# meiva:ref cli/commands/observability/docs/lgtm/dashboard-provisioning.meiva.okf.md#dashboard-provisioning-cutover
+# meiva:link cli/commands/observability/docs/lgtm/dashboard-provisioning.meiva.okf.md
 def record_rendered_hash(
     hashes_path: Path, key: str, digest: str, *, source: str = "render"
 ) -> None:
@@ -253,7 +253,7 @@ def render_provisioning(
     _prune_ghost_hashes(dest_dir, hashes_path)
 
 
-# meiva:ref cli/commands/observability/docs/lgtm/dashboard-provisioning.meiva.okf.md#dashboard-provisioning-cutover
+# meiva:link cli/commands/observability/docs/lgtm/dashboard-provisioning.meiva.okf.md
 def _prune_ghost_hashes(dest_dir: Path, hashes_path: Path) -> None:
     recorded = _recorded_hashes(hashes_path)
     ghosts = sorted(
@@ -350,7 +350,7 @@ def _grafana_problems(fetch: Callable[[str], tuple[int, Any]], grafana_url: str)
     return problems
 
 
-# meiva:ref cli/commands/observability/docs/lgtm/dashboard-provisioning.meiva.okf.md#dashboard-provisioning-cutover
+# meiva:link cli/commands/observability/docs/lgtm/dashboard-provisioning.meiva.okf.md
 def verify_dashboard_provisioning(
     native_dir: Path,
     *,

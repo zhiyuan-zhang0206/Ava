@@ -73,7 +73,9 @@ def _gh_api(path: str) -> Any:
     return json.loads(result.stdout)
 
 
-# meiva:ref scripts/ci/docs/dependency-audit.meiva.okf.md#osv-severity-grading
+# meiva:note
+# uv audit JSON carries no severity; each advisory id is graded through OSV's reviewed severity, and an advisory OSV cannot grade is unknown and counts as actionable.
+# meiva:link scripts/ci/docs/dependency-audit.meiva.okf.md
 def osv_severity(advisory_ids: list[str], fetch: Fetch = _fetch_json) -> str:
     for advisory_id in advisory_ids:
         try:
@@ -135,7 +137,7 @@ def _no_forward_fix(fix: Any, packages: dict[str, Any]) -> bool:
     return _version_key(suggested) <= _version_key(version)
 
 
-# meiva:ref scripts/ci/docs/dependency-audit.meiva.okf.md#dev-only-exemption
+# meiva:link scripts/ci/docs/dependency-audit.meiva.okf.md
 def npm_vulnerabilities(
     audit_json: dict[str, Any], packages: dict[str, Any] | None = None
 ) -> list[Vulnerability]:
@@ -166,7 +168,9 @@ def npm_vulnerabilities(
     return found
 
 
-# meiva:ref scripts/ci/docs/dependency-audit.meiva.okf.md#incomplete-audit-guard
+# meiva:note
+# An audit tool exiting 1 with complete JSON findings is accepted; non-JSON output, an error payload or any other exit code raises as an incomplete audit.
+# meiva:link scripts/ci/docs/dependency-audit.meiva.okf.md
 def run_json(argv: list[str], cwd: Path) -> dict[str, Any]:
     result = subprocess.run(argv, capture_output=True, text=True, cwd=cwd, timeout=600, check=False)
     try:
@@ -182,7 +186,7 @@ def run_json(argv: list[str], cwd: Path) -> dict[str, Any]:
     return cast("dict[str, Any]", parsed)
 
 
-# meiva:ref scripts/ci/docs/dependency-audit.meiva.okf.md#pinned-binary-constants
+# meiva:link scripts/ci/docs/dependency-audit.meiva.okf.md
 PINS: tuple[tuple[str, str, str], ...] = (
     ("zonky Postgres", "base/cluster/dataplane/runtime_binaries.py", r'^PG_VERSION = "([^"]+)"'),
     ("pgvector", "base/cluster/dataplane/runtime_binaries.py", r'^PGVECTOR_VERSION = "([^"]+)"'),
@@ -204,7 +208,9 @@ def pinned_version(path: str, pattern: str, root: Path = _REPO_ROOT) -> str:
     return matches[0]
 
 
-# meiva:ref scripts/ci/docs/dependency-audit.meiva.okf.md#zonky-major-comparison
+# meiva:note
+# The zonky Postgres row compares only within the pinned major: a major bump is an expand step, not what the row reports.
+# meiva:link scripts/ci/docs/dependency-audit.meiva.okf.md
 def zonky_latest(pinned: str, metadata_xml: str) -> str:
     major = pinned.split(".", 1)[0]
     versions = re.findall(r"<version>([^<]+)</version>", metadata_xml)
@@ -249,7 +255,9 @@ def latest_binaries(
     ]
 
 
-# meiva:ref scripts/ci/docs/dependency-audit.meiva.okf.md#run-actionability
+# meiva:note
+# A run is actionable when any finding is critical, high or unknown, or any pinned binary is behind; a dev-only finding with no forward fix is listed but does not make the run actionable.
+# meiva:link scripts/ci/docs/dependency-audit.meiva.okf.md
 def is_actionable(vulnerabilities: list[Vulnerability], binaries: list[Binary]) -> bool:
     return any(
         v.severity in _ACTIONABLE_SEVERITIES and not v.dev_only_no_fix for v in vulnerabilities
@@ -325,7 +333,9 @@ def _gh(argv: list[str]) -> str:
     ).stdout
 
 
-# meiva:ref scripts/ci/docs/dependency-audit.meiva.okf.md#weekly-issue-lifecycle
+# meiva:note
+# The one tracked issue is located by its marker among non-pull-request issues, updated while the run is actionable, opened when missing, and closed with a comment when clean.
+# meiva:link scripts/ci/docs/dependency-audit.meiva.okf.md
 def sync_issue(
     repo: str, body: str, *, actionable: bool, gh: Callable[[list[str]], str] = _gh
 ) -> str:
@@ -387,7 +397,9 @@ def sync_issue(
     return f"closed {len(open_issues)} issue(s)"
 
 
-# meiva:ref scripts/ci/docs/dependency-audit.meiva.okf.md#weekly-report-run
+# meiva:note
+# A run renders the marker-prefixed three-section report from the audit tools and the canonical pins, and runs `uv audit` with the uv version pinned in base/host/brew_pin.py.
+# meiva:link scripts/ci/docs/dependency-audit.meiva.okf.md
 def main(argv: list[str]) -> int:
     parser = argparse.ArgumentParser(description="Weekly dependency audit report")
     parser.add_argument("--out", type=Path, required=True)

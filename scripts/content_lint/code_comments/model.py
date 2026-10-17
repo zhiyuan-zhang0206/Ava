@@ -2,15 +2,9 @@ from dataclasses import dataclass
 from enum import StrEnum
 
 
-class Kind(StrEnum):
-    INVARIANT = "invariant"
-    EXTERNAL = "external"
-    DECISION = "decision"
-    API = "api"
-
-
 class NoteKind(StrEnum):
     COMMENT = "comment"
+    NOTE = "note"
     DOCSTRING = "docstring"
     UNUSED_STRING = "unused-string"
     LINT_DIRECTIVE = "lint-directive"
@@ -30,35 +24,10 @@ class Finding:
 
 
 @dataclass(frozen=True)
-class Contract:
-    document: str
-    line: int
-    identifier: str
-    kind: Kind
-    statement: str
-    code: tuple[str, ...]
-    tests: tuple[str, ...]
-    source: str = ""
-    applies_to: str = ""
-    decision: str = ""
-    api: str = ""
-
-    @property
-    def key(self) -> str:
-        return f"{self.document}#{self.identifier}"
-
-    @property
-    def owner(self) -> str:
-        return "/".join(self.document.split("/")[: self.document.split("/").index("docs")])
-
-
-@dataclass(frozen=True)
 class Symbol:
     name: str
     line: int
     end_line: int
-    parameters: tuple[str, ...] = ()
-    ambiguous: bool = False
     callable: bool = False
     lexical_key: str = ""
 
@@ -72,6 +41,7 @@ class Note:
     owner: str
     lexical_owner: str = ""
     raw_text: str = ""
+    links: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)

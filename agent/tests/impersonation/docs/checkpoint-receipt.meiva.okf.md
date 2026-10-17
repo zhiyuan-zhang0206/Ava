@@ -14,11 +14,3 @@ values or execute application work. LangGraph's overloads expose partially
 unknown generic types and require the parameter name `state` in their callback
 protocol. The narrow type directives keep this real runtime seam while the
 test explicitly checks the resulting checkpoint value after both settlements.
-
-```meiva-contract
-id = "checkpoint-receipt-retry"
-kind = "invariant"
-statement = "After a receipt write fails, retrying settlement does not apply the same non-idempotent delta to the checkpoint twice."
-code = ["agent/tests/impersonation/test_impersonation.py:test_checkpoint_receipt_prevents_reapplying_non_idempotent_delta"]
-tests = ["agent/tests/impersonation/test_impersonation.py::test_checkpoint_receipt_prevents_reapplying_non_idempotent_delta"]
-```

@@ -25,7 +25,7 @@ class Component:
     services: tuple[str, ...]
 
 
-# meiva:ref scripts/host_ops/docs/fleet-update-keep.meiva.okf.md#component-keep-decision
+# meiva:link scripts/host_ops/docs/fleet-update-keep.meiva.okf.md
 COMPONENTS: tuple[Component, ...] = (
     Component(
         name="pty-sessions",
@@ -56,7 +56,7 @@ def _under(path: str, directory: str) -> bool:
     return path == directory or path.startswith(directory + "/")
 
 
-# meiva:ref scripts/host_ops/docs/fleet-update-keep.meiva.okf.md#component-roots-and-watch
+# meiva:link scripts/host_ops/docs/fleet-update-keep.meiva.okf.md
 def roots_at(files: frozenset[str], component: Component) -> list[str]:
     return sorted(
         f
@@ -119,7 +119,7 @@ def _changed(repo: Path, old: str, new: str) -> list[str]:
     return [path for path in done.stdout.split("\0") if path]
 
 
-# meiva:ref scripts/host_ops/docs/fleet-update-keep.meiva.okf.md#scratch-worktree-cleanup
+# meiva:link scripts/host_ops/docs/fleet-update-keep.meiva.okf.md
 def _worktree(repo: Path, parent: Path, name: str, revision: str) -> Path:
     target = parent / name
     done = subprocess.run(
@@ -150,7 +150,7 @@ def _dismantle(repo: Path, parent: Path) -> None:
     shutil.rmtree(parent, ignore_errors=True)
 
 
-# meiva:ref scripts/host_ops/docs/fleet-update-keep.meiva.okf.md#keep-decision-fail-closed
+# meiva:link scripts/host_ops/docs/fleet-update-keep.meiva.okf.md
 def decide(repo: Path, old: str, new: str) -> dict[str, object]:
     old_sha, new_sha = _rev(repo, old), _rev(repo, new)
     changed = _changed(repo, old_sha, new_sha)

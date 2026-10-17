@@ -48,21 +48,5 @@ versions and copies cleanly. That normalization is its own helper
 space, so asserting it through a rendered clock would pass with the
 normalization deleted.
 
-```meiva-contract
-id = "day-context"
-kind = "invariant"
-statement = "formatUpcoming renders an upcoming instant as a 12-hour clock time plus the day context its viewer-local calendar date requires, and never as a bare clock time for a future day: clock only later today, 'Tomorrow' on the next local date, a weekday name from two to six days, a day count with the date from seven to 29 days, and the date alone from 30 days. The boundary is local midnight, not 24 elapsed hours, so a DST day still counts as one day. A past instant keeps the shared relative wording and an unparseable input yields an em dash."
-code = ["ui/web/src/lib/format/time.ts:formatUpcoming"]
-tests = [
-  "ui/web/src/lib/format/time.test.ts::formatUpcoming day context::labels tomorrow instead of showing a clock time alone (the reported case)",
-  "ui/web/src/lib/format/time.test.ts::formatUpcoming day context::calls 00:01 tomorrow when the local date changes, 20 minutes from now",
-  "ui/web/src/lib/format/time.test.ts::formatUpcoming day context::keeps today's clock for a target 23h59m away that stays on the same date",
-  "ui/web/src/lib/format/time.test.ts::formatUpcoming day context::switches to a dated countdown at exactly seven days",
-  "ui/web/src/lib/format/time.test.ts::formatUpcoming day context::renders a date at exactly one month (30 days)",
-  "ui/web/src/lib/format/time.test.ts::formatUpcoming day context::counts a spring-forward day as one calendar day, not 24 hours",
-  "ui/web/src/lib/format/time.test.ts::formatUpcoming input handling::keeps the existing relative wording for a past instant",
-]
-```
-
 The Inspector's Liveness cells are the first consumer; see
 [[ui/web/src/docs/frontend-components/inspector/section-details.meiva.okf.md|Inspector section details]].

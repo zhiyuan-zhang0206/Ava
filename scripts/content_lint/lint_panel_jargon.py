@@ -44,7 +44,7 @@ class Finding:
     hard: bool
 
 
-# meiva:ref scripts/content_lint/docs/panel-jargon.meiva.okf.md#panel-body-plain-language
+# meiva:link scripts/content_lint/docs/panel-jargon.meiva.okf.md
 def load_ruleset(path: Path | None = None) -> Ruleset:
     source = path or DEFAULT_RULES
     data = tomllib.loads(source.read_text(encoding="utf-8"))
@@ -93,7 +93,7 @@ def _heading_text(line: str) -> str | None:
     return None
 
 
-# meiva:ref scripts/content_lint/docs/panel-jargon.meiva.okf.md#panel-body-plain-language
+# meiva:link scripts/content_lint/docs/panel-jargon.meiva.okf.md
 def split_body(text: str, ruleset: Ruleset) -> tuple[list[str], list[str], list[str]]:
     lines = text.splitlines()
     body: list[str] = []
@@ -156,7 +156,7 @@ def _acronym_findings(
     return findings
 
 
-# meiva:ref scripts/content_lint/docs/panel-jargon.meiva.okf.md#panel-body-plain-language
+# meiva:link scripts/content_lint/docs/panel-jargon.meiva.okf.md
 def scan_panel(path: Path, ruleset: Ruleset) -> tuple[list[Finding], int]:
     body, _evidence, glossary = split_body(path.read_text(encoding="utf-8"), ruleset)
     terms = _glossary_terms(glossary, ruleset)
@@ -188,7 +188,7 @@ def panel_paths(targets: Sequence[Path], name: str) -> list[Path]:
     return found
 
 
-# meiva:ref scripts/content_lint/docs/panel-jargon.meiva.okf.md#panel-body-plain-language
+# meiva:link scripts/content_lint/docs/panel-jargon.meiva.okf.md
 def evaluate(path: Path, ruleset: Ruleset) -> tuple[list[Finding], int, bool]:
     findings, entries = scan_panel(path, ruleset)
     hard = any(finding.hard for finding in findings)
@@ -200,7 +200,7 @@ def evaluate(path: Path, ruleset: Ruleset) -> tuple[list[Finding], int, bool]:
     return findings, entries, passed
 
 
-# meiva:ref scripts/content_lint/docs/panel-jargon.meiva.okf.md#panel-body-plain-language
+# meiva:link scripts/content_lint/docs/panel-jargon.meiva.okf.md
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         description="Report internal identifiers in the body of a user-facing panel."

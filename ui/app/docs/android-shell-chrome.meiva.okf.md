@@ -35,7 +35,6 @@ The failure screen still offers "Change address", and the update check runs on
 every console load. Anything the injection layer adds to the console must stay
 out of the composer band.
 
-
 Android's network-security XML cannot express IP prefixes, so it permits
 cleartext transport while Rust refuses to persist an HTTP endpoint unless all
 resolved addresses are loopback, link-local, RFC1918, or `100.64.0.0/10`.
@@ -48,10 +47,4 @@ top edge is y=0 under the status bar and its bottom edge under the navigation
 bar. A plain Android WebView reports no CSS safe-area insets to the page, so
 the console cannot pad itself out of the system UI: the fix has to be native.
 
-```meiva-contract
-id = "android-system-bar-insets"
-kind = "invariant"
-statement = "The overlay pads the generated activity's content root by the system-bar plus display-cutout insets, after Tauri's own enableEdgeToEdge() and before the page renders, so every page sits inside the usable area on edge-to-edge devices and the padding is zero where the window already fits; the patch is idempotent and refuses an unrecognised activity template instead of shipping an APK whose header hides under the status bar."
-code = ["ui/app/android/apply_overlay.py:patch_main_activity", "ui/app/android/apply_overlay.py:_MAIN_ACTIVITY_INSETS"]
-tests = ["tests/ui/test_android_overlay.py::test_activity_pads_the_content_root_by_the_system_bar_insets", "tests/ui/test_android_overlay.py::test_activity_patch_is_idempotent", "tests/ui/test_android_overlay.py::test_activity_patch_rejects_an_unknown_template"]
-```
+The overlay pads the generated activity's content root by the system-bar plus display-cutout insets, after Tauri's own enableEdgeToEdge() and before the page renders, so every page sits inside the usable area on edge-to-edge devices and the padding is zero where the window already fits; the patch is idempotent and refuses an unrecognised activity template instead of shipping an APK whose header hides under the status bar.

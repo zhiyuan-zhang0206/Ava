@@ -1,4 +1,6 @@
-# meiva:ref base/config/docs/process-profiles.meiva.okf.md#process-domains
+# meiva:note
+# Profile domains follow actual reads in each process kind's import closure, independently of config-panel capability labels. Launchers select gateway, agent, or runner; unknown names fail fast. Excluded domains raise an actionable AttributeError in eager and lite access, and dynamic consumers can use has_domain. Runner support daemons do not consume the agent domain now that shared documents always use Markdown; agent execution belongs to the agent profile.
+# meiva:link base/config/docs/process-profiles.meiva.okf.md
 from __future__ import annotations
 
 from typing import Literal

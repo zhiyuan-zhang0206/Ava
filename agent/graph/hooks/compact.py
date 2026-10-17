@@ -64,7 +64,9 @@ class EmptyCompactionSummaryError(RuntimeError):
     pass
 
 
-# meiva:ref agent/graph/docs/context-window/replacement.meiva.okf.md#retained-boundary-checkpoints
+# meiva:note
+# Compaction stamps the newest pre-compaction checkpoint as the segment anchor rather than deleting checkpoints. A missing pool is a no-op; stamp failures are reported and do not abort compaction. A closing understanding chunk is anchored to the successful stamp.
+# meiva:link agent/graph/docs/context-window/replacement.meiva.okf.md
 async def stamp_compact_boundary(
     pool: AsyncConnectionPool | None,
     agent_id: int,
@@ -102,7 +104,9 @@ def conversation_messages(messages: list[AnyMessage]) -> list[AnyMessage]:
     return messages[1:] if has_system else messages
 
 
-# meiva:ref agent/graph/docs/context-window/preparation.meiva.okf.md#completed-window-attribution
+# meiva:note
+# compaction_completed describes an applied replacement, not a request. It counts one completion, measures conversation characters excluding the standing head, omits a ratio for empty history, and attributes reminder_shown only to the version being replaced.
+# meiva:link agent/graph/docs/context-window/preparation.meiva.okf.md
 def emit_compaction_monitoring(
     messages: list[AnyMessage],
     summary: str,
@@ -132,7 +136,9 @@ def emit_compaction_monitoring(
     )
 
 
-# meiva:ref agent/graph/docs/context-window/replacement.meiva.okf.md#summary-request-prefix
+# meiva:note
+# Generated compaction appends the shared meiva.self.compact instructions to the complete existing conversation prefix. Empty conversations fail before invocation and empty returned text fails validation; tool-only responses are not summaries.
+# meiva:link agent/graph/docs/context-window/replacement.meiva.okf.md
 async def generate_summary(
     messages: list[AnyMessage],
     llm: BaseChatModel,
@@ -183,13 +189,13 @@ def _estimate_tokens(messages: list[AnyMessage]) -> int:
     return total_chars // 4
 
 
-# meiva:ref agent/graph/docs/context-window/preparation.meiva.okf.md#occupancy-and-reply-opportunity
+# meiva:link agent/graph/docs/context-window/preparation.meiva.okf.md
 def _context_occupancy(messages: list[AnyMessage]) -> int:
     tokens = latest_input_tokens(messages)
     return tokens if tokens is not None else _estimate_tokens(messages)
 
 
-# meiva:ref agent/graph/docs/context-window/preparation.meiva.okf.md#occupancy-and-reply-opportunity
+# meiva:link agent/graph/docs/context-window/preparation.meiva.okf.md
 def _summary_awaits_reply(messages: list[AnyMessage]) -> bool:
     for message in reversed(messages):
         if isinstance(message, AIMessage):
@@ -213,7 +219,7 @@ def auto_compact_will_fire(state: AgentState, agent: AgentSlices, *, catalog: Mo
     return bool(conversation_messages(state.messages))
 
 
-# meiva:ref agent/graph/docs/context-window/replacement.meiva.okf.md#compact-failure-boundary
+# meiva:link agent/graph/docs/context-window/replacement.meiva.okf.md
 async def auto_compact_summary(
     messages: list[AnyMessage],
     llm: BaseChatModel,
@@ -261,7 +267,7 @@ async def auto_compact_summary(
     return summary
 
 
-# meiva:ref agent/graph/docs/context-window/replacement.meiva.okf.md#compact-failure-boundary
+# meiva:link agent/graph/docs/context-window/replacement.meiva.okf.md
 async def auto_compact_for_llm(
     state: AgentState,
     runtime: Runtime[MeivaContext],
@@ -381,7 +387,7 @@ async def auto_compact_for_llm(
     return transition
 
 
-# meiva:ref agent/graph/docs/context-window/replacement.meiva.okf.md#clean-replacement
+# meiva:link agent/graph/docs/context-window/replacement.meiva.okf.md
 def build_compact_transition(
     summary: str,
     *,
@@ -420,7 +426,7 @@ COMPACT_REMINDER_NOTE = (
 )
 
 
-# meiva:ref agent/graph/docs/context-window/preparation.meiva.okf.md#soft-preparation-delivery
+# meiva:link agent/graph/docs/context-window/preparation.meiva.okf.md
 def _reminder_content(
     agent: AgentSlices, *, catalog: ModelCatalog, extensions: ExtensionRegistry
 ) -> str:
@@ -449,7 +455,7 @@ def _reminder_content(
     return "\n\n".join(parts)
 
 
-# meiva:ref agent/graph/docs/context-window/preparation.meiva.okf.md#soft-preparation-delivery
+# meiva:link agent/graph/docs/context-window/preparation.meiva.okf.md
 def compact_reminder_update(
     state: AgentState,
     agent: AgentSlices,

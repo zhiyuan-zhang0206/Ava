@@ -8,10 +8,10 @@ import pytest
 from playwright.sync_api import Page
 
 SNAPSHOT_ROOT = Path(__file__).parent / "__snapshots__"
-# meiva:ref tests/e2e/visual/docs/visual-regression-gate.meiva.okf.md#visual-diff-sensitivity-floor
+# meiva:link tests/e2e/visual/docs/visual-regression-gate.meiva.okf.md
 MAX_DIFF_PIXEL_RATIO = 0.001
 _CHANNEL_DELTA_THRESHOLD = 16
-# meiva:ref tests/e2e/visual/docs/visual-regression-gate.meiva.okf.md#settled-frame-capture
+# meiva:link tests/e2e/visual/docs/visual-regression-gate.meiva.okf.md
 _SETTLED_FRAME_ATTEMPTS = 20
 _SETTLED_FRAME_INTERVAL_MS = 150
 
@@ -129,7 +129,7 @@ def snapshot_path(
     return snapshots_dir / test_file / test_name / name
 
 
-# meiva:ref tests/e2e/visual/docs/visual-regression-gate.meiva.okf.md#settled-frame-capture
+# meiva:link tests/e2e/visual/docs/visual-regression-gate.meiva.okf.md
 def settled_screenshot(page: Page) -> bytes:
     def capture() -> bytes:
         return page.screenshot(animations="disabled", caret="hide", full_page=True)

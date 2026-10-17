@@ -45,25 +45,9 @@ creation-time rule; a later `cd` does not change it.
 
 Page servers opened with `meiva.ui.serve` run in your own sessions (`page-<name>`, one entry per open page; the label grammar is owned by `base/sessions/page_session.py`) and appear in `sessions.list()`; see the [[meiva/docs/ui.meiva.okf.md]] server lifecycle for closure through `close()` or TTL expiry — killing the entry does not close the page, and a terminate's `kill_all_shell_sessions` spares them.
 
-
-```meiva-contract
-id = "background-notice-fires-on-command-exit"
-kind = "invariant"
-statement = """
 A background command's completion notice fires when the command subshell exits,
 not when the tee pipeline reaches EOF. A grandchild that inherits stdout and
 outlives the command must not postpone the notice; tee keeps draining into the
 log and session capture in the background. The launch line is sourced from disk
 to keep long paths out of a canonical-mode PTY input buffer, and it preserves
 the command status, keep/exit behavior and the watcher's orphan-guard parent.
-"""
-code = [
-  "meiva/shell/background.py:<module>",
-  "meiva/shell/background.py:notified_line",
-  "meiva/shell/background.py:write_launch_file",
-]
-tests = [
-  "meiva/tests/namespaces/shell/test_shell_background.py::test_notified_line_structure",
-  "meiva/tests/namespaces/shell/test_shell_background.py::test_run_background_e2e_notice_log_and_close",
-]
-```

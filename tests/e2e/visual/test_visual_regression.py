@@ -63,7 +63,7 @@ _TOKEN_USAGE = {
     "hard_compact_tokens": 0,
 }
 
-# meiva:ref tests/e2e/visual/docs/visual-regression-gate.meiva.okf.md#visual-fixture-renders-the-real-ui
+# meiva:link tests/e2e/visual/docs/visual-regression-gate.meiva.okf.md
 _API_STUBS: dict[str, object] = {
     "/api/agents": {"agents": [_AGENT], "next_cursor": None},
     "/api/agents/roster": {"agents": [_AGENT], "ancestors": []},
@@ -141,7 +141,7 @@ _API_STUBS: dict[str, object] = {
         "shells": {"shells": []},
     },
     "/api/system": {"cpu_percent": 0, "mem_percent": 0, "disk_percent": 0},
-    # meiva:ref tests/e2e/visual/docs/visual-regression-gate.meiva.okf.md#visual-fixture-renders-the-real-ui
+    # meiva:link tests/e2e/visual/docs/visual-regression-gate.meiva.okf.md
     "/api/host/permissions": {
         "state": "not_applicable",
         "headline": "This host needs no macOS permissions.",

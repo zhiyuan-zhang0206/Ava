@@ -184,6 +184,8 @@ def fixtures_in_scope(
     return owners
 
 
-# meiva:ref scripts/content_lint/code_comments/docs/fixtures.meiva.okf.md#native-fixture-help
+# meiva:note
+# Pytest fixture docstrings remain native CLI help only when the parser proves the original pytest.fixture binding and the fixture definition is unique. This does not authorize ordinary function docstrings, fixture-body comments, replaced declarations or unknown decorators. Pytest reads the fixture function with inspect.getdoc for both fixture help commands.
+# meiva:link scripts/content_lint/code_comments/docs/fixtures.meiva.okf.md
 def fixture_owners(tree: ast.Module) -> frozenset[str]:
     return frozenset(fixtures_in_scope(tree.body, {}, classes=True))

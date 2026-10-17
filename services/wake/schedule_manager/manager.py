@@ -56,17 +56,17 @@ STALL_ALERT_AFTER_S = SCHEDULE_STALL_ALERT_AFTER_S
 BLOCKED_GIVE_UP_AFTER_S = 600.0
 BLOCKED_STREAK_GAP_S = 60.0
 
-# meiva:ref services/wake/schedule_manager/docs/host-replacement.meiva.okf.md#host-replacement-restart
+# meiva:link services/wake/schedule_manager/docs/host-replacement.meiva.okf.md
 INTERRUPTED_HOST_REPLACED = "interrupted (session host replaced)"
 HOST_GENERATION_UNKNOWN_LOG_INTERVAL_S = 300.0
 
 
-# meiva:ref services/wake/schedule_manager/docs/host-replacement.meiva.okf.md#host-replacement-restart
+# meiva:link services/wake/schedule_manager/docs/host-replacement.meiva.okf.md
 def auto_restart_max_per_window() -> int:
     return settings.gateway.schedule_auto_restart_max_per_window
 
 
-# meiva:ref services/wake/schedule_manager/docs/host-replacement.meiva.okf.md#host-replacement-restart
+# meiva:link services/wake/schedule_manager/docs/host-replacement.meiva.okf.md
 def auto_restart_window_seconds() -> float:
     return settings.gateway.schedule_auto_restart_window_seconds
 
@@ -304,11 +304,13 @@ class ScheduleManager:
         if changed:
             _log.warning("schedule %s process lost; automatic relaunch disabled", schedule_id)
 
-    # meiva:ref services/wake/schedule_manager/docs/host-replacement.meiva.okf.md#host-replacement-restart
+    # meiva:link services/wake/schedule_manager/docs/host-replacement.meiva.okf.md
     def _read_host_generation(self) -> str | None:
         return get_shell_backend().host_generation()
 
-    # meiva:ref services/wake/schedule_manager/docs/host-replacement.meiva.okf.md#session-host-absent
+    # meiva:note
+    # While the session host does not answer, one reconcile pass takes no action: no session is declared lost, no schedule changes status, and no launch is attempted.
+    # meiva:link services/wake/schedule_manager/docs/host-replacement.meiva.okf.md
     def _note_host_generation_unknown(self) -> None:
         now = time.monotonic()
         if now - self._host_generation_unknown_logged < HOST_GENERATION_UNKNOWN_LOG_INTERVAL_S:
@@ -319,7 +321,7 @@ class ScheduleManager:
             "(an absent host means unknown, never an empty one)"
         )
 
-    # meiva:ref services/wake/schedule_manager/docs/host-replacement.meiva.okf.md#host-replacement-restart
+    # meiva:link services/wake/schedule_manager/docs/host-replacement.meiva.okf.md
     def _reclaim_after_host_replacement(self, schedule_id: int, wanted: revisions.Desired) -> bool:
         generation = self._host_generation
         if (

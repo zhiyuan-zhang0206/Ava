@@ -7,13 +7,75 @@ import { pathToFileURL } from 'node:url';
 const require = createRequire(new URL('../../../ui/web/package.json', import.meta.url));
 const ts = require('typescript');
 
+
+const NOTE_HEADER = /^\s*\/\/\s*meiva:note\s*$/;
+const LINK_LINE = /^\s*\/\/\s*meiva:link\s+(\S+)\s*$/;
+
+export function mergeNotes(notes, tree, owner, lexicalOwner) {
+  const out = [];
+  for (let i = 0; i < notes.length; i++) {
+    const note = notes[i];
+    if (note.kind === 'comment' && NOTE_HEADER.test(note.text)) {
+      const body = [];
+      const links = [];
+      const raw = [note.text];
+      let last = note.line;
+      let j = i + 1;
+      while (j < notes.length && notes[j].kind === 'comment' && notes[j].line === last + 1 && notes[j].column === note.column && !NOTE_HEADER.test(notes[j].text) && !LINK_LINE.test(notes[j].text)) {
+        body.push(notes[j].text.replace(/^\s*\/\/\s?/, ''));
+        raw.push(notes[j].text);
+        last = notes[j].line;
+        j++;
+      }
+      while (j < notes.length && notes[j].kind === 'comment' && notes[j].line === last + 1 && notes[j].column === note.column && LINK_LINE.test(notes[j].text)) {
+        links.push(LINK_LINE.exec(notes[j].text)[1]);
+        raw.push(notes[j].text);
+        last = notes[j].line;
+        j++;
+      }
+      out.push(block(note, last, body.join('\n'), links, raw, tree, owner, lexicalOwner));
+      i = j - 1;
+      continue;
+    }
+    const link = note.kind === 'comment' ? LINK_LINE.exec(note.text) : null;
+    if (link) {
+      const links = [link[1]];
+      const raw = [note.text];
+      let last = note.line;
+      let j = i + 1;
+      while (j < notes.length && notes[j].kind === 'comment' && notes[j].line === last + 1 && notes[j].column === note.column && LINK_LINE.test(notes[j].text)) {
+        links.push(LINK_LINE.exec(notes[j].text)[1]);
+        raw.push(notes[j].text);
+        last = notes[j].line;
+        j++;
+      }
+      out.push(block(note, last, '', links, raw, tree, owner, lexicalOwner));
+      i = j - 1;
+      continue;
+    }
+    out.push(note);
+  }
+  return out;
+}
+
+const block = (note, last, text, links, raw, tree, owner, lexicalOwner) => ({
+  kind: 'note',
+  line: note.line,
+  end_line: last,
+  text,
+  raw_text: raw.join('\n'),
+  owner: owner(last),
+  lexical_owner: lexicalOwner(tree.getPositionOfLineAndCharacter(last - 1, 0), true),
+  links,
+});
+
 export function scanSource(file, text) {
   const kind = /\.[jt]sx$/.test(file) ? ts.ScriptKind.TSX : /\.[cm]?js$/.test(file) ? ts.ScriptKind.JS : ts.ScriptKind.TS;
   const tree = ts.createSourceFile(file, text, ts.ScriptTarget.Latest, true, kind);
   if (tree.parseDiagnostics.length) {
     throw new Error(`${file}: ${tree.parseDiagnostics.map(d => ts.flattenDiagnosticMessageText(d.messageText, ' ')).join('; ')}`);
   }
-  const symbols = { '<module>': { name: '<module>', line: 1, end_line: text.split('\n').length, parameters: [], ambiguous: false, callable: false } };
+  const symbols = { '<module>': { name: '<module>', line: 1, end_line: text.split('\n').length, callable: false } };
   const definitions = [{ ...symbols['<module>'], key: '<module>', parent: 0, kind: 'module' }];
   const spans = new Map();
   const machineComments = new Set();
@@ -49,7 +111,7 @@ export function scanSource(file, text) {
   };
   const lineAt = position => tree.getLineAndCharacterOfPosition(position).line + 1;
   const addSymbol = (name, node, callable) => {
-    symbols[name] = { name, line: lineAt(node.getStart(tree)), end_line: lineAt(node.end), parameters: [], ambiguous: Object.hasOwn(symbols, name), callable };
+    symbols[name] = { name, line: lineAt(node.getStart(tree)), end_line: lineAt(node.end), callable };
   };
   const addDefinition = (name, node, kind, parent) => {
     definitions.push({ name, line: lineAt(node.getStart(tree)), end_line: lineAt(node.end), start: node.getStart(tree), end: node.end, kind, parent });
@@ -143,7 +205,7 @@ export function scanSource(file, text) {
   const notes = [...spans.values()].filter(span => !machineComments.has(span.pos)).sort((a, b) => a.pos - b.pos).map(span => {
     const value = text.slice(span.pos, span.end);
     const line = lineAt(span.pos);
-    return { kind: value.startsWith('/**') ? 'docstring' : 'comment', line, end_line: lineAt(span.end - 1), text: value, raw_text: value, owner: owner(line), lexical_owner: lexicalOwner(span.pos, !text.slice(text.lastIndexOf('\n', span.pos - 1) + 1, span.pos).trim()) };
+    return { kind: value.startsWith('/**') ? 'docstring' : 'comment', line, end_line: lineAt(span.end - 1), text: value, raw_text: value, owner: owner(line), column: span.pos - (text.lastIndexOf('\n', span.pos - 1) + 1), lexical_owner: lexicalOwner(span.pos, !text.slice(text.lastIndexOf('\n', span.pos - 1) + 1, span.pos).trim()) };
   });
   for (const node of unused) {
     const line = lineAt(node.getStart(tree));
@@ -152,7 +214,9 @@ export function scanSource(file, text) {
   const shebang = ts.getShebang(text);
   if (shebang && !/^#!\/usr\/bin\/(?:env node|node)$/.test(shebang)) notes.push({ kind: 'comment', line: 1, end_line: 1, text: shebang, raw_text: shebang, owner: '<module>', lexical_owner: '<module>' });
   notes.sort((a, b) => a.line - b.line);
-  return { path: file, sha256: createHash('sha256').update(text).digest('hex'), symbols, notes };
+  const merged = mergeNotes(notes, tree, owner, lexicalOwner);
+  for (const note of merged) delete note.column;
+  return { path: file, sha256: createHash('sha256').update(text).digest('hex'), symbols, notes: merged };
 }
 
 if (process.argv[1] && pathToFileURL(path.resolve(process.argv[1])).href === import.meta.url) {

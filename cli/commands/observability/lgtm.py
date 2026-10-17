@@ -16,7 +16,7 @@ def is_station_ctx(ctx: ConvergeCtx) -> bool:
     return (ctx.meiva_home / "lgtm-host").exists() or roles_declare_station(ctx.roles)
 
 
-# meiva:ref cli/commands/observability/docs/lgtm/dashboard-provisioning.meiva.okf.md#dashboard-provisioning-cutover
+# meiva:link cli/commands/observability/docs/lgtm/dashboard-provisioning.meiva.okf.md
 def cmd_lgtm_status(*, machine: MachineIdentity) -> int:
     station = is_lgtm_host(machine=machine)
     if not station:

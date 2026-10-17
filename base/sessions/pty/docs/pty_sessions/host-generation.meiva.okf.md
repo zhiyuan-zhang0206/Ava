@@ -7,17 +7,6 @@ tags: [base, pty, sessions]
 
 # Service host generation
 
-```meiva-contract
-id = "service-host-generation"
-kind = "invariant"
-statement = "The service mints one generation id per process and reports it on ping; a restarted service always answers a different one. An absent service still answers queries as 'no sessions', so a consumer that acts on absence reads the generation first and treats None as unknown."
-code = ["base/sessions/pty/client.py:host_generation"]
-tests = [
-  "base/sessions/pty/tests/test_service_epoch.py::test_a_replaced_service_answers_a_new_generation",
-  "base/sessions/pty/tests/test_service_epoch.py::test_an_absent_service_has_no_generation_even_though_its_session_list_is_empty",
-]
-```
-
 The service (`services/agent_runner/pty_sessions/`) mints the generation in its
 `__init__` and never persists it: it names one incarnation, which is what a
 consumer needs to tell "my session is gone" from "my session's host is gone". The

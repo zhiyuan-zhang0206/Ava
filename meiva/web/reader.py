@@ -188,7 +188,7 @@ def _answer(
 
 
 def read_page(url: str, max_chars: int, deps: FetchDeps) -> tuple[str, str, str, bool]:
-    # meiva:ref meiva/web/docs/providers.meiva.okf.md#web-provider-selection
+    # meiva:link meiva/web/docs/providers.meiva.okf.md
     if deps.reader == "jina":
         return _read_page(url, max_chars, deps)
     return deepseek.read_page(url, max_chars, deps)

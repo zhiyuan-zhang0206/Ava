@@ -1,4 +1,14 @@
-# meiva:ref meiva/impersonation/docs/attachment-contracts.meiva.okf.md#attachment-capture-lifetime
+# meiva:note
+# An attachment borrows a validated controller identity and restores the prior process
+# context on detach. Its own client set and admission gate are distinct from the SDK
+# installation's longer-lived cold producer. Each admitted SDK call retains its original
+# durable capture gate even when another attachment becomes current. Closing admission
+# and marking the attachment closing share one lock: already-admitted calls may drain,
+# later calls are refused. Close attempts plugin-state flush, receipt closure, telemetry
+# delivery and detach; a later cleanup error cannot replace the primary failure. A
+# still-running admitted call retains its original receipt and seals it only when it
+# actually drains; a finite close wait cannot certify that source empty.
+# meiva:link meiva/impersonation/docs/attachment-contracts.meiva.okf.md
 
 from __future__ import annotations
 

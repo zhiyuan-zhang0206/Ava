@@ -117,7 +117,7 @@ class SessionBackend(abc.ABC):
         """The live session's persisted generation, when this backend has one."""
         return None
 
-    # meiva:ref base/sessions/docs/host-generation.meiva.okf.md#host-generation
+    # meiva:link base/sessions/docs/host-generation.meiva.okf.md
     def host_generation(self) -> str | None:
         return None
 

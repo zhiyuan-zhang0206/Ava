@@ -16,12 +16,4 @@ Agent source is registered for traceback line lookup. The child copies its user-
 
 The result envelope is written before last-mile telemetry. Known unfinished ordinary delivery is best effort; an unknown owned writer failure rewrites a successful result, while an existing crash remains primary. Timeout/cancel paths skip delivery. A zero-record finalizer leaves telemetry and OTel unimported. Deferred OTLP initialization occurs while the interpreter is alive, not during finalization. The stdlib crash writer remains usable if application logging/protocol imports fail; writing the fallback envelope precedes best-effort logging.
 
-```meiva-contract
-id = "exec-child-result-boundary"
-kind = "invariant"
-statement = "The child preserves the code-reached distinction and a full crash envelope, including a fallback when the normal protocol writer fails."
-code = ["agent/execution/child.py:<module>"]
-tests = ["agent/tests/execution/test_exec_child.py::test_boot_config_failure_writes_crashed_envelope", "agent/tests/execution/test_exec_child.py::test_crash_envelope_uses_stdlib_fallback_when_protocol_writer_fails", "agent/tests/execution/test_exec_child.py::test_child_crash_writes_envelope_with_traceback"]
-```
-
 Parent: [[agent/execution/docs/gated-deadline.meiva.okf.md]].

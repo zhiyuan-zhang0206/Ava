@@ -96,7 +96,7 @@ function MessageCard({
   );
 }
 
-// meiva:ref ui/web/src/docs/frontend-components/run-timeline/details-panel.meiva.okf.md#selected-message-parts
+// meiva:link ui/web/src/docs/frontend-components/run-timeline/details-panel.meiva.okf.md
 export function PreviewMessage({
   text,
   source,
@@ -126,7 +126,7 @@ export function PreviewMessage({
   );
 }
 
-// meiva:ref ui/web/src/docs/frontend-components/run-timeline/details-panel.meiva.okf.md#selected-message-parts
+// meiva:link ui/web/src/docs/frontend-components/run-timeline/details-panel.meiva.okf.md
 export function TimelineMessages({
   agentId,
   snapshot,

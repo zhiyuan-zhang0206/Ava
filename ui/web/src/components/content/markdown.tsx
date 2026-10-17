@@ -1,4 +1,6 @@
-// meiva:ref ui/web/src/docs/frontend-components/markdown-surfaces.meiva.okf.md#markdown-lazy-loading
+// meiva:note
+// ChatMarkdown is a lazy boundary: the renderer (the react-markdown chain) is a deferred chunk, so route bundles carry only the boundary and a cold first paint shows the same content as plain text inside the shared chat-md wrapper. A resolved renderer renders Markdown on the first paint; a pending one upgrades the mounted tree when it arrives, and a superseded or unmounted attempt never writes back. Prefetch starts when the boundary module evaluates and is shared and deduplicated by one module-level promise; a rejected load clears the cache, keeps the fallback, and the next attempt retries.
+// meiva:link ui/web/src/docs/frontend-components/markdown-surfaces.meiva.okf.md
 "use client";
 
 import { memo, useEffect, useState } from "react";

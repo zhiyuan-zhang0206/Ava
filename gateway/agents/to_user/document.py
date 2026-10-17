@@ -90,7 +90,7 @@ _HTML_POLICY = (
 _PASSIVE_POLICY = "sandbox; default-src 'none'; style-src 'unsafe-inline'"
 
 
-# meiva:ref gateway/agents/docs/to-user-resources.meiva.okf.md#resource-disposition
+# meiva:link gateway/agents/docs/to-user-resources.meiva.okf.md
 def response_policy(media_type: str) -> tuple[str, str]:
 
     if media_type in _HTML_TYPES:

@@ -1,4 +1,5 @@
-# meiva:ref base/config/docs/prompt-composition.meiva.okf.md#sdk-defaults
+# meiva:note
+# The default SDK expansion is the measured common module set; rare APIs remain discoverable through meiva.help, and explicit wildcard expansion remains available. Plugin expansions are merged before these defaults. Skill selection and preloading are per-agent settings so a spawner can narrow one worker without changing the cluster catalog.
 from __future__ import annotations
 
 from typing import Annotated, Literal

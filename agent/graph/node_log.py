@@ -22,7 +22,7 @@ from base.events.live.publisher import AgentEventPublisher
 from base.log import logger
 
 
-# meiva:ref agent/graph/docs/node-lifecycle.meiva.okf.md#stall-probe-arming
+# meiva:link agent/graph/docs/node-lifecycle.meiva.okf.md
 def awaiter_chain_lines(task: asyncio.Task[Any]) -> list[str]:
     lines: list[str] = []
     awaitable: Any = task.get_coro()
@@ -48,7 +48,7 @@ def dump_async_tasks() -> None:
     stderr.flush()
 
 
-# meiva:ref agent/graph/docs/node-lifecycle.meiva.okf.md#stall-probe-arming
+# meiva:link agent/graph/docs/node-lifecycle.meiva.okf.md
 _STALL_GUARD_EXEMPT = frozenset({"claim"})
 
 
@@ -63,7 +63,7 @@ def _real_stderr() -> TextIO | None:
     return stderr
 
 
-# meiva:ref agent/graph/docs/node-lifecycle.meiva.okf.md#stall-probe-arming
+# meiva:link agent/graph/docs/node-lifecycle.meiva.okf.md
 @contextlib.contextmanager
 def _stall_dump_guard(
     node_name: str, *, read_stall_seconds: Callable[[], float]
@@ -85,7 +85,7 @@ def _stall_dump_guard(
         faulthandler.cancel_dump_traceback_later()
 
 
-# meiva:ref agent/graph/docs/node-lifecycle.meiva.okf.md#timeline-snapshot-cursor
+# meiva:link agent/graph/docs/node-lifecycle.meiva.okf.md
 SNAPSHOT_CURSOR: dict[int, int] = {}
 
 _NODE_EXIT_AGGREGATE: dict[int, list[dict[str, Any]]] = {}
@@ -93,7 +93,7 @@ _NODE_EXIT_AGGREGATE: dict[int, list[dict[str, Any]]] = {}
 _NODE_EXIT_AGGREGATE_CAP = 32
 
 
-# meiva:ref agent/graph/docs/node-lifecycle.meiva.okf.md#node-exit-aggregation
+# meiva:link agent/graph/docs/node-lifecycle.meiva.okf.md
 def flush_node_exit_aggregate(agent_id: int) -> None:
     entries = _NODE_EXIT_AGGREGATE.pop(agent_id, [])
     if not entries:
@@ -107,7 +107,7 @@ def flush_node_exit_aggregate(agent_id: int) -> None:
     )
 
 
-# meiva:ref agent/graph/docs/node-lifecycle.meiva.okf.md#node-exit-aggregation
+# meiva:link agent/graph/docs/node-lifecycle.meiva.okf.md
 def _accumulate_node_exit(
     agent_id: int,
     node_name: str,
@@ -126,7 +126,7 @@ def _accumulate_node_exit(
         flush_node_exit_aggregate(agent_id)
 
 
-# meiva:ref agent/graph/docs/node-lifecycle.meiva.okf.md#node-exit-owner
+# meiva:link agent/graph/docs/node-lifecycle.meiva.okf.md
 @contextlib.asynccontextmanager
 async def node_lifecycle(
     node_name: str,
@@ -151,7 +151,7 @@ async def node_lifecycle(
                 messages, start=cursor, inputs=timeline_inputs
             )
             window = inc_items
-        # meiva:ref agent/graph/docs/node-lifecycle.meiva.okf.md#timeline-snapshot-cursor
+        # meiva:link agent/graph/docs/node-lifecycle.meiva.okf.md
         if not window:
             logger.info(
                 "[node enter {node}] msgs={msg_count}",

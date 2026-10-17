@@ -14,13 +14,7 @@ The app retains either the complete catalog or the original exception. A provide
 may supply the only model required by a workload; a partial catalog cannot prove
 that the workload is valid.
 
-```meiva-contract
-id = "retained-catalog-failure"
-kind = "invariant"
-statement = "A catalog build failure retains the original Exception and traceback without publishing a partial catalog. Each model-dependent access raises a fresh ModelCatalogUnavailableError chained to that original cause. Process-exit exceptions propagate."
-code = ["gateway/http/model_catalog.py:load_model_catalog", "gateway/http/model_catalog.py:require_catalog"]
-tests = ["gateway/tests/bootstrap/catalog/test_provider_startup.py::test_catalog_failure_preserves_identity_and_traceback", "gateway/tests/bootstrap/catalog/test_provider_startup.py::test_process_exit_does_not_become_model_unavailable"]
-```
+A catalog build failure retains the original Exception and traceback without publishing a partial catalog. Each model-dependent access raises a fresh ModelCatalogUnavailableError chained to that original cause. Process-exit exceptions propagate.
 
 Only catalog construction has this boundary. Invalid core configuration, database
 startup and authentication dependencies retain their own failure behavior.

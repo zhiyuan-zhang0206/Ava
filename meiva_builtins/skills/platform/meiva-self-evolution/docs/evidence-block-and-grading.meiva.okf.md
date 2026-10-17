@@ -14,25 +14,6 @@ tags:
 `label()` is unchanged: the block only adds fields and `schema_version = 2`.
 Older records lack those keys, and a reader takes a missing grade as `None`.
 
-```meiva-contract
-id = "evidence-block-and-grading"
-kind = "invariant"
-code = ["meiva_builtins/skills/platform/meiva-self-evolution/scripts/record.py:<module>"]
-tests = [
-  "meiva_builtins/skills/platform/meiva-self-evolution/tests/test_self_evolution_record.py::test_evidence_grade_none_without_telemetry",
-  "meiva_builtins/skills/platform/meiva-self-evolution/tests/test_self_evolution_record.py::test_evidence_grade_partial_without_task_prompt",
-  "meiva_builtins/skills/platform/meiva-self-evolution/tests/test_self_evolution_record.py::test_evidence_grade_partial_for_live_status",
-  "meiva_builtins/skills/platform/meiva-self-evolution/tests/test_self_evolution_record.py::test_evidence_grade_partial_without_terminal_status",
-  "meiva_builtins/skills/platform/meiva-self-evolution/tests/test_self_evolution_record.py::test_evidence_grade_complete_when_all_evidence_present",
-  "meiva_builtins/skills/platform/meiva-self-evolution/tests/test_self_evolution_record.py::test_legacy_record_without_evidence_keeps_downstream_reads",
-  "meiva_builtins/skills/platform/meiva-self-evolution/tests/test_self_evolution_record.py::test_evidence_block_reports_prompt_source_and_task_receipts",
-  "meiva_builtins/skills/platform/meiva-self-evolution/tests/test_self_evolution_collect.py::test_task_receipts_by_agent_counts_notes_states_and_changes",
-]
-statement = """
-`record._evidence_block` reports what a record is based on; `record._grade` grades that block in priority order — no telemetry events, or no tokens: `none` / `no_telemetry`; no task prompt: `partial` / `no_task`; a lifecycle status other than `terminated`: `partial` / `no_terminal`; all three present: `complete` with no reason. `prompt_source` names the `_task_prompt` branch that supplied the prompt; `task_updates.note` counts note-only receipts; `task_state_changes` counts status receipts whose status differs from the actor's previous declaration on that task, `in_progress` being the birth state. `collect._task_receipts_by_agent` supplies the receipt counts in one grouped query per agent batch, and the inbounds `collect` already fetches carry `claimed`, so the block adds no per-agent query.
-"""
-```
-
 ## Fields
 
 | Field | Meaning |
@@ -74,22 +55,6 @@ exactly `no_telemetry`, `no_task`, `no_terminal`, or None.
 `none` or `partial` evidence is `unknown`, because the dataset cannot tell a
 broken run from an unobserved one. The gate wins over `failed` / `fumbled`, and a
 record with no `evidence_grade` key takes the rule label exactly as before.
-
-```meiva-contract
-id = "unknown-label"
-kind = "invariant"
-code = ["meiva_builtins/skills/platform/meiva-self-evolution/scripts/label.py:<module>"]
-tests = [
-  "meiva_builtins/skills/platform/meiva-self-evolution/tests/test_self_evolution_label.py::test_complete_evidence_without_negatives_is_ok",
-  "meiva_builtins/skills/platform/meiva-self-evolution/tests/test_self_evolution_label.py::test_complete_evidence_keeps_the_fumble_threshold",
-  "meiva_builtins/skills/platform/meiva-self-evolution/tests/test_self_evolution_label.py::test_missing_evidence_is_unknown_even_with_exec_failures",
-  "meiva_builtins/skills/platform/meiva-self-evolution/tests/test_self_evolution_label.py::test_partial_evidence_is_unknown",
-  "meiva_builtins/skills/platform/meiva-self-evolution/tests/test_self_evolution_label.py::test_record_without_a_grade_keeps_the_rule_label",
-]
-statement = """
-`label.label` returns `unknown` when the record carries an `evidence_grade` other than `complete`, and otherwise defers to `_rule_label`, whose tiers are unchanged: `failed` when the run terminated with no output and no side-channel delivery, or ended on a failed exec; `fumbled` when it crossed a re-prompt, correction, peer-feedback, scaled exec-failure or compaction threshold; `ok` when no negative signal fired. A record without an `evidence_grade` key takes `_rule_label` directly, so older datasets keep their labels, and `LABELS` lists all four tiers.
-"""
-```
 
 The contract statement is the tier definition; in one line: `unknown` is neither
 success nor failure, and `ok` means no objective failure signal, not high

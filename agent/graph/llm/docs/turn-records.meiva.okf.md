@@ -39,11 +39,3 @@ reproducing the gateway timeline endpoint's id for the same committed
 AIMessage, so the frontend merges by stable key instead of a timestamp
 heuristic. An empty stream returns an empty message to `before_exec`
 (historical behavior).
-
-```meiva-contract
-id = "turn-end-owner"
-kind = "invariant"
-statement = "Every turn_end record carries its owning agent's id, passed explicitly at the emit site: the process-wide log binding is the no-agent sentinel and the Inspector activity projection drops unattributed records."
-code = ["agent/graph/llm/node.py:llm_attempt"]
-tests = ["agent/graph/llm/tests/test_turn_end_attribution.py::test_turn_end_records_carry_the_owning_agent", "agent/graph/llm/tests/test_turn_end_attribution.py::test_turn_end_failure_records_carry_the_owning_agent"]
-```

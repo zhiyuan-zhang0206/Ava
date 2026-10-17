@@ -28,7 +28,9 @@ class ExecStatus(StrEnum):
     UNKNOWN = "unknown"
 
 
-# meiva:ref base/agents/messages/docs/metadata-contracts.meiva.okf.md#notetag-closed-set
+# meiva:note
+# NoteTag is a closed cross-stack set: a new member needs its frontend dispatch branch (markers.tsx) and its gateway timestamp classification, or the UI renders the loud unrecognized marker instead of a generic note. The value set itself is a wire contract, locked by value-set tests against silent renames.
+# meiva:link base/agents/messages/docs/metadata-contracts.meiva.okf.md
 class NoteTag(StrEnum):
     IMPERSONATION = "impersonation"
     SDK_HINT = "sdk_hint"
@@ -111,7 +113,9 @@ def message_read_time(msg: BaseMessage) -> str | None:
     return kwargs_read_time(read_meiva_kwargs(msg))
 
 
-# meiva:ref base/agents/messages/docs/metadata-contracts.meiva.okf.md#compact-summary-header-roles
+# meiva:note
+# COMPACT_SUMMARY_HEADER is prepended to every replacement compact summary and is the read side's classifier for the untagged summary HumanMessage; it is also the standing "a compaction just happened" signal, without which an agent re-reads a /compact order in the summary's verbatim tail and runs it again every turn. The string lives in the leaf message-contract module so gateway and insights callers import it without agent.graph.
+# meiva:link base/agents/messages/docs/metadata-contracts.meiva.okf.md
 COMPACT_SUMMARY_HEADER = (
     "[system] Your context was just compacted. The following is the summary of "
     "your own prior context:"

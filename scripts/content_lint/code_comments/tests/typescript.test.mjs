@@ -14,9 +14,57 @@ test('JSX comments and JSDoc are both visible', () => {
   assert.equal(source.notes[1].owner, 'View');
 });
 
-test('a source pointer binds the adjacent function', () => {
-  const source = scanSource('pkg/core.ts', '// meiva:ref pkg/docs/core.meiva.okf.md#positive-budget\nexport function budget() { return 1; }');
+test('a note block keeps its lines, paragraph breaks and links', () => {
+  const source = scanSource('pkg/core.ts', [
+    '// meiva:note',
+    '// Retains the last value.',
+    '// Nothing else may clear it.',
+    '//',
+    '// Cleared only by an explicit reset.',
+    '// meiva:link pkg/docs/core.md',
+    'export function budget() { return 1; }',
+  ].join('\n'));
+  const [note] = source.notes;
+  assert.equal(note.kind, 'note');
+  assert.equal(note.line, 1);
+  assert.equal(note.end_line, 6);
+  assert.equal(note.text, 'Retains the last value.\nNothing else may clear it.\n\nCleared only by an explicit reset.');
+  assert.deepEqual(note.links, ['pkg/docs/core.md']);
+  assert.equal(note.owner, 'budget');
+  assert.match(note.lexical_owner, /"budget"/);
+});
+
+test('a link-only block points at shared documentation', () => {
+  const source = scanSource('pkg/core.ts', '// meiva:link pkg/docs/core.md\n// meiva:link pkg/docs/other.md\nexport const value = 1;');
+  const [note] = source.notes;
+  assert.equal(note.kind, 'note');
+  assert.equal(note.text, '');
+  assert.equal(note.end_line, 2);
+  assert.deepEqual(note.links, ['pkg/docs/core.md', 'pkg/docs/other.md']);
+});
+
+test('body lines after the links are new prose', () => {
+  const source = scanSource('pkg/core.ts', '// meiva:note\n// Stated here.\n// meiva:link pkg/docs/core.md\n// trailing prose\nexport const value = 1;');
+  assert.deepEqual(source.notes.map(n => n.kind), ['note', 'comment']);
+  assert.equal(source.notes[0].text, 'Stated here.');
+  assert.deepEqual(source.notes[0].links, ['pkg/docs/core.md']);
+});
+
+test('block comments and link prose stay comments', () => {
+  for (const text of [
+    '/* meiva:note */\nexport const value = 1;',
+    '/* meiva:note\nText */\nexport const value = 1;',
+    '// meiva:link pkg/docs/core.md because needed\nexport const value = 1;',
+    '// meiva:note because it matters\nexport const value = 1;',
+  ]) {
+    assert.deepEqual(scanSource('pkg/core.ts', text).notes.map(n => n.kind), ['comment']);
+  }
+});
+
+test('a note block inside a function binds its body', () => {
+  const source = scanSource('pkg/core.ts', 'export function budget() {\n  // meiva:note\n  // Retains the last value.\n  return 1;\n}');
   assert.equal(source.notes[0].owner, 'budget');
+  assert.match(source.notes[0].lexical_owner, /"budget"/);
 });
 
 test('test definitions use imported runner bindings and exact suite names', () => {
@@ -188,4 +236,24 @@ test('unproved suite labels retain conservative anonymous identities', () => {
     const after = scanSource('core.test.ts', prefix + addition + stable + suffix);
     assert.notEqual(after.notes[0].lexical_owner, before.notes[0].lexical_owner);
   }
+});
+
+test('a note block keeps only same-column continuation lines', () => {
+  const source = scanSource(
+    'pkg/core.ts',
+    'function f() {\n  // meiva:note\n  // Body line.\n  // meiva:link pkg/docs/core.md\n// outdented\n}\n'
+  );
+  const blocks = source.notes.filter(n => n.kind === 'note');
+  assert.equal(blocks.length, 1);
+  assert.equal(blocks[0].text, 'Body line.');
+  assert.deepEqual(blocks[0].links, ['pkg/docs/core.md']);
+  assert.ok(source.notes.some(n => n.kind === 'comment' && n.text === '// outdented'));
+});
+
+test('a note header tolerates spacing and keeps the block', () => {
+  const source = scanSource('pkg/core.ts', '//meiva:note\n// Body.\n//   meiva:link   pkg/docs/core.md\n');
+  const blocks = source.notes.filter(n => n.kind === 'note');
+  assert.equal(blocks.length, 1);
+  assert.equal(blocks[0].text, 'Body.');
+  assert.deepEqual(blocks[0].links, ['pkg/docs/core.md']);
 });

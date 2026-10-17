@@ -1,4 +1,5 @@
-# meiva:ref agent/graph/prompt/docs/composition.meiva.okf.md#sdk-expansion
+# meiva:note
+# Plugin expansions lead the deduplicated configured expansion list. Wildcards recursively discover public namespaces while excluding disabled entries and capability surfaces; explicitly naming a capability member is refused to avoid injecting whole skill bodies or tool schemas and falsely attributing them as loaded. Media filtering is per rendering call, and installed extensions are visible before rendering captures the SDK overview. The system prompt can be rebuilt when an empty context window is initialized. Delegation checks give the exact `meiva.help(meiva.skills.meiva_workflow)` invocation syntax for non-trivial work.
 import contextlib
 import hashlib
 import inspect

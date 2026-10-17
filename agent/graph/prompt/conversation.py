@@ -1,4 +1,5 @@
-# meiva:ref agent/graph/prompt/docs/composition.meiva.okf.md#conversation-policy
+# meiva:note
+# Core reply routing, language, and milestone progress rules in `user_reply_section` remain active across every `COMMUNICATION_STYLE_SECTIONS` setting (`off`, `oriented`, `concise`, `silent`). Whenever the first turn on a human request calls `execute_code`, it must include a brief substantive opening reply before the first tool call; intermediate turns call `execute_code` with no assistant text unless a milestone is reached. `COMMUNICATION_STYLE_SECTIONS` keys match the non-`off` `agent_communication_style` Literal members so an unknown style raises at render time.
 from base.host.env.agent_slices import AgentSlices
 
 

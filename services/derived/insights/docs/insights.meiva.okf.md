@@ -42,18 +42,4 @@ The daemon reads its render policy and ClockConfig from its own live boot, then 
 
 The process checks schema before serving. Its signal path uses an explicit Runner and hard exit rather than waiting for the default executor to finish cold history work; uvicorn reraises the signal after graceful stop. Repeated SIGTERM is ignored during the bounded exit.
 
-```meiva-contract
-id = "daemon-live-clock-owner"
-kind = "invariant"
-statement = "The daemon retains its supplied configuration owner: later model, timestamp and timezone edits are visible through that app's readers, while the owned pool and socket close at exit."
-code = ["services/derived/insights/daemon.py:<module>"]
-tests = ["services/derived/insights/tests/test_insights_service.py::test_daemon_binds_live_rendering_to_its_configuration_owner"]
-```
-
-```meiva-contract
-id = "insights-service-ownership"
-kind = "invariant"
-statement = "Insights binds an owner-only Unix socket, creates its socket directory, serves the public route paths, and reports the explicit service home and process identity. The caller owns database handles through app shutdown."
-code = ["services/derived/insights/app.py:<module>", "services/derived/insights/daemon.py:<module>"]
-tests = ["services/derived/insights/tests/test_insights_service.py::test_the_socket_is_owner_only_and_replaces_a_predecessors_leftover", "services/derived/insights/tests/test_insights_service.py::test_the_binder_creates_the_directory_of_its_socket", "services/derived/insights/tests/test_insights_service.py::test_healthz_names_the_service_home_and_process"]
-```
+Insights binds an owner-only Unix socket, creates its socket directory, serves the public route paths, and reports the explicit service home and process identity. The caller owns database handles through app shutdown.

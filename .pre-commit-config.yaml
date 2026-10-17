@@ -49,7 +49,7 @@ repos:
         verbose: true
 
       - id: check-code-comments
-        name: check typed code comments and changed-file migration
+        name: check source notes and changed-file migration
         entry: bash scripts/content_lint/code_comments/check.sh changed
         language: system
         always_run: true

@@ -26,13 +26,7 @@ human reads (panels, skill descriptions); `chars` bounds stored or injected
 text (memory notes and inherited blocks); `lines` bounds structured documents
 (AGENTS.md, SKILL.md, memory indexes).
 
-```meiva-contract
-id = "text-units"
-kind = "invariant"
-statement = "Text is measured in three units: chars is the code-point length; lines is the count of splitlines() pieces; words counts one unit per CJK character — kana, CJK extension A, unified ideographs, hangul, compatibility ideographs — plus one per maximal run of letters and digits, with underscore not continuing a run and CJK characters blanked first so runs never merge across scripts; punctuation, whitespace and other symbols count zero. An unknown unit raises."
-code = ["base/packages/text_budget.py:Unit", "base/packages/text_budget.py:count_words", "base/packages/text_budget.py:measure"]
-tests = ["base/packages/tests/test_text_budget.py::test_words_count_english_splits_on_punctuation", "base/packages/tests/test_text_budget.py::test_words_count_cjk_characters_individually", "base/packages/tests/test_text_budget.py::test_words_count_kana_and_hangul_characters_individually", "base/packages/tests/test_text_budget.py::test_words_count_mixed_scripts_without_merging_runs", "base/packages/tests/test_text_budget.py::test_measure_chars_counts_code_points", "base/packages/tests/test_text_budget.py::test_measure_lines_counts_splitlines", "base/packages/tests/test_text_budget.py::test_measure_rejects_an_unknown_unit"]
-```
+Text is measured in three units: chars is the code-point length; lines is the count of splitlines() pieces; words counts one unit per CJK character — kana, CJK extension A, unified ideographs, hangul, compatibility ideographs — plus one per maximal run of letters and digits, with underscore not continuing a run and CJK characters blanked first so runs never merge across scripts; punctuation, whitespace and other symbols count zero. An unknown unit raises.
 
 A CJK character counts as one unit because one character carries about the
 information an English word does: a flat character count would read a Chinese
@@ -41,13 +35,7 @@ page and an English sentence as the same size. `chars` counts code points
 
 ## Budgets and verdicts
 
-```meiva-contract
-id = "length-budget"
-kind = "invariant"
-statement = "A length budget pairs one unit with a hard limit, a soft threshold, or both; 0 disables either limit and a negative limit is invalid; a set soft threshold must be strictly below a set hard limit. evaluate measures the budget's unit and returns ok at or below every set threshold, soft past the soft threshold while at or below the hard limit, and over past the hard limit, with over taking precedence. The verdict carries the measurement, the budget, and the remaining room under a set hard limit — None when no hard limit is set."
-code = ["base/packages/text_budget.py:Level", "base/packages/text_budget.py:LengthBudget", "base/packages/text_budget.py:Verdict", "base/packages/text_budget.py:Verdict.remaining", "base/packages/text_budget.py:evaluate"]
-tests = ["base/packages/tests/test_text_budget.py::test_budget_rejects_negative_limits", "base/packages/tests/test_text_budget.py::test_budget_rejects_a_soft_threshold_at_or_above_the_hard_limit", "base/packages/tests/test_text_budget.py::test_evaluate_reports_ok_at_or_below_every_threshold", "base/packages/tests/test_text_budget.py::test_evaluate_reports_soft_past_the_soft_threshold_including_at_the_hard_limit", "base/packages/tests/test_text_budget.py::test_evaluate_reports_over_past_the_hard_limit_with_negative_remaining", "base/packages/tests/test_text_budget.py::test_evaluate_measures_the_budgets_unit", "base/packages/tests/test_text_budget.py::test_a_soft_only_budget_reports_soft_and_no_remaining", "base/packages/tests/test_text_budget.py::test_a_zero_hard_limit_disables_only_the_hard_limit", "base/packages/tests/test_text_budget.py::test_evaluate_prefers_over_when_both_thresholds_are_exceeded"]
-```
+A length budget pairs one unit with a hard limit, a soft threshold, or both; 0 disables either limit and a negative limit is invalid; a set soft threshold must be strictly below a set hard limit. evaluate measures the budget's unit and returns ok at or below every set threshold, soft past the soft threshold while at or below the hard limit, and over past the hard limit, with over taking precedence. The verdict carries the measurement, the budget, and the remaining room under a set hard limit — None when no hard limit is set.
 
 A soft threshold equal to the hard limit could never fire — `over` takes
 precedence at the same measurement — so it is rejected as a dead setting

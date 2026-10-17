@@ -1,4 +1,6 @@
-# meiva:ref meiva_builtins/plugins/docs/plugins.meiva.okf.md#lm-google-provider
+# meiva:note
+# The Google Gemini provider (`meiva_builtins/plugins/lm_google/provider.py`) constructs `ChatGoogleGenerativeAI` with `GEMINI_API_KEY` and passes `temperature=None` on every request so deprecated sampling parameters (`temperature`, `top_p`, `top_k`) are never sent, regardless of whether the model id is version-numbered (`gemini-4-argon`, `gemini-3.8-flash`) or an alias (`gemini-flash-lite-latest`). Deprecated `gemini-3.5-flash` and `gemini-3.7-flash` remain spawnable for existing agent configurations while declaring `superseded_by="gemini-3.8-flash"` to hide them in the spawn picker and settle resurrected agents onto `gemini-3.8-flash`. Thinking depth maps through `thinking_level` (`media_thinking_level` on the media path, lowest declared rung plus `include_thoughts=False` when disabled on models that declare `effort_levels`, or `validate_effort` against the model's rungs), while models without `effort_levels` log a warning and omit thinking parameters when disabled. Promotional pricing periods activate price increases at the earliest global occurrence of the calendar date (UTC+14).
+# meiva:link meiva_builtins/plugins/docs/plugins.meiva.okf.md
 from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
