@@ -510,8 +510,9 @@ def test_spawn_line_tees_and_notifies(_agent_row: int, launch_watcher: Callable[
     assert shlex.split(sent) == [".", str(_watchers_dir() / f"watcher_{wid}_launch.sh")]
     cmd = (_watchers_dir() / f"watcher_{wid}_launch.sh").read_text().splitlines()[1]
     assert ".shell_logs" in cmd  # output is teed to the workspace log dir
-    assert "2>&1 | tee" in cmd
-    assert "_ec=${PIPESTATUS[0]}" in cmd
+    assert "exec 3> >(tee" in cmd
+    assert ") >&3 2>&1" in cmd
+    assert "_ec=$?" in cmd
     assert "agents send" in cmd
     assert f"--source watcher:{wid}" in cmd
     assert "finished. Full output at" in cmd
