@@ -18,7 +18,9 @@ Schema checks, health-before-pool ordering and shutdown stay at their original
 boundaries. Business-specific configuration slices keep their existing readers.
 
 Loop tuning is a frozen `MemoryIndexerConfig` (`loop_interval_s`,
+`patrol_interval_s`, `retry_backoff_s`, `retry_limit`, `excluded_basenames`,
 `reconcile_chunk_paths`, `batch_size`; defaults are the production values).
-`main` constructs it and passes it to `run`, which hands it to the startup
-reconcile, the drain loop and `process_paths`. No module constant holds these
-values; a test that needs a small batch constructs its own config.
+`main` constructs it and passes it to `run`, which hands it to the patrol loop,
+each pass (`reconcile`) and `process_paths`. No module constant holds these
+values; a test that needs a small batch or a short interval constructs its own
+config.

@@ -25,8 +25,13 @@ persistence.
   baseline
 - **Persistence**: every mutation rewrites `$AVA_HOME/memory-search/vectors.npz`
   atomically (tmp file + rename) before acking — a kill-after-ack never loses
-  a row; a fresh service loads the file at boot and the indexer's cold-start
-  reconcile fills what disk says
+  a row; a fresh service loads the file at boot and the indexer's next patrol
+  fills what disk says
+- **Broken cache never raises**: a torn, foreign or width-mismatched npz loads
+  empty instead of raising — the pool is the source of truth and the indexer's
+  next patrol rebuilds it; a raise would make the supervisor respawn into the
+  same broken file every 60 s. An absent `last_success_at` / `last_save_seconds`
+  in an event means "not yet", never zero
 - **Local binding**: only `127.0.0.1`, no LAN ports
 
 ## Key Dependencies

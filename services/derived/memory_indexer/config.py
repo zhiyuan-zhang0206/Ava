@@ -11,18 +11,17 @@ from services.derived.memory_indexer.embeddings import factory
 
 @dataclass(frozen=True)
 class MemoryIndexerConfig:
-    """Tuning of the indexing loops; the defaults are the production values."""
-
     loop_interval_s: float = 1.0
-    """Seconds the main loop sleeps between two drains of the dirty queue."""
+
+    patrol_interval_s: float = 900.0
+
+    retry_backoff_s: float = 60.0
+
+    retry_limit: int = 3
+
+    excluded_basenames: tuple[str, ...] = ("MEMORY.md", "index.md")
 
     reconcile_chunk_paths: int = 64
-    """Dirty files per chunk of the startup reconcile.
-
-    The reconcile beats before and after each chunk: a full rebuild can outlive the liveness
-    ceiling. Chunks bound preparation and local work; `process_paths` also beats before external
-    calls within each chunk.
-    """
 
     batch_size: int = 32
     """Texts per embedding call: `embed_content` accepts several inputs, so batching amortizes round-trips."""
@@ -30,10 +29,19 @@ class MemoryIndexerConfig:
     def __post_init__(self) -> None:
         if self.loop_interval_s <= 0:
             raise ValueError("loop_interval_s must be positive")
+        if self.patrol_interval_s <= 0:
+            raise ValueError("patrol_interval_s must be positive")
+        if self.retry_backoff_s <= 0:
+            raise ValueError("retry_backoff_s must be positive")
+        if self.retry_limit < 0:
+            raise ValueError("retry_limit must not be negative")
         if self.reconcile_chunk_paths < 1:
             raise ValueError("reconcile_chunk_paths must be at least 1")
         if self.batch_size < 1:
             raise ValueError("batch_size must be at least 1")
+        for name in self.excluded_basenames:
+            if not name or "/" in name or "\\" in name:
+                raise ValueError(f"excluded_basenames entries must be plain file names: {name!r}")
 
 
 @dataclass(frozen=True)

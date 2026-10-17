@@ -53,4 +53,4 @@ Topic directories are shared, `machines/<name>/` holds per-machine notes; `MEMOR
 
 - [[ava_builtins/plugins/ava_memory/skills/docs/skills.ava.okf.md|Ava Memory Skills]] — shared-memory entrypoint and assigned-role references
 - [[ava_builtins/plugins/ava_memory/docs/memory-api.ava.okf.md]] — the `ava.memory` pool itself being operated on
-- [[memory_indexer.ava.okf.md]] — the re-embedding service triggered by `ava memory refresh`
+- [[memory_indexer.ava.okf.md]] — the patrol that re-embeds what `ava memory refresh` fast-forwards

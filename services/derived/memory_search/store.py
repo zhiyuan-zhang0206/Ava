@@ -46,17 +46,6 @@ _NPZ_KEYS = frozenset(
 
 
 class MemoryStore:
-    """Chunk rows keyed by the shared folded pk — the same row vocabulary
-    every backend uses, so reconciliation can compare rows 1:1.
-
-    The embedding vector space is injected (the provider's `dim` and
-    `fingerprint`, wired by `services.derived.memory_search.daemon` from
-    `embeddings.factory.get_provider()`): the store is the numpy backend's
-    storage, and its matrix width IS the provider's dim. A loaded npz whose
-    width differs is a stale cache from another provider — the store starts
-    empty and the cold-start reconcile rebuilds it.
-    """
-
     def __init__(self, data_file: Path, dim: int, fingerprint: str) -> None:
         self._data_file = data_file
         self._dim = dim
@@ -78,21 +67,6 @@ class MemoryStore:
     # ── persistence ──────────────────────────────────────────────────────
 
     def load(self) -> None:
-        """Load rows from the npz when it exists; a fresh service starts
-        empty and the indexer's cold-start reconcile fills it.
-
-        Four broken-file paths degrade to "start empty" instead of raising —
-        a file missing keys, a file that does not parse at all
-        (truncated / foreign bytes), a file that half-converts (one
-        column fails mid-load), and a vector width that differs from the
-        configured provider's dim (another provider's index, or a provider
-        switch without a restart of this service). All four are a broken
-        cache: the memory pool is the source of truth and the cold-start
-        reconcile rebuilds the index, so there is nothing worth crashing the
-        daemon for — a raise here would mean the watchdog respawns into the
-        same broken file every 60s (the restart-loop shape the keepalive
-        policy exists to stop, but only a degradable load makes it a
-        non-issue)."""
         if not self._data_file.exists():
             return
         try:
@@ -100,7 +74,6 @@ class MemoryStore:
                 missing = _NPZ_KEYS - set(data.files)
                 if missing:
                     # A torn/foreign file is a broken cache — start empty and let
-                    # the cold-start reconcile rebuild it rather than guess.
                     _log.warning(
                         "[memory_search] %s missing keys %s — starting empty; "
                         "cold-start will rebuild the index",
