@@ -1,12 +1,10 @@
-"""One automatic attempt per intent, with short database transitions."""
-
 import asyncio
-from collections.abc import Awaitable
+from collections.abc import Awaitable, Callable
 
 from base.deploy.maintenance import admission
 from base.log import logger
 from services.entrypoints.im_bridge.outbound.store import IMOutboxStore
-from services.entrypoints.im_bridge.outbound.types import OutboundStatus
+from services.entrypoints.im_bridge.outbound.types import OutboundIntent, OutboundStatus
 from services.entrypoints.im_bridge.types import (
     NETWORK_ERRORS,
     IMAdapter,
@@ -53,9 +51,16 @@ async def _complete_before_cancel[T](work: Awaitable[T]) -> T:
 
 
 class IMOutboxWorker:
-    def __init__(self, store: IMOutboxStore, adapters: dict[str, IMAdapter]) -> None:
+    def __init__(
+        self,
+        store: IMOutboxStore,
+        adapters: dict[str, IMAdapter],
+        *,
+        retry: Callable[[Callable[[], Awaitable[None]]], Awaitable[None]] | None = None,
+    ) -> None:
         self.store = store
         self.adapters = adapters
+        self._retry = retry
         self._serial = asyncio.Lock()
 
     async def run_once(self) -> None:
@@ -86,22 +91,7 @@ class IMOutboxWorker:
             return
         intent_id, attempt, intent = claimed
         adapter = self.adapters[stream[0]]
-        unexpected: Exception | None = None
-        try:
-            await _complete_before_cancel(
-                adapter.send_prepared_outbound(intent.chat_id, intent.prepared)
-            )
-        except SendNotStartedError:
-            status, reason = OutboundStatus.FAILED, "adapter_proved_no_effect"
-        except Exception as exc:
-            status, reason = OutboundStatus.UNCERTAIN, "external_send_ambiguous"
-            logger.warning(
-                "IM outbound send uncertain intent={} class={}", intent_id, type(exc).__name__
-            )
-            if not isinstance(exc, (*NETWORK_ERRORS, SendOutcomeUncertainError)):
-                unexpected = exc
-        else:
-            status, reason = OutboundStatus.SENT, None
+        status, reason, unexpected = await self._deliver(adapter, intent, intent_id)
         try:
             recorded = await _complete_before_cancel(
                 asyncio.to_thread(self.store.finish, intent_id, attempt, status, reason)
@@ -114,3 +104,41 @@ class IMOutboxWorker:
             logger.warning("IM outbound outcome CAS rejected intent={}", intent_id)
         if unexpected is not None:
             raise unexpected
+
+    async def _deliver(
+        self, adapter: IMAdapter, intent: OutboundIntent, intent_id: int
+    ) -> tuple[OutboundStatus, str | None, Exception | None]:
+        async def send_once() -> None:
+            await _complete_before_cancel(
+                adapter.send_prepared_outbound(intent.chat_id, intent.prepared)
+            )
+
+        try:
+            await send_once()
+        except SendNotStartedError:
+            if self._retry is None:
+                return OutboundStatus.FAILED, "adapter_proved_no_effect", None
+            logger.warning("IM outbound send proved no effect intent={}; retrying once", intent_id)
+            try:
+                await self._retry(send_once)
+            except SendNotStartedError:
+                logger.warning("IM outbound send proved no effect after retry intent={}", intent_id)
+                return OutboundStatus.FAILED, "adapter_proved_no_effect", None
+            except Exception as exc:
+                logger.warning(
+                    "IM outbound send uncertain intent={} class={}", intent_id, type(exc).__name__
+                )
+                unexpected = (
+                    None if isinstance(exc, (*NETWORK_ERRORS, SendOutcomeUncertainError)) else exc
+                )
+                return OutboundStatus.UNCERTAIN, "external_send_ambiguous", unexpected
+            return OutboundStatus.SENT, None, None
+        except Exception as exc:
+            logger.warning(
+                "IM outbound send uncertain intent={} class={}", intent_id, type(exc).__name__
+            )
+            unexpected = (
+                None if isinstance(exc, (*NETWORK_ERRORS, SendOutcomeUncertainError)) else exc
+            )
+            return OutboundStatus.UNCERTAIN, "external_send_ambiguous", unexpected
+        return OutboundStatus.SENT, None, None

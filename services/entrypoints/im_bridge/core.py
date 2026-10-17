@@ -100,7 +100,11 @@ class IMBridgeCore(SpawnMenuMixin):
         self.outbound_store = IMOutboxStore(db_pool)
         self.notice_bridge = notice_bridge.NoticeBridge(self, config, db_pool=db_pool)
         self.adapters: dict[str, IMAdapter] = {}
-        self.outbound_worker = IMOutboxWorker(self.outbound_store, self.adapters)
+        self.outbound_worker = IMOutboxWorker(
+            self.outbound_store,
+            self.adapters,
+            retry=partial(push_watchdog.retry_once_after_backoff, config=config),
+        )
         self.chats: dict[tuple[str, str], ChatState] = {}
         self._selection_locks: dict[tuple[str, str], asyncio.Lock] = {}
         self._subscriptions: dict[tuple[str, str], asyncio.Task[Any]] = {}
