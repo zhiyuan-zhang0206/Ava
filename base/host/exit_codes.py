@@ -57,6 +57,8 @@ SERVICES_NOT_READY_EXIT_CODE = 4
 # is neither 3 (the host is still serving) nor 4 (the start sequence completed).
 CODE_BEHIND_MINIMUM_EXIT_CODE = 78
 
+HELPER_CHAIN_BROKEN_EXIT_CODE = 70
+
 
 # ── Leaving the process ───────────────────────────────────────────────────────
 #

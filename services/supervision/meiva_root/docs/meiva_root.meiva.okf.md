@@ -41,23 +41,10 @@ an immutable running release or seal ignored dependency directories.
 
 ## Native ancestry and lifetime
 
-- macOS: `launchd -> signed permissions helper -> meiva-root -> application
-  services`. The helper is the permission ancestor. Root start requires the
-  durable root-stop and helper-shutdown protocols and proves this exact root birth
-  and home. No direct-spawn fallback exists. Helper stop intent survives helper
-  restart; an explicit seed resumes the root.
-- Linux: `systemd/direct caller -> meiva-root -> application services`. There is
-  no permissions helper, and “root” does not mean UID 0. Automatic boot uses
-  only systemd; ordinary convergence registers/enables the exact home unit with
-  its checkout and registry. Registration never recursively starts it. The unit invokes
-  ordinary start with `Type=forking`. Its final successful dispatch tail publishes
-  the exact root PID after checking native birth, home and cgroup. Systemd reads
-  that private PIDFile only after the starter exits successfully, when root has
-  become its child; native stop therefore waits for root closure. The retained
-  child handle prevents early reaping and PID reuse before adoption. PIDFile is
-  an adoption hint, never replacement custody. Failed start cannot become ready.
-  No resident boot wrapper or root runtime deadline exists; interactive start
-  writes no PIDFile. `KillMode=process` preserves independent data-plane siblings.
+Where each platform anchors the tree, the platform lifetime rules, and how a root
+whose permissions helper was replaced retires itself:
+[[services/supervision/meiva_root/docs/ancestry.meiva.okf.md]].
+
 ## Unit intent and recorded failures
 
 Each unit carries one policy fact: its `intent` (`running` | `stopped`) and the

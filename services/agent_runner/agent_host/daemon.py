@@ -82,12 +82,13 @@ from base.deploy.maintenance import admission
 from base.deploy.progress_timeout import AGENT_LEASE_RENEW_INTERVAL_S
 from base.deploy.timing import assert_clock_lattice
 from base.events.live.bus import EventBus, EventBusConfig
+from base.host.exit_codes import HELPER_CHAIN_BROKEN_EXIT_CODE
 from base.host.exit_codes import hard_exit as _hard_exit
 from base.lm.catalog import ModelCatalog
 from base.native_process.code_version import CodeVersion
 from base.native_process.stop_timing import CANCEL_UNWIND_TIMEOUT_S
 from base.packages.composer_commands import CommandCatalog
-from base.sessions.helper_chain_guard import parent_chain_intact
+from base.sessions.helper_chain_guard import helper_marker_pid, parent_chain_intact
 from meiva import skills as meiva_skills
 from meiva.boot import process_clients
 from meiva.sdk_surface import process_context
@@ -688,13 +689,16 @@ async def run(
 
 
 def require_helper_parent_chain() -> None:
-    """Exit a helper-spawned host whose ancestor chain no longer holds the helper."""
     if parent_chain_intact():
         return
-    host_log.warning(
-        "[agent-host] permissions helper parent chain broken, self-terminating for helper respawn"
+    logger.warning(
+        "[agent-host] permissions helper parent chain broken, self-terminating for helper respawn",
+        event="helper_chain_broken",
+        process="agent_host",
+        detail=f"agent host pid {os.getpid()} is no longer under the permissions helper "
+        f"that spawned it (marker pid {helper_marker_pid() or 'absent'})",
     )
-    os._exit(70)
+    os._exit(HELPER_CHAIN_BROKEN_EXIT_CODE)
 
 
 def main() -> None:

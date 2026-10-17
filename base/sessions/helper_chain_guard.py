@@ -9,7 +9,7 @@ import psutil
 
 from base.native_process.child_env import inherited_process_env
 
-_HELPER_PID_ENV = "MEIVA_PERMISSIONS_HELPER_PID"
+HELPER_PID_ENV = "MEIVA_PERMISSIONS_HELPER_PID"
 
 _MAX_ANCESTOR_HOPS = 32
 """Upper bound on the ancestor walk (ppid reads, this process excluded).
@@ -33,6 +33,10 @@ def _read_ppid(pid: int) -> int | None:
         return None
 
 
+def helper_marker_pid() -> str | None:
+    return inherited_process_env().get(HELPER_PID_ENV)
+
+
 def parent_chain_intact(read_ppid: Callable[[int], int | None] = _read_ppid) -> bool:
     """Whether this process is still anchored to the helper that spawned it.
 
@@ -45,7 +49,7 @@ def parent_chain_intact(read_ppid: Callable[[int], int | None] = _read_ppid) -> 
     cannot be read (an intermediate process is gone) breaks the chain.
     `read_ppid` is the link reader; tests pass one that feeds a synthetic chain.
     """
-    raw_helper_pid = inherited_process_env().get(_HELPER_PID_ENV)
+    raw_helper_pid = helper_marker_pid()
     if raw_helper_pid is None:
         return True
     try:
