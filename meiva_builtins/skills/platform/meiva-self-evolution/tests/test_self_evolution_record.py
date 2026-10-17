@@ -113,7 +113,7 @@ def test_broadcast_instruction_is_excluded_from_per_agent_corrections(
         database=database,
         agent_id=7,
         week="2026-08-30",
-        events=[],
+        events=[("llm_usage", {"model": "deepseek", "in_total": 900, "out_total": 200})],
         log_events=[],
         inbounds=[
             {"source": "user", "content": "task prompt", "is_broadcast": False},
@@ -123,7 +123,7 @@ def test_broadcast_instruction_is_excluded_from_per_agent_corrections(
                 "is_broadcast": True,
             },
         ],
-        meta=("user", "completed", "delivered"),
+        meta=("user", "terminated", "delivered"),
     )
 
     assert rec["corrections"] == []
@@ -140,13 +140,13 @@ def test_targeted_correction_remains_a_per_agent_correction(
         database=database,
         agent_id=7,
         week="2026-08-30",
-        events=[],
+        events=[("llm_usage", {"model": "deepseek", "in_total": 900, "out_total": 200})],
         log_events=[],
         inbounds=[
             {"source": "user", "content": "task prompt", "is_broadcast": False},
             {"source": "user", "content": "wrong: use the requested path", "is_broadcast": False},
         ],
-        meta=("user", "completed", "delivered"),
+        meta=("user", "terminated", "delivered"),
     )
 
     assert rec["corrections"] == ["wrong: use the requested path"]

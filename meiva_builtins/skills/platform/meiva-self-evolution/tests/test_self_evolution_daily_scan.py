@@ -81,7 +81,7 @@ def test_render_lists_bad_runs_with_their_signals(daily_scan: Any) -> None:
         ),
     ]
     out = ds.render(records, Path("daily.jsonl"), 1)
-    assert "runs: 2 (ok 1 / fumbled 0 / failed 1)" in out
+    assert "runs: 2 (ok 1 / fumbled 0 / failed 1 / unknown 0)" in out
     assert "ALERT — 1 run(s) worth mining:" in out
     assert "#2 failed" in out
     assert "1 user correction(s)" in out
@@ -219,7 +219,8 @@ def test_render_appends_summary_and_report_pointer_last(daily_scan: Any) -> None
     out = ds.render(records, Path("d.jsonl"), 1, report_path=Path("d.report.txt"))
     lines = out.splitlines()
     assert lines[-2] == (
-        "summary: 3 runs (ok 1 / fumbled 1 / failed 1) | corrections 2 | peer 1 | exec-fail runs 1"
+        "summary: 3 runs (ok 1 / fumbled 1 / failed 1 / unknown 0)"
+        " | corrections 2 | peer 1 | exec-fail runs 1"
     )
     assert lines[-1] == "full report: d.report.txt"
 
@@ -343,3 +344,33 @@ def test_compact_bad_line_pins_every_signal_token(daily_scan: Any) -> None:
     )
     assert ds._compact_bad_line(all_signals) == "  #7 fumbled rep2 c1 pf1 ef2 last cp3 term"
     assert ds._compact_bad_line(_record("failed", agent_id=8)) == "  #8 failed -"
+
+
+def test_render_reports_the_unknown_bucket_with_reasons(daily_scan: Any) -> None:
+    ds = daily_scan
+    records = [
+        _record("ok", agent_id=1),
+        _record("fumbled", agent_id=2, corrections=["fix"]),
+        _record("failed", agent_id=3, exec_failed=4),
+        _record("unknown", agent_id=4, unknown_reason="no_telemetry"),
+    ]
+
+    out = ds.render(records, Path("daily.jsonl"), 1)
+
+    assert "runs: 4 (ok 1 / fumbled 1 / failed 1 / unknown 1 (no_telemetry 1))" in out
+    assert "ALERT — 2 run(s) worth mining:" in out
+    assert "#4 unknown" not in out
+
+
+def test_unknown_runs_do_not_alert_or_enter_the_bad_list(daily_scan: Any) -> None:
+    ds = daily_scan
+    records = [
+        _record("unknown", agent_id=1, unknown_reason="no_telemetry"),
+        _record("unknown", agent_id=2, unknown_reason="no_task"),
+    ]
+
+    out = ds.render(records, Path("daily.jsonl"), 1)
+
+    assert ds.alert_exit(records) == 0
+    assert "ALERT" not in out
+    assert "unknown 2 (no_task 1, no_telemetry 1)" in out

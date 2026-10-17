@@ -48,6 +48,7 @@ from typing import Any, NamedTuple
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import collect
+import label
 from record import task_prompt_of
 
 from base.db import Database
@@ -175,7 +176,7 @@ def alert_exit(
     PR #698, 2026-08-29). Without counts any empty dataset exits 2."""
     if not records:
         return 0 if _is_test_only_window(records, counts) else 2
-    return 2 if any(r["label"] != "ok" for r in records) else 0
+    return 2 if any(r["label"] in label.REGRESSION_LABELS for r in records) else 0
 
 
 class _Totals(NamedTuple):
@@ -185,6 +186,7 @@ class _Totals(NamedTuple):
     corrections: int
     peer: int
     execfail: int
+    unknown_reasons: Counter[str]
 
     @classmethod
     def of(cls, records: list[dict[str, Any]]) -> _Totals:
@@ -193,7 +195,27 @@ class _Totals(NamedTuple):
             sum(len(r["corrections"]) for r in records),
             sum(len(r["peer_feedback"]) for r in records),
             sum(1 for r in records if r["exec_failed"]),
+            Counter(
+                r.get("unknown_reason") or "unspecified" for r in records if r["label"] == "unknown"
+            ),
         )
+
+
+def _label_counts(totals: _Totals) -> str:
+    unknown = totals.by_label["unknown"]
+    detail = ""
+    if unknown:
+        detail = (
+            " ("
+            + ", ".join(
+                f"{reason} {count}" for reason, count in sorted(totals.unknown_reasons.items())
+            )
+            + ")"
+        )
+    return (
+        f"ok {totals.by_label['ok']} / fumbled {totals.by_label['fumbled']} / "
+        f"failed {totals.by_label['failed']} / unknown {unknown}{detail}"
+    )
 
 
 def _builtin_help_line(records: list[dict[str, Any]]) -> str:
@@ -228,7 +250,7 @@ def _header_lines(
     )
     return [
         f"self-evolution daily scan — {datetime.now(UTC).strftime('%Y-%m-%dT%H:%M:%SZ')}",
-        f"window: {days} day(s) | runs: {len(records)} (ok {totals.by_label['ok']} / fumbled {totals.by_label['fumbled']} / failed {totals.by_label['failed']})"
+        f"window: {days} day(s) | runs: {len(records)} ({_label_counts(totals)})"
         f" | corrections {totals.corrections} | peer feedback {totals.peer} | exec-fail runs {totals.execfail}",
         _builtin_help_line(records),
         _subprocess_line(records),
@@ -254,7 +276,7 @@ def _no_runs_line(records: list[dict[str, Any]], counts: dict[str, int] | None) 
 def _bad_run_lines(
     records: list[dict[str, Any]], *, report_path: Path | None, compact_bad: bool
 ) -> list[str]:
-    bad = [r for r in records if r["label"] != "ok"]
+    bad = [r for r in records if r["label"] in label.REGRESSION_LABELS]
     if not bad:
         return []
     sorted_bad = sorted(bad, key=lambda r: r["agent_id"])
@@ -303,8 +325,7 @@ def render(
     lines.extend(_bad_run_lines(records, report_path=report_path, compact_bad=compact_bad))
     if report_path is not None:
         lines.append(
-            f"summary: {len(records)} runs (ok {totals.by_label['ok']} / "
-            f"fumbled {totals.by_label['fumbled']} / failed {totals.by_label['failed']})"
+            f"summary: {len(records)} runs ({_label_counts(totals)})"
             f" | corrections {totals.corrections} | peer {totals.peer} "
             f"| exec-fail runs {totals.execfail}"
         )
