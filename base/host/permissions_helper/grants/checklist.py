@@ -18,6 +18,8 @@ _STATE_LABELS: dict[Grant, str] = {
     Grant.UNKNOWN: "not readable here",
 }
 
+_OPTIONAL_LABEL = "not granted -- not requested by Meiva"
+
 _MODE_LABELS: dict[RequestMode, str] = {
     RequestMode.PROMPT: "a dialog can grant it",
     RequestMode.SYSTEM_SETTINGS: "System Settings only",
@@ -111,7 +113,11 @@ def rows(report: GateReport) -> tuple[ChecklistRow, ...]:
             title=status.item.title,
             group=status.item.group,
             state=status.grant,
-            state_label=_STATE_LABELS[status.grant],
+            state_label=(
+                _STATE_LABELS[status.grant]
+                if status.item.required or status.grant is Grant.GRANTED
+                else _OPTIONAL_LABEL
+            ),
             mode=_MODE_LABELS[status.item.mode],
             why=status.item.why,
             jump=settings_url(status.item),

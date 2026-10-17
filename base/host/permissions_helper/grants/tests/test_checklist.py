@@ -60,3 +60,9 @@ def test_the_payload_counts_only_required_rows() -> None:
     assert payload["required_missing"] == 1
     assert len(payload["items"]) == len(CATALOG)
     assert payload["headline"] == checklist.headline(_report(**{"documents-folder": Grant.DENIED}))
+
+
+def test_a_row_meiva_never_requests_does_not_read_as_an_action() -> None:
+    rows = {row.id: row for row in checklist.rows(_report(**{"full-disk-access": Grant.DENIED}))}
+    assert rows["full-disk-access"].state_label == "not granted -- not requested by Meiva"
+    assert rows["full-disk-access"].blocking is False
