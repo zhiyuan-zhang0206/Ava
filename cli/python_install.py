@@ -176,7 +176,7 @@ def install(
     pinned = ["--python", request]
     # uv sync can recreate an interpreter-drifted venv before checking freshness.
     # Export validates the manifest without synchronizing the target environment.
-    with tempfile.TemporaryDirectory(prefix="ava-python-lock-") as temporary:
+    with tempfile.TemporaryDirectory(prefix="meiva-python-lock-") as temporary:
         requirements = Path(temporary) / "requirements.txt"
         env["UV_DEFAULT_INDEX"] = PYPI_INDEX
         result = run(

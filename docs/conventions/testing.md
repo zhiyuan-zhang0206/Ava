@@ -1,4 +1,4 @@
-# Testing Ava changes
+# Testing Meiva changes
 
 Run tests from a development checkout, separate from any running deployment.
 Select affected test files and their contract consumers; a changed `base/` module
@@ -30,8 +30,8 @@ responsibility for that instance's cleanup. These access fixtures do not start
 the shared resources. Resource URLs and per-test cleanup belong to function
 fixtures; the session holds only requested instances and configuration values.
 Other development
-tools that import application code must set a temporary `AVA_HOME` before doing
-so; unset `AVA_HOME` selects `~/.ava`, which can be a running deployment.
+tools that import application code must set a temporary `MEIVA_HOME` before doing
+so; unset `MEIVA_HOME` selects `~/.meiva`, which can be a running deployment.
 See [development setup](dev-setup.md#development-in-a-worktree).
 
 ## Python
@@ -47,7 +47,7 @@ unit contracts, run
 `.venv/bin/pytest --test-environment=static`. This scoped process refuses native
 Postgres/Redis and accepts its owned component directories, descendant paths
 and node IDs; other tests keep the native default. CI runs it in the required
-backend static job and excludes the same paths from native shards. See [fixture environments](../../tests/fixtures/docs/static-environment.ava.okf.md).
+backend static job and excludes the same paths from native shards. See [fixture environments](../../tests/fixtures/docs/static-environment.meiva.okf.md).
 
 Check changed Python files with pyright:
 

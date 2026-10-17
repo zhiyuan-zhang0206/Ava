@@ -52,7 +52,7 @@ def _mark_current(home: Path) -> None:
 
 # The fixed document the S3 dashboard render is stubbed to: these converge
 # tests stay offline (no plugin imports, no registry database).
-_STUB_RENDER = '{"title": "Ava Ops", "panels": []}\n'
+_STUB_RENDER = '{"title": "Meiva Ops", "panels": []}\n'
 
 
 @pytest.fixture(autouse=True)
@@ -75,13 +75,13 @@ def test_render_warns_when_a_value_diverges_from_the_env_file(
     home = tmp_path / "home"
     home.mkdir()
     (home / ".env").write_text(
-        "AVA_TELEMETRY_TEMPO_QUERY_URL=http://127.0.0.1:3200\n", encoding="utf-8"
+        "MEIVA_TELEMETRY_TEMPO_QUERY_URL=http://127.0.0.1:3200\n", encoding="utf-8"
     )
     lgtm_native.warn_env_file_divergence(
-        home, {"AVA_TELEMETRY_TEMPO_QUERY_URL": "http://10.55.0.9:3200"}
+        home, {"MEIVA_TELEMETRY_TEMPO_QUERY_URL": "http://10.55.0.9:3200"}
     )
     err = capsys.readouterr().err
-    assert "AVA_TELEMETRY_TEMPO_QUERY_URL resolved to http://10.55.0.9:3200" in err
+    assert "MEIVA_TELEMETRY_TEMPO_QUERY_URL resolved to http://10.55.0.9:3200" in err
     assert "inherited environment value is in effect" in err
 
 
@@ -91,15 +91,15 @@ def test_render_value_divergence_check_stays_quiet_when_consistent(
     home = tmp_path / "home"
     home.mkdir()
     (home / ".env").write_text(
-        "AVA_TELEMETRY_TEMPO_QUERY_URL=http://127.0.0.1:3200\nAVA_LGTM_LOKI_PORT=53100\n",
+        "MEIVA_TELEMETRY_TEMPO_QUERY_URL=http://127.0.0.1:3200\nMEIVA_LGTM_LOKI_PORT=53100\n",
         encoding="utf-8",
     )
     lgtm_native.warn_env_file_divergence(
         home,
         {
-            "AVA_TELEMETRY_TEMPO_QUERY_URL": "http://127.0.0.1:3200",
-            "AVA_LGTM_LOKI_PORT": "53100",
-            "AVA_LGTM_GRAFANA_PORT": "53003",  # undeclared in the file: skipped
+            "MEIVA_TELEMETRY_TEMPO_QUERY_URL": "http://127.0.0.1:3200",
+            "MEIVA_LGTM_LOKI_PORT": "53100",
+            "MEIVA_LGTM_GRAFANA_PORT": "53003",  # undeclared in the file: skipped
         },
     )
     assert capsys.readouterr().err == ""
@@ -218,7 +218,7 @@ def _assert_rendered_config_dir_layout(config_dir: Path) -> None:
     assert (config_dir / "provisioning/alerting/contact.yml").is_file()
     assert (config_dir / "provisioning/alerting/rules.yml").is_file()
     # The dashboard is generated from the render path, not copied (S3).
-    assert (config_dir / "provisioning/dashboards/ava-ops-main.json").read_text(
+    assert (config_dir / "provisioning/dashboards/meiva-ops-main.json").read_text(
         encoding="utf-8"
     ) == _STUB_RENDER
 
@@ -290,7 +290,7 @@ def test_ensure_renders_configs_with_native_paths_and_loopback(
     loki = (config_dir / "loki.yaml").read_text(encoding="utf-8")
     prometheus = (config_dir / "prometheus.yml").read_text(encoding="utf-8")
     loki_config = yaml.safe_load(loki)
-    assert "{{AVA_HOME}}" not in loki
+    assert "{{MEIVA_HOME}}" not in loki
     _assert_rendered_config_dir_layout(config_dir)
     _assert_loki_renders_native_paths_and_loopback(loki, loki_config, home)
     _assert_prometheus_scrapes_loopback_backends(yaml.safe_load(prometheus))
@@ -311,8 +311,8 @@ def test_prometheus_too_old_samples_rule_uses_window_delta_in_fast_group() -> No
             encoding="utf-8"
         )
     )
-    group = next(g for g in rules["groups"] if g["name"] == "ava-ops")
-    rule = next(r for r in group["rules"] if r["uid"] == "ava-ops-prom-too-old-samples")
+    group = next(g for g in rules["groups"] if g["name"] == "meiva-ops")
+    rule = next(r for r in group["rules"] if r["uid"] == "meiva-ops-prom-too-old-samples")
     expr = next(d["model"]["expr"] for d in rule["data"] if d.get("datasourceUid") == "prometheus")
     assert "prometheus_tsdb_too_old_samples_total" in expr
     assert "increase(" in expr
@@ -418,7 +418,7 @@ def test_native_step_does_not_touch_an_unmarked_home(
     machine_config_484 = ConfigBoot()
     ctx = lgtm_native.ConvergeCtx(
         repo=_repo(),
-        ava_home=tmp_path / "home",
+        meiva_home=tmp_path / "home",
         roles=frozenset({"gateway"}),
         services=frozenset(lgtm_native.BACKENDS),
         config=machine_config_484,
@@ -441,7 +441,7 @@ def test_native_step_does_not_touch_an_unmarked_home(
 
     lgtm_native.ensure_lgtm_native_step(ctx)
 
-    assert not ctx.ava_home.exists()
+    assert not ctx.meiva_home.exists()
 
 
 def test_render_provisioning_generates_the_dashboard_from_the_render_path(
@@ -449,13 +449,13 @@ def test_render_provisioning_generates_the_dashboard_from_the_render_path(
     operator_database: Callable[[], Any],
     operator_pipeline: Callable[[], EventPipeline],
 ) -> None:
-    """Task #3697 S3: ava-ops-main.json in the rendered tree comes from the
+    """Task #3697 S3: meiva-ops-main.json in the rendered tree comes from the
     metric-registry render, not from the checkout copy — and its hash is
     recorded in the protection sidecar."""
     repo = tmp_path / "repo"
     source = repo / "deploy/lgtm/config/grafana/provisioning"
     (source / "dashboards").mkdir(parents=True)
-    (source / "dashboards/ava-ops-main.json").write_text('{"checkout": true}\n', encoding="utf-8")
+    (source / "dashboards/meiva-ops-main.json").write_text('{"checkout": true}\n', encoding="utf-8")
     (source / "dashboards/dashboards.yml").write_text("yaml\n", encoding="utf-8")
     (source / "datasources").mkdir()
     (source / "datasources/datasources.yml").write_text("datasource\n", encoding="utf-8")
@@ -466,10 +466,10 @@ def test_render_provisioning_generates_the_dashboard_from_the_render_path(
     )
 
     dest_dir = native / "config/provisioning"
-    assert (dest_dir / "dashboards/ava-ops-main.json").read_text(encoding="utf-8") == _STUB_RENDER
+    assert (dest_dir / "dashboards/meiva-ops-main.json").read_text(encoding="utf-8") == _STUB_RENDER
     assert (dest_dir / "dashboards/dashboards.yml").read_text(encoding="utf-8") == "yaml\n"
     hashes = json.loads((native / "config/provisioning-hashes.json").read_text(encoding="utf-8"))
-    assert "dashboards/ava-ops-main.json" in hashes
+    assert "dashboards/meiva-ops-main.json" in hashes
 
 
 def test_render_provisioning_keeps_the_generated_dashboard_without_its_source(
@@ -482,14 +482,14 @@ def test_render_provisioning_keeps_the_generated_dashboard_without_its_source(
     repo = tmp_path / "repo"
     source = repo / "deploy/lgtm/config/grafana/provisioning"
     (source / "dashboards").mkdir(parents=True)
-    checkout_copy = source / "dashboards/ava-ops-main.json"
+    checkout_copy = source / "dashboards/meiva-ops-main.json"
     checkout_copy.write_text('{"checkout": true}\n', encoding="utf-8")
     native = tmp_path / "native"
 
     lgtm_native.render_provisioning(
         repo, native, database_factory=operator_database, producer=operator_pipeline
     )
-    dest = native / "config/provisioning/dashboards/ava-ops-main.json"
+    dest = native / "config/provisioning/dashboards/meiva-ops-main.json"
     assert dest.is_file()
 
     checkout_copy.unlink()
@@ -512,7 +512,7 @@ def test_render_provisioning_rewrites_the_dashboard_only_on_change(
     lgtm_native.render_provisioning(
         repo, native, database_factory=operator_database, producer=operator_pipeline
     )
-    dest = native / "config/provisioning/dashboards/ava-ops-main.json"
+    dest = native / "config/provisioning/dashboards/meiva-ops-main.json"
     before = dest.stat().st_mtime_ns
 
     lgtm_native.render_provisioning(
@@ -527,7 +527,7 @@ def test_render_provisioning_replaces_a_dashboard_written_outside_converge(
     operator_database: Callable[[], Any],
     operator_pipeline: Callable[[], EventPipeline],
 ) -> None:
-    """The stale-dashboard shape: `ava lgtm render --force` wrote the file without recording its
+    """The stale-dashboard shape: `meiva lgtm render --force` wrote the file without recording its
     hash, so the sidecar named older content. The next rollout's render must still land."""
     repo = tmp_path / "repo"
     (repo / "deploy/lgtm/config/grafana/provisioning").mkdir(parents=True)
@@ -535,7 +535,7 @@ def test_render_provisioning_replaces_a_dashboard_written_outside_converge(
     lgtm_native.render_provisioning(
         repo, native, database_factory=operator_database, producer=operator_pipeline
     )
-    dest = native / "config/provisioning/dashboards/ava-ops-main.json"
+    dest = native / "config/provisioning/dashboards/meiva-ops-main.json"
     dest.write_text('{"panels": ["rendered by hand on 10-02"]}\n', encoding="utf-8")
 
     lgtm_native.render_provisioning(
@@ -545,7 +545,8 @@ def test_render_provisioning_replaces_a_dashboard_written_outside_converge(
     assert dest.read_text(encoding="utf-8") == _STUB_RENDER
     hashes = json.loads((native / "config/provisioning-hashes.json").read_text(encoding="utf-8"))
     assert (
-        hashes["dashboards/ava-ops-main.json"] == hashlib.sha256(_STUB_RENDER.encode()).hexdigest()
+        hashes["dashboards/meiva-ops-main.json"]
+        == hashlib.sha256(_STUB_RENDER.encode()).hexdigest()
     )
 
 
@@ -562,7 +563,7 @@ def test_render_provisioning_dashboard_failure_keeps_the_previous_file(
     lgtm_native.render_provisioning(
         repo, native, database_factory=operator_database, producer=emitted_events.producer
     )
-    dest = native / "config/provisioning/dashboards/ava-ops-main.json"
+    dest = native / "config/provisioning/dashboards/meiva-ops-main.json"
     before = dest.read_text(encoding="utf-8")
 
     def broken_render(_db: object, _repo_only: bool = False) -> tuple[str, tuple[str, ...]]:

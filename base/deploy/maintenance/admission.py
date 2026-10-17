@@ -67,7 +67,7 @@ def quiesced() -> bool:
     Background loops consult this before doing database work: while a unit is
     being stopped or held stopped, ownership renewals, turn scans, page
     reconciliation and pool borrows must wait — the window's whole point is
-    that the unit stops doing database work until `ava start` releases the
+    that the unit stops doing database work until `meiva start` releases the
     hold. `preparing`/`draining` read as NOT quiesced (in-flight continuations
     must still run). An unreadable owner reads as quiesced: the same
     refuse-new-work posture `snapshot` enforces by raising, held by background
@@ -102,7 +102,7 @@ def require_start_allowed(operation: pause_owner.PauseOwnerSnapshot | None) -> N
         or not current.matches(operation.holder, operation.acquired_at)
     ):
         raise RuntimeError(
-            "service startup cannot release maintenance without the authorized ava start boundary"
+            "service startup cannot release maintenance without the authorized meiva start boundary"
         )
 
 

@@ -2,13 +2,13 @@
 
 ## Why this exists
 
-The user holds flat-rate subscriptions to ChatGPT, Gemini, and Claude. Ava's own
+The user holds flat-rate subscriptions to ChatGPT, Gemini, and Claude. Meiva's own
 backbone plus metered APIs cost credits per call, while those subscriptions are
-already paid and sit idle to Ava. Driving the web UIs in the user's logged-in
+already paid and sit idle to Meiva. Driving the web UIs in the user's logged-in
 Chrome (the `chrome` MCP, same browser the `web-sources` adapters use) closes
 the gap two ways:
 
-- **No API credits** for things Ava can do anyway (Q&A) — use the flat-rate web seat.
+- **No API credits** for things Meiva can do anyway (Q&A) — use the flat-rate web seat.
 - **Web-only capabilities** that have no API at all — Deep Research, image/video.
 
 The browser is the universal adapter; each capability is a self-contained CLI
@@ -18,7 +18,7 @@ pointed at AI apps instead of content sources.
 
 ## Shape
 
-Root skill `ava_builtins/skills/integrations/web-ai/` with a shared driver `scripts/webchat.py` (open a
+Root skill `meiva_builtins/skills/integrations/web-ai/` with a shared driver `scripts/webchat.py` (open a
 fresh chat, type the prompt, submit, wait for the streamed answer to finish —
 completion judged by text-stability so a drifted stop-button selector still
 converges). Children add it to `sys.path` and import it, then add their specifics.
@@ -43,14 +43,14 @@ selection.
 - [x] `console` — ask one question to ChatGPT + Gemini + Claude, collect all
   answers for cross-reading. (PR1)
 - [x] `deep-research` — Gemini / ChatGPT Deep Research: start the job, poll back
-  via `ava.watcher.at` until the cited report is ready, save it. (PR2)
+  via `meiva.watcher.at` until the cited report is ready, save it. (PR2)
 - [x] `media` — image (ChatGPT / Gemini) and video (Gemini) generation:
   submit the prompt, wait for the asset, download it to Downloads. (PR3)
 - [x] file attachments (`console --file`) + conversation follow-ups
   (`console --continue-url`, `deep-research reply`).
 - [x] `perplexity` as a console site — user call: its search is the best.
   Landed (the corp-gateway 502 blocking it was resolved); live in
-  `ava_builtins/skills/integrations/web-ai/scripts/_sites.py`.
+  `meiva_builtins/skills/integrations/web-ai/scripts/_sites.py`.
 
 Future candidates (not committed): Grok DeepSearch, AI Studio.
 

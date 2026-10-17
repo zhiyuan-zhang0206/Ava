@@ -11,7 +11,7 @@ __all__ = ["guard_health_port_gate"]
 
 @pytest.fixture
 def guard_health_port_gate(request: pytest.FixtureRequest, monkeypatch: pytest.MonkeyPatch) -> None:
-    """Autouse safety net: `ava start`'s pre-bind health-port gate finds nothing.
+    """Autouse safety net: `meiva start`'s pre-bind health-port gate finds nothing.
 
     The gate dials this unit's daemon `/healthz` ports before launching (issue
     #977). It does NOT reach the prod defaults (the health ports of the fixed table): the env block in

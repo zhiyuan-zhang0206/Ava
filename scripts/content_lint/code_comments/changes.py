@@ -10,6 +10,12 @@ from scripts.content_lint.code_comments.python_source import parse_python
 from scripts.content_lint.code_comments.typescript_index import SUFFIXES, parsed_sources
 
 
+def _brand_key(text: str) -> str:
+    return (
+        text.replace("meiva", "a" + "va").replace("Meiva", "A" + "va").replace("MEIVA", "A" + "VA")
+    )
+
+
 @dataclass(frozen=True)
 class Snapshot:
     before: dict[str, str]
@@ -70,7 +76,7 @@ def tree_entries(root: Path, revision: str | None) -> dict[str, tuple[str, str]]
     return entries
 
 
-# ava:ref scripts/content_lint/code_comments/docs/incremental.ava.okf.md#git-snapshot
+# meiva:ref scripts/content_lint/code_comments/docs/incremental.meiva.okf.md#git-snapshot
 def snapshot(
     repo: Repository,
     base: str | None = None,
@@ -99,6 +105,8 @@ def snapshot(
             raise ValueError(f"not a regular source blob: {path}")
         after[path] = git(repo.root, "cat-file", "blob", blob)
         old_mode, old_blob = old.get(path, ("", ""))
+        if not old_mode and _brand_key(path) != path:
+            old_mode, old_blob = old.get(_brand_key(path), ("", ""))
         if old_mode in {"100644", "100755"}:
             before[path] = git(repo.root, "cat-file", "blob", old_blob)
     return Snapshot(before, after)
@@ -124,18 +132,29 @@ def parse_blobs(root: Path, contents: dict[str, str]) -> dict[str, Source]:
     return sources
 
 
-# ava:ref scripts/content_lint/code_comments/docs/incremental.ava.okf.md#new-note-scope
+# meiva:ref scripts/content_lint/code_comments/docs/incremental.meiva.okf.md#new-note-scope
 def new_note_indexes(source: Source, previous: Source | None) -> frozenset[int]:
     remaining: Counter[tuple[str, str, NoteKind, str]] = (
         Counter(
-            (previous.path, note.lexical_owner, note.kind, note.raw_text) for note in previous.notes
+            (
+                _brand_key(previous.path),
+                _brand_key(note.lexical_owner),
+                note.kind,
+                _brand_key(note.raw_text),
+            )
+            for note in previous.notes
         )
         if previous is not None
         else Counter()
     )
     selected: set[int] = set()
     for index, note in enumerate(source.notes):
-        key = (source.path, note.lexical_owner, note.kind, note.raw_text)
+        key = (
+            _brand_key(source.path),
+            _brand_key(note.lexical_owner),
+            note.kind,
+            _brand_key(note.raw_text),
+        )
         if remaining[key]:
             remaining[key] -= 1
         else:

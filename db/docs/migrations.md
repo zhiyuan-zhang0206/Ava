@@ -3,30 +3,30 @@
 The model itself — baseline vs post-baseline deltas, the applied **set** keyed by
 migration name, the immutability of merged migrations, expand-contract for lossy
 operations, and the bidirectional `assert_schema_current` check — is in
-[migration model](../../base/deploy/schema/docs/migrations.ava.okf.md). What follows is how you operate it.
+[migration model](../../base/deploy/schema/docs/migrations.meiva.okf.md). What follows is how you operate it.
 
 ## Applying migrations
 
 There is no standalone migrate command. Pending migrations are applied as a step of
-`ava start` (early in boot, after Postgres is up and before the schema-current assertion), so
+`meiva start` (early in boot, after Postgres is up and before the schema-current assertion), so
 any restart that crosses a schema change catches the DB up automatically.
 
 Production upgrades run `python -m cli.fleet_update down` and `up` (attended, with
 user approval; see the runbook's "Updating a networked cluster in source mode"):
-the gateway's cold `ava start` in the `up` half applies the pending migrations.
-For a manual catch-up, run `ava start` directly, which applies pending
+the gateway's cold `meiva start` in the `up` half applies the pending migrations.
+For a manual catch-up, run `meiva start` directly, which applies pending
 migrations on the way up.
 
 ## Checkpoint dependency upgrades
 
 Fresh install alone invokes `PostgresSaver.setup()`; later starts only read and
-verify the complete checkpoint migration set after applying Ava migrations.
+verify the complete checkpoint migration set after applying Meiva migrations.
 `base/cluster/provision.py` freezes the adopted upstream baseline at version 9.
-An upstream dependency that adds version N must carry that DDL in an Ava
-timestamp migration and declare it in `CHECKPOINT_SCHEMA_AVA_MIGRATIONS`.
+An upstream dependency that adds version N must carry that DDL in an Meiva
+timestamp migration and declare it in `CHECKPOINT_SCHEMA_MEIVA_MIGRATIONS`.
 Do not advance the frozen baseline instead. The migration must remain idempotent
 when fresh install already created both the effects and the upstream migration
-row, while recording its Ava migration name. Real-Postgres verification covers
+row, while recording its Meiva migration name. Real-Postgres verification covers
 existing N-1 upgrade and fresh N birth followed by first-start registration;
 the drift gate refuses unmirrored dependency changes before DB mutation.
 

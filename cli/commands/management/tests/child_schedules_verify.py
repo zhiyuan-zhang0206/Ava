@@ -2,7 +2,7 @@ import json
 import sys
 from pathlib import Path
 
-from base.paths import ava_home
+from base.paths import meiva_home
 from cli.commands.management.schedules_verify import _read_schedule_rows, cmd_schedules_verify
 from cli.database import (
     open_operator_database,
@@ -30,7 +30,7 @@ def _check_rows(rows_file: str) -> None:
         open_database=open_operator_database,
         gateway_url_reader=lambda: command.config.view.gateway.gateway_url,
     )
-    producer = operator_event_pipeline(database, machine=command.machine, home=ava_home())
+    producer = operator_event_pipeline(database, machine=command.machine, home=meiva_home())
     try:
         sys.exit(
             cmd_schedules_verify(

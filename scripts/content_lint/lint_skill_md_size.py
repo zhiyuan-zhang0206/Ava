@@ -13,21 +13,21 @@ from base.packages.text_budget import LengthBudget, Level, Unit, evaluate
 
 _REPO_ROOT = Path(__file__).resolve().parent.parent.parent
 
-# ava:ref scripts/content_lint/docs/content_lint.ava.okf.md#skill-md-size-ceiling
+# meiva:ref scripts/content_lint/docs/content_lint.meiva.okf.md#skill-md-size-ceiling
 _TRANSITIONAL_FLOOR = 250
 _HARD_CEILING = 300
 
 _SKILL_MD_GLOBS = [
-    "ava_builtins/skills/*/*/SKILL.md",
-    "ava_builtins/skills/*/*/*/SKILL.md",
-    "ava_builtins/plugins/*/skills/SKILL.md",
-    "ava_builtins/plugins/*/skills/*/SKILL.md",
+    "meiva_builtins/skills/*/*/SKILL.md",
+    "meiva_builtins/skills/*/*/*/SKILL.md",
+    "meiva_builtins/plugins/*/skills/SKILL.md",
+    "meiva_builtins/plugins/*/skills/*/SKILL.md",
     ".agents/skills/*/SKILL.md",
     ".agents/skills/*/*/SKILL.md",
 ]
 
 
-# ava:ref scripts/content_lint/docs/content_lint.ava.okf.md#skill-md-size-ceiling
+# meiva:ref scripts/content_lint/docs/content_lint.meiva.okf.md#skill-md-size-ceiling
 def _skill_md_files(root: Path) -> list[Path]:
     files: list[Path] = []
     for pattern in _SKILL_MD_GLOBS:
@@ -35,7 +35,7 @@ def _skill_md_files(root: Path) -> list[Path]:
     return sorted({p.resolve() for p in files})
 
 
-# ava:ref scripts/content_lint/docs/content_lint.ava.okf.md#skill-md-size-ceiling
+# meiva:ref scripts/content_lint/docs/content_lint.meiva.okf.md#skill-md-size-ceiling
 def main(_argv: list[str] | None = None, *, repo_root: Path | None = None) -> int:
     root = repo_root or _REPO_ROOT
     budget = LengthBudget(Unit.LINES, hard=_HARD_CEILING, soft=_TRANSITIONAL_FLOOR)

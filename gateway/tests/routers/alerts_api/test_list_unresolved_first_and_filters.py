@@ -248,7 +248,7 @@ def test_stream_endpoint_is_sse(monkeypatch: pytest.MonkeyPatch) -> None:
         assert resp.headers["cache-control"] == "no-cache"
         assert resp.headers["x-accel-buffering"] == "no"
     kwargs = seen["kwargs"]
-    assert kwargs["channel"] == "ava:alerts"
+    assert kwargs["channel"] == "meiva:alerts"
     assert kwargs["broadcast"] is True
 
 

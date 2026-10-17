@@ -75,7 +75,7 @@ def test_scheduler_shares_captured_image_with_health_and_lazy_log_database(
         "postgresql://scheduler-owner.invalid/live",
     ]
     assert gates[0] is gates[1]
-    assert gates[0].application_name() == "ava:pg_backup:v7"
+    assert gates[0].application_name() == "meiva:pg_backup:v7"
     count.assert_called_once_with(tmp_path, image.sha)
     exit_process.assert_called_once_with(0)
 
@@ -124,7 +124,7 @@ def test_worker_shares_one_gate_with_work_log_and_scratch_url(
     assert logging.call_args.kwargs["image"] is image
     gate = create.call_args_list[0].kwargs["gate"]
     assert all(call.kwargs["gate"] is gate for call in create.call_args_list)
-    assert gate.application_name() == "ava:pg-backup-worker:v7"
+    assert gate.application_name() == "meiva:pg-backup-worker:v7"
     count.assert_called_once_with(tmp_path, image.sha)
     configs = [call.args[0] for call in create.call_args_list]
     assert [config.db_url for config in configs] == [

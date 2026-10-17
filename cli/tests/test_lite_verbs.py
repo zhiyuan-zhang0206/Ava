@@ -18,12 +18,12 @@ def _dispatched_fetch_env(monkeypatch: pytest.MonkeyPatch, argv: list[str]) -> s
     seen: dict[str, str | None] = {}
 
     def handler(_args: types.SimpleNamespace) -> int:
-        seen["fetch"] = os.environ.get("AVA_CONFIG_FETCH")
+        seen["fetch"] = os.environ.get("MEIVA_CONFIG_FETCH")
         return 0
 
     parser = types.SimpleNamespace(parse_args=lambda _argv: types.SimpleNamespace(func=handler))
     monkeypatch.setattr(parsers, "build_parser", _ignoring_retention(lambda: parser))
-    monkeypatch.delenv("AVA_CONFIG_FETCH", raising=False)
+    monkeypatch.delenv("MEIVA_CONFIG_FETCH", raising=False)
     assert cli_main.main(argv) == 0
     return seen["fetch"]
 
@@ -56,7 +56,7 @@ def test_only_completed_cold_stop_can_skip_gateway_fetch(
     hold: MaintenanceHold | None,
     expected: str | None,
 ) -> None:
-    monkeypatch.setitem(os.environ, "AVA_HOME", str(tmp_path))
+    monkeypatch.setitem(os.environ, "MEIVA_HOME", str(tmp_path))
     journal = tmp_path / "run" / "deploy-pause-owner.json"
     journal.parent.mkdir()
     payload: dict[str, object] = {
@@ -75,7 +75,7 @@ def test_only_completed_cold_stop_can_skip_gateway_fetch(
 def test_corrupt_stop_journal_is_not_offline_success(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    monkeypatch.setitem(os.environ, "AVA_HOME", str(tmp_path))
+    monkeypatch.setitem(os.environ, "MEIVA_HOME", str(tmp_path))
     journal = tmp_path / "run" / "deploy-pause-owner.json"
     journal.parent.mkdir()
     journal.write_text('{"state":"paused","maintenance":')
@@ -112,16 +112,16 @@ def test_lite_cli_uses_its_local_runner_api_token(
     from base.host.db_authority import unit
     from base.host.db_authority.model import AuthorityRefusedError
 
-    monkeypatch.setenv("AVA_HOME", str(tmp_path))
-    monkeypatch.delenv("AVA_LAUNCHER_PROFILE", raising=False)
-    monkeypatch.delenv("AVA_PROCESS_PROFILE", raising=False)
-    monkeypatch.setenv("AVA_CONFIG_FETCH", "")
-    monkeypatch.delenv("AVA_CONFIG_FETCH", raising=False)
+    monkeypatch.setenv("MEIVA_HOME", str(tmp_path))
+    monkeypatch.delenv("MEIVA_LAUNCHER_PROFILE", raising=False)
+    monkeypatch.delenv("MEIVA_PROCESS_PROFILE", raising=False)
+    monkeypatch.setenv("MEIVA_CONFIG_FETCH", "")
+    monkeypatch.delenv("MEIVA_CONFIG_FETCH", raising=False)
     if explicit is None:
-        monkeypatch.setenv("AVA_API_TOKEN", "")
-        monkeypatch.delenv("AVA_API_TOKEN", raising=False)
+        monkeypatch.setenv("MEIVA_API_TOKEN", "")
+        monkeypatch.delenv("MEIVA_API_TOKEN", raising=False)
     else:
-        monkeypatch.setenv("AVA_API_TOKEN", explicit)
+        monkeypatch.setenv("MEIVA_API_TOKEN", explicit)
     monkeypatch.setattr(bootstrap, "config_source_is_local", lambda: False)
 
     def consume(home: Path) -> types.SimpleNamespace:
@@ -159,13 +159,13 @@ def test_lite_cli_in_agent_profile_does_not_consume_operator_capability(
 ) -> None:
     from base.host.db_authority import unit
 
-    monkeypatch.setenv("AVA_HOME", str(tmp_path))
-    monkeypatch.setenv("AVA_PROCESS_PROFILE", "agent")
-    monkeypatch.setenv("AVA_LAUNCHER_PROFILE", "")
-    monkeypatch.delenv("AVA_LAUNCHER_PROFILE", raising=False)
-    monkeypatch.delenv("AVA_API_TOKEN", raising=False)
-    monkeypatch.setenv("AVA_CONFIG_FETCH", "")
-    monkeypatch.delenv("AVA_CONFIG_FETCH", raising=False)
+    monkeypatch.setenv("MEIVA_HOME", str(tmp_path))
+    monkeypatch.setenv("MEIVA_PROCESS_PROFILE", "agent")
+    monkeypatch.setenv("MEIVA_LAUNCHER_PROFILE", "")
+    monkeypatch.delenv("MEIVA_LAUNCHER_PROFILE", raising=False)
+    monkeypatch.delenv("MEIVA_API_TOKEN", raising=False)
+    monkeypatch.setenv("MEIVA_CONFIG_FETCH", "")
+    monkeypatch.delenv("MEIVA_CONFIG_FETCH", raising=False)
     monkeypatch.setattr(bootstrap, "config_source_is_local", lambda: False)
 
     def no_operator_capability(_home: Path) -> None:
@@ -183,7 +183,7 @@ def test_lite_cli_in_agent_profile_does_not_consume_operator_capability(
     monkeypatch.setattr(parsers, "build_parser", _ignoring_retention(lambda: parser))
 
     assert cli_main.main(["agents"]) == 0
-    assert "AVA_API_TOKEN" not in os.environ
+    assert "MEIVA_API_TOKEN" not in os.environ
 
 
 def _ignoring_retention[T](callback: Callable[[], T]) -> Callable[..., T]:

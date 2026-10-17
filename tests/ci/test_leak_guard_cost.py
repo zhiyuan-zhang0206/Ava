@@ -251,8 +251,8 @@ def _the_rule(file: str, root: str = ROOT) -> bool:
 
 
 FILES = [
-    "/work/repo/ava/self.py",
-    "/work/repo/ava/sub/deep/er/module.py",
+    "/work/repo/meiva/self.py",
+    "/work/repo/meiva/sub/deep/er/module.py",
     "/work/repo/conftest.py",
     "/work/repo/tests/fixtures/leak_guard.py",
     "/work/repo/base/telemetry/tests/test_x.py",

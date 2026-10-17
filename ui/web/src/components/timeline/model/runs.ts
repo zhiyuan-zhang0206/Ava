@@ -54,7 +54,7 @@ const EN_TURN: TurnTranslator = (key, values) => {
 // Which side of the "is this an inbound message a human would read" line an
 // inbound_chat source falls on. Mirrors the envelope source model
 // (base/agents/messages/envelope.py): `agent:N` is another agent talking;
-// `external_agent:<subject>[:<instance>]` is an agent outside Ava that declared
+// `external_agent:<subject>[:<instance>]` is an agent outside Meiva that declared
 // itself (distinct from the user); `user` / `ui:page:*` is a person (a page post
 // "reads as User"); everything else — `system`, `system:*`, `watcher:N`,
 // `shell:N`, `schedule:N`, `self:update` — is a framework-generated wake-up /
@@ -68,7 +68,7 @@ export function inboundKind(source: string | null): "human" | "agent" | "externa
 }
 
 
-// primary: the human-readable backbone — Ava's text replies and human inbound
+// primary: the human-readable backbone — Meiva's text replies and human inbound
 //   messages. Always rendered; never folded into a turn.
 // secondary: foldable chatter — thinking / code / output, inter-agent messages,
 //   system inbound, compaction, the system prompt, and framework note markers.
@@ -156,7 +156,7 @@ export interface TurnSummary {
   // committed field yet, e.g. streaming) contributes nothing. No text
   // scanning, here or in the per-block chip (`summarizeCode`): scanning the
   // payload could surface a phantom method from a comment or string like
-  // `# see ava.files.read(...)` in a header the user may never expand to
+  // `# see meiva.files.read(...)` in a header the user may never expand to
   // check.
   // How long the agent actually WORKED in this turn: thinkingMs + codeMs +
   // execMs. Not wall-clock across the turn — a turn is a maximal run of

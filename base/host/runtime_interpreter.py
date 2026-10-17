@@ -122,7 +122,7 @@ def loaded_runtime() -> tuple[Path, Path, Path, bool]:
     """Read actual imports without importing Settings or a higher application layer."""
     # base/host/runtime_interpreter.py -> the import root (checkout or site-packages).
     package = Path(__file__).resolve().parents[2]
-    for name in ("base", "cli", "ava", "agent", "gateway", "services"):
+    for name in ("base", "cli", "meiva", "agent", "gateway", "services"):
         module = sys.modules.get(name)
         if (
             module is not None

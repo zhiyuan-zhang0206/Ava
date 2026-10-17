@@ -18,15 +18,15 @@ from base.paths import logs_dir
 
 MANAGED_LOG_NAME = re.compile(
     r"(?:"
-    r"(?P<agent>ava-agent-[0-9]+\.out\.log)"
-    r"|(?P<shell>ava-agent-[0-9]+-shell-[0-9]+-[a-z][a-z0-9-]*\.(?:out|host)\.log)"
+    r"(?P<agent>meiva-agent-[0-9]+\.out\.log)"
+    r"|(?P<shell>meiva-agent-[0-9]+-shell-[0-9]+-[a-z][a-z0-9-]*\.(?:out|host)\.log)"
     r"|(?P<service>[a-z][a-z0-9_-]*)\.[0-9]{4}-[0-9]{2}-[0-9]{2}_"
     r"[0-9]{2}-[0-9]{2}-[0-9]{2}_[0-9]+\.log"
-    r"|(?P<svcout>ava-[a-z][a-z0-9_-]*\.out\.log)"
+    r"|(?P<svcout>meiva-[a-z][a-z0-9_-]*\.out\.log)"
     r"|(?P<rotlog>loki\.log\.[0-9]{4}-[0-9]{2}-[0-9]{2}"
     r"|prometheus\.log\.[0-9]{4}-[0-9]{2}-[0-9]{2}"
     r"|dbg-stdout\.log\.[0-9]{4}-[0-9]{2}-[0-9]{2})"
-    r"|(?P<rotout>ava-[a-z][a-z0-9_-]*\.out\.log\.[0-9]{4}-[0-9]{2}-[0-9]{2})"
+    r"|(?P<rotout>meiva-[a-z][a-z0-9_-]*\.out\.log\.[0-9]{4}-[0-9]{2}-[0-9]{2})"
     r"|(?P<snapshot>agent-[0-9]+-[0-9]{8}T[0-9]+\.png)"
     r")"
 )
@@ -89,12 +89,12 @@ def log_family(match: re.Match[str]) -> str:
     service = match["service"]
     if service is None:
         service_stdout = match["svcout"] or match["rotout"]
-        service = service_stdout.removeprefix("ava-").split(".out.log", 1)[0]
+        service = service_stdout.removeprefix("meiva-").split(".out.log", 1)[0]
     return _service_family(service)
 
 
 def _maintenance_roots(logs_path: Path) -> tuple[Path, ...]:
-    """Top-level roots maintained for an `$AVA_HOME/logs` path."""
+    """Top-level roots maintained for an `$MEIVA_HOME/logs` path."""
     if logs_path.name != "logs":
         return (logs_path,)
     return (logs_path, logs_path.parent / "lgtm" / "native" / "logs")

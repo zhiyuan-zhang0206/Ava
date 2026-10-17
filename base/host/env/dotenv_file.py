@@ -151,14 +151,14 @@ def snapshot_env(path: Path, *, keep: int = ENV_BACKUP_KEEP) -> Path | None:
 
 
 def unit_home() -> Path:
-    """$AVA_HOME directory, created if missing.
+    """$MEIVA_HOME directory, created if missing.
 
-    Routed through `base.paths.home.resolve_ava_home()`: callers run before
-    `load_ava_env` pins `AVA_HOME` into the environment (the Settings-lite
+    Routed through `base.paths.home.resolve_meiva_home()`: callers run before
+    `load_meiva_env` pins `MEIVA_HOME` into the environment (the Settings-lite
     maintenance commands defer it — see `base.host.env.bootstrap._serve_flag`)."""
-    from base.paths.home import resolve_ava_home
+    from base.paths.home import resolve_meiva_home
 
-    root = resolve_ava_home()
+    root = resolve_meiva_home()
     root.mkdir(parents=True, exist_ok=True)
     return root
 
@@ -226,7 +226,7 @@ def upsert_env(
 
     A byte-identical result is not a write: when every line this call would render
     matches the file on disk, the call returns having changed nothing — no snapshot,
-    no rewrite, no audit record. Converge runs this on every `ava start`, and a
+    no rewrite, no audit record. Converge runs this on every `meiva start`, and a
     boot-retry storm re-runs that start per attempt; without the skip, each retry
     manufactured an `old == new` audit record (task #3637).
     The skip compares rendered BYTES, not decoded values: a quoted or oddly-spaced
@@ -234,7 +234,7 @@ def upsert_env(
 
     Cross-process exclusive for the whole read-modify-write, like every other door
     onto this file (`env_lock_path`). This one is the busiest: converge runs it on
-    **every `ava start`** (the redis URL, the app port, the pooler's DB URL), which
+    **every `meiva start`** (the redis URL, the app port, the pooler's DB URL), which
     is exactly the writer that interleaves with the gateway's config PUT and the ops
     daemon's `config_write` arm.
     """

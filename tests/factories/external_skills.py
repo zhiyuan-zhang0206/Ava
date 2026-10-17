@@ -13,11 +13,11 @@ from base.sessions.tests.refuse_helper import refuse_helper
 from base.telemetry import EventPipeline
 from cli.commands.converge.spec import ConvergeCtx
 
-SKILL = "operating-ava-cluster"
+SKILL = "operating-meiva-cluster"
 
 
 def skill_source(repo: Path, body: str = "operator v1\n") -> Path:
-    source = repo / "ava_builtins" / "skills" / "platform" / SKILL
+    source = repo / "meiva_builtins" / "skills" / "platform" / SKILL
     (source / "references").mkdir(parents=True)
     (source / "SKILL.md").write_text(body)
     (source / "references" / "recovery.md").write_text("recover\n")
@@ -33,11 +33,11 @@ def skill_ctx(
     command_config_machine: tuple[ConfigBoot, MachineIdentity],
 ) -> ConvergeCtx:
     config, machine = command_config_machine
-    ava_home = tmp_path / "ava-home"
-    (ava_home / "configs").mkdir(parents=True)
+    meiva_home = tmp_path / "meiva-home"
+    (meiva_home / "configs").mkdir(parents=True)
     return ConvergeCtx(
         repo=repo,
-        ava_home=ava_home,
+        meiva_home=meiva_home,
         roles=None,
         config=config,
         machine=machine,
@@ -69,6 +69,6 @@ def read_ledger(context: ConvergeCtx) -> dict[str, Any]:
     return cast(
         dict[str, Any],
         json.loads(
-            (context.ava_home / "configs" / "external-agent-skills" / "codex.json").read_text()
+            (context.meiva_home / "configs" / "external-agent-skills" / "codex.json").read_text()
         ),
     )

@@ -25,9 +25,9 @@ def runner_exec_env(db_conn: psycopg.Connection[Any], monkeypatch: pytest.Monkey
     assert_test_db_url(url, context="real agent exec fixture")
     password = "impersonation-test-runner-password"  # noqa: S105 — private test DB only
     runner_url = grant_runner_login(
-        url, owner="ava_citest", login="ava_g0_runner", password=password
+        url, owner="meiva_citest", login="meiva_g0_runner", password=password
     )
     # The real exec child builds its environment from the live os.environ (agent/graph/exec/_subprocess.py),
     # not from the Settings singleton, so the raw-env seam (not monkeypatch.setenv) is the one that reaches it.
-    monkeypatch.setitem(os.environ, "AVA_DB_URL", runner_url)
-    assert db_conn.info.user != "ava_g0_runner"
+    monkeypatch.setitem(os.environ, "MEIVA_DB_URL", runner_url)
+    assert db_conn.info.user != "meiva_g0_runner"

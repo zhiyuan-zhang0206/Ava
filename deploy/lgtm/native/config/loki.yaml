@@ -11,7 +11,7 @@ server:
   # launchd-captured log); warn keeps it small without hiding errors
   # (task #1978).
   log_level: warn
-  # Listen host comes from the AVA_LGTM_LISTEN_HOST setting (default loopback);
+  # Listen host comes from the MEIVA_LGTM_LISTEN_HOST setting (default loopback);
   # the external-migration form widens it to 0.0.0.0 or a tailnet IP. The
   # brace-free token keeps this a valid YAML plain scalar — a {{...}} token
   # would parse as a flow mapping — and renders byte-identically to the
@@ -96,7 +96,7 @@ distributor:
       - agent_id
       - event_name
 
-# Retention: the viewer ingests Ava session stdout (~20MB/day new + ~130MB
+# Retention: the viewer ingests Meiva session stdout (~20MB/day new + ~130MB
 # one-time backfill of the existing logs dir) plus the OTLP event stream.
 # Without a cap the filesystem store grows linearly forever. The 84h global
 # window is pinned to the query and rollup floor in base/telemetry/loki_index_labels.py.

@@ -18,7 +18,7 @@ class ModelCatalogUnavailableError(RuntimeError):
     pass
 
 
-# ava:ref gateway/http/docs/model-catalog.ava.okf.md#retained-catalog-failure
+# meiva:ref gateway/http/docs/model-catalog.meiva.okf.md#retained-catalog-failure
 def load_model_catalog(build: Callable[[], ModelCatalog]) -> ModelCatalog | CatalogLoadFailure:
     try:
         return build()

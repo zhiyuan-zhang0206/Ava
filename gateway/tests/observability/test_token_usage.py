@@ -199,7 +199,7 @@ def test_checkpoint_read_failure_returns_zero(
 ) -> None:
     """A checkpoint store read failure is tolerated to 0/0 — the SSE token_usage
     push refreshes the counter later (contrast the /messages data endpoint's
-    503). Make Ava's explicitly constructed saver adapter fail at its tuple read.
+    503). Make Meiva's explicitly constructed saver adapter fail at its tuple read.
     max_input_tokens still reflects the cluster default model (read from
     config_overlay before the checkpoint access)."""
     from typing import NoReturn

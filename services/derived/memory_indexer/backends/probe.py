@@ -9,7 +9,7 @@ retry loop. Two outcomes matter:
   daemon exits immediately with an actionable message instead of a 30s
   retry storm followed by an opaque crash and a 503 search surface.
 - `fatal=False` — the backend is not reachable right now, but might be
-  booting (`ava start` spawns the storage services just before the
+  booting (`meiva start` spawns the storage services just before the
   indexer). The message is logged as a warning and appended to the retry
   loop's terminal error, so the operator still gets the actionable fix
   ("what is missing / how to fix / which backend to switch to") when the
@@ -57,9 +57,9 @@ def _probe_numpy(database: Database, uri_reader: Callable[[], str]) -> ProbeResu
             message=(
                 f"memory_search service is not reachable at {uri} "
                 f"({type(exc).__name__}: {exc}) — the memory-search session may "
-                "still be booting (`ava start` spawns it before the indexer); if "
+                "still be booting (`meiva start` spawns it before the indexer); if "
                 "it stays down, ensure the session is not disabled, or set "
-                "AVA_MEMORY_SEARCH_BACKEND=numpy (default)"
+                "MEIVA_MEMORY_SEARCH_BACKEND=numpy (default)"
             )
         )
 
@@ -96,13 +96,13 @@ def _probe_pgvector(database: Database, uri_reader: Callable[[], str]) -> ProbeR
         return ProbeResult(
             message=(
                 "pgvector is not installed in the cluster Postgres — the vendored "
-                "runtime Postgres (~/.ava/runtime/pg/<ver>) injects the pinned "
-                "pgvector files at converge time and `ava start` pre-creates the "
+                "runtime Postgres (~/.meiva/runtime/pg/<ver>) injects the pinned "
+                "pgvector files at converge time and `meiva start` pre-creates the "
                 "extension, so a missing extension means this Postgres is not the "
-                "converged vendored tree: re-run `ava start` (converge + inject), or "
+                "converged vendored tree: re-run `meiva start` (converge + inject), or "
                 "install the pgvector package into a brew/apt Postgres, or provision "
                 "pgvector on a remote-managed plane. pgvector stays fallback-only "
-                "(numpy is the default) — use AVA_MEMORY_SEARCH_BACKEND=numpy"
+                "(numpy is the default) — use MEIVA_MEMORY_SEARCH_BACKEND=numpy"
             ),
             fatal=True,
         )
@@ -110,9 +110,9 @@ def _probe_pgvector(database: Database, uri_reader: Callable[[], str]) -> ProbeR
         return ProbeResult(
             message=(
                 f"cluster Postgres is not reachable ({type(exc).__name__}: {exc}) — it "
-                "may still be booting (`ava start` starts it before the indexer); if it "
+                "may still be booting (`meiva start` starts it before the indexer); if it "
                 "stays down, check the cluster DB session, or set "
-                "AVA_MEMORY_SEARCH_BACKEND=numpy"
+                "MEIVA_MEMORY_SEARCH_BACKEND=numpy"
             )
         )
     except Exception as exc:
@@ -120,7 +120,7 @@ def _probe_pgvector(database: Database, uri_reader: Callable[[], str]) -> ProbeR
             message=(
                 f"pgvector preflight could not run against the cluster Postgres "
                 f"({type(exc).__name__}: {exc}) — pgvector is fallback-only / v2; set "
-                "AVA_MEMORY_SEARCH_BACKEND=numpy"
+                "MEIVA_MEMORY_SEARCH_BACKEND=numpy"
             ),
             fatal=True,
         )
@@ -136,14 +136,14 @@ def probe_backend(name: str, database: Database, *, uri_reader: Callable[[], str
     """The preflight verdict for backend `name`.
 
     Unknown names are a fatal verdict too (with the fix): an unrecognized
-    `AVA_MEMORY_SEARCH_BACKEND` must not silently fall back to numpy."""
+    `MEIVA_MEMORY_SEARCH_BACKEND` must not silently fall back to numpy."""
     probe = PROBES.get(name)
     if probe is None:
         known = ", ".join(sorted(PROBES))
         return ProbeResult(
             message=(
                 f"unknown memory search backend {name!r} (known: {known}) — "
-                f"set AVA_MEMORY_SEARCH_BACKEND to one of: {known}"
+                f"set MEIVA_MEMORY_SEARCH_BACKEND to one of: {known}"
             ),
             fatal=True,
         )

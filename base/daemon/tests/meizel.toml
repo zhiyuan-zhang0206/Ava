@@ -6,8 +6,8 @@ exports = ["fakes.py", "health_support.py"]
 "test_http_transport.py" = ["_transport_import_child.py"]
 
 [debt.env-patch]
-"test_endpoints.py#monkeypatch.setenv os.environ.AVA_HOME" = 1
-"test_endpoints_golden.py#monkeypatch.setenv os.environ.AVA_HOME" = 1
+"test_endpoints.py#monkeypatch.setenv os.environ.MEIVA_HOME" = 1
+"test_endpoints_golden.py#monkeypatch.setenv os.environ.MEIVA_HOME" = 1
 
 [debt.first-party-patch]
 "fakes.py#monkeypatch.setattr base.daemon.endpoints.ServiceEndpoints.from_settings" = 1
@@ -17,7 +17,7 @@ exports = ["fakes.py", "health_support.py"]
 "test_endpoints_golden.py#monkeypatch.setattr base.config.settings.services.ops_health_port" = 1
 "test_health.py#monkeypatch.setattr base.daemon.health.time.monotonic" = 2
 "test_health_probe.py#monkeypatch.setattr base.config.settings.services.agent_host_health_port" = 1
-"test_health_probe.py#monkeypatch.setattr base.daemon.health.ava_home" = 1
+"test_health_probe.py#monkeypatch.setattr base.daemon.health.meiva_home" = 1
 "test_health_probe.py#monkeypatch.setattr base.daemon.health.probe_daemon_identity" = 3
 "test_health_probe.py#monkeypatch.setattr base.daemon.health.probe_unit_home" = 3
 "test_health_probe.py#monkeypatch.setattr base.daemon.health.urllib.request.urlopen" = 1

@@ -1,4 +1,4 @@
-// ava:ref ui/web/src/docs/frontend-state/shared-context.ava.okf.md#refresh-ownership
+// meiva:ref ui/web/src/docs/frontend-state/shared-context.meiva.okf.md#refresh-ownership
 "use client";
 
 import { useQuery } from "@tanstack/react-query";

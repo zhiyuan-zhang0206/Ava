@@ -7,7 +7,6 @@ import pytest
 from httpx2 import Response
 from pydantic import model_validator
 
-from ava_builtins.plugins.ava_fleet.default_config import FleetConfig
 from base.cluster.machine import MachineIdentity
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from base.config.service_read import ConfigAuthority
@@ -15,6 +14,7 @@ from base.host.system.tests.fake_commands import fake_host
 from base.packages import plugin_config_admin as plugin_config
 from base.packages import plugin_config_images
 from base.packages.plugin_config_images import PluginConfigOwner
+from meiva_builtins.plugins.meiva_fleet.default_config import FleetConfig
 from ops.host_config import config_write_op
 from ops.rpc_schemas import ConfigWriteOpResult
 from tests.fixtures.gateway_config import gateway_test_client
@@ -32,7 +32,7 @@ class ValidatedFleetConfig(FleetConfig):
 def owned_image(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     image = tmp_path / "config.json"
     image.write_text(ValidatedFleetConfig().model_dump_json())
-    owner = PluginConfigOwner("ava_fleet", ValidatedFleetConfig, image)
+    owner = PluginConfigOwner("meiva_fleet", ValidatedFleetConfig, image)
     monkeypatch.setattr(plugin_config, "config_owners", lambda: {owner.name: owner})
     return image
 

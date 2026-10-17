@@ -37,7 +37,7 @@ router = APIRouter()
 
 @dataclass(frozen=True)
 class MemorySearchInputs:
-    # ava:ref gateway/routers/docs/memory.ava.okf.md#bounded-search
+    # meiva:ref gateway/routers/docs/memory.meiva.okf.md#bounded-search
     embedding_backend: Callable[[], str]
     backend: Callable[[], str]
     uri: Callable[[], str]
@@ -51,13 +51,13 @@ class MemorySearchInputs:
 
 
 def build_search_gate(max_concurrency: int) -> asyncio.Semaphore:
-    # ava:ref gateway/routers/docs/memory.ava.okf.md#bounded-search
+    # meiva:ref gateway/routers/docs/memory.meiva.okf.md#bounded-search
     return asyncio.Semaphore(max_concurrency)
 
 
 @asynccontextmanager
 async def _bounded_semaphore(semaphore: asyncio.Semaphore, budget: float) -> AsyncGenerator[None]:
-    # ava:ref gateway/routers/docs/memory.ava.okf.md#bounded-search
+    # meiva:ref gateway/routers/docs/memory.meiva.okf.md#bounded-search
     try:
         await asyncio.wait_for(semaphore.acquire(), timeout=budget)
     except TimeoutError as exc:
@@ -72,7 +72,7 @@ _RESERVED_NAMES = frozenset({"index.md", "log.md", "MEMORY.md"})
 
 
 def _build_memory_graph(memory_root: Path) -> MemoryGraphResponse:
-    # ava:ref gateway/routers/docs/memory.ava.okf.md#graph-projection
+    # meiva:ref gateway/routers/docs/memory.meiva.okf.md#graph-projection
     if not memory_root.is_dir():
         return MemoryGraphResponse(nodes=[], edges=[], warnings=["memory_root not found"])
 
@@ -113,7 +113,7 @@ def _parent_folder_id(folder_id: str) -> str:
 def _folder_structure(
     nodes: list[MemoryGraphNode], memory_root: Path
 ) -> tuple[list[MemoryGraphNode], list[MemoryGraphEdge]]:
-    # ava:ref gateway/routers/docs/memory.ava.okf.md#graph-projection
+    # meiva:ref gateway/routers/docs/memory.meiva.okf.md#graph-projection
     if not nodes:
         return [], []
 
@@ -136,8 +136,8 @@ def _folder_structure(
             tags=[],
             primary_tag="",
             timestamp=None,
-            ava_agent=None,
-            ava_machine=None,
+            meiva_agent=None,
+            meiva_machine=None,
         )
         for folder in sorted(folders)
     ]
@@ -165,13 +165,13 @@ def _node_from_note(note: Note) -> MemoryGraphNode:
         tags=tags,
         primary_tag=primary_tag(tags),
         timestamp=note.timestamp,
-        ava_agent=note.ava_agent,
-        ava_machine=note.ava_machine,
+        meiva_agent=note.meiva_agent,
+        meiva_machine=note.meiva_machine,
     )
 
 
 def primary_tag(tags: list[str]) -> str:
-    # ava:ref gateway/routers/docs/memory.ava.okf.md#graph-projection
+    # meiva:ref gateway/routers/docs/memory.meiva.okf.md#graph-projection
     domain = [t for t in tags if not t.startswith("type/")]
     if domain:
         return domain[0]
@@ -187,7 +187,7 @@ async def _backend_topk(
     fingerprint: str,
     inputs: MemorySearchInputs,
 ) -> list[ChunkHit]:
-    # ava:ref gateway/routers/docs/memory.ava.okf.md#bounded-search
+    # meiva:ref gateway/routers/docs/memory.meiva.okf.md#bounded-search
     from services.derived.memory_indexer.backends import factory
 
     return await factory.get_backend(
@@ -216,7 +216,7 @@ async def _backend_topk(
         "the request's `deadline_seconds` when that is shorter).\n"
         "\n"
         "Paths are relative to memory pool root (settings.services.memory_root, e.g.\n"
-        "`~/.ava/memory/`); the SDK caller prepends `ava.memory.PATH` to\n"
+        "`~/.meiva/memory/`); the SDK caller prepends `meiva.memory.PATH` to\n"
         "reconstruct the absolute path. fs-neutral so gateway fs (e.g.\n"
         "/Users/x) and agent-runner fs (/home/y) being different still works.\n"
         "\n"
@@ -232,7 +232,7 @@ async def _backend_topk(
     ),
 )
 async def post_memory_search(request: Request, body: MemorySearchRequest) -> MemorySearchResponse:
-    # ava:ref gateway/routers/docs/memory.ava.okf.md#bounded-search
+    # meiva:ref gateway/routers/docs/memory.meiva.okf.md#bounded-search
     from services.derived.memory_indexer.embeddings import factory as _embedding_factory
 
     inputs: MemorySearchInputs = request.app.state.memory_search_inputs
@@ -271,7 +271,7 @@ async def post_memory_search(request: Request, body: MemorySearchRequest) -> Mem
 
 
 def _candidate_count(inputs: MemorySearchInputs, body: MemorySearchRequest) -> int:
-    # ava:ref gateway/routers/docs/memory.ava.okf.md#bounded-search
+    # meiva:ref gateway/routers/docs/memory.meiva.okf.md#bounded-search
     return inputs.dedup_candidates() if body.purpose == "dedup" else inputs.rerank_candidates()
 
 
@@ -306,7 +306,7 @@ async def _vector_candidates(
     deadline: float,
     count: int,
 ) -> list[ChunkHit]:
-    # ava:ref gateway/routers/docs/memory.ava.okf.md#bounded-search
+    # meiva:ref gateway/routers/docs/memory.meiva.okf.md#bounded-search
     from services.derived.memory_indexer.embeddings.base import EmbeddingAPIError
 
     gate = request.app.state.memory_search_gate
@@ -357,7 +357,7 @@ async def _vector_candidates(
     ),
 )
 async def post_memory_refresh(request: Request) -> MemoryRefreshResponse:
-    # ava:ref gateway/routers/docs/memory.ava.okf.md#refresh-owner
+    # meiva:ref gateway/routers/docs/memory.meiva.okf.md#refresh-owner
     from base.deploy.git import memory_repo
 
     config = request.app.state.gateway_process.config.view.general
@@ -371,7 +371,7 @@ async def post_memory_refresh(request: Request) -> MemoryRefreshResponse:
 
 
 def _pool_revision(root: Path) -> str | None:
-    # ava:ref gateway/routers/docs/memory.ava.okf.md#graph-revision
+    # meiva:ref gateway/routers/docs/memory.meiva.okf.md#graph-revision
     try:
         out = subprocess.run(  # noqa: S603
             ["git", "-C", str(root), "rev-parse", "HEAD"],
@@ -388,7 +388,7 @@ def _pool_revision(root: Path) -> str | None:
 
 
 class MemoryGraphCache:
-    # ava:ref gateway/routers/docs/memory.ava.okf.md#graph-revision
+    # meiva:ref gateway/routers/docs/memory.meiva.okf.md#graph-revision
     def __init__(self, *, max_entries: int = 4) -> None:
         self._max_entries = max_entries
         self._graphs: OrderedDict[tuple[str, str], MemoryGraphResponse] = OrderedDict()
@@ -414,7 +414,7 @@ class MemoryGraphCache:
     description=("Return concept notes and cross-links from the gateway memory bundle."),
 )
 def get_memory_graph(request: Request) -> MemoryGraphResponse:
-    # ava:ref gateway/routers/docs/memory.ava.okf.md#graph-revision
+    # meiva:ref gateway/routers/docs/memory.meiva.okf.md#graph-revision
     root = request.app.state.gateway_config.memory_root
     revision = _pool_revision(root)
     if revision is None:
@@ -438,7 +438,7 @@ def get_memory_graph(request: Request) -> MemoryGraphResponse:
     ),
 )
 def get_memory_note(request: Request, path: str) -> MemoryNoteResponse:
-    # ava:ref gateway/routers/docs/memory.ava.okf.md#note-containment
+    # meiva:ref gateway/routers/docs/memory.meiva.okf.md#note-containment
     root = request.app.state.gateway_config.memory_root.resolve()
     rel = Path(path)
     if rel.is_absolute() or rel.suffix != ".md":
@@ -461,8 +461,8 @@ def get_memory_note(request: Request, path: str) -> MemoryNoteResponse:
         description=note.description,
         tags=list(note.tags),
         timestamp=note.timestamp,
-        ava_agent=note.ava_agent,
-        ava_machine=note.ava_machine,
+        meiva_agent=note.meiva_agent,
+        meiva_machine=note.meiva_machine,
         body=note.body,
     )
 

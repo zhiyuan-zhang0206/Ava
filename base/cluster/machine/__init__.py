@@ -4,7 +4,7 @@ Composition roots supply four independent lazy readers. Each MachineIdentity
 caches its own name, capabilities, reachable host and optional description;
 resetting one owner never changes another. The startup factory is defined in
 base.cluster.machine.boot and consumes the root's ConfigBoot without reading
-any fields at construction. SDK consumers use the machine in their AvaContext.
+any fields at construction. SDK consumers use the machine in their MeivaContext.
 
 Machine names are stable deployment labels, never inferred from hostnames.
 Capabilities are independently declared gateway, agent-runner and
@@ -45,7 +45,7 @@ __all__ = [
 # Postgres/Redis + the HTTP gateway; `agent-runner` runs agent processes;
 # `observability-station` owns the native LGTM observability backends. A
 # single-box deployment carries gateway+agent-runner. Each capability is
-# declared independently by its own boolean flag (`AVA_MACHINE_SERVE_*`, unset =
+# declared independently by its own boolean flag (`MEIVA_MACHINE_SERVE_*`, unset =
 # off); `roles_from_flags` collapses the booleans into the frozenset.
 # The DB still encodes the set as a TEXT[] of capability tokens. `MachineRole`
 # is one capability; `MachineRoles` is the set MachineIdentity.role() returns.
@@ -61,11 +61,11 @@ _VALID_CAPABILITIES: frozenset[str] = frozenset(
 
 
 class MachineNameMissing(RuntimeError):  # noqa: N818 — "state description" naming, same as AgentNotFound / IndexerUnavailable
-    """`AVA_MACHINE_NAME` is not set — multi-machine setup is incomplete."""
+    """`MEIVA_MACHINE_NAME` is not set — multi-machine setup is incomplete."""
 
 
 class MachineRoleMissing(RuntimeError):  # noqa: N818
-    """This host serves no capability (every AVA_MACHINE_SERVE_* flag off or unset) — multi-machine setup is incomplete."""
+    """This host serves no capability (every MEIVA_MACHINE_SERVE_* flag off or unset) — multi-machine setup is incomplete."""
 
 
 class MachineRoleInvalid(ValueError):  # noqa: N818
@@ -170,8 +170,8 @@ def format_capabilities(
 
     "gateway + agent-runner" on a single-box host, "gateway" or "agent-runner"
     for a split node, "observability-station" for a pure station, "none" when
-    a host serves none. Single source for the `ava status` serves: line and
-    the `ava cluster status` role column, which both display the capability
+    a host serves none. Single source for the `meiva status` serves: line and
+    the `meiva cluster status` role column, which both display the capability
     set (there is no single categorical role field on the wire — see
     MachineStatus / ClusterStatus). The third flag defaults False so a caller
     that only knows the two original flags keeps the pre-station label.
@@ -194,8 +194,8 @@ def validate_machine_name(value: str) -> str:
     if env:
         return env
     raise MachineNameMissing(
-        "machine name not set — `ava init --machine-name <name>` records it for a new "
-        "home; for an initialized one set AVA_MACHINE_NAME in its `.env` (e.g. host-a / host-b)."
+        "machine name not set — `meiva init --machine-name <name>` records it for a new "
+        "home; for an initialized one set MEIVA_MACHINE_NAME in its `.env` (e.g. host-a / host-b)."
     )
 
 
@@ -218,8 +218,8 @@ def roles_from_flags(
     if not caps:
         raise MachineRoleMissing(
             "this host serves neither gateway, agent-runner, nor observability-station — set "
-            "AVA_MACHINE_SERVE_GATEWAY and/or AVA_MACHINE_SERVE_AGENT_RUNNER and/or "
-            "AVA_MACHINE_SERVE_OBSERVABILITY_STATION (or run `ava init --serve-gateway` / "
+            "MEIVA_MACHINE_SERVE_GATEWAY and/or MEIVA_MACHINE_SERVE_AGENT_RUNNER and/or "
+            "MEIVA_MACHINE_SERVE_OBSERVABILITY_STATION (or run `meiva init --serve-gateway` / "
             "`--serve-agent-runner` / `--serve-observability-station` on a new home; a single "
             "box serves both gateway and agent-runner)."
         )
@@ -236,7 +236,7 @@ def gateway_api_base(gateway_url: str) -> str:
 
     One role-blind resolver for every client-side caller (the agent SDK, the
     monitor wrapper, the runner, the watchdog, and dev bootstrap): the configured
-    gateway address (`AVA_GATEWAY_URL`), normalized, else raise. A gateway-capable host
+    gateway address (`MEIVA_GATEWAY_URL`), normalized, else raise. A gateway-capable host
     resolves the *same* configured address as any other caller — on a single box that
     address is the box's own reachable address, so its agent-runner half dials its
     gateway half the same way a remote runner would. No localhost shortcut: single-box
@@ -248,8 +248,8 @@ def gateway_api_base(gateway_url: str) -> str:
     url = _normalize_gateway_url(gateway_url)
     if url is None:
         raise GatewayApiBaseMissing(
-            "gateway_url unset — `ava start` writes it on an agent-runner; "
-            "or `export AVA_GATEWAY_URL=<gateway url>` (a gateway host sets its "
+            "gateway_url unset — `meiva start` writes it on an agent-runner; "
+            "or `export MEIVA_GATEWAY_URL=<gateway url>` (a gateway host sets its "
             "own reachable URL there too)."
         )
     return url
@@ -290,7 +290,7 @@ def gateway_bearer(access: GatewayAccess) -> str:
 
     Raises:
         GatewayApiTokenMissing: an agent- or runner-profile process has no
-            `AVA_API_TOKEN`, or the process holds neither a token nor the
+            `MEIVA_API_TOKEN`, or the process holds neither a token nor the
             human secret (the API always authenticates).
     """
     return resolve_gateway_bearer(
@@ -316,17 +316,17 @@ def resolve_gateway_bearer(
     profile = profile_reader()
     if profile in _TOKEN_ONLY_PROFILES and not no_tokens_reader():
         raise GatewayApiTokenMissing(
-            f"this {profile}-profile process carries no machine API token (AVA_API_TOKEN) "
+            f"this {profile}-profile process carries no machine API token (MEIVA_API_TOKEN) "
             "while the cluster API is authenticated. The root "
             "launcher delivers the active write generation's token to every agent host and "
             "runner service it starts, and such a process never presents the human secret "
-            "instead: restart the cluster's services (`ava stop`, then `ava start`) so the "
+            "instead: restart the cluster's services (`meiva stop`, then `meiva start`) so the "
             "launcher delivers it."
         )
     if not secret:
         raise GatewayApiTokenMissing(
-            "this process holds no gateway credential: no machine API token (AVA_API_TOKEN) "
-            "and no AVA_CLUSTER_SECRET, and the cluster API always authenticates. Run it from "
+            "this process holds no gateway credential: no machine API token (MEIVA_API_TOKEN) "
+            "and no MEIVA_CLUSTER_SECRET, and the cluster API always authenticates. Run it from "
             "the gateway home, or from a unit whose database capability is installed"
         )
     return secret
@@ -364,9 +364,9 @@ def daemon_acceptance(access: GatewayAccess) -> frozenset[str]:
     """
     from base.host.db_authority.api import acceptance, token_digest
     from base.host.db_authority.unit import load_unit_capability
-    from base.paths import ava_home
+    from base.paths import meiva_home
 
-    home = ava_home().resolve()
+    home = meiva_home().resolve()
     capability = load_unit_capability(home)
     if capability is not None:
         api = capability.api

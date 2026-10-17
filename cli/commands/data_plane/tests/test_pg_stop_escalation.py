@@ -62,7 +62,7 @@ def _private_home(
     home = tmp_path / "home"
     home.mkdir()
     port = free_port()
-    monkeypatch.setenv("AVA_HOME", str(home))
+    monkeypatch.setenv("MEIVA_HOME", str(home))
     private = dataclasses.replace(
         config,
         db_url=f"postgresql://test@127.0.0.1:{port}/test",

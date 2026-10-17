@@ -16,7 +16,7 @@
     "test_status_cluster.py",
     "test_understanding_build_endpoints.py",
 ]
-"ava.tests.fixtures.sdk" = [
+"meiva.tests.fixtures.sdk" = [
     ".",
 ]
 "services.backup.artifact.tests.passphrase" = [

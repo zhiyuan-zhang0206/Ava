@@ -127,7 +127,7 @@ def test_sidebar_force_expires_takeover_and_agent_resumes(
     exhaust_ack_budget: bool,
     database_gate: ProcessDbGate,
 ) -> None:
-    local_machine = validate_machine_name(os.environ["AVA_MACHINE_NAME"])
+    local_machine = validate_machine_name(os.environ["MEIVA_MACHINE_NAME"])
     reset_record()
     page = e2e_env.page
     agent_id = e2e_env.agent_id

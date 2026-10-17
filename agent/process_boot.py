@@ -3,13 +3,13 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
-import ava
-from ava.sdk_surface import sdk_disable
+import meiva
 from base.cluster.machine import MachineIdentity
 from base.db import Database
 from base.host.env.agent_slices import ModelOverrides, agent_setting
 from base.log import logger
 from base.paths import workspace_dir
+from meiva.sdk_surface import sdk_disable
 
 
 def apply_per_agent_sdk_disable(*, default_reader: Callable[[str, str], Any]) -> None:
@@ -31,12 +31,12 @@ def apply_per_agent_eval_isolation(*, default_reader: Callable[[str, str], Any])
         disabled.append("understand")
     sdk_disable.apply_sdk_disable(disabled)
 
-    agent_id = int(os.environ["AVA_AGENT_ID"])
+    agent_id = int(os.environ["MEIVA_AGENT_ID"])
     isolated_pool = workspace_dir(agent_id) / "memory-pool"
     isolated_pool.mkdir(parents=True, exist_ok=True)
-    memory = getattr(ava, "memory", None)
+    memory = getattr(meiva, "memory", None)
     if memory is not None:
-        memory.PATH = ava.const(isolated_pool, doc=memory.PATH.__doc__)
+        memory.PATH = meiva.const(isolated_pool, doc=memory.PATH.__doc__)
         memory.search = _isolated_memory_search
 
 
@@ -57,7 +57,7 @@ def land_cluster_extensions(db: Database) -> None:
     try:
         with db.connect() as conn:
             result = materialize.materialize_skills(
-                conn, dest_root=paths.skills_dir(paths.ava_home())
+                conn, dest_root=paths.skills_dir(paths.meiva_home())
             )
     except Exception as exc:
         logger.warning(

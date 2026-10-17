@@ -1,9 +1,9 @@
-"""Idempotent host convergence for the ava lifecycle.
+"""Idempotent host convergence for the meiva lifecycle.
 
-Bring a machine to the host-level state the current code expects: `ava` on
-PATH, ~/.local/bin on PATH, the $AVA_HOME dir skeleton, fresh plugin config
+Bring a machine to the host-level state the current code expects: `meiva` on
+PATH, ~/.local/bin on PATH, the $MEIVA_HOME dir skeleton, fresh plugin config
 images. Run by development `cmd_start`, and
-standalone via `ava converge`. Verified release startup consumes prepared assets
+standalone via `meiva converge`. Verified release startup consumes prepared assets
 without mutating its image.
 """
 
@@ -28,7 +28,7 @@ from base.host.converge.browser_deps import browser_deps_notice, browser_deps_wa
 from base.host.converge.screen_capture import clear_status, write_status
 from base.host.system.hostport import Host
 from base.host.system.probes import browser_incapability
-from base.paths.home import is_default_home, resolve_ava_home
+from base.paths.home import is_default_home, resolve_meiva_home
 from base.telemetry import EventPipeline
 from base.telemetry.lgtm_local import BACKENDS
 from cli.commands.converge.brew_pin import ensure_brew_pin
@@ -57,10 +57,10 @@ from cli.commands.converge.steps import (
     PATH_END as PATH_END,
 )
 from cli.commands.converge.steps import (
-    ensure_ava_home_dirs,
-    ensure_ava_on_path,
     ensure_local_bin_on_path,
     ensure_local_git_hooks,
+    ensure_meiva_home_dirs,
+    ensure_meiva_on_path,
     ensure_pg_binaries_step,
 )
 from cli.commands.converge.steps import (
@@ -93,11 +93,11 @@ def _ensure_plugin_config_images(ctx: ConvergeCtx) -> None:  # noqa: ARG001
 
 
 def _converge_skills_step(ctx: ConvergeCtx) -> None:
-    """Sync repo + plugin skills into `$AVA_HOME/skills/` — the single dir the
+    """Sync repo + plugin skills into `$MEIVA_HOME/skills/` — the single dir the
     skill scanner loads (see `cli/commands/extensions/skills_sync.py`)."""
     from cli.commands.extensions.skills_sync import converge_skills
 
-    result = converge_skills(ctx.repo, ctx.ava_home)
+    result = converge_skills(ctx.repo, ctx.meiva_home)
     for kind, names in (
         ("copied", result.copied),
         ("updated", result.updated),
@@ -112,10 +112,10 @@ def _converge_skills_step(ctx: ConvergeCtx) -> None:
 def ensure_browser(ctx: ConvergeCtx) -> None:
     """Preflight the shared headed Chrome.
 
-    chrome's MCP config ships in `<repo>/ava_builtins/mcps/chrome/.mcp.json` (a built-in
+    chrome's MCP config ships in `<repo>/meiva_builtins/mcps/chrome/.mcp.json` (a built-in
     source the loader scans). When the browser is enabled, probe host capability;
     on an incapable machine emit a prominent actionable warning instead of
-    failing so the rest of converge (and ava start) proceeds.
+    failing so the rest of converge (and meiva start) proceeds.
     """
     if not ctx.read_config().view.services.browser_enabled:
         return
@@ -126,7 +126,7 @@ def ensure_browser(ctx: ConvergeCtx) -> None:
             return
         print(f"  ! browser: {reason}", file=sys.stderr)
         print(browser_deps_warning(reason, host=ctx.host), file=sys.stderr)
-        print("    (ava-browser will not start on this host)", file=sys.stderr)
+        print("    (meiva-browser will not start on this host)", file=sys.stderr)
         return
     # Host is browser-capable. Offer, once, to seed the dedicated Chrome profile
     # from the operator's daily Chrome — a security-gated choice that only fires
@@ -161,7 +161,7 @@ def ensure_cross_machine_transfer(ctx: ConvergeCtx) -> None:
     synced folder. The configured backend is probed at start and used when
     present; a missing backend degrades to a warning so the runner still starts
     (files move through the gateway upload path, GitHub Releases, or IM file
-    bridges instead). `AVA_CROSS_MACHINE_TRANSFER_BACKEND=none` skips the probe
+    bridges instead). `MEIVA_CROSS_MACHINE_TRANSFER_BACKEND=none` skips the probe
     entirely.
 
     Only probed on a split deployment: a single box (this unit also carries
@@ -181,7 +181,7 @@ def ensure_cross_machine_transfer(ctx: ConvergeCtx) -> None:
             " agent-runner: no writable Google Drive synced folder, so file transfer"
             " via the shared Drive folder will not work. Install Google Drive for"
             " Desktop (macOS), sign in, and make sure the synced 'My Drive' area"
-            " is writable to enable it; set AVA_CROSS_MACHINE_TRANSFER_BACKEND=none"
+            " is writable to enable it; set MEIVA_CROSS_MACHINE_TRANSFER_BACKEND=none"
             " to skip this probe on a runner that moves files its own way."
             " Looked in: " + looked,
             file=sys.stderr,
@@ -198,9 +198,9 @@ def ensure_github_pr(ctx: ConvergeCtx) -> None:
 
     Only enforced on a split deployment: a single box (this unit also carries
     'gateway') consolidates locally with no PR round-trip, so the requirement is
-    skipped. Also skipped when AVA_MEMORY_KEEP_LOCAL is set (the pool is
+    skipped. Also skipped when MEIVA_MEMORY_KEEP_LOCAL is set (the pool is
     local-only and never pushed off-box). A split agent-runner that does not
-    consolidate via PRs can opt out with AVA_REQUIRE_GITHUB_PR=false.
+    consolidate via PRs can opt out with MEIVA_REQUIRE_GITHUB_PR=false.
     """
     if ctx.roles and "gateway" in ctx.roles:
         return
@@ -278,7 +278,7 @@ def warn_untracked_migrations(ctx: ConvergeCtx) -> None:  # noqa: ARG001
     """Operator-visible warning when migrations/ holds files git does not track.
 
     The applier skips untracked migrations with a log warning (Task #998); this
-    surfaces the same fact on the console every `ava start` / the fleet update
+    surfaces the same fact on the console every `meiva start` / the fleet update
     converge runs, so an operator who wrote a migration into the prod checkout
     without committing it is told it will NOT be applied — the silent no-op
     would otherwise read as "my migration ran". Gateway-only: the gateway is the
@@ -297,12 +297,12 @@ def warn_untracked_migrations(ctx: ConvergeCtx) -> None:  # noqa: ARG001
 CONVERGE_STEPS: tuple[ConvergeStep, ...] = (
     # Warning-only ownership preflight must run before every write-capable step:
     # root-owned paths otherwise fail before converge can print the exact repair.
-    ConvergeStep("$AVA_HOME ownership preflight", _ensure_ownership_preflight),
-    ConvergeStep("ava on PATH", ensure_ava_on_path, host_global=True),
+    ConvergeStep("$MEIVA_HOME ownership preflight", _ensure_ownership_preflight),
+    ConvergeStep("meiva on PATH", ensure_meiva_on_path, host_global=True),
     ConvergeStep("~/.local/bin on PATH", ensure_local_bin_on_path, host_global=True),
-    ConvergeStep("$AVA_HOME dir skeleton", ensure_ava_home_dirs),
+    ConvergeStep("$MEIVA_HOME dir skeleton", ensure_meiva_home_dirs),
     # Codex and Claude Code own their global homes. This prod-only host step
-    # contributes exactly the Ava operator skill when those homes already exist.
+    # contributes exactly the Meiva operator skill when those homes already exist.
     # The private ownership ledger lives under the skeleton created above.
     ConvergeStep(
         "external agent operator skill",
@@ -311,7 +311,7 @@ CONVERGE_STEPS: tuple[ConvergeStep, ...] = (
     ),
     # Warning-only health preflight: data-plane reachability (pg/redis, local on
     # gateway / remote on runner) + checkout state (dirty marker). Findings are
-    # printed and appended to $AVA_HOME/logs/health_preflight.log, never blocking.
+    # printed and appended to $MEIVA_HOME/logs/health_preflight.log, never blocking.
     ConvergeStep(
         "health preflight",
         _ensure_health_preflight,
@@ -324,7 +324,7 @@ CONVERGE_STEPS: tuple[ConvergeStep, ...] = (
         ensure_pg_binaries_step,
         roles=frozenset({"gateway"}),
     ),
-    # WAL archiving, when AVA_WALG_CONFIG_FILE switches it on: the pinned binary, a
+    # WAL archiving, when MEIVA_WALG_CONFIG_FILE switches it on: the pinned binary, a
     # validated configuration and the pinned key fingerprint, all before Postgres
     # starts. A no-op while the key is unset.
     ConvergeStep(
@@ -332,7 +332,7 @@ CONVERGE_STEPS: tuple[ConvergeStep, ...] = (
         converge_walg,
         roles=frozenset({"gateway"}),
     ),
-    # Reconcile the one DB URL (AVA_DB_URL) with the pooler toggle + preflight the
+    # Reconcile the one DB URL (MEIVA_DB_URL) with the pooler toggle + preflight the
     # PgBouncer binary when the pooler is enabled (gateway box's data plane).
     ConvergeStep(
         "one DB URL + pgbouncer binary (when enabled)",
@@ -373,10 +373,10 @@ CONVERGE_STEPS: tuple[ConvergeStep, ...] = (
         roles=frozenset({"agent-runner"}),
         requires_unit_config=True,
     ),
-    # Skills load in agent processes only, from the single $AVA_HOME/skills/
+    # Skills load in agent processes only, from the single $MEIVA_HOME/skills/
     # dir this step keeps in sync with the repo + plugin source trees.
     ConvergeStep(
-        "skills sync -> $AVA_HOME/skills",
+        "skills sync -> $MEIVA_HOME/skills",
         _converge_skills_step,
         roles=frozenset({"agent-runner"}),
         requires_unit_config=True,
@@ -456,7 +456,7 @@ CONVERGE_STEPS: tuple[ConvergeStep, ...] = (
         ensure_pr_flow_job,
         requires_unit_config=True,
     ),
-    # The WAL-G daily tick: registered while AVA_WALG_CONFIG_FILE is set, removed
+    # The WAL-G daily tick: registered while MEIVA_WALG_CONFIG_FILE is set, removed
     # when it is not. The gateway owns the Postgres it backs up.
     ConvergeStep(
         "WAL-G backup job",
@@ -486,7 +486,7 @@ def converge_host(
     repo: Path,
     roles: MachineRoles | None,
     *,
-    ava_home: Path | None = None,
+    meiva_home: Path | None = None,
     steps: tuple[ConvergeStep, ...] = CONVERGE_STEPS,
     services: frozenset[str] | None = None,
     database_factory: DatabaseFactory,
@@ -501,7 +501,7 @@ def converge_host(
     to (`roles & step.roles`), so a single-box gateway,agent-runner host runs
     both the gateway and agent-runner steps.
     """
-    resolved_home = ava_home if ava_home is not None else resolve_ava_home()
+    resolved_home = meiva_home if meiva_home is not None else resolve_meiva_home()
     selected = (
         _desired_service_names(roles, machine=command.machine, host=command.host)
         if services is None
@@ -509,7 +509,7 @@ def converge_host(
     )
     ctx = ConvergeCtx(
         repo=repo,
-        ava_home=resolved_home,
+        meiva_home=resolved_home,
         roles=roles,
         config=command.config,
         machine=command.machine,
@@ -522,17 +522,17 @@ def converge_host(
     )
 
     # Host-global steps belong to the host's prod install (the default home
-    # `~/.ava`), not to a dev cluster spun up from a worktree — a dev cluster must
-    # not repoint `~/.local/bin/ava` or rewrite the shell rc.
+    # `~/.meiva`), not to a dev cluster spun up from a worktree — a dev cluster must
+    # not repoint `~/.local/bin/meiva` or rewrite the shell rc.
     #
     # Identity is the home path, so the criterion is direct: this unit's resolved
-    # home must BE the default home. A dev worktree resolves its home to `~/.ava`
-    # too whenever AVA_HOME is unset, so additionally require a repo
+    # home must BE the default home. A dev worktree resolves its home to `~/.meiva`
+    # too whenever MEIVA_HOME is unset, so additionally require a repo
     # that is not a dev worktree (`.worktrees/...` or `.claude/worktrees/...`) —
     # host-global wiring runs only for a genuine prod-install checkout.
     repo_resolved = str(ctx.repo.resolve())
     repo_is_worktree = ".claude/worktrees" in repo_resolved or "/.worktrees/" in repo_resolved
-    is_prod_install = is_default_home(ctx.ava_home) and not repo_is_worktree
+    is_prod_install = is_default_home(ctx.meiva_home) and not repo_is_worktree
 
     print("\n→ converge host")
     for step in steps:
@@ -556,7 +556,7 @@ def _skip_reason(ctx: ConvergeCtx, step: ConvergeStep, *, is_prod_install: bool)
     if ctx.roles is not None and not (ctx.roles & step.roles):
         return f"roles {','.join(sorted(ctx.roles))}"
     if ctx.roles is None and step.requires_unit_config:
-        return "unit not configured yet; initialize with ava start"
+        return "unit not configured yet; initialize with meiva start"
     return None
 
 
@@ -583,7 +583,7 @@ def cmd_converge(
     producer: Callable[[], EventPipeline],
     command: CommandRuntime,
 ) -> int:
-    """`ava converge` — bring this host to the state the current code expects (idempotent)."""
+    """`meiva converge` — bring this host to the state the current code expects (idempotent)."""
     from base.deploy.maintenance import admission
     from base.native_process.os_platform import raise_fd_limit
     from cli.commands import _repo
@@ -592,21 +592,23 @@ def cmd_converge(
     raise_fd_limit(65536)  # converge spawns services + frontend deps; children inherit
     repo = _repo.repo_root()
     roles = _repo.roles_or_none(machine=command.machine)
-    print(f"[ava converge] cwd = {repo}  roles = {','.join(sorted(roles)) if roles else 'unknown'}")
+    print(
+        f"[meiva converge] cwd = {repo}  roles = {','.join(sorted(roles)) if roles else 'unknown'}"
+    )
 
     converge_host(
         repo, roles, database_factory=database_factory, producer=producer, command=command
     )
     # After the steps, not inside them: standalone converge runs against a
     # cluster that is already up, which is the precondition this needs and which
-    # a CONVERGE_STEPS entry would not have on the `ava start` path.
-    from base.paths import ava_home, skills_dir
+    # a CONVERGE_STEPS entry would not have on the `meiva start` path.
+    from base.paths import meiva_home, skills_dir
     from cli.commands.extensions.materialize import (
         adopt_local_extensions,
         materialize_cluster_extensions,
     )
 
-    skills_root = skills_dir(ava_home())
+    skills_root = skills_dir(meiva_home())
     adopt_local_extensions(
         database_factory=database_factory,
         machine_name=command.machine.name,

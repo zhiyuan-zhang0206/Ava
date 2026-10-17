@@ -73,7 +73,7 @@ def test_real_isolated_import_detects_damage_without_writes(
     (tmp_path / ".venv/bin/python").unlink()
     venv.EnvBuilder(with_pip=False, symlinks=True).create(tmp_path / ".venv")
     site = next((tmp_path / ".venv/lib").glob("python*/site-packages"))
-    for name in ("ava", "pydantic", "psycopg", "fastapi"):
+    for name in ("meiva", "pydantic", "psycopg", "fastapi"):
         if name == "psycopg" and damage == "missing":
             continue
         package = site / name
@@ -98,4 +98,4 @@ def test_real_isolated_import_detects_damage_without_writes(
             assert "No module named" in message
             assert "psycopg" in message
         else:
-            assert "ava: hollow package" in message
+            assert "meiva: hollow package" in message

@@ -84,7 +84,7 @@ class SystemStatus(BaseModel):
 
 
 class AgentMachineRow(BaseModel):
-    """One machine as exposed to agents via ava.agents.list_machines().
+    """One machine as exposed to agents via meiva.agents.list_machines().
 
     Intentionally minimal: name + free-text description + determinate liveness.
     A paused host is still live, but a reached host whose status operation

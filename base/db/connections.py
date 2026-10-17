@@ -26,7 +26,7 @@ class PlaceholderDbUrlError(RuntimeError):
     """A DB connection was attempted by a process that holds no cluster connection facts.
 
     The process's db_url is the never-dialed placeholder rather than a real
-    cluster database: its home declares none (no `.env` with AVA_DB_URL), or it
+    cluster database: its home declares none (no `.env` with MEIVA_DB_URL), or it
     built settings-lite and never fetched them (see base/config/_lite.py).
     Raised instead of dialing anything.
     """
@@ -59,7 +59,7 @@ class NoDatabaseAuthorityError(RuntimeError):
 # "failed". This constant is therefore the single definition of that posture:
 # `connect()` / `connect_url()` / `pool()` / `async_pool()` apply it, bounded or
 # not (a caller may shorten `connect_url`'s connect timeout for a probe).
-# Fail-fast behaviour is pinned by ava/tests/bootstrap/test_connect_fail_fast.py.
+# Fail-fast behaviour is pinned by meiva/tests/bootstrap/test_connect_fail_fast.py.
 PG_KEEPALIVE_KWARGS: dict[str, Any] = {
     "keepalives": 1,
     "keepalives_idle": 30,
@@ -237,12 +237,12 @@ def _refuse_placeholder(url: str) -> None:
     """
     if url == PLACEHOLDER_DB_URL:
         raise PlaceholderDbUrlError(
-            "refusing to open a DB connection: AVA_DB_URL is the never-dialed "
+            "refusing to open a DB connection: MEIVA_DB_URL is the never-dialed "
             "placeholder. Two ways to land here: this process's home "
-            "($AVA_HOME, else ~/.ava) has no .env declaring a cluster — start a "
-            "cluster there, or set AVA_HOME to a home that has one; or this "
+            "($MEIVA_HOME, else ~/.meiva) has no .env declaring a cluster — start a "
+            "cluster there, or set MEIVA_HOME to a home that has one; or this "
             "process built settings-lite "
-            "(AVA_CONFIG_FETCH=skip, the maintenance verbs' gateway-down mode) and "
+            "(MEIVA_CONFIG_FETCH=skip, the maintenance verbs' gateway-down mode) and "
             "this operation needs the cluster config a fetch would have provided."
         )
 
@@ -395,7 +395,7 @@ def connect_url(
     admin console, a URL a probe or boot check is handed. The caller owns the
     target: the URL carries its host, credential, database, startup options and
     `sslmode`, and nothing here reads settings, so no cluster login is
-    substituted and the configured `AVA_DB_SSLMODE` is not injected. (This
+    substituted and the configured `MEIVA_DB_SSLMODE` is not injected. (This
     module still resolves a home and imports settings at load, so a process
     that must do neither — the restricted restore worker, the throwaway-Postgres
     tooling — dials on its own; see the `postgres-dial` allowed map in

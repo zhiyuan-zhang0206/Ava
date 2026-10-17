@@ -42,8 +42,8 @@ def active(
     window, attempts = getattr(request, "param", (180, 2))
     monkeypatch.setattr(dotenv_file, "unit_home", lambda: tmp_path)
     (tmp_path / ".env").write_text(
-        f"AVA_IMPERSONATION_ACK_WINDOW_SECONDS={window}\n"
-        f"AVA_IMPERSONATION_MAX_DELIVERY_ATTEMPTS={attempts}\n"
+        f"MEIVA_IMPERSONATION_ACK_WINDOW_SECONDS={window}\n"
+        f"MEIVA_IMPERSONATION_MAX_DELIVERY_ATTEMPTS={attempts}\n"
     )
     agent_id = create_agent(db_conn)
     owner = RuntimeIncarnation(agent_id, uuid4(), uuid4())
@@ -548,7 +548,7 @@ def assert_pushes_follow_snapshotted_budget(
         assert ("final delivery" in push) == (count == attempts)
     assert f"Each message has {attempts} delivery attempts" in pushes[0]
     assert f"with {window}s to ACK each" in pushes[0]
-    assert all("Ava control expired" not in push for push in pushes)
+    assert all("Meiva control expired" not in push for push in pushes)
 
 
 @pytest.mark.parametrize("active", [(180, 2), (7, 1), (60, 3)], indirect=True)
@@ -572,7 +572,7 @@ async def test_real_relay_uses_snapshotted_config_across_restart(
     window, attempts = lease["ack_window_seconds"], lease["max_delivery_attempts"]
     # Later config edits cannot change a lease's promised deadlines or budget.
     (tmp_path / ".env").write_text(
-        "AVA_IMPERSONATION_ACK_WINDOW_SECONDS=999\nAVA_IMPERSONATION_MAX_DELIVERY_ATTEMPTS=9\n"
+        "MEIVA_IMPERSONATION_ACK_WINDOW_SECONDS=999\nMEIVA_IMPERSONATION_MAX_DELIVERY_ATTEMPTS=9\n"
     )
     pushes: list[str] = []
     monkeypatch.setattr(relay, "MIN_EMIT_INTERVAL_SECONDS", 0)

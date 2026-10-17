@@ -1,7 +1,7 @@
 """Host-side primitives shared by the verification recipes.
 
 A verification boundary (a Linux container, a Tart macOS VM) is born from one commit,
-runs one cluster through `ava init` and `ava start`, is observed, and is destroyed. What
+runs one cluster through `meiva init` and `meiva start`, is observed, and is destroyed. What
 every recipe shares lives here: the start profile (a scripted model, no key of any
 kind), the init and start argv, the refusal to let host state in, the commit
 resolution, and the evidence directory with its bounded, logged steps. The design is
@@ -26,22 +26,22 @@ from typing import Any
 # telemetry export, and the scripted model scenario in place of a provider. No key of
 # any kind: nothing secret enters a boundary.
 PROFILE = {
-    "AVA_OS_JOBS_ENABLED": "0",
-    "AVA_PROVISION_BUILTIN_SCHEDULES": "0",
-    "AVA_BROWSER_ENABLED": "0",
-    "AVA_MEMORY_KEEP_LOCAL": "1",
-    "AVA_CROSS_MACHINE_TRANSFER_BACKEND": "none",
-    "AVA_REQUIRE_GITHUB_PR": "0",
-    "AVA_LLM_OVERRIDE": "tests.e2e.fakes.scenarios.message_flow:build",
-    "AVA_TELEMETRY_OTLP_ENABLED": "0",
-    "AVA_TIMEZONE": "UTC",
+    "MEIVA_OS_JOBS_ENABLED": "0",
+    "MEIVA_PROVISION_BUILTIN_SCHEDULES": "0",
+    "MEIVA_BROWSER_ENABLED": "0",
+    "MEIVA_MEMORY_KEEP_LOCAL": "1",
+    "MEIVA_CROSS_MACHINE_TRANSFER_BACKEND": "none",
+    "MEIVA_REQUIRE_GITHUB_PR": "0",
+    "MEIVA_LLM_OVERRIDE": "tests.e2e.fakes.scenarios.message_flow:build",
+    "MEIVA_TELEMETRY_OTLP_ENABLED": "0",
+    "MEIVA_TIMEZONE": "UTC",
 }
 SERVICES = ("gateway", "frontend", "ops", "agent-host")
 MACHINE_NAME = "verify"
 
-# `ava init` records the machine's identity; `ava start` takes only the service selection.
+# `meiva init` records the machine's identity; `meiva start` takes only the service selection.
 START_ARGV = [
-    ".venv/bin/ava",
+    ".venv/bin/meiva",
     "start",
     *(arg for name in SERVICES for arg in ("--only-service", name)),
 ]
@@ -53,7 +53,7 @@ def profile_text() -> str:
 
 def init_argv(profile_path: str) -> list[str]:
     return [
-        ".venv/bin/ava",
+        ".venv/bin/meiva",
         "init",
         "--serve-gateway",
         "--serve-agent-runner",
@@ -84,7 +84,7 @@ def refuse_host_state(source: Path) -> None:
     home = Path.home().resolve()
     resolved = source.resolve()
     sealed = [
-        home / name for name in (".ava", ".ssh", ".gnupg", ".aws", ".docker", ".tart", "Library")
+        home / name for name in (".meiva", ".ssh", ".gnupg", ".aws", ".docker", ".tart", "Library")
     ]
     if (
         home.is_relative_to(resolved)

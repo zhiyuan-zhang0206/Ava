@@ -14,9 +14,9 @@ from base.db.code_version_gate import ProcessDbGate
 class MachineSetup:
     def __init__(self, machine: MachineIdentity) -> None:
         self.machine = machine
-        self.home = "~/.ava"
+        self.home = "~/.meiva"
 
-    def __call__(self, *, name: str, role: str = "gateway", home: str = "~/.ava") -> None:
+    def __call__(self, *, name: str, role: str = "gateway", home: str = "~/.meiva") -> None:
         self.machine.set(name=name, role=role)
         self.home = home
 

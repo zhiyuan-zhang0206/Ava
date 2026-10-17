@@ -1,7 +1,7 @@
 # Autonomous learning loop (generation 1 of the evolution machine)
 
 > **Premise retired (2026-09-21):** the telemetry-mining section below assumes
-> the unified `events` table read via `ava.DB`; that table was frozen at the
+> the unified `events` table read via `meiva.DB`; that table was frozen at the
 > LGTM cutover (task #1197) and dropped with the archive cleanup (task
 > #1281/#1823). The cluster event stream is now Loki (with the emitter's JSONL
 > mirror as the local source) — point the Curator's mining job there.
@@ -13,7 +13,7 @@ week a forked **Curator** triages the jottings plus the existing library into
 skills, memory notes, repo issues, and PRs, and prunes what has rotted. This is
 the capability competitors ship (Hermes' Curator + review-fork, OpenClaw's Skill
 Workshop) and the one row of the 2026-06 benchmark where they genuinely lead and
-Ava genuinely lacks.
+Meiva genuinely lacks.
 
 ## The framing that makes this not a detour from the north star
 
@@ -33,7 +33,7 @@ height**:
 | Gen | Target | Guardrail | Substrate needed |
 |---|---|---|---|
 | **1 (this doc)** | skill + memory text, and repo issues/PRs | `git revert` + human triage of issues/PRs | none new — text runs no code |
-| **2 ([`self-code-evolution.md`](self-code-evolution.md))** | `ava.*` / kernel code | container eval + CI + PR | the disposable-container sandbox |
+| **2 ([`self-code-evolution.md`](self-code-evolution.md))** | `meiva.*` / kernel code | container eval + CI + PR | the disposable-container sandbox |
 
 Building gen 1 builds the `observe -> propose -> guardrail -> promote` loop
 once; gen 2 swaps the target to code and raises the guardrail. The notice /
@@ -42,7 +42,7 @@ is literally a gen-2 work item — see "Repo issues are the gen-2 work queue".)
 
 ## Why this does NOT wait on the sandbox fuse (a fence to split)
 
-[`non-goals.md`](../../docs/conventions/non-goals.md) fences *"Self-evolution: agent modifies `ava.*` /
+[`non-goals.md`](../../docs/conventions/non-goals.md) fences *"Self-evolution: agent modifies `meiva.*` /
 system prompt / policy files"* behind *"evaluation harness lands first; without
 evals, no go,"* and the sandbox item gates on *"agent starts modifying its own
 code."* Read literally that lumps two very different targets under one fuse.
@@ -56,7 +56,7 @@ objective scorecard. Neither property is about the *text*:
   maximal-blast-radius case the sandbox exists for (untrusted code running
   unconfined on the host) does not arise.
 - A bad text edit is **`git revert`**; a bad issue is closed. Skills and memory
-  are git-tracked (`~/.ava/skills/` overlay; the memory pool's per-machine
+  are git-tracked (`~/.meiva/skills/` overlay; the memory pool's per-machine
   branch); issues are human-triaged before any code moves. The safety property
   is **reversibility + a human gate on anything code-bound**, not confinement —
   and both already exist.
@@ -66,7 +66,7 @@ curation + issue filing ship now; code evolution stays behind the sandbox + eval
 fuse.** The eval harness still matters here, but as the thing that *grades* a
 candidate over time, not as a hard gate before the loop may run at all.
 
-## The loop, in Ava primitives
+## The loop, in Meiva primitives
 
 Two cadences. The framework delta is tiny — one always-on system-prompt section
 (sibling to the existing memory-behavior section) and, optionally, one event
@@ -79,7 +79,7 @@ the loop *is* skill-shaped, so it is built as skills, not framework machinery.
 
 > **Status (v0 shipped).** The in-moment half is live as the merged authoritative
 > system-prompt section "# Invest in the future" (`agent/graph/prompt/system_prompt.py`,
-> gated by `AVA_SYSTEM_PROMPT_INVEST_FUTURE`, default on), which merged the former
+> gated by `MEIVA_SYSTEM_PROMPT_INVEST_FUTURE`, default on), which merged the former
 > "Beyond the task at hand": any noticed signal that could improve later work gets
 > an immediate closing action (resolve and verify / escalate with evidence and
 > recommendation / land a tracked task with owner and evidence), with closing
@@ -95,7 +95,7 @@ future.** Primed by it, the agent, as it works, routes what it notices:
 |---|---|---|
 | a reusable procedure | **skill draft** | jot (Curator promotes it) |
 | a durable fact / preference | **memory note** | written directly (the existing low-stakes path) |
-| a flaw in Ava itself — prompt self-contradiction, unclear tool, weak skill, framework bug | **repo-issue candidate** | jot (Curator dedups + files) |
+| a flaw in Meiva itself — prompt self-contradiction, unclear tool, weak skill, framework bug | **repo-issue candidate** | jot (Curator dedups + files) |
 | a task-level follow-up | **to-do** | jot |
 
 The section only **defines the stance + the sinks**; the wording stays minimal
@@ -112,7 +112,7 @@ it is written directly, as today.)
 
 ### Curator — weekly, forked, batch
 
-A weekly watcher (`ava.watcher.cron("0 4 * * 0", "run curation")`, matching
+A weekly watcher (`meiva.watcher.cron("0 4 * * 0", "run curation")`, matching
 Hermes' 7-day Curator cadence) runs the Curator, which:
 
 1. **Forks the week's notable-task agents** (`spawn(fork_from=N)`, or `resurrect`
@@ -123,7 +123,7 @@ Hermes' 7-day Curator cadence) runs the Curator, which:
 2. **Aggregates** that plus the in-moment jot buffer, and **dedups** across the
    batch and against what already exists.
 3. **Triages each survivor to its sink**: a skill draft -> a PR adding/updating
-   `SKILL.md`; a memory consolidation -> a commit on the pool track; an Ava-flaw
+   `SKILL.md`; a memory consolidation -> a commit on the pool track; an Meiva-flaw
    -> `gh issue create` against the repo.
 4. **Prunes** the library: archive dead weight (move to `archive/`, never
    hard-delete), rewrite stale entries, consolidate duplicates.
@@ -131,7 +131,7 @@ Hermes' 7-day Curator cadence) runs the Curator, which:
 
 Curation rides paths that already exist: a memory write is re-embedded by the
 indexer daemon within ~1s; a skill write is surfaced by the next `_scan_tree()`;
-the nightly memory steward/arbiter (the `ava-memory` skill) already commits / PRs
+the nightly memory steward/arbiter (the `meiva-memory` skill) already commits / PRs
 / merges pool changes cluster-wide. The Curator produces work on those same
 tracks plus the issue tracker.
 
@@ -141,7 +141,7 @@ The Curator's cleanest input is not a forked agent or a jot buffer — it is the
 cluster's own **operational telemetry**, because that data is already structured
 and objective. The unified `events` table is the cluster-wide event stream with a `level`
 column (INFO / WARNING / ERROR / CRITICAL), and an agent reads it directly via
-`ava.DB` (its live connection to the central cluster DB) — the same table the
+`meiva.DB` (its live connection to the central cluster DB) — the same table the
 gateway's `GET /api/cluster/admin/events` ops endpoint slices. So "what went
 wrong across the cluster in the last window" is one query — no jot buffer, no
 fork.
@@ -151,25 +151,25 @@ This is the highest-leverage *first* job because the signal is objective (not th
 in-moment agent sees: a recurring cross-agent error, a warning nobody read. The
 shape, as a `self-development` skill run by a periodic monitor agent:
 
-> `ava.watcher.cron(...)` wakes the monitor -> query `events` via `ava.DB`
+> `meiva.watcher.cron(...)` wakes the monitor -> query `events` via `meiva.DB`
 > for WARNING+ over the window -> aggregate by signature (`event` + normalized
 > `msg`) -> dedup against open issues (`gh issue list`) -> draft an issue for the
 > recurring or novel-and-actionable signatures -> idle until the next wake.
 
-All existing primitives — watcher cron (4/5) + the `ava.DB` query + `gh` — so **zero
+All existing primitives — watcher cron (4/5) + the `meiva.DB` query + `gh` — so **zero
 framework code**. And the issues it files are, per "Repo issues are the gen-2 work
 queue" below, exactly the backlog gen 2 later works through: the cluster watching
 itself and filing its own bugs is the most concrete, text-only, human-gated step
 toward self-code-evolution.
 
 **Status (v0 built → removed).** First shipped as the `cluster-health` skill
-(`skills/cluster-health/SKILL.md`, deleted 2026-06-21, commit 768e93121): query `events` via `ava.DB` for
+(`skills/cluster-health/SKILL.md`, deleted 2026-06-21, commit 768e93121): query `events` via `meiva.DB` for
 WARNING+ over a window -> signature-aggregate -> dedup vs open issues -> **draft**
 the worth-filing ones for human review. Two decisions are locked: a **dedicated
-monitor agent** arms `ava.watcher.cron` and idles between wakes; and v0 is
+monitor agent** arms `meiva.watcher.cron` and idles between wakes; and v0 is
 **draft-first** — no auto-`gh issue create` until the recurrence threshold + the
 benign-skip list have a few rounds of human calibration (the same
-propose-then-autonomous ladder as new skills). Reading via `ava.DB` directly
+propose-then-autonomous ladder as new skills). Reading via `meiva.DB` directly
 (not the ops endpoint) moots the earlier admin-scope question. The one live knob
 left is the **noise threshold** (recurrence count + benign skip-list), to
 calibrate on real volume.
@@ -179,9 +179,9 @@ calibrate on real volume.
 The "todo.md vs issue" question resolves by *kind*, as a pipeline (in-moment jot
 -> Curator triage), not an either/or:
 
-- **Skill** — reusable procedure -> `~/.ava/skills/<name>/SKILL.md`.
+- **Skill** — reusable procedure -> `~/.meiva/skills/<name>/SKILL.md`.
 - **Memory** — durable fact -> a pool note (existing path).
-- **Repo issue** — a flaw in Ava's own prompt / tools / skills / framework ->
+- **Repo issue** — a flaw in Meiva's own prompt / tools / skills / framework ->
   `gh issue create`. Chosen over a flat `todo.md` because an issue is routed,
   deduped, discussable, and has an open -> PR -> closed lifecycle; a todo.md
   rots unowned.
@@ -190,8 +190,8 @@ The "todo.md vs issue" question resolves by *kind*, as a pipeline (in-moment jot
 
 ### Repo issues are the gen-2 work queue
 
-Filing issues about Ava's own design is the **safest, highest-leverage gen-1
-channel for "the agent improves Ava"**: a pure proposal, human-triaged, executing
+Filing issues about Meiva's own design is the **safest, highest-leverage gen-1
+channel for "the agent improves Meiva"**: a pure proposal, human-triaged, executing
 nothing. And the backlog it accumulates *is* the input corpus gen-2
 (self-code-evolution) works through — when the sandbox + eval substrate lands,
 the agent's own issue queue is what the autonomous code loop picks tasks from. So
@@ -245,7 +245,7 @@ Deliberately deferred so this round stays the in-moment section + the Curator:
    is the only *required* addition.
 2. **Optional: a `skill_loaded` event** — to rank skills by usage, the Curator
    needs to know which skill a turn used, and today nothing records it. The
-   minimal fix is one lifecycle event emitted where `ava.skills.<name>` resolves
+   minimal fix is one lifecycle event emitted where `meiva.skills.<name>` resolves
    a node, persisted like any `events` row. Optional because the Curator
    grades on overlap / staleness / quality without exact counts.
 
@@ -255,7 +255,7 @@ constraint: if this loop needs a framework subsystem, it is being designed wrong
 ## Open design questions (for when it is picked up)
 
 - **The system-prompt skill-index lag.** A freshly written skill is reachable via
-  `ava.skills.<name>` immediately, but the *index* advertising which skills exist
+  `meiva.skills.<name>` immediately, but the *index* advertising which skills exist
   is built once per agent birth — so a new skill helps future agents (and any
   that restart), not the one that wrote it. Fine for the loop's purpose; decide
   explicitly whether the Curator ever triggers a restart to adopt sooner.

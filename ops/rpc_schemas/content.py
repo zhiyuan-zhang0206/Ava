@@ -2,7 +2,7 @@ from typing import Annotated
 
 from pydantic import StringConstraints
 
-# ava:ref ops/rpc_schemas/docs/content.ava.okf.md#content-guard
+# meiva:ref ops/rpc_schemas/docs/content.meiva.okf.md#content-guard
 _MAX_CONTENT_CHARS = 1_000_000
 
 UserContent = Annotated[

@@ -53,27 +53,27 @@ def history_messages() -> list[BaseMessage]:
         SystemMessage(content="prompt"),
         HumanMessage(
             content="start",
-            additional_kwargs={"ava_msg_type": "inbound", "ava_created_at": at(0)},
+            additional_kwargs={"meiva_msg_type": "inbound", "meiva_created_at": at(0)},
         ),
         AIMessage(
             content=[{"type": "thinking", "thinking": "plan"}],
             tool_calls=[{"name": "execute_code", "args": {"code": "ls"}, "id": "t1"}],
             usage_metadata=usage(100),
-            additional_kwargs={"ava_created_at": at(1)},
+            additional_kwargs={"meiva_created_at": at(1)},
         ),
         ToolMessage(
             content="out",
             tool_call_id="t1",
             additional_kwargs={
-                "ava_msg_type": "exec_output",
-                "ava_exec_body_start": 0,
-                "ava_created_at": at(2),
+                "meiva_msg_type": "exec_output",
+                "meiva_exec_body_start": 0,
+                "meiva_created_at": at(2),
             },
         ),
         AIMessage(
             content="done",
             usage_metadata=usage(200),
-            additional_kwargs={"ava_created_at": at(10)},
+            additional_kwargs={"meiva_created_at": at(10)},
         ),
     ]
 
@@ -160,7 +160,7 @@ def test_recent_day_is_relative_to_the_last_activity_and_keeps_the_lifetime(
 ) -> None:
     world = World(database, db_conn)
     messages = history_messages()
-    messages[-1].additional_kwargs["ava_created_at"] = at(3 * 24 * 60)
+    messages[-1].additional_kwargs["meiva_created_at"] = at(3 * 24 * 60)
     world.view = view(messages)
     result = read(world, recent_hours=24, max_units=5000)
     assert result.lifetime is not None and result.lifetime.from_ == T0
@@ -252,7 +252,7 @@ def test_an_inbound_block_names_the_inbound_row_the_checkpoint_stamped(
 ) -> None:
     world = World(database, db_conn)
     messages = history_messages()
-    messages[1].additional_kwargs["ava_inbound_id"] = 77
+    messages[1].additional_kwargs["meiva_inbound_id"] = 77
     world.view = view(messages)
     result = read(world)
     assert {u.kind: u.inbound_id for u in result.units} == {
@@ -342,12 +342,12 @@ def test_nodes_and_units_follow_the_read_order_when_the_stamps_do_not() -> None:
 
     msgs: list[BaseMessage] = [
         SystemMessage(content="prompt"),
-        AIMessage(content="first", additional_kwargs={"ava_created_at": at(5)}),
+        AIMessage(content="first", additional_kwargs={"meiva_created_at": at(5)}),
         HumanMessage(
             content="late reader",
-            additional_kwargs={"ava_msg_type": "inbound", "ava_created_at": at(3)},
+            additional_kwargs={"meiva_msg_type": "inbound", "meiva_created_at": at(3)},
         ),
-        AIMessage(content="second", additional_kwargs={"ava_created_at": at(8)}),
+        AIMessage(content="second", additional_kwargs={"meiva_created_at": at(8)}),
     ]
     read = read_times(msgs, timeline_inputs=_TIMELINE_INPUTS)
     assert read == [
@@ -360,7 +360,7 @@ def test_nodes_and_units_follow_the_read_order_when_the_stamps_do_not() -> None:
     spans = [(u.start, u.end) for u in units]
     assert all(a[1] <= b[0] for a, b in pairwise(spans))
 
-    assert msgs[2].additional_kwargs["ava_created_at"] == at(3)
+    assert msgs[2].additional_kwargs["meiva_created_at"] == at(3)
 
 
 def test_the_read_time_is_the_stamp_itself_when_the_stamps_are_monotone() -> None:
@@ -378,18 +378,18 @@ def test_the_read_time_is_the_stamp_itself_when_the_stamps_are_monotone() -> Non
 def test_a_recorded_pickup_time_is_the_read_time_and_older_messages_fall_back_to_arrival() -> None:
     msgs: list[BaseMessage] = [
         SystemMessage(content="prompt"),
-        AIMessage(content="old", additional_kwargs={"ava_created_at": at(5)}),
+        AIMessage(content="old", additional_kwargs={"meiva_created_at": at(5)}),
         HumanMessage(
             content="picked up",
             additional_kwargs={
-                "ava_msg_type": "inbound",
-                "ava_created_at": at(3),
-                "ava_picked_up_at": at(6),
+                "meiva_msg_type": "inbound",
+                "meiva_created_at": at(3),
+                "meiva_picked_up_at": at(6),
             },
         ),
         HumanMessage(
             content="old inbound",
-            additional_kwargs={"ava_msg_type": "inbound", "ava_created_at": at(4)},
+            additional_kwargs={"meiva_msg_type": "inbound", "meiva_created_at": at(4)},
         ),
     ]
     assert read_times(msgs, timeline_inputs=_TIMELINE_INPUTS) == [
@@ -438,7 +438,7 @@ def test_a_block_no_request_has_read_has_no_context_total(
             *history_messages(),
             HumanMessage(
                 content="later",
-                additional_kwargs={"ava_msg_type": "inbound", "ava_created_at": at(20)},
+                additional_kwargs={"meiva_msg_type": "inbound", "meiva_created_at": at(20)},
             ),
         ]
     )
@@ -478,7 +478,7 @@ def test_a_unit_no_request_has_read_has_no_tokens(
             *history_messages(),
             HumanMessage(
                 content="later",
-                additional_kwargs={"ava_msg_type": "inbound", "ava_created_at": at(20)},
+                additional_kwargs={"meiva_msg_type": "inbound", "meiva_created_at": at(20)},
             ),
         ]
     )
@@ -511,7 +511,7 @@ def test_a_node_no_request_has_read_has_no_tokens(
             *history_messages(),
             HumanMessage(
                 content="later",
-                additional_kwargs={"ava_msg_type": "inbound", "ava_created_at": at(20)},
+                additional_kwargs={"meiva_msg_type": "inbound", "meiva_created_at": at(20)},
             ),
         ]
     )

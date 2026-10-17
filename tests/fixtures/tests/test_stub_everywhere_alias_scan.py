@@ -35,17 +35,17 @@ def test_alias_scan_does_not_probe_module_getattr(monkeypatch: pytest.MonkeyPatc
 def test_alias_scan_does_not_trigger_the_mcps_servers_probe(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    import ava.mcps
+    import meiva.mcps
     import ops.cluster_status.pause
 
     calls: list[str] = []
-    real_servers = ava.mcps.servers
+    real_servers = meiva.mcps.servers
 
     def _spy() -> list[str]:
         calls.append("servers")
         return real_servers()
 
-    monkeypatch.setattr(ava.mcps, "servers", _spy)
+    monkeypatch.setattr(meiva.mcps, "servers", _spy)
     stub_everywhere(monkeypatch, ops.cluster_status.pause, "unpause_local_cluster", _stub)
 
     assert calls == []

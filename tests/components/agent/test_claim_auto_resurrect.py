@@ -10,7 +10,7 @@ from langgraph.graph import END
 from langgraph.runtime import Runtime
 from psycopg_pool import AsyncConnectionPool
 
-import ava
+import meiva
 from agent.graph import claim_node
 from agent.graph.claim.tests.claim_support import insert_inbound_kind, make_runtime, thread_config
 from agent.state import AgentState
@@ -56,7 +56,7 @@ async def running_agent(
         db=database,
     )
     assert incarnation is not None
-    ava.context = replace(ava.context, original_incarnation=incarnation)
+    meiva.context = replace(meiva.context, original_incarnation=incarnation)
     yield lambda: agent_id
 
 
@@ -92,7 +92,7 @@ async def test_claim_auto_resurrect_chat_batch_wakes_and_keeps_chat(
         )
     ).goto == END
 
-    old = ava.context.original_incarnation
+    old = meiva.context.original_incarnation
     assert old is not None
     assert (
         await apply_hosted_lifecycle(aops_pool, old, bus=event_bus, resources=None) == "terminate"

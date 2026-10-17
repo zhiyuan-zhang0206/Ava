@@ -303,7 +303,7 @@ def _proof_paths(proof: CopyProof, manifest: Manifest) -> list[str]:
     if (
         native_directory.name != manifest.batch_id
         or native_directory.parent.name != NAMESPACE
-        or native_directory.parent.parent.name != f"AvaAgent-{manifest.agent_id}"
+        or native_directory.parent.parent.name != f"MeivaAgent-{manifest.agent_id}"
     ):
         raise UploadDeliveryConflictError(
             "copy proof directory differs from its fixed agent batch namespace"

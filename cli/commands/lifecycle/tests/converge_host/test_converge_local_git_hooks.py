@@ -27,7 +27,7 @@ def _ctx(
     machine_config = ConfigBoot()
     return cv.ConvergeCtx(
         repo=Path("/repo"),
-        ava_home=tmp_path,
+        meiva_home=tmp_path,
         roles=cv.ALL_ROLES,
         config=machine_config,
         database_factory=operator_database,
@@ -99,7 +99,7 @@ def test_drifted_machine_warns(
     _with_script(monkeypatch, tmp_path)
     _fake_scan(
         monkeypatch,
-        "WARNING: [/home/u/Ava] pre-commit: INSTALL_PYTHON points into a disposable worktree: /x\n"
+        "WARNING: [/home/u/Meiva] pre-commit: INSTALL_PYTHON points into a disposable worktree: /x\n"
         "hook check: 1 problem(s) across 1 clone(s)\n",
         1,
     )

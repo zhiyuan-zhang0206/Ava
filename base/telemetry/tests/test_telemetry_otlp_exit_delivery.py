@@ -80,7 +80,7 @@ from base.native_process.code_version import CodeVersion
 from base.native_process.loaded_commit import LoadedCommit
 from base.config import ConfigBoot
 from base.cluster.machine.boot import machine_from_boot
-from base.paths import ava_home
+from base.paths import meiva_home
 
 MARKER = {marker!r}
 
@@ -89,7 +89,7 @@ version = CodeVersion(image)
 gate = ProcessDbGate(process="exit-seam-probe", version=version.get)
 config = ConfigBoot()
 config.read_process_environment()
-pipeline = telemetry.build_pipeline(database=partial(Database.from_settings, gate=gate), machine=machine_from_boot(config), home=ava_home())
+pipeline = telemetry.build_pipeline(database=partial(Database.from_settings, gate=gate), machine=machine_from_boot(config), home=meiva_home())
 telemetry.init_telemetry(process="exit-seam-probe", pipeline=pipeline)
 telemetry.emit("log", "log", attributes={{"seq": "early", "marker": MARKER}})
 telemetry.sync()
@@ -100,7 +100,7 @@ telemetry.emit("log", "log", attributes={{"seq": "tail", "marker": MARKER}})
 # The external CLI's `exec` command runs the caller's code inside this same
 # attachment context. The lease and checkpoint dependencies are local fakes;
 # the telemetry emitter, SDK wrapper, OTLP setup, and normal interpreter exit
-# are real. `ava.files.read` is one tail sdk_call (under 0.5 s before exit).
+# are real. `meiva.files.read` is one tail sdk_call (under 0.5 s before exit).
 
 
 def _received_log_records(posts: list[tuple[str, bytes]]) -> list[Any]:
@@ -152,15 +152,15 @@ def test_tail_record_of_a_short_lived_process_reaches_the_receiver(
     env = os.environ.copy()
     env.update(
         {
-            "AVA_HOME": str(home),
-            "AVA_PROCESS_PROFILE": "agent",
+            "MEIVA_HOME": str(home),
+            "MEIVA_PROCESS_PROFILE": "agent",
             # The explicit endpoint + enabled flag open the export gate
             # (tests/fixtures/env_bootstrap.py disables OTLP suite-wide).
-            "AVA_TELEMETRY_OTLP_ENDPOINT": f"http://127.0.0.1:{otlp_receiver.server_address[1]}",
-            "AVA_TELEMETRY_OTLP_ENABLED": "true",
+            "MEIVA_TELEMETRY_OTLP_ENDPOINT": f"http://127.0.0.1:{otlp_receiver.server_address[1]}",
+            "MEIVA_TELEMETRY_OTLP_ENABLED": "true",
         }
     )
-    env.pop("AVA_LOG_DIR", None)
+    env.pop("MEIVA_LOG_DIR", None)
     # Fixed argv, sys.executable is trusted. -I keeps the parent's PYTHON*
     # environment out; `import base` resolves through the checkout's
     # editable install.

@@ -6,7 +6,7 @@ process-global state (metering, existing telemetry and stdlib logger state).
 CLI and Gateway owners request their heavier readiness, native helper and
 schedule-control guards through ordinary fixture dependencies.
 A leaked environment key,
-`AVA_HOME` included, is the root leak guard's: `tests/fixtures/leak_guard.py`. Opt-outs are per-test
+`MEIVA_HOME` included, is the root leak guard's: `tests/fixtures/leak_guard.py`. Opt-outs are per-test
 markers documented on the fixture that honours them.
 """
 
@@ -33,7 +33,7 @@ def suite_is_not_inside_an_exec_domain(monkeypatch: pytest.MonkeyPatch) -> None:
 
     A suite launched from a fleet agent's `execute_code` runs inside the call's
     exec-domain session, so `base.host.proc.hosting_exec_domain` reports it and any
-    unrelated test that reaches an in-process lifecycle leg (`ava restart`,
+    unrelated test that reaches an in-process lifecycle leg (`meiva restart`,
     stop) would refuse — red on an agent box, green
     in CI. A pty-session or login-shell run (the fleet's test convention) never
     sees this. The predicate's own membership behaviour is exercised in spawned
@@ -93,14 +93,14 @@ def sdk_metering() -> Iterator[None]:
 
 @pytest.fixture(autouse=True)
 def _restore_metering(sdk_metering: None) -> None:
-    """Per-test isolation for the process-global `ava` singleton's metering state:
+    """Per-test isolation for the process-global `meiva` singleton's metering state:
     whatever a test wrapped, the next test sees the bare callables again.
 
-    `ava.sdk_surface.extensions.load_extensions()` installs the SDK-usage recorder as part of
-    the SDK installation (`ava.sdk_surface.install`), which replaces every public
-    `ava.*` callable — plus the `ava.mcps._call_raw` MCP funnel — with a recording
+    `meiva.sdk_surface.extensions.load_extensions()` installs the SDK-usage recorder as part of
+    the SDK installation (`meiva.sdk_surface.install`), which replaces every public
+    `meiva.*` callable — plus the `meiva.mcps._call_raw` MCP funnel — with a recording
     proxy, and nothing ever put them back. `load_extensions()` is reached directly
-    *and* lazily, via `ava/__init__.py:ensure_plugins_loaded` on an `ava.*` miss, so
+    *and* lazily, via `meiva/__init__.py:ensure_plugins_loaded` on an `meiva.*` miss, so
     merely touching the namespace permanently swapped out the callables every later
     test in that xdist worker would see.
 
@@ -123,7 +123,7 @@ def _restore_metering(sdk_metering: None) -> None:
 
 # The old `_stub_os_cron` patched only pytest; registration leaked in the e2e
 # gateway subprocess, where monkeypatch could not reach. The inherited
-# `AVA_OS_JOBS_ENABLED=false` setting covers both processes.
+# `MEIVA_OS_JOBS_ENABLED=false` setting covers both processes.
 
 
 def stub_everywhere(
@@ -153,7 +153,7 @@ def stub_everywhere(
         # Static lookup on purpose — never `getattr(mod, name, None)`: that
         # invokes a module-level `__getattr__` (PEP 562) on every loaded
         # module, and a dynamic surface can run arbitrary code while merely
-        # being probed (task #3950: `ava.mcps.__getattr__` formats its "no such
+        # being probed (task #3950: `meiva.mcps.__getattr__` formats its "no such
         # server" message by calling the metered `servers()`, so the old probe
         # emitted a burst of `sdk_call` telemetry rows on every test setup and
         # polluted the per-test event mirror). A dynamically-served name is
@@ -237,7 +237,7 @@ def guard_service_readiness(
     and a test that reaches it with real probes would sit there for the full bound —
     long enough under `-n auto` for the worker to be declared down, which reports as
     an infrastructure failure rather than as the stubbing gap it is. Reporting no
-    unready specs also keeps such a test's `ava start` at rc 0 instead of the
+    unready specs also keeps such a test's `meiva start` at rc 0 instead of the
     readiness code.
 
     Opt out with `@pytest.mark.real_service_readiness_gate` when the wait or the exit
@@ -285,11 +285,11 @@ def homes_get_their_own_ports(
 #
 # That is not hypothetical (pre-2026-08-01): `cli.start_refresh.
 # refresh_runner_env_or_die` ran from `cli.main.main()` before dispatch on
-# `ava start`, and on an enrolled runner it fetched /api/bootstrap, rewrote the
-# real ~/.ava/.env, and re-exec'd — replacing the pytest process mid-run.
+# `meiva start`, and on an enrolled runner it fetched /api/bootstrap, rewrote the
+# real ~/.meiva/.env, and re-exec'd — replacing the pytest process mid-run.
 # `cli/tests/test_main_dispatch.py` stubbed it, and the exec guard here is the
 # backstop that turns a forgotten stub into a plain test failure instead of a
-# vanished run. (The refresh is gone; `ava start`'s Settings build fetches in-
+# vanished run. (The refresh is gone; `meiva start`'s Settings build fetches in-
 # process, which is what `_guard_bootstrap_fetch` below blocks.)
 #
 # Sibling shape to watch for: the guard is what makes the next one a plain test
@@ -345,10 +345,10 @@ def _guard_bootstrap_fetch(monkeypatch: pytest.MonkeyPatch) -> None:
     the gateway, no joined state.
 
     That chain is not theoretical. On an enrolled runner — serve_gateway unset,
-    gateway URL in the real `~/.ava/.env`, which is every dev box joined to a
+    gateway URL in the real `~/.meiva/.env`, which is every dev box joined to a
     cluster — a test that constructs Settings without the suite's
-    AVA_CONFIG_FETCH=skip pin would fetch from that cluster's live gateway.
-    The suite redirects `AVA_HOME` to tmpfs and pins the fetch skip in the
+    MEIVA_CONFIG_FETCH=skip pin would fetch from that cluster's live gateway.
+    The suite redirects `MEIVA_HOME` to tmpfs and pins the fetch skip in the
     env block above; this guard is the second net for any test that drives a
     Settings build directly.
 
@@ -365,7 +365,7 @@ def _guard_bootstrap_fetch(monkeypatch: pytest.MonkeyPatch) -> None:
         raise AssertionError(
             f"a real GET {url} would leave the test process — this is the call that "
             "reaches a live gateway and, on an enrolled runner, rewrites the operator's "
-            "~/.ava/.env. Stub the caller, or patch base.host.env.bootstrap.dial_get in the test "
+            "~/.meiva/.env. Stub the caller, or patch base.host.env.bootstrap.dial_get in the test "
             "body with a fake transport (see base/host/env/tests/test_bootstrap_fetch.py)."
         )
 

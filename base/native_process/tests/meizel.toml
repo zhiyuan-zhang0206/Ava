@@ -8,7 +8,7 @@ exports = ["fake_process_control.py"]
 
 [debt.env-patch]
 "test_child_env.py#monkeypatch.setenv os.environ" = 1
-"test_child_env.py#monkeypatch.setenv os.environ.AVA_API_TOKEN" = 1
+"test_child_env.py#monkeypatch.setenv os.environ.MEIVA_API_TOKEN" = 1
 "test_loaded_commit.py#monkeypatch.delenv os.environ" = 1
 
 [debt.first-party-patch]

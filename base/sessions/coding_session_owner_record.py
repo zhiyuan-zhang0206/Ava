@@ -95,9 +95,9 @@ def canonical_key(
     if not _TOOL_RE.fullmatch(tool):
         raise ValueError("tool must be a lowercase slug")
     if cluster is None:
-        from base.paths import ava_home
+        from base.paths import meiva_home
 
-        cluster_path = ava_home()
+        cluster_path = meiva_home()
     else:
         cluster_path = Path(cluster).expanduser()
     return CodingSessionKey(
@@ -133,13 +133,13 @@ def supervisor_suffix(key: CodingSessionKey, generation: str) -> str:
 
 def full_session_name(owner_agent_id: int, session_id: int, suffix: str) -> str:
     """Build the full PTY handle behind an owner-scoped numeric session id."""
-    return f"ava-agent-{owner_agent_id}-shell-{session_id}-{suffix}"
+    return f"meiva-agent-{owner_agent_id}-shell-{session_id}-{suffix}"
 
 
 def host_owner_dir() -> Path:
-    from base.paths import ava_home
+    from base.paths import meiva_home
 
-    root = ava_home() / "coding-session-owners"
+    root = meiva_home() / "coding-session-owners"
     root.mkdir(parents=True, exist_ok=True)
     with contextlib.suppress(OSError):
         root.chmod(0o700)

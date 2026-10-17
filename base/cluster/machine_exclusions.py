@@ -30,9 +30,9 @@ def list_excluded_machines(db: Database) -> list[tuple[str, str, datetime | None
 
     `reason` names the latch the row is excluded by, first match wins in the
     order the exits are documented: `"paused"` (the operator pause latch,
-    cleared only by `ava cluster resume`), `"staging"` (`ava cluster
-    unmark-staging`), `"stopped"` (an `ava stop` announcement, cleared by the
-    next completed `ava start`). `since` is that latch's timestamp — the
+    cleared only by `meiva cluster resume`), `"staging"` (`meiva cluster
+    unmark-staging`), `"stopped"` (an `meiva stop` announcement, cleared by the
+    next completed `meiva start`). `since` is that latch's timestamp — the
     `paused_at` / `stopped_at` column; the staging flag has no date column, so
     it reads None. A machine can carry several latches at once (the operator
     paused-then-stopped shape); the order above is what a reader is told.

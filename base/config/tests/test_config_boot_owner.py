@@ -21,11 +21,11 @@ _CHILD = Path(__file__).with_name("_boot_owner_child.py")
 @pytest.fixture(autouse=True)
 def _isolated_owner_environment(tmp_path: Path) -> Iterator[None]:
     with patch.dict(os.environ):
-        os.environ["AVA_HOME"] = str(tmp_path)
+        os.environ["MEIVA_HOME"] = str(tmp_path)
         (tmp_path / ".env").write_text(
-            "AVA_MACHINE_SERVE_GATEWAY=true\n"
-            "AVA_DB_URL=postgresql://test:test@127.0.0.1:1/initial\n"
-            "AVA_REDIS_URL=redis://127.0.0.1:1/0\n",
+            "MEIVA_MACHINE_SERVE_GATEWAY=true\n"
+            "MEIVA_DB_URL=postgresql://test:test@127.0.0.1:1/initial\n"
+            "MEIVA_REDIS_URL=redis://127.0.0.1:1/0\n",
             encoding="utf-8",
         )
         yield
@@ -37,9 +37,9 @@ def test_constructor_and_skip_boot_do_not_deliver_environment(
     def unexpected_load() -> None:
         raise AssertionError("construction/skip boot must not load environment")
 
-    monkeypatch.setattr(_lite, "load_ava_env", unexpected_load)
-    monkeypatch.setenv("AVA_CONFIG_FETCH", "skip")
-    monkeypatch.setenv("AVA_CONFIG_BOOT", "eager")
+    monkeypatch.setattr(_lite, "load_meiva_env", unexpected_load)
+    monkeypatch.setenv("MEIVA_CONFIG_FETCH", "skip")
+    monkeypatch.setenv("MEIVA_CONFIG_BOOT", "eager")
     owner = ConfigBoot()
     owner.boot()
     assert not owner.boot_state()["prepared"]
@@ -51,10 +51,10 @@ def test_read_only_owners_keep_delivered_values_through_parallel_eager_builds() 
         [sys.executable, str(_CHILD)],
         env={
             **os.environ,
-            "AVA_CONFIG_FETCH": "skip",
-            "AVA_MODEL": "delivered-model",
-            "AVA_TIMEZONE": "Asia/Tokyo",
-            "AVA_MESSAGE_TIMESTAMPS": "false",
+            "MEIVA_CONFIG_FETCH": "skip",
+            "MEIVA_MODEL": "delivered-model",
+            "MEIVA_TIMEZONE": "Asia/Tokyo",
+            "MEIVA_MESSAGE_TIMESTAMPS": "false",
             "GEMINI_API_KEY": "delivered-provider-key",
         },
         capture_output=True,
@@ -66,15 +66,15 @@ def test_read_only_owners_keep_delivered_values_through_parallel_eager_builds() 
 
 def test_process_entry_still_delivers_its_home_environment(tmp_path: Path) -> None:
     (tmp_path / ".env").write_text(
-        "AVA_MACHINE_SERVE_GATEWAY=true\n"
-        "AVA_DB_URL=postgresql://test:test@127.0.0.1:1/entry\n"
-        "AVA_REDIS_URL=redis://127.0.0.1:1/0\n"
-        "AVA_MODEL=entry-model\nAVA_TIMEZONE=Asia/Tokyo\n",
+        "MEIVA_MACHINE_SERVE_GATEWAY=true\n"
+        "MEIVA_DB_URL=postgresql://test:test@127.0.0.1:1/entry\n"
+        "MEIVA_REDIS_URL=redis://127.0.0.1:1/0\n"
+        "MEIVA_MODEL=entry-model\nMEIVA_TIMEZONE=Asia/Tokyo\n",
         encoding="utf-8",
     )
     owner = ConfigBoot()
     owner.prepare()
-    assert os.environ["AVA_MODEL"] == "entry-model"
+    assert os.environ["MEIVA_MODEL"] == "entry-model"
     assert os.environ["TZ"] == "Asia/Tokyo"
     assert owner.view.lm.llm_model == "entry-model"
     with pytest.raises(RuntimeError, match="already prepared"):
@@ -139,9 +139,9 @@ def test_full_view_assignment_and_data_plane_refresh_affect_only_its_owner(
     second_data_plane = second.view.data_plane
     old_url = second_data_plane.db_url
     (tmp_path / ".env").write_text(
-        "AVA_MACHINE_SERVE_GATEWAY=true\n"
-        "AVA_DB_URL=postgresql://new:new@127.0.0.1:1/refreshed\n"
-        "AVA_REDIS_URL=redis://127.0.0.1:1/0\n",
+        "MEIVA_MACHINE_SERVE_GATEWAY=true\n"
+        "MEIVA_DB_URL=postgresql://new:new@127.0.0.1:1/refreshed\n"
+        "MEIVA_REDIS_URL=redis://127.0.0.1:1/0\n",
         encoding="utf-8",
     )
     first.refresh_data_plane_settings()
@@ -157,12 +157,12 @@ def test_full_view_assignment_and_data_plane_refresh_affect_only_its_owner(
 def test_profile_rejection_remains_lazy_and_instance_local(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.delenv("AVA_CONFIG_BOOT", raising=False)
-    monkeypatch.delenv("AVA_CONFIG_FETCH", raising=False)
-    monkeypatch.setenv("AVA_PROCESS_PROFILE", "runner")
+    monkeypatch.delenv("MEIVA_CONFIG_BOOT", raising=False)
+    monkeypatch.delenv("MEIVA_CONFIG_FETCH", raising=False)
+    monkeypatch.setenv("MEIVA_PROCESS_PROFILE", "runner")
     limited = ConfigBoot()
     limited.boot()
-    monkeypatch.delenv("AVA_PROCESS_PROFILE")
+    monkeypatch.delenv("MEIVA_PROCESS_PROFILE")
     complete = ConfigBoot()
     complete.boot()
     assert not limited.view.has_domain("alerts")
@@ -240,9 +240,9 @@ def test_same_thread_build_reads_lite_without_recursive_build_and_retries_failur
 def test_skip_boot_profile_probes_prepare_without_full_build(
     monkeypatch: pytest.MonkeyPatch, probe: str
 ) -> None:
-    monkeypatch.setenv("AVA_CONFIG_FETCH", "skip")
-    monkeypatch.setenv("AVA_CONFIG_BOOT", "eager")
-    monkeypatch.setenv("AVA_PROCESS_PROFILE", "agent")
+    monkeypatch.setenv("MEIVA_CONFIG_FETCH", "skip")
+    monkeypatch.setenv("MEIVA_CONFIG_BOOT", "eager")
+    monkeypatch.setenv("MEIVA_PROCESS_PROFILE", "agent")
     owner = ConfigBoot()
     owner.boot()
     assert not owner.boot_state()["prepared"]
@@ -262,8 +262,8 @@ def test_skip_agent_profile_selects_deferred_authority_for_other_domains(
 ) -> None:
     from base.config.service_read import ConfigAuthority
 
-    monkeypatch.setenv("AVA_CONFIG_FETCH", "skip")
-    monkeypatch.setenv("AVA_PROCESS_PROFILE", "agent")
+    monkeypatch.setenv("MEIVA_CONFIG_FETCH", "skip")
+    monkeypatch.setenv("MEIVA_PROCESS_PROFILE", "agent")
     owner = ConfigBoot()
     owner.boot()
     builds = 0

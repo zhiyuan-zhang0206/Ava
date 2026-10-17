@@ -17,7 +17,7 @@ from base.host.db_authority.model import (
     VerifiedGeneration,
 )
 
-_GROUPS = Groups(gateway="ava_gateway", runner="ava_runner")
+_GROUPS = Groups(gateway="meiva_gateway", runner="meiva_runner")
 
 
 class _Encrypt:
@@ -33,7 +33,7 @@ class _Encrypt:
 def home(tmp_path: Path) -> Path:
     path = tmp_path.resolve() / "home"
     path.mkdir()
-    store.create_ledger(path, owner="ava", groups=_GROUPS)
+    store.create_ledger(path, owner="meiva", groups=_GROUPS)
     return path
 
 
@@ -53,7 +53,7 @@ def test_birth_records_generation_zero_pending_then_active(home: Path) -> None:
     active = store.activate(home, _verified(pending))
     assert (active.number, active.roles, active.origin) == (
         0,
-        ("ava_g0_gateway", "ava_g0_runner"),
+        ("meiva_g0_gateway", "meiva_g0_runner"),
         Origin(kind="birth"),
     )
     ledger = store.require_ledger(home)
@@ -139,7 +139,7 @@ def test_a_ledger_that_recorded_a_rotation_is_refused(home: Path, legacy: dict[s
     [
         {"number": 1},
         {"credential_digest": "0" * 64},
-        {"roles": ("ava_g0_gateway", "ava_g9_runner")},
+        {"roles": ("meiva_g0_gateway", "meiva_g9_runner")},
     ],
 )
 def test_activation_requires_the_exact_pending_pair(home: Path, change: dict[str, Any]) -> None:
@@ -159,7 +159,7 @@ def test_activation_is_idempotent_for_the_same_generation(home: Path) -> None:
 def test_the_secret_is_bound_to_the_ledger_digest(home: Path) -> None:
     generation = _born(home)
     secret = store.read_secret(home, generation)
-    assert (secret.number, secret.roles.gateway.name) == (0, "ava_g0_gateway")
+    assert (secret.number, secret.roles.gateway.name) == (0, "meiva_g0_gateway")
     assert len(secret.roles.runner.password) >= 32
     path = home / "db-authority" / "generations" / "0.json"
     path.chmod(0o600)
@@ -246,10 +246,10 @@ def test_an_unexplained_secret_refuses_the_mint(home: Path) -> None:
 
 def test_create_ledger_keeps_an_identical_ledger_and_refuses_another(home: Path) -> None:
     before = (home / "db-authority" / "ledger.json").read_bytes()
-    store.create_ledger(home, owner="ava", groups=_GROUPS)
+    store.create_ledger(home, owner="meiva", groups=_GROUPS)
     assert (home / "db-authority" / "ledger.json").read_bytes() == before
     with pytest.raises(LedgerRefusedError, match="another owner"):
-        store.create_ledger(home, owner="ava_main", groups=_GROUPS)
+        store.create_ledger(home, owner="meiva_main", groups=_GROUPS)
 
 
 def test_an_absent_store_reads_as_no_ledger(tmp_path: Path) -> None:
@@ -265,8 +265,8 @@ _BIRTH = Origin(kind="birth")
 def _generation(**changes: Any) -> Generation:
     fields: dict[str, Any] = {
         "number": 0,
-        "gateway": "ava_g0_gateway",
-        "runner": "ava_g0_runner",
+        "gateway": "meiva_g0_gateway",
+        "runner": "meiva_g0_runner",
         "credential_digest": _DIGEST,
         "origin": _BIRTH,
     }
@@ -278,13 +278,13 @@ def _generation(**changes: Any) -> Generation:
     [
         {"active": _generation(), "pending": _generation()},
         {"counter": 0},
-        {"active": _generation(gateway="ava_gateway")},
-        {"active": _generation(runner="ava_g0_gateway")},
-        {"owner": "ava_runner"},
+        {"active": _generation(gateway="meiva_gateway")},
+        {"active": _generation(runner="meiva_g0_gateway")},
+        {"owner": "meiva_runner"},
     ],
 )
 def test_the_ledger_model_rejects_incoherent_records(fields: dict[str, Any]) -> None:
-    base: dict[str, Any] = {"version": 1, "home": "/h", "owner": "ava", "groups": _GROUPS}
+    base: dict[str, Any] = {"version": 1, "home": "/h", "owner": "meiva", "groups": _GROUPS}
     with pytest.raises(ValidationError):
         Ledger(**{**base, **fields})
 

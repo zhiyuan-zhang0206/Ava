@@ -16,7 +16,7 @@ from base.agents.inbox.chat_delivery import ClientMessageConflictError
 from base.agents.messages.inbound_provenance import InboundProvenance
 from base.agents.observation import roster
 from base.agents.observation import snapshot as snapshot_module
-from base.api_contracts.agent_contract import AvaAgentError
+from base.api_contracts.agent_contract import MeivaAgentError
 from base.api_contracts.caller_identity import CallerIdentity
 from base.api_contracts.mcp_tool_contract import (
     project_message,
@@ -57,7 +57,7 @@ def _authenticated_client(request: Request | None) -> dict[str, Any]:
 
     if request is None:
         raise RuntimeError("authenticated MCP client request is missing")
-    client = getattr(request.state, "ava_mcp_client", None)
+    client = getattr(request.state, "meiva_mcp_client", None)
     if client is None:
         raise RuntimeError("authenticated MCP client context is missing")
     return cast(dict[str, Any], client)
@@ -331,7 +331,7 @@ async def _mcp_deliver_send_message(
             ),
             local_machine=local_machine,
         )
-    except (AvaAgentError, ClientMessageConflictError) as exc:
+    except (MeivaAgentError, ClientMessageConflictError) as exc:
         raise ToolError(str(exc)) from exc
     except HTTPException as exc:
         raise ToolError(str(exc.detail)) from exc
@@ -397,7 +397,7 @@ def _register_spawn_tools(
             )
         except HTTPException as exc:
             raise ToolError(str(exc.detail)) from exc
-        except AvaAgentError as exc:
+        except MeivaAgentError as exc:
             from base.api_contracts.agent_contract import AgentLaunchFailed
 
             if isinstance(exc, AgentLaunchFailed):
@@ -494,12 +494,12 @@ def _register_fleet_tools(
                 pool,
                 db=db,
             )
-        except AvaAgentError as exc:
+        except MeivaAgentError as exc:
             raise ToolError(str(exc)) from exc
         return result.model_dump(mode="json")
 
 
-# ava:ref gateway/mcp_server/docs/mcp-endpoint/model-capability-failures.ava.okf.md#lazy-sdk-types
+# meiva:ref gateway/mcp_server/docs/mcp-endpoint/model-capability-failures.meiva.okf.md#lazy-sdk-types
 def _build_server(  # noqa: ANN202
     pool: Any,
     db: Database,
@@ -513,7 +513,9 @@ def _build_server(  # noqa: ANN202
 
     from mcp.server.mcpserver import MCPServer
 
-    server = MCPServer("ava", instructions=server_instructions(), middleware=[_AuditMiddleware(db)])
+    server = MCPServer(
+        "meiva", instructions=server_instructions(), middleware=[_AuditMiddleware(db)]
+    )
     _register_read_tools(
         server,
         pool,
@@ -535,7 +537,7 @@ def _build_server(  # noqa: ANN202
     return server
 
 
-# ava:ref gateway/mcp_server/docs/mcp-endpoint/model-capability-failures.ava.okf.md#lazy-sdk-types
+# meiva:ref gateway/mcp_server/docs/mcp-endpoint/model-capability-failures.meiva.okf.md#lazy-sdk-types
 def build_manager(  # noqa: ANN201
     pool: Any,
     db: Database,
@@ -610,7 +612,7 @@ def mcp_gateway(app: FastAPI) -> Callable[..., Awaitable[None]]:
             )
             await response(scope, receive, send)
             return
-        Request(scope).state.ava_mcp_client = client
+        Request(scope).state.meiva_mcp_client = client
         await manager.asgi_app(scope, receive, send)
 
     return _gateway

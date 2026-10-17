@@ -1,3 +1,0 @@
-[debt.first-party-patch]
-"test_sdk_entry_counting.py#monkeypatch.setattr ava.agents.get_status" = 1
-"test_sdk_entry_counting.py#monkeypatch.setattr base.agents.sdk.call_policy.policy" = 1

@@ -45,7 +45,7 @@ from base.host.tests.daemon_shutdown_child import (
 
 _REPO_ROOT = Path(__file__).resolve().parents[3]
 
-_ENDPOINT_ENV = "AVA_TELEMETRY_OTLP_ENDPOINT"
+_ENDPOINT_ENV = "MEIVA_TELEMETRY_OTLP_ENDPOINT"
 
 # The child must exit within this bound of SIGTERM — small enough to separate a
 # bounded exit from a join-stalled one, and far below the stop budget the bound
@@ -145,20 +145,20 @@ def spawn_child(
     # A throwaway home keeps every home-derived path (pidfiles, config chain)
     # inside tmp_path; the dead OTLP endpoint keeps telemetry export from
     # dialing the operator's real collector.
-    home = tmp_path / "ava-home"
+    home = tmp_path / "meiva-home"
     home.mkdir()
     (home / ".env").write_text(
-        f"{_ENDPOINT_ENV}={endpoint}\nAVA_MACHINE_NAME={label}-shutdown-test\n", encoding="utf-8"
+        f"{_ENDPOINT_ENV}={endpoint}\nMEIVA_MACHINE_NAME={label}-shutdown-test\n", encoding="utf-8"
     )
     env = os.environ.copy()
-    env["AVA_HOME"] = str(home)
+    env["MEIVA_HOME"] = str(home)
     env[MARKERS_ENV] = str(markers_path)
     env[_ENDPOINT_ENV] = endpoint
     env[INTERNAL_STOP_ENV] = "1" if internal_stop else "0"
     env[CLEANUP_FAILURE_ENV] = "1" if cleanup_failure else "0"
     # The helper-chain guard acts on this marker; a test child is not
     # helper-spawned, and inheriting a stray marker would self-exit(70).
-    env.pop("AVA_PERMISSIONS_HELPER_PID", None)
+    env.pop("MEIVA_PERMISSIONS_HELPER_PID", None)
     log_file = log_path.open("wb")
     proc = subprocess.Popen(  # noqa: S603 -- callers pass a literal repository test entry, no shell
         command,

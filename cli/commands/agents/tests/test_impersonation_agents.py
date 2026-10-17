@@ -47,10 +47,10 @@ def test_timeline_preserves_existing_payload(
 
 
 def test_relay_token_channels(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("AVA_IMPERSONATION_RELAY_TOKEN", "from-env")
+    monkeypatch.setenv("MEIVA_IMPERSONATION_RELAY_TOKEN", "from-env")
     assert cli.relay_token_from_env() == "from-env"
-    monkeypatch.delenv("AVA_IMPERSONATION_RELAY_TOKEN")
-    with pytest.raises(ValueError, match="AVA_IMPERSONATION_RELAY_TOKEN"):
+    monkeypatch.delenv("MEIVA_IMPERSONATION_RELAY_TOKEN")
+    with pytest.raises(ValueError, match="MEIVA_IMPERSONATION_RELAY_TOKEN"):
         cli.relay_token_from_env()
 
     def readline(*_size: object) -> str:
@@ -63,7 +63,7 @@ def test_relay_token_channels(monkeypatch: pytest.MonkeyPatch) -> None:
 def test_failed_relay_stub_write_removes_partial_file(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    stub = tmp_path / ".ava-relay.env"
+    stub = tmp_path / ".meiva-relay.env"
 
     def fail_mode(_fd: int, _mode: int) -> None:
         raise OSError("cannot secure stub")

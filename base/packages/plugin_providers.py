@@ -21,13 +21,13 @@ def _load_one(builder: CatalogBuilder, name: str, provider_py: Path, *, is_built
     The module registers nothing: it exports `contribute()` returning a `PluginContributions` whose
     `providers` are `ProviderContribution`s and whose `decision_providers` are
     `DecisionProviderContribution`s. The declaration passes the manifest gate (the
-    `providers` and `decisionProviders` keys of the plugin's `ava-plugin.json`) before anything is
+    `providers` and `decisionProviders` keys of the plugin's `meiva-plugin.json`) before anything is
     installed.
     """
     from base.packages.plugins.data_registry import declaration_of
     from base.packages.plugins.gate import check_manifest
 
-    pkg = "ava_builtins.plugins" if is_builtin else "plugins"
+    pkg = "meiva_builtins.plugins" if is_builtin else "plugins"
     spec = importlib.util.spec_from_file_location(f"{pkg}.{name}.provider", provider_py)
     if spec is None or spec.loader is None:
         raise RuntimeError(

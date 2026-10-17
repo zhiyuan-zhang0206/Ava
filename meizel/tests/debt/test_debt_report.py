@@ -15,10 +15,10 @@ TREE = {
     ),
     "base/sub/__init__.py": "",
     "base/sub/meizel.toml": '[debt.private-module]\n"a.py -> b.py" = 4\n',
-    "ava/__init__.py": "",
-    "ava/meizel.toml": '[debt.cycle-edge]\n"x.py -> y.py" = 3\n',
+    "meiva/__init__.py": "",
+    "meiva/meizel.toml": '[debt.cycle-edge]\n"x.py -> y.py" = 3\n',
     "clean/__init__.py": "",
-    "meizel.toml": '[debt.undeclared-edge]\n"ava -> base" = 5\n',
+    "meizel.toml": '[debt.undeclared-edge]\n"meiva -> base" = 5\n',
     "broken/__init__.py": "",
     "broken/bad.py": "def f(:\n",
 }

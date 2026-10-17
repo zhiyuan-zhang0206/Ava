@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# tcc-preauth.sh v2 — read-only macOS TCC diagnostics for AvaPermissionsHelper.
+# tcc-preauth.sh v2 — read-only macOS TCC diagnostics for MeivaPermissionsHelper.
 #
 # Provenance: Task #2421 audit deliverable, originally created for workspace #5805.
 # v2 makes the stable helper app the only authorization subject and removes the
@@ -13,7 +13,7 @@ set -euo pipefail
 repo_root=$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd -P)
 readonly repo_root
 readonly python_bin="$repo_root/.venv/bin/python"
-readonly helper_bundle_id="com.ava.permissions-helper"
+readonly helper_bundle_id="com.meiva.permissions-helper"
 readonly user_tcc="$HOME/Library/Application Support/com.apple.TCC/TCC.db"
 readonly system_tcc="/Library/Application Support/com.apple.TCC/TCC.db"
 host_name=$(hostname -s 2>/dev/null || hostname)
@@ -114,8 +114,8 @@ verify_helper_process() {
     local pids
     local pid_list
 
-    if ! pids=$(pgrep -f 'AvaPermissionsHelper.app/Contents/MacOS/AvaPermissionsHelper'); then
-        status_line helper-process DOWN 'no AvaPermissionsHelper process found'
+    if ! pids=$(pgrep -f 'MeivaPermissionsHelper.app/Contents/MacOS/MeivaPermissionsHelper'); then
+        status_line helper-process DOWN 'no MeivaPermissionsHelper process found'
         return 1
     fi
     pid_list=$(printf '%s\n' "$pids" | paste -sd, -)
@@ -174,23 +174,23 @@ PY
 list_manual() {
     cat <<'EOF'
 
-Manual one-time grants for AvaPermissionsHelper:
+Manual one-time grants for MeivaPermissionsHelper:
 1. Full Disk Access
-   System Settings > Privacy & Security > Full Disk Access > AvaPermissionsHelper
+   System Settings > Privacy & Security > Full Disk Access > MeivaPermissionsHelper
 2. Screen Recording
-   System Settings > Privacy & Security > Screen & System Audio Recording > AvaPermissionsHelper
+   System Settings > Privacy & Security > Screen & System Audio Recording > MeivaPermissionsHelper
    Earlier macOS releases label this pane "Screen Recording."
 3. Accessibility
-   System Settings > Privacy & Security > Accessibility > AvaPermissionsHelper
+   System Settings > Privacy & Security > Accessibility > MeivaPermissionsHelper
 4. Desktop, Documents, and Downloads
-   System Settings > Privacy & Security > Files & Folders > AvaPermissionsHelper
+   System Settings > Privacy & Security > Files & Folders > MeivaPermissionsHelper
 5. Camera and Microphone, only when an agent needs them
-   System Settings > Privacy & Security > Camera > AvaPermissionsHelper
-   System Settings > Privacy & Security > Microphone > AvaPermissionsHelper
+   System Settings > Privacy & Security > Camera > MeivaPermissionsHelper
+   System Settings > Privacy & Security > Microphone > MeivaPermissionsHelper
 6. AppleEvents automation for Safari, Terminal, Finder, Chrome, and System Events
-   System Settings > Privacy & Security > Automation > AvaPermissionsHelper
+   System Settings > Privacy & Security > Automation > MeivaPermissionsHelper
 
-All grants belong to the stable AvaPermissionsHelper.app identity, never to a
+All grants belong to the stable MeivaPermissionsHelper.app identity, never to a
 Python interpreter. This script does not modify TCC.db or restart tccd.
 EOF
 }
@@ -202,7 +202,7 @@ verify() {
     [[ -x "$python_bin" ]] || fail "repository Python is missing: $python_bin"
     command -v sqlite3 >/dev/null 2>&1 || fail 'sqlite3 is required for read-only TCC queries'
 
-    printf 'Read-only Ava TCC verification\n'
+    printf 'Read-only Meiva TCC verification\n'
     if ! verify_helper_process; then
         result=1
     fi

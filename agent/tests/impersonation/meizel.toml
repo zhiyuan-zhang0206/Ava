@@ -12,22 +12,22 @@ exports = ["external_attachment.py"]
 "test_successor_lease_binding.py" = ["test_impersonation.py"]
 
 [debt.env-patch]
-"test_external_database_owner.py#monkeypatch.setenv os.environ.AVA_HOME" = 1
+"test_external_database_owner.py#monkeypatch.setenv os.environ.MEIVA_HOME" = 1
 "test_external_database_owner.py#patch.dict os.environ" = 4
 "test_external_machine_owner.py#patch.dict os.environ" = 2
 "test_impersonation_introduction.py#patch.dict os.environ" = 1
 
 [debt.first-party-patch]
 "external_attachment.py#monkeypatch.setattr agent.extensions.plugin_state_codec.load_snapshot" = 1
-"external_attachment.py#monkeypatch.setattr ava.__plugin_installation__" = 1
-"external_attachment.py#monkeypatch.setattr ava.ensure_plugins_loaded" = 1
-"external_attachment.py#monkeypatch.setattr ava.impersonation.attachment.control.merge_plugin_delta" = 1
-"external_attachment.py#monkeypatch.setattr ava.impersonation.attachment.control.require_active" = 1
+"external_attachment.py#monkeypatch.setattr meiva.__plugin_installation__" = 1
+"external_attachment.py#monkeypatch.setattr meiva.ensure_plugins_loaded" = 1
+"external_attachment.py#monkeypatch.setattr meiva.impersonation.attachment.control.merge_plugin_delta" = 1
+"external_attachment.py#monkeypatch.setattr meiva.impersonation.attachment.control.require_active" = 1
 "external_attachment.py#monkeypatch.setattr base.agents.impersonation.manifest.open_local_participant" = 1
 "external_attachment.py#monkeypatch.setattr base.agents.sdk.call_policy.policy" = 1
-"test_external_database_owner.py#monkeypatch.setattr ava.impersonation.attachment.ConfigBoot" = 1
-"test_external_database_owner.py#monkeypatch.setattr ava.impersonation.attachment.control.require_active" = 1
-"test_external_database_owner.py#monkeypatch.setattr ava.impersonation.attachment.process_clients" = 1
+"test_external_database_owner.py#monkeypatch.setattr meiva.impersonation.attachment.ConfigBoot" = 1
+"test_external_database_owner.py#monkeypatch.setattr meiva.impersonation.attachment.control.require_active" = 1
+"test_external_database_owner.py#monkeypatch.setattr meiva.impersonation.attachment.process_clients" = 1
 "test_external_database_owner.py#monkeypatch.setattr base.agents.impersonation.manifest.close_local_participant_admission" = 1
 "test_external_database_owner.py#monkeypatch.setattr base.agents.impersonation.manifest.open_local_participant" = 1
 "test_external_database_owner.py#monkeypatch.setattr base.db.code_version_gate.ProcessDbGate.min_read_due" = 1

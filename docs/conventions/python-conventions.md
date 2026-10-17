@@ -19,13 +19,13 @@ Genuine exceptions (circular imports, `import torch`-class heavy deps) go in
 
 A `.py` file may contain at most 800 lines (`len(text.splitlines())`). Split
 larger files into focused modules. The budget covers the eight governed
-packages (`agent`, `ava`, `ava_builtins`, `gateway`, `base`, `services`, `ops`,
+packages (`agent`, `meiva`, `meiva_builtins`, `gateway`, `base`, `services`, `ops`,
 `cli`) plus `tests/` and `scripts/`. The TYPE_CHECKING ban and retired ambient machine_role()
 call rejection apply only to the eight packages.
 
 A script shipped with a skill or plugin gets no exemption. When one outgrows
 the budget, its logic moves into a governed package the script imports
-normally (the Claude/Codex launchers live in `ava/shell/coding_tools/`, their
+normally (the Claude/Codex launchers live in `meiva/shell/coding_tools/`, their
 `spawn_*.py` scripts only parse arguments). Splitting it into path-imported
 siblings is refused by Rule 6 below. Moving implementation into a governed
 package does not make it a public SDK capability; see [SDK and skill ownership](#sdk-and-skill-ownership).
@@ -68,23 +68,23 @@ use which, and a name another file uses is public. Reaching a private name or mo
 `private-name` / `private-module`; entering a directory through a child it does not export is
 `not-exported`; a dependency nobody declared is `undeclared-edge`; patching anything is a
 `*-patch` diagnostic. Existing violations are recorded debt that may only shrink. See
-[the checker](../../meizel/docs/checker/checker.ava.okf.md) and the
+[the checker](../../meizel/docs/checker/checker.meiva.okf.md) and the
 [contributing guide](../contributing.md#locality-gate-meizel). Use an existing capability,
 pass the required dependency explicitly, or verify public behavior. Agent visibility remains owned
 by the existing SDK surface metadata and Installation; do not introduce another SDK member list.
 
-- **Rule 6 — no path imports under `ava_builtins/`.** A skill or plugin
+- **Rule 6 — no path imports under `meiva_builtins/`.** A skill or plugin
   module may not edit `sys.path`, call `site.addsitedir`, or load a module
   by file path (`spec_from_file_location`, `SourceFileLoader`,
   `runpy.run_path`); `meizel/language/path_imports.py` finds them. Shared
   code moves into a governed package the script imports normally, and a
   script that needs it runs on the checkout's venv python. One narrow
-  exception: a script under `ava_builtins/skills/<group>/<skill>/` may run a
+  exception: a script under `meiva_builtins/skills/<group>/<skill>/` may run a
   one-line `sys.path.insert(0, ...)` / `.append(...)` guard whose argument
   is derived from `__file__` and resolves inside that same `<skill>/` tree
   (its own `scripts/`, or a sibling sub-skill's) — recognized by AST, so it
   is not counted as a site at all. A guard reaching outside the skill (another
-  skill, `ava_builtins/skills/` itself, or `ava_builtins/plugins/`), or any
+  skill, `meiva_builtins/skills/` itself, or `meiva_builtins/plugins/`), or any
   file-loader call regardless of its argument, is still a violation. The
   Every measured path-import site fails directly, with no baseline allowance.
 - **Rule 5 — single decision owners.** `meizel/owners/decisions.py:DECISIONS`
@@ -275,7 +275,7 @@ no warning output. Warnings alone never fail the gate.
 ## No `print()` in framework code
 
 Framework code logs via `base.log.logger`. `print()` is banned in framework
-code by ruff `T20`. Exempt: `cli/` (terminal output), `ava/` + `plugins/`
+code by ruff `T20`. Exempt: `cli/` (terminal output), `meiva/` + `plugins/`
 (agent-facing dump), `scripts/` (tooling).
 One-off legitimate cases use inline `# noqa: T201` with a reason.
 
@@ -332,7 +332,7 @@ uses inline `# emoji-ok: <reason>`.
 
 ## SDK and skill ownership
 
-The SDK owns reusable Ava domain operations and their execution contracts, such
+The SDK owns reusable Meiva domain operations and their execution contracts, such
 as identity attachment, message delivery and file access. A skill owns how to
 combine those operations for a particular workflow: preparation, context
 selection, briefing assembly and handoff procedures belong in its instructions
@@ -344,18 +344,18 @@ adding a public API. A script may reuse existing non-agent-facing component capa
 an explicit owner interface without turning its selected output or procedure
 into a new SDK method. If size limits or shared implementation require a governed module,
 keep the workflow entry in the skill and the helper internal; placement under
-`ava/` alone does not justify adding it to `__all_for_ava__`.
+`meiva/` alone does not justify adding it to `__all_for_meiva__`.
 
 ## SDK return shapes
 
 A public SDK function or constant that returns a record (a fixed set of
 meaningful fields) returns a `NamedTuple`, never a bare `tuple[A, B]` whose
-meaning depends on position. The type must be listed in `__all_for_ava__` of the
+meaning depends on position. The type must be listed in `__all_for_meiva__` of the
 namespace that returns it, so `help()` renders its fields; document each field in
 the class docstring. Use `tuple[T, ...]` or a list for a variable-length
 sequence of one type, and a frozen dataclass when the record has many fields,
 optional fields or is expected to change. A constant of a `NamedTuple` type
-cannot be wrapped with `ava.const()`; document it with a PEP 224 docstring.
+cannot be wrapped with `meiva.const()`; document it with a PEP 224 docstring.
 
 ## When a public SDK entry earns its place
 
@@ -365,9 +365,9 @@ A public SDK function must meet at least one of two tests:
    protocol, authorization, an atomic multi-step operation, lifecycle, or
    framework-internal state.
 2. It makes a frequent operation shorter or harder to misuse. The typical case
-   is a narrow signature: `ava.tasks.log` takes only a progress note, so an
+   is a narrow signature: `meiva.tasks.log` takes only a progress note, so an
    agent cannot resend an already-written result through `update`;
-   `ava.tasks.create_and_assign` joins creating a task and assigning it into
+   `meiva.tasks.create_and_assign` joins creating a task and assigning it into
    one step.
 
 A function that meets neither and only renames another entry is deleted. A rule
@@ -383,19 +383,19 @@ Which package may import which, and how it is enforced:
 
 ## contextvars are allowlisted, not free
 
-Use LangGraph's existing `Runtime[AvaContext]` for graph-run dependencies rather
+Use LangGraph's existing `Runtime[MeivaContext]` for graph-run dependencies rather
 than creating a second implicit context with `ContextVar`. Nodes receive the
 runtime explicitly; helpers receive the values they need as parameters. Outside
 a graph run, use the caller's explicit context or resource owner: `get_runtime()`
 requires an active runnable context and is not a process-wide service locator.
 
 The disposable execution child has no LangGraph runtime. Its bootstrap initializes
-`ava.context`, `ava.state` and `ava.state_update` before user code runs; normal
+`meiva.context`, `meiva.state` and `meiva.state_update` before user code runs; normal
 imports and threads in that one execution use those same child-local slots.
-SDK modules read context through `ava.context`, not a separate context variable,
+SDK modules read context through `meiva.context`, not a separate context variable,
 thread inheritance patch or hidden host-current getter. Shared-host code receives
-`Runtime[AvaContext]`, an explicit context or the narrower dependency it needs.
-Plugin context-note builders receive `AvaContext` explicitly. See the
+`Runtime[MeivaContext]`, an explicit context or the narrower dependency it needs.
+Plugin context-note builders receive `MeivaContext` explicitly. See the
 [process-local SDK decision](../decisions/agents/context/2026-10-09-process-local-sdk-context.md).
 
 
@@ -408,7 +408,7 @@ ban is not possible — but every use is a mechanism-layer decision. A new use
 point needs a written justification in the PR description before joining the
 allowlist. Each `ContextVar` is also a frozen `contextvar` site of the
 [ambient-state rule](#ambient-state-inject-what-is-read-to-decide); the target is
-the LangGraph runtime context (`AvaContext`), not a module global.
+the LangGraph runtime context (`MeivaContext`), not a module global.
 
 ## Finite-domain vocabulary
 
@@ -473,7 +473,7 @@ A test does not replace a name in another module (`monkeypatch.setattr`,
 control something, the production code takes it as a parameter, a constructor argument
 for a class or a required keyword for a function, and the test passes a fake or a
 value. Every patch is recorded meizel debt that may only shrink
-([patching](../../meizel/docs/checker/patching.ava.okf.md)), and a new one fails the
+([patching](../../meizel/docs/checker/patching.meiva.okf.md)), and a new one fails the
 check.
 
 Why:
@@ -502,7 +502,7 @@ a test has to control it; production code that no test needs to steer may still
 | Configuration, including a value that comes from an environment variable | The component takes its own frozen `XxxConfig`, with exactly the fields it reads. The composition root builds it from `settings`; the component never reads `settings` or `os.environ`. A test builds the config it wants. |
 | A tuning constant (timeout, threshold, interval) | A field of that config whose default is today's constant. A test passes a small value. |
 | A client, a factory | A required parameter with no default. |
-| A path | A parameter. A test hands in `tmp_path`; it does not switch `AVA_HOME`. |
+| A path | A parameter. A test hands in `tmp_path`; it does not switch `MEIVA_HOME`. |
 | An atomic file write, or a filesystem call whose failure a test must cause (`replace`, `fsync`, `fchmod`) | `base/host/atomic_io.AtomicWriter(Fs(...))`. Commit, cleanup and durability faults are injected only in `atomic_io`'s own tests, through the `Fs` a test builds. A caller whose own policy warns, suppresses or never syncs may take a required `AtomicWriter` to test that policy, as specified by the `atomic_io` owner; it does not retest the writer's mechanisms. Other components call `write_text_atomic` or `write_bytes_atomic` and their tests use real files under `tmp_path`; a fault the disk can produce (a target that is a directory, a read-only directory) is made on disk. A test never patches `os.replace`, `Path.replace`, `os.fsync` or `os.fchmod`. |
 | Time: elapsed time, waiting, the wall clock | A required `Clock` (wall time and timezone; it carries a `Timers` and satisfies it) or, for a component that needs only elapsed time, a required `Timers` (`monotonic`, `sleep`, `asleep`). A root builds `Clock(config, timers=SYSTEM_TIMERS)` or passes `SYSTEM_TIMERS`; a test passes `ManualTimers` from `base/clock/tests` (`Clock(config, timers=manual, now=manual.now)`), which never waits and records each sleep in `sleeps`. A test never patches `time`, `asyncio.sleep` or `datetime`. |
 | A socket or a server | A real local service: a listener on port 0, a unix socket under `tmp_path`. Only fault injection (a refused or half-open connect) goes through a `connect` parameter, and only in the clients of `services/redis_bridge` and `base/host/permissions_helper`. |

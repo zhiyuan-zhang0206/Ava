@@ -61,7 +61,7 @@ def test_a_percent_in_a_path_is_escaped_for_postgres(
 
     command = archive.archive_pg_args(path_reader=lambda: settings.walg.walg_config_file)[-1]
 
-    assert "ava home%%p" in command
+    assert "meiva home%%p" in command
     assert command.count("%p") == 3, "two escaped path occurrences and the one real placeholder"
     assert command.endswith(" %p")
 

@@ -1,4 +1,4 @@
-// ava:ref ui/web/src/docs/frontend-state/api-requests.ava.okf.md#request-budget
+// meiva:ref ui/web/src/docs/frontend-state/api-requests.meiva.okf.md#request-budget
 import { API_BASE } from "./api-base";
 import { track } from "../telemetry/telemetry";
 import type { ToUserDocument, NoticesFeed,

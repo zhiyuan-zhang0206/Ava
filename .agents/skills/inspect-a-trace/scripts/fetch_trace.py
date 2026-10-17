@@ -7,7 +7,7 @@ Two modes:
   traces (id, duration, matched span count). Run this first to get trace ids.
 - **Fetch** (`--trace-id <hex-32>`): pull one trace's full span set and write
   `trace_raw.json` for `read_trace.py`. Sources:
-    - `mirror` (default): scan `$AVA_HOME/traces/spans*.jsonl*` (active `spans.jsonl` + rotated `spans-<ISO>-(size|time).jsonl`, gzipped old segments read transparently) — the durable
+    - `mirror` (default): scan `$MEIVA_HOME/traces/spans*.jsonl*` (active `spans.jsonl` + rotated `spans-<ISO>-(size|time).jsonl`, gzipped old segments read transparently) — the durable
       record, complete, no size cap, no network. Needs filesystem access to
       the machine that recorded the trace. Every file in range is scanned
       and spans are merged (a trace can straddle the sidecar's rotation
@@ -37,8 +37,8 @@ Output `trace_raw.json` (contract for read_trace.py):
     }
 
 Otherwise stdlib only. Needs the repo's `base` package on the path (see
-`_common.source_root`) to resolve `$AVA_HOME` the way every other Ava process
-does (the variable, else `~/.ava`); runs inside the repo venv (`.venv/bin/python`) or any Python 3.12 with `base`'s deps
+`_common.source_root`) to resolve `$MEIVA_HOME` the way every other Meiva process
+does (the variable, else `~/.meiva`); runs inside the repo venv (`.venv/bin/python`) or any Python 3.12 with `base`'s deps
 installed.
 """
 
@@ -59,7 +59,7 @@ from _common import source_root
 
 sys.path.insert(0, str(source_root()))
 
-from base.paths.home import resolve_ava_home
+from base.paths.home import resolve_meiva_home
 
 _KIND_STRIP = "SPAN_KIND_"
 _STATUS_OK = "STATUS_CODE_OK"
@@ -204,7 +204,7 @@ def cmd_search(args) -> int:
 def _mirror_dir(args) -> Path:
     if args.mirror_dir:
         return Path(args.mirror_dir)
-    return resolve_ava_home() / "traces"
+    return resolve_meiva_home() / "traces"
 
 
 def _trace_id_b64(hex_trace_id: str) -> str:
@@ -318,7 +318,7 @@ def cmd_fetch(args) -> int:
         print(
             "no spans found. Is the trace id right? Old mirror files are "
             "retention-pruned — widen --days. In Tempo, traces arrive via "
-            "`ava trace ship` (gap-replay; the sidecar fans out live)."
+            "`meiva trace ship` (gap-replay; the sidecar fans out live)."
         )
         return 1
     spans.sort(key=lambda s: s["start_ns"])
@@ -338,12 +338,12 @@ def main() -> int:
     ap.add_argument(
         "--tempo-url",
         default=os.environ.get(
-            "AVA_TRACE_TEMPO_URL",
-            os.environ.get("AVA_TELEMETRY_TEMPO_QUERY_URL", "http://localhost:3200"),
+            "MEIVA_TRACE_TEMPO_URL",
+            os.environ.get("MEIVA_TELEMETRY_TEMPO_QUERY_URL", "http://localhost:3200"),
         ),
         help=(
             "Tempo query API base (or the Grafana datasource proxy path). "
-            "Default: AVA_TRACE_TEMPO_URL, else AVA_TELEMETRY_TEMPO_QUERY_URL "
+            "Default: MEIVA_TRACE_TEMPO_URL, else MEIVA_TELEMETRY_TEMPO_QUERY_URL "
             "(the per-cluster Tempo query URL; remote when Tempo is not on "
             "this host), else http://localhost:3200."
         ),
@@ -358,7 +358,7 @@ def main() -> int:
         "--source",
         choices=("mirror", "tempo"),
         default="mirror",
-        help="fetch mode: mirror = $AVA_HOME/traces JSONL (default); tempo = /api/traces/{id}",
+        help="fetch mode: mirror = $MEIVA_HOME/traces JSONL (default); tempo = /api/traces/{id}",
     )
     ap.add_argument(
         "--days",
@@ -369,7 +369,7 @@ def main() -> int:
     ap.add_argument(
         "--mirror-dir",
         default=None,
-        help="fetch mode (mirror): override $AVA_HOME/traces",
+        help="fetch mode (mirror): override $MEIVA_HOME/traces",
     )
     args = ap.parse_args()
     return cmd_search(args) if args.search else cmd_fetch(args)

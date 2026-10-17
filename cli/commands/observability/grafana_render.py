@@ -1,11 +1,11 @@
-"""`ava lgtm render` — the ava-ops dashboard render, from the metric registries.
+"""`meiva lgtm render` — the meiva-ops dashboard render, from the metric registries.
 
 Task #3697 slice S1 (parent #3689): ``base.telemetry.metrics.grafana_dashboard`` renders the
 dashboard from the registered ``MetricSpec`` set and
 ``base.packages.dashboard_supply`` collects the plugin side (checkout plugins
 plus enabled installed ones). This command is the operator surface for that
 render: it diffs the render against THIS host's native Grafana provisioning
-copy (the live ``ava-ops-main.json``) or writes the render with ``--force``.
+copy (the live ``meiva-ops-main.json``) or writes the render with ``--force``.
 Slice S3 reuses the same render path inside converge, where the render
 replaces the checkout copy as the provisioning source.
 """
@@ -23,7 +23,7 @@ from base.host.atomic_io import write_text_atomic
 
 __all__ = ["cmd_grafana_render"]
 
-_DASHBOARD_FILE = "ava-ops-main.json"
+_DASHBOARD_FILE = "meiva-ops-main.json"
 
 
 def provisioning_dashboard(home: Path) -> Path:
@@ -78,7 +78,7 @@ def _report_diff(target: Path, current: str, rendered: str) -> None:
 
 
 def cmd_grafana_render(*, force: bool, repo_only: bool, database_factory: DatabaseFactory) -> int:
-    """Render the ava-ops dashboard and diff it (default) or write it (--force).
+    """Render the meiva-ops dashboard and diff it (default) or write it (--force).
 
     The spec set is the checkout's plugins plus, unless ``--repo_only``, the
     enabled installed-plugin registry rows — the same dual supplier slice S3
@@ -86,13 +86,13 @@ def cmd_grafana_render(*, force: bool, repo_only: bool, database_factory: Databa
     (or was written), 1 when it differs (diff preview) or the render cannot
     run on this host.
     """
-    from base.paths import ava_home
+    from base.paths import meiva_home
 
-    target = provisioning_dashboard(ava_home())
+    target = provisioning_dashboard(meiva_home())
     if not target.parent.is_dir():
         print(
             f"no native Grafana provisioning tree at {target.parent} — this host does not "
-            "run the LGTM observability stack (`ava lgtm on` or converge installs it)",
+            "run the LGTM observability stack (`meiva lgtm on` or converge installs it)",
             file=sys.stderr,
         )
         return 1
@@ -118,7 +118,7 @@ def cmd_grafana_render(*, force: bool, repo_only: bool, database_factory: Databa
             print(f"{target} is absent — the render would create it", file=sys.stderr)
         else:
             _report_diff(target, current, rendered)
-        print("run `ava lgtm render --force` to write the render", file=sys.stderr)
+        print("run `meiva lgtm render --force` to write the render", file=sys.stderr)
         return 1
 
     atomic_write(target, rendered)

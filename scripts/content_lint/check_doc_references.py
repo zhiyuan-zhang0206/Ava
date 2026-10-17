@@ -9,13 +9,13 @@ Two escapes, hours apart, from the same class:
 
 - A setup guide told readers to run
   `install.sh --skip-native-infra`. That flag has never existed.
-- `ava_builtins/skills/ava-self-development/SKILL.md` — a skill agents load and
-  *execute* — told them `ava start --cluster preview`, eight days after
+- `meiva_builtins/skills/meiva-self-development/SKILL.md` — a skill agents load and
+  *execute* — told them `meiva start --cluster preview`, eight days after
   `--cluster` was removed. The same section still described cluster names coming
   from the worktree directory, the mechanism that once birthed a phantom cluster
   over prod's own.
 
-`lint_doc_symbols.py` validates `ava.<name>` SDK references, so a deleted
+`lint_doc_symbols.py` validates `meiva.<name>` SDK references, so a deleted
 submodule cannot rot in the docs. Nothing covered the two things docs assert most
 often: **what you can type** and **what you can open**.
 
@@ -56,15 +56,15 @@ Three doc trees get exemptions, not a blanket skip:
    Three things this gets right that the obvious version does not, each a false
    negative found by review rather than by the tool going green:
    - Options are keyed by **command path**, not unioned. A flat set accepts
-     `ava stop --machine-name` because `start` has that flag.
+     `meiva stop --machine-name` because `start` has that flag.
    - A shell **continuation** carries the command across lines, so the four
-     flags under `ava start \` are validated rather than skipped.
+     flags under `meiva start \` are validated rather than skipped.
    - A script's options come only from **case arms at line start**, so the
      `$(node --version)` inside an `echo` does not make `install.sh --version`
      look legal.
 
    Attribution happens only inside code — a fenced block, or one inline-code
-   span. Prose is not an invocation: "`ava update` keeps it up (`--keep-infra`)"
+   span. Prose is not an invocation: "`meiva update` keeps it up (`--keep-infra`)"
    describes what update passes to its internal stop, and reading English words
    as arguments attributed that flag across a sentence.
 2. **Relative links.** Every `[text](path)` in a tracked doc, resolved against
@@ -94,7 +94,7 @@ Three doc trees get exemptions, not a blanket skip:
    are skipped; everything else must resolve.
 4. **Wikilinks.** Every `[[target]]` and `[[target|label]]` must resolve to an
    OKF node through the node graph's own `resolve_wikilink` (the label is
-   display text; only the target is read). `lint_ava_okf.py` reports the same
+   display text; only the target is read). `lint_meiva_okf.py` reports the same
    miss as a warning inside a node, which no hook prints, so a dangling edge
    stayed in the tree; here it blocks, and it covers the docs that linter never
    opens. Code samples and `future/`'s `(planned)` marker are exempt as for links.
@@ -139,10 +139,10 @@ _MD_LINK = re.compile(r"\[[^\]]*\]\(([^)\s]+)\)")
 _PLANNED = re.compile(r"\s*\(planned\)", re.IGNORECASE)
 
 
-def ava_flags() -> dict[tuple[str, ...], set[str]]:
+def meiva_flags() -> dict[tuple[str, ...], set[str]]:
     """Options keyed by the command path that accepts them.
 
-    Keyed rather than unioned: a flat set would accept `ava stop --machine-name`
+    Keyed rather than unioned: a flat set would accept `meiva stop --machine-name`
     because `--machine-name` exists on `start`, which is the false negative this
     tool exists to avoid."""
     from cli.parsers import command_options
@@ -185,7 +185,7 @@ def _command_segments(line: str, *, fenced: bool) -> list[str]:
 
     A command is written as code. Inside a fenced block the whole line is; in
     prose only inline-code spans are, and each span stands alone. Walking prose
-    was the mistake: the runbook says "`ava update` keeps it up (`--keep-infra`)"
+    was the mistake: the runbook says "`meiva update` keeps it up (`--keep-infra`)"
     to describe what update passes to its internal stop, and English words
     between the two kept the command path open long enough to attribute a flag
     across a sentence."""
@@ -225,7 +225,7 @@ def check_flags(
     r"""(bad (command, flag) pairs, the command path still open at end of line).
 
     `carry` is the path left open by the previous line's trailing backslash, so a
-    multi-line invocation validates its continuation flags too — `ava start \`
+    multi-line invocation validates its continuation flags too — `meiva start \`
     with four flags on the lines below is how the runbook writes it, and each of
     those lines carries no command token of its own. Only meaningful inside a
     fenced block; a backslash in prose continues nothing."""
@@ -280,7 +280,7 @@ def _indented_code(line: str, *, open_now: bool, prev_blank: bool, in_list: bool
 # markdown links). Unlike the deliberately-unsafe generic backtick path, this
 # shape is unambiguous: it must resolve to a `references/` dir of the skill or
 # one of its ancestors (a nested skill shares its parent's library — the
-# ava_builtins/skills/practice/ava-serious-engineering tree's ai-era/ and principles/
+# meiva_builtins/skills/practice/meiva-serious-engineering tree's ai-era/ and principles/
 # skills all point at
 # the root library). Three review rounds lost two of these to library moves
 # (Task #939).
@@ -288,7 +288,7 @@ _SKILL_REF = re.compile(r"`references/([A-Za-z0-9._/-]+\.md)`")
 
 
 _SKILL_ROOTS = (
-    REPO / "ava_builtins" / "skills",
+    REPO / "meiva_builtins" / "skills",
     REPO / ".agents" / "skills",
 )
 
@@ -326,23 +326,23 @@ def check_skill_backtick_refs(doc: Path, line: str) -> list[str]:
 
 # A `skills/<name>/...` path written WITHOUT the load-dir prefix. The repo
 # has no top-level `skills/` dir since #864 moved built-ins to
-# `ava_builtins/skills/` (+ project skills to `.agents/skills/`), so a bare
+# `meiva_builtins/skills/` (+ project skills to `.agents/skills/`), so a bare
 # `skills/<name>/...` reference can only resolve from a stale checkout — and a
 # SKILL.md command written that way fails when the agent runs it (audit round 2,
-# skills-plugins #2: gmail/sms/web-sources/web-ai/ava-self-evolution/ava-guide/pages all
+# skills-plugins #2: gmail/sms/web-sources/web-ai/meiva-self-evolution/meiva-guide/pages all
 # shipped dead `.venv/bin/python skills/<name>/...` invocations). The load-dir
-# form is `$AVA_HOME/skills/<name>/...` (or `~/.ava/skills/...`).
+# form is `$MEIVA_HOME/skills/<name>/...` (or `~/.meiva/skills/...`).
 _SKILLS_PREFIX_REF = re.compile(r"(?<![\w$./])skills/[A-Za-z0-9_-]+/")
 
 
 def check_skills_prefix_refs(line: str) -> list[str]:
     """Bare `skills/<name>/` refs on this SKILL.md line, if any.
 
-    A line that already carries a load-dir form (`$AVA_HOME/skills/` or
-    `~/.ava/skills/`) is clean: the bare form can then be a word about the path
-    rather than the path itself (e.g. "under `$AVA_HOME/skills/<name>/`"
+    A line that already carries a load-dir form (`$MEIVA_HOME/skills/` or
+    `~/.meiva/skills/`) is clean: the bare form can then be a word about the path
+    rather than the path itself (e.g. "under `$MEIVA_HOME/skills/<name>/`"
     prose)."""
-    if "$AVA_HOME/skills/" in line or "~/.ava/skills/" in line:
+    if "$MEIVA_HOME/skills/" in line or "~/.meiva/skills/" in line:
         return []
     return [m.group(0) for m in _SKILLS_PREFIX_REF.finditer(line)]
 
@@ -373,9 +373,9 @@ def check_links(doc: Path, line: str, *, allow_planned: bool = False) -> list[st
 
 @functools.cache
 def okf_nodes() -> frozenset[str]:
-    """Every tracked `.ava.okf.md` path — the universe a wikilink resolves in."""
+    """Every tracked `.meiva.okf.md` path — the universe a wikilink resolves in."""
     out = subprocess.run(  # noqa: S603 — fixed argv; REPO comes from git rev-parse, not input
-        ["git", "-C", str(REPO), "ls-files", "*.ava.okf.md"],
+        ["git", "-C", str(REPO), "ls-files", "*.meiva.okf.md"],
         capture_output=True,
         text=True,
         check=True,
@@ -387,7 +387,7 @@ def check_wikilinks(doc: Path, line: str, *, allow_planned: bool = False) -> lis
     """`[[target]]` / `[[target|label]]` targets on this line that name no OKF node.
 
     The label is display text; only the target half resolves, through the same
-    `resolve_wikilink` the node graph uses. `lint_ava_okf.py` reports a miss in a
+    `resolve_wikilink` the node graph uses. `lint_meiva_okf.py` reports a miss in a
     node as a warning, which no hook prints; this makes it block, and reaches the
     non-node docs that linter never opens."""
     # Imported here: a module-level import of application code would run before
@@ -477,7 +477,10 @@ def check_doc(
         if doc.name == "SKILL.md":
             for target in check_skills_prefix_refs(line):
                 problems.append(
-                    (lineno, f"`{target}` — no top-level skills/ dir (use `$AVA_HOME/skills/...`)")
+                    (
+                        lineno,
+                        f"`{target}` — no top-level skills/ dir (use `$MEIVA_HOME/skills/...`)",
+                    )
                 )
         if line.strip() and not line.startswith((" ", "\t")):
             in_list = bool(_LIST_ITEM.match(line))
@@ -486,7 +489,7 @@ def check_doc(
 
 
 def main() -> int:
-    commands = ava_flags()
+    commands = meiva_flags()
     for script in (REPO / "scripts").glob("*.sh"):
         commands[(script.name,)] = shell_flags(script)
 

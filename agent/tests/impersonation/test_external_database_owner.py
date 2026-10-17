@@ -10,18 +10,18 @@ from unittest.mock import patch
 
 import pytest
 
-import ava
+import meiva
 from agent.extensions import plugin_state_codec
 from agent.tests.impersonation.external_attachment import attached_runtime as attached_runtime
-from ava import boot, impersonation
-from ava.impersonation import attachment as attachment_module
-from ava.sdk_surface import process_context
-from ava.sdk_surface import settings as _settings
 from base.agents.impersonation import manifest
 from base.agents.impersonation.status import LOG_PROTOCOL_VERSION
 from base.config import ConfigBoot
 from base.db import Database, code_version_gate, connections
 from base.host.proc import run_bounded
+from meiva import boot, impersonation
+from meiva.impersonation import attachment as attachment_module
+from meiva.sdk_surface import process_context
+from meiva.sdk_surface import settings as _settings
 
 
 class _RestoreCursor:
@@ -102,18 +102,18 @@ def test_independent_attachments_check_the_minimum_on_first_borrow_and_close_own
     monkeypatch.setattr(code_version_gate.ProcessDbGate, "min_read_due", owner_check)
     monkeypatch.setattr(attachment_module.control, "require_active", active)
     (tmp_path / ".env").write_text(
-        "AVA_DB_URL=postgresql://test:test@127.0.0.1:1/attachment\n"
-        "AVA_REDIS_URL=redis://127.0.0.1:1/0\n"
-        "AVA_MACHINE_SERVE_AGENT_RUNNER=true\n",
+        "MEIVA_DB_URL=postgresql://test:test@127.0.0.1:1/attachment\n"
+        "MEIVA_REDIS_URL=redis://127.0.0.1:1/0\n"
+        "MEIVA_MACHINE_SERVE_AGENT_RUNNER=true\n",
         encoding="utf-8",
     )
     try:
         with patch.dict(
             os.environ,
             {
-                "AVA_HOME": str(tmp_path),
-                "AVA_CONFIG_FETCH": "skip",
-                "AVA_MACHINE_NAME": attached_runtime[0]["machine"],
+                "MEIVA_HOME": str(tmp_path),
+                "MEIVA_CONFIG_FETCH": "skip",
+                "MEIVA_MACHINE_NAME": attached_runtime[0]["machine"],
             },
         ):
             writers_before = {
@@ -129,7 +129,7 @@ def test_independent_attachments_check_the_minimum_on_first_borrow_and_close_own
                     assert first_db is not second_db
                     first_db.connect(autocommit=True).close()
                     second_db.connect(autocommit=True).close()
-                    ava.context.sql.execute("SELECT 1")
+                    meiva.context.sql.execute("SELECT 1")
                     live = dials[-1]
                     assert not live.closed
                     current = dials[first_dial:]
@@ -147,7 +147,7 @@ def test_independent_attachments_check_the_minimum_on_first_borrow_and_close_own
                 assert {
                     thread for thread in threading.enumerate() if thread.name == "event-emitter"
                 } == writers_before
-                assert getattr(ava, "context", None) is None
+                assert getattr(meiva, "context", None) is None
         assert len({id(owner) for owner in checked}) == 2
     finally:
         if prior is not None:
@@ -159,7 +159,7 @@ def test_attachment_borrows_existing_database_factory_without_closing_prior_clie
     monkeypatch: pytest.MonkeyPatch,
     database: Database,
 ) -> None:
-    prior = ava.context
+    prior = meiva.context
     handles: list[Database] = []
 
     def original() -> Database:
@@ -174,9 +174,9 @@ def test_attachment_borrows_existing_database_factory_without_closing_prior_clie
     prior.sql.execute("SELECT 1")
     original_connection = cast(Any, prior.sql._get())
     with impersonation.attach("lease"):
-        assert ava.context.clients is prior.clients
+        assert meiva.context.clients is prior.clients
         assert _settings.database() in handles
-    assert ava.context is prior
+    assert meiva.context is prior
     assert prior.sql._get() is original_connection
     assert not original_connection.closed
 
@@ -185,14 +185,14 @@ def test_read_only_attachment_refuses_an_undelivered_login_before_dial(tmp_path:
     authority = tmp_path / "db-authority"
     authority.mkdir()
     (authority / "ledger.json").write_text("{}", encoding="utf-8")
-    environment = {key: value for key, value in os.environ.items() if key != "AVA_AGENT_ID"}
+    environment = {key: value for key, value in os.environ.items() if key != "MEIVA_AGENT_ID"}
     result = run_bounded(
         [sys.executable, str(Path(__file__).with_name("child_undelivered_login.py"))],
         env={
             **environment,
-            "AVA_HOME": str(tmp_path),
-            "AVA_CONFIG_FETCH": "skip",
-            "AVA_DB_URL": "postgresql://127.0.0.1:1/undelivered",
+            "MEIVA_HOME": str(tmp_path),
+            "MEIVA_CONFIG_FETCH": "skip",
+            "MEIVA_DB_URL": "postgresql://127.0.0.1:1/undelivered",
         },
         capture_output=True,
         text=True,
@@ -215,14 +215,14 @@ def test_independent_attachment_does_not_redeliver_environment(
     tmp_path: Path,
     contended: bool,
 ) -> None:
-    with patch.dict(os.environ, {"AVA_MACHINE_NAME": attached_runtime[0]["machine"]}):
+    with patch.dict(os.environ, {"MEIVA_MACHINE_NAME": attached_runtime[0]["machine"]}):
         (tmp_path / ".env").write_text(
-            "AVA_MACHINE_SERVE_GATEWAY=true\nAVA_TIMEZONE=Asia/Tokyo\n"
-            "AVA_DB_URL=postgresql://test:test@127.0.0.1:1/other-home\n"
-            "AVA_REDIS_URL=redis://127.0.0.1:1/1\n",
+            "MEIVA_MACHINE_SERVE_GATEWAY=true\nMEIVA_TIMEZONE=Asia/Tokyo\n"
+            "MEIVA_DB_URL=postgresql://test:test@127.0.0.1:1/other-home\n"
+            "MEIVA_REDIS_URL=redis://127.0.0.1:1/1\n",
             encoding="utf-8",
         )
-        monkeypatch.setenv("AVA_HOME", str(tmp_path))
+        monkeypatch.setenv("MEIVA_HOME", str(tmp_path))
         before = dict(os.environ)
         delivered = ConfigBoot()
         delivered.read_process_environment()
@@ -230,7 +230,7 @@ def test_independent_attachment_does_not_redeliver_environment(
         try:
             with impersonation.attach("lease"):
                 assert dict(os.environ) == before
-                assert ava.context.require_clock().timezone == delivered.view.general.timezone
+                assert meiva.context.require_clock().timezone == delivered.view.general.timezone
                 if contended:
                     _assert_competing_attachment_is_refused()
                 assert dict(os.environ) == before
@@ -280,18 +280,18 @@ def test_unbound_attachment_failure_closes_owned_clients_and_releases_binding(
         else (plugin_state_codec, "load_snapshot")
     )
     (tmp_path / ".env").write_text(
-        "AVA_DB_URL=postgresql://test:test@127.0.0.1:1/attachment\n"
-        "AVA_REDIS_URL=redis://127.0.0.1:1/0\n"
-        "AVA_MACHINE_SERVE_AGENT_RUNNER=true\n",
+        "MEIVA_DB_URL=postgresql://test:test@127.0.0.1:1/attachment\n"
+        "MEIVA_REDIS_URL=redis://127.0.0.1:1/0\n"
+        "MEIVA_MACHINE_SERVE_AGENT_RUNNER=true\n",
         encoding="utf-8",
     )
     try:
         with patch.dict(
             os.environ,
             {
-                "AVA_HOME": str(tmp_path),
-                "AVA_CONFIG_FETCH": "skip",
-                "AVA_MACHINE_NAME": attached_runtime[0]["machine"],
+                "MEIVA_HOME": str(tmp_path),
+                "MEIVA_CONFIG_FETCH": "skip",
+                "MEIVA_MACHINE_NAME": attached_runtime[0]["machine"],
             },
         ):
             with monkeypatch.context() as failed:
@@ -300,9 +300,9 @@ def test_unbound_attachment_failure_closes_owned_clients_and_releases_binding(
                     impersonation.attach("lease")
                 assert raised.value is primary
             assert created[0][1][0]
-            assert getattr(ava, "context", None) is None
+            assert getattr(meiva, "context", None) is None
             with impersonation.attach("lease"):
-                assert ava.self.AGENT_ID == 405
+                assert meiva.self.AGENT_ID == 405
             assert created[1][1][0]
     finally:
         if prior is not None:
@@ -334,15 +334,15 @@ def test_independent_attachment_seal_wait_reads_its_live_configuration_owner(
     monkeypatch.setattr(attachment_module, "ConfigBoot", build)
     monkeypatch.setattr(manifest, "open_local_participant", open_participant)
     monkeypatch.setattr(manifest, "close_local_participant_admission", wait)
-    (tmp_path / ".env").write_text("AVA_MACHINE_SERVE_AGENT_RUNNER=true\n", encoding="utf-8")
+    (tmp_path / ".env").write_text("MEIVA_MACHINE_SERVE_AGENT_RUNNER=true\n", encoding="utf-8")
     prior = process_context.unbind_context()
     try:
         with patch.dict(
             os.environ,
             {
-                "AVA_HOME": str(tmp_path),
-                "AVA_CONFIG_FETCH": "skip",
-                "AVA_MACHINE_NAME": attached_runtime[0]["machine"],
+                "MEIVA_HOME": str(tmp_path),
+                "MEIVA_CONFIG_FETCH": "skip",
+                "MEIVA_MACHINE_NAME": attached_runtime[0]["machine"],
             },
         ):
             attachment = impersonation.attach("lease")
@@ -351,7 +351,7 @@ def test_independent_attachment_seal_wait_reads_its_live_configuration_owner(
             assert waits == []
             attachment.close()
             assert waits == [37]
-            assert getattr(ava, "context", None) is None
+            assert getattr(meiva, "context", None) is None
     finally:
         if prior is not None:
             process_context.bind_context(prior)

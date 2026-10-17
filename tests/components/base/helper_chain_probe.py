@@ -2,7 +2,7 @@
 
 Spawned by tests/harness/test_helperproc.py. The helper writes the marker a signed
 helper stamps into its direct child — its own pid, or
-`AVA_TEST_HELPER_MARKER_VALUE` when the test needs a pid that is *not* on the
+`MEIVA_TEST_HELPER_MARKER_VALUE` when the test needs a pid that is *not* on the
 chain — then spawns a root, which spawns a unit. The unit reads the marker
 file, sets the env var, and prints `parent_chain_intact()`'s verdict. The
 marker is set by the unit rather than inherited only because the helper pid
@@ -19,7 +19,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
 
-_MARKER_OVERRIDE_ENV = "AVA_TEST_HELPER_MARKER_VALUE"
+_MARKER_OVERRIDE_ENV = "MEIVA_TEST_HELPER_MARKER_VALUE"
 
 
 def _run_next(next_role: str, marker_path: str) -> None:
@@ -41,7 +41,7 @@ def main() -> None:
     elif role == "root":
         _run_next("unit", marker_path)
     else:
-        os.environ["AVA_PERMISSIONS_HELPER_PID"] = Path(marker_path).read_text()
+        os.environ["MEIVA_PERMISSIONS_HELPER_PID"] = Path(marker_path).read_text()
         from base.sessions.helper_chain_guard import parent_chain_intact
 
         sys.stdout.write("intact" if parent_chain_intact() else "broken")

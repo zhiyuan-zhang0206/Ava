@@ -3,7 +3,7 @@
 
 Dry-run is the default. ``--scope admin`` rotates the Redis ``default`` /
 requirepass password; ``--scope runner`` rotates the Redis runtime ACL
-password; the default rotates both. It never changes ``AVA_CLUSTER_SECRET``:
+password; the default rotates both. It never changes ``MEIVA_CLUSTER_SECRET``:
 that is the separate, emergency-only control-plane bearer rotation.
 
 PostgreSQL has no rotatable password here: the schema owner is NOLOGIN, the
@@ -37,7 +37,7 @@ from base.cluster.derive import REDIS_PASSWORD_ENV
 from base.config import settings
 from base.host.env.dotenv_file import upsert_env
 from base.host.net.url_secret import url_host, url_with_password
-from base.paths import ava_home
+from base.paths import meiva_home
 from ops.env_audit import EnvWriteAudit
 
 _TOKEN_BYTES = 32
@@ -45,7 +45,7 @@ _SCOPES = frozenset({"admin", "runner", "both"})
 _GATEWAY_CONTEXT_ERROR = (
     "data-plane secret rotation must run on the gateway host in a gateway context, not from "
     "an agent shell. Run:\n"
-    "cd <gateway checkout (e.g. ~/.ava/source)> && unset AVA_PROCESS_PROFILE && "
+    "cd <gateway checkout (e.g. ~/.meiva/source)> && unset MEIVA_PROCESS_PROFILE && "
     ".venv/bin/python scripts/data_plane_ops/rotate_data_plane_secrets.py ..."
 )
 
@@ -68,7 +68,7 @@ class RotationState:
 
     def path(self) -> Path:
         stamp = self.started_at.replace(":", "").replace("+00:00", "Z")
-        return ava_home() / "backups" / "secret-rotation" / f"data-plane-{stamp}.json"
+        return meiva_home() / "backups" / "secret-rotation" / f"data-plane-{stamp}.json"
 
     def save(self) -> Path:
         path = self.path()
@@ -120,11 +120,11 @@ def build_state(scope: str = "both") -> RotationState:
     if scope not in _SCOPES:
         raise ValueError(f"unsupported scope {scope!r}")
     _require_gateway_context()
-    record = get_record(ava_home())
+    record = get_record(meiva_home())
     if record is None:
         raise RuntimeError("no cluster record — cannot resolve data-plane ports")
-    values = dotenv_values(ava_home() / ".env")
-    old_admin = (values.get("AVA_REDIS_ADMIN_PASSWORD") or "").strip()
+    values = dotenv_values(meiva_home() / ".env")
+    old_admin = (values.get("MEIVA_REDIS_ADMIN_PASSWORD") or "").strip()
     old_runtime = (values.get(REDIS_PASSWORD_ENV) or "").strip()
     if not (old_admin and old_runtime):
         raise RuntimeError(
@@ -230,16 +230,17 @@ def verify(state: RotationState) -> None:
 
 
 def write_env(state: RotationState) -> None:
-    values = dotenv_values(ava_home() / ".env")
+    values = dotenv_values(meiva_home() / ".env")
     redis_url = url_with_password(
-        (values.get("AVA_REDIS_URL") or settings.data_plane.redis_url).strip(), state.redis_password
+        (values.get("MEIVA_REDIS_URL") or settings.data_plane.redis_url).strip(),
+        state.redis_password,
     )
     upsert_env(
-        ava_home() / ".env",
+        meiva_home() / ".env",
         {
-            "AVA_REDIS_ADMIN_PASSWORD": state.redis_admin_password,
+            "MEIVA_REDIS_ADMIN_PASSWORD": state.redis_admin_password,
             REDIS_PASSWORD_ENV: state.redis_password,
-            "AVA_REDIS_URL": redis_url,
+            "MEIVA_REDIS_URL": redis_url,
         },
         audit=EnvWriteAudit(site="rotate_data_plane_secrets"),
     )
@@ -270,7 +271,7 @@ def main(argv: list[str] | None = None) -> int:
         print(
             "✗ this cluster's data plane is remote-managed — rotation is a "
             "local-instance operation (requirepass / ACL). A remote/SaaS plane "
-            "rotates credentials at the provider; update AVA_REDIS_URL here.",
+            "rotates credentials at the provider; update MEIVA_REDIS_URL here.",
             file=sys.stderr,
         )
         return 1

@@ -34,7 +34,7 @@ from base.config.service_read import ConfigAuthority, domain_model_classes
 # value: the panel/CLI round-trips it unchanged on a full-replace PUT, and the
 # write path treats it as "keep the existing .env value" (neither rewrite nor
 # unset). This keeps secrets off the wire without a full-replace clobbering them.
-CONFIG_UNCHANGED_SENTINEL = "__ava_unchanged__"
+CONFIG_UNCHANGED_SENTINEL = "__meiva_unchanged__"
 
 
 class ConfigFieldMeta:
@@ -148,7 +148,7 @@ def env_override_values(
     `remote_writable` UNLESS `local` (a self-target edit), since `writable` already
     means "a human may edit it on its own host" and `remote_writable` only gates
     editing a *remote* host's field. That keeps read-only fields (`db_url`) out and,
-    for a remote target, the connection / identity values the first `ava start` wrote — so
+    for a remote target, the connection / identity values the first `meiva start` wrote — so
     the whole set round-trips back through a PUT without rejection.
 
     Core only unless the caller supplies the plugin-owned `plugin_metadata` and the
@@ -168,7 +168,7 @@ def env_override_values(
             # Never put a secret's cleartext on the wire. The panel/CLI carries the
             # sentinel and PUTs it back unchanged; the write path preserves the
             # existing .env value (set the field with a real value to change it,
-            # `ava config unset` to clear it).
+            # `meiva config unset` to clear it).
             out[meta.name] = CONFIG_UNCHANGED_SENTINEL
             continue
         value = values[meta.name]

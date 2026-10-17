@@ -22,7 +22,7 @@ lives in `b` when `b`'s production code imports `a`. The home follows production
 the census moves when they do.
 
 - **A, environment boundary.** Not repository code: stdlib, third-party, the runtime, the
-  test harness, or an environment variable that is not an `AVA_*` setting.
+  test harness, or an environment variable that is not an `MEIVA_*` setting.
 - **B, own package.** Repository code whose owning package contains the test's home. The
   owner of a private name is the package that holds its first private component (Rule 4); the
   owner of a public name is the package of its module.
@@ -35,7 +35,7 @@ the census moves when they do.
   `top-level` (a test with no package home).
 - **E, global environment.** The explicit list `E_MODULES` in
   `scripts/structure/patch_targets.py` (settings, paths, machine and cluster identity, env
-  resolution, ambient services) and `AVA_*` environment variables. Tests replace these through
+  resolution, ambient services) and `MEIVA_*` environment variables. Tests replace these through
   the same few seams everywhere; a test-support design for them is a separate line of work,
   planned in [dependency injection](../security/dependency-injection.md).
 - **U, unresolved.** The patched object is not statically known (a parameter, a call result).
@@ -44,7 +44,7 @@ the census moves when they do.
 
 | class | meaning | points |
 |---|---|---|
-| A | environment boundary (stdlib, third-party, runtime, non-AVA env vars) | 1763 |
+| A | environment boundary (stdlib, third-party, runtime, non-MEIVA env vars) | 1763 |
 | B | own package (the owning package contains the test's home) | 3204 |
 | C | another package's public name | 2030 |
 | D | violation: a private name of a package the test does not belong to | 685 |
@@ -61,7 +61,7 @@ Class C includes 88 deep attributes (`module.Class.method`), not violations.
 | `cli/commands/lifecycle` | 25 | 601 | 50 | 225 | 172 | 44 | 108 | 2 |
 | `gateway` | 56 | 592 | 38 | 25 | 224 | 54 | 250 | 1 |
 | `services/agent_runner/agent_host` | 45 | 509 | 28 | 192 | 134 | 54 | 99 | 2 |
-| `ava` | 24 | 468 | 58 | 79 | 49 | 71 | 201 | 10 |
+| `meiva` | 24 | 468 | 58 | 79 | 49 | 71 | 201 | 10 |
 | `base/lm` | 11 | 374 | 145 | 45 | 1 | 2 | 181 | 0 |
 | `cli/commands/data_plane` | 13 | 357 | 33 | 162 | 42 | 23 | 97 | 0 |
 | `cli` | 27 | 338 | 53 | 42 | 49 | 55 | 136 | 3 |
@@ -89,7 +89,7 @@ Class C includes 88 deep attributes (`module.Class.method`), not violations.
 
 | test home | D points |
 |---|---|
-| `ava` | 71 |
+| `meiva` | 71 |
 | `cli/commands` | 58 |
 | `base` | 55 |
 | `cli` | 55 |
@@ -97,7 +97,7 @@ Class C includes 88 deep attributes (`module.Class.method`), not violations.
 | `gateway` | 54 |
 | `cli/commands/lifecycle` | 44 |
 | `ops` | 29 |
-| `ava_builtins/plugins` | 25 |
+| `meiva_builtins/plugins` | 25 |
 | `cli/commands/data_plane` | 23 |
 | `cli/parsers` | 20 |
 | `agent` | 18 |
@@ -112,13 +112,13 @@ patched and the test homes that patch them. This is the injection-seam work list
 
 | production module | points | private names | patched from (test home) |
 |---|---|---|---|
-| `ava.mcps` | 43 | `_read_cache` 10, `_get_remote_client` 9, `_sessions` 8 | `ava` 40, `agent` 3 |
+| `meiva.mcps` | 43 | `_read_cache` 10, `_get_remote_client` 9, `_sessions` 8 | `meiva` 40, `agent` 3 |
 | `agent.impersonation` | 32 | `_PROCESS_STARTED_MONOTONIC` 9, `_spawn_codex_relay` 8, `_provider_anchor_states` 6 | `services/agent_runner/agent_host` 32 |
 | `cli.commands.extensions.external_skills` | 28 | `_rename_no_replace` 20, `_stage_copy` 3, `_commit_activation` 2 | `cli/commands` 28 |
 | `base.deploy.git.memory_repo` | 21 | `_run_git` 13, `_download_pool_snapshot` 4, `_init_local_repo` 2 | `base` 21 |
 | `ops.lifecycle` | 21 | `_recovery_halt_reason` 5, `_wake_suppression_active` 3, `_recovery_halted` 3 | `ops` 21 |
 | `services.desktop.permissions_helper.lifecycle` | 19 | `_BUILD_DIR` 3, `_keychain_lock_reason` 3, `_interactive_signing_reason` 3 | `cli/commands/lifecycle` 19 |
-| `ava.mcps._remote` | 18 | `_remote` 18 | `ava` 18 |
+| `meiva.mcps._remote` | 18 | `_remote` 18 | `meiva` 18 |
 | `scripts.lint.async_no_sync_blocking` | 18 | `_REPO_ROOT` 9, `_ROOT` 2, `DEFINITION_DIRS` 2 | `scripts` 18 |
 | `agent.startup` | 16 | `_page_server_alive` 9, `_last_reconcile_at` 7 | `agent/graph/claim` 16 |
 | `cli.commands.lifecycle.root_driver` | 16 | `stop_root_service_tree` 8, `root_tree_selection` 4, `_root_tree_plan` 2 | `cli/commands/data_plane` 10, `cli` 4, `cli/commands/observability` 1, `(top-level)` 1 |
@@ -130,7 +130,7 @@ patched and the test homes that patch them. This is the injection-seam work list
 | `gateway.alerts.router` | 10 | `notify_im` 10 | `cli/commands` 10 |
 | `gateway.cluster.status` | 10 | `_compute_stats_dashboard` 8, `_probe_agent_runner` 1, `_STATUS_CACHE_TTL_S` 1 | `gateway` 10 |
 | `services.desktop.permissions_helper.launchd_job` | 10 | `_retirement_command` 4, `_executable_pids` 2, `_retirement_owner` 2 | `cli/commands/lifecycle` 10 |
-| `ava.shell.sessions` | 9 | `_next_session_index_from_db` 3, `_shell_prefix` 3, `_record_ttl` 3 | `ava` 6, `cli/commands/data_plane` 3 |
+| `meiva.shell.sessions` | 9 | `_next_session_index_from_db` 3, `_shell_prefix` 3, `_record_ttl` 3 | `meiva` 6, `cli/commands/data_plane` 3 |
 | `cli.commands.agents.impersonation_relay` | 9 | `_MIN_EMIT_INTERVAL_SECONDS` 2, `read_relay_inbox` 2, `_write_heartbeat` 2 | `cli/parsers` 9 |
 
 ## Class E by module (top 15)
@@ -138,10 +138,10 @@ patched and the test homes that patch them. This is the injection-seam work list
 | ambient module | tier | points | test homes |
 |---|---|---|---|
 | `base.config` | config | 1676 | 90 |
-| `env:AVA_*` | env-var | 411 | 40 |
+| `env:MEIVA_*` | env-var | 411 | 40 |
 | `base.paths` | paths | 375 | 55 |
 | `base.cluster.machine` | identity | 236 | 29 |
-| `ava.sdk_surface.agent_identity` | identity | 99 | 14 |
+| `meiva.sdk_surface.agent_identity` | identity | 99 | 14 |
 | `base.log` | ambient-service | 87 | 18 |
 | `base.telemetry` | ambient-service | 84 | 31 |
 | `base.db` | ambient-service | 81 | 31 |
@@ -152,4 +152,4 @@ patched and the test homes that patch them. This is the injection-seam work list
 
 ## Files placed by the patch-evidence fallback
 
-Every strong first-party reference of these files is patch evidence, so they keep it (see `scripts/structure/placement.py`): `ava/tests/failures/test_seed_guard.py`, `tests/components/ava/test_self_evolution_schedules.py`, `tests/components/schedules/test_c9_daily_report.py`, `ava/tests/test_self_evolution_evaluate.py`.
+Every strong first-party reference of these files is patch evidence, so they keep it (see `scripts/structure/placement.py`): `meiva/tests/failures/test_seed_guard.py`, `tests/components/meiva/test_self_evolution_schedules.py`, `tests/components/schedules/test_c9_daily_report.py`, `meiva/tests/test_self_evolution_evaluate.py`.

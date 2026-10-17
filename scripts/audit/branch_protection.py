@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Compare GitHub's live branch protections with Ava's Trunk merge-queue declaration.
+"""Compare GitHub's live branch protections with Meiva's Trunk merge-queue declaration.
 
 The repository declares its merge gate in ``.trunk/trunk.yaml`` (queue testing
 gate) plus the admission gate ruled in P2 (three suite aggregators),

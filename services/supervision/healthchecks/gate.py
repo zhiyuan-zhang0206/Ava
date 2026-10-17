@@ -6,13 +6,13 @@ import urllib.request
 from typing import cast
 
 from base.daemon.health import DaemonProbe
-from base.paths import ava_home
+from base.paths import meiva_home
 from services.entrypoints.gate.daemon import entry_port
 
 
 def probe() -> DaemonProbe:
     """A Gate response proves its own readiness, independent of app availability."""
-    url = f"http://127.0.0.1:{entry_port()}/__ava/healthz"
+    url = f"http://127.0.0.1:{entry_port()}/__meiva/healthz"
     try:
         with urllib.request.urlopen(url, timeout=3) as response:
             payload = json.loads(response.read(4096))
@@ -23,6 +23,6 @@ def probe() -> DaemonProbe:
     payload = cast("dict[str, object]", payload)
     if payload.get("name") != "gate":
         return DaemonProbe.down("gate health endpoint returned an invalid identity")
-    if payload.get("home") != str(ava_home()):
+    if payload.get("home") != str(meiva_home()):
         return DaemonProbe.port_taken("gate health endpoint belongs to another home")
     return DaemonProbe.up("gate health endpoint is ready")

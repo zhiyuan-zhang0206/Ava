@@ -86,7 +86,7 @@ def _hold_refusal(current: PauseOwnerSnapshot) -> str | None:
         and current.maintenance.phase in (MaintenancePhase.STOPPING, MaintenancePhase.STOPPED)
         and not start_serving.is_serving()
     ):
-        return "services have stopped; ava start must pass readiness before resume"
+        return "services have stopped; meiva start must pass readiness before resume"
     return None
 
 

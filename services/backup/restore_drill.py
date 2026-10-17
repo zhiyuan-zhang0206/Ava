@@ -60,9 +60,9 @@ def _newest_artifact() -> Path:
     return artifacts[-1][1]
 
 
-RESTORE_ROLES = ("ava_main", GATEWAY_GROUP, RUNNER_GROUP, "grafana_ro", "zzy")
+RESTORE_ROLES = ("meiva_main", GATEWAY_GROUP, RUNNER_GROUP, "grafana_ro", "zzy")
 """Roles a managed dump's OWNER/GRANT statements reference. initdb only
-creates the `ava` superuser; without these pg_restore fails on
+creates the `meiva` superuser; without these pg_restore fails on
 `role "..." does not exist` (2026-08-27 prod drill finding). They are created
 as plain LOGIN roles without a password (trust auth): a restore needs them
 only to exist. The two write-generation capability groups
@@ -117,7 +117,7 @@ def restore_failure_message(proc: subprocess.CompletedProcess[bytes], base: Path
         f"pg_restore exited {proc.returncode} against the throwaway cluster on {base} "
         f"({format_bytes(shutil.disk_usage(base).free)} free). If the server closed "
         f"the connection mid-copy, the scratch base ran out of room — free space on "
-        f"{base} or point AVA_PG_THROWAWAY_BASE at a larger volume."
+        f"{base} or point MEIVA_PG_THROWAWAY_BASE at a larger volume."
     )
     stderr_tail = "\n".join((proc.stderr or b"").decode(errors="replace").splitlines()[-5:])
     return f"{hint}\npg_restore stderr tail:\n{stderr_tail}" if stderr_tail else hint
@@ -210,7 +210,7 @@ def run_drill(
     if not artifact.is_file():
         raise RuntimeError(f"backup artifact does not exist: {artifact.name}")
     started = time.monotonic()
-    with tempfile.TemporaryDirectory(prefix="ava-restore-drill-", dir=scratch_root) as tmp:
+    with tempfile.TemporaryDirectory(prefix="meiva-restore-drill-", dir=scratch_root) as tmp:
         scratch = Path(tmp)
         raw_dump = scratch / "backup.dump"
         backup.decrypt_artifact(artifact, raw_dump)
@@ -230,7 +230,7 @@ def run_drill(
 
 
 def main(argv: list[str] | None = None) -> None:
-    parser = argparse.ArgumentParser(description="Restore and verify an encrypted Ava DB backup.")
+    parser = argparse.ArgumentParser(description="Restore and verify an encrypted Meiva DB backup.")
     parser.add_argument("artifact", nargs="?", type=Path, help="managed .dump.enc artifact")
     args = parser.parse_args(argv)
     config = ConfigBoot()

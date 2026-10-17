@@ -36,7 +36,7 @@ def post(monkeypatch: pytest.MonkeyPatch) -> Mock:
     monkeypatch.setattr(http_dial, "post", call)
     monkeypatch.setattr(machine, "gateway_api_base", gateway_api_base_stub("http://localhost"))
     monkeypatch.setattr(machine, "gateway_auth_headers", gateway_auth_headers_stub({}))
-    monkeypatch.setenv("AVA_CALLER_IDENTITY", '{"kind":"external_agent","subject":"codex"}')
+    monkeypatch.setenv("MEIVA_CALLER_IDENTITY", '{"kind":"external_agent","subject":"codex"}')
     return call
 
 
@@ -49,7 +49,7 @@ def post(monkeypatch: pytest.MonkeyPatch) -> Mock:
 def test_send_carries_explicit_source(
     post: Mock, monkeypatch: pytest.MonkeyPatch, source: str
 ) -> None:
-    monkeypatch.delenv("AVA_CALLER_IDENTITY")
+    monkeypatch.delenv("MEIVA_CALLER_IDENTITY")
     agents_control.cmd_agents_send(42, "hello", source)
     assert post.call_args.kwargs["json"]["source"] == source
 
@@ -69,7 +69,7 @@ def test_missing_send_source_is_not_compensated(post: Mock) -> None:
 
 
 def test_lifecycle_takes_explicit_source(post: Mock, monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.delenv("AVA_CALLER_IDENTITY")
+    monkeypatch.delenv("MEIVA_CALLER_IDENTITY")
     agents_control.cmd_agents_restart(42, source="user")
     assert post.call_args.kwargs["json"] == {"source": "user"}
     agents_control.cmd_agents_resurrect(42, source="user")
@@ -158,7 +158,7 @@ def test_send_without_provenance_exits_cleanly(
 ) -> None:
     from cli.commands.agents.parsers import h_agents_send
 
-    monkeypatch.delenv("AVA_CALLER_IDENTITY")
+    monkeypatch.delenv("MEIVA_CALLER_IDENTITY")
     assert h_agents_send(_send_args()) == 2
     err = capsys.readouterr().err
     assert "requires --source" in err
@@ -171,7 +171,7 @@ def test_send_invalid_source_exits_cleanly(
 ) -> None:
     from cli.commands.agents.parsers import h_agents_send
 
-    monkeypatch.delenv("AVA_CALLER_IDENTITY")
+    monkeypatch.delenv("MEIVA_CALLER_IDENTITY")
     assert h_agents_send(_send_args(source="bogus")) == 2
     assert "Unrecognized inbound source" in capsys.readouterr().err
     post.assert_not_called()

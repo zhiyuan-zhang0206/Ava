@@ -9,9 +9,9 @@ exports = ["admission_fixture.py", "cancel_fixture.py"]
 
 [debt.env-patch]
 "test_exec_protocol.py#patch.dict os.environ" = 1
-"test_exec_turn_config.py#monkeypatch.setenv os.environ.AVA_AGENT_BIRTH_CONFIG" = 1
-"test_exec_turn_config.py#monkeypatch.setenv os.environ.AVA_AGENT_CONFIG_OVERLAY" = 1
-"test_exec_turn_config.py#monkeypatch.setitem os.environ.AVA_HOME" = 1
+"test_exec_turn_config.py#monkeypatch.setenv os.environ.MEIVA_AGENT_BIRTH_CONFIG" = 1
+"test_exec_turn_config.py#monkeypatch.setenv os.environ.MEIVA_AGENT_CONFIG_OVERLAY" = 1
+"test_exec_turn_config.py#monkeypatch.setitem os.environ.MEIVA_HOME" = 1
 
 [debt.first-party-patch]
 "admission_fixture.py#monkeypatch.setattr agent.graph.exec._owned_run.validate_native_ready" = 1

@@ -7,7 +7,7 @@ from base.telemetry.metrics.core import catalog
 
 _DASHBOARD = (
     Path(__file__).resolve().parents[5]
-    / "deploy/lgtm/config/grafana/provisioning/dashboards/ava-ops-main.json"
+    / "deploy/lgtm/config/grafana/provisioning/dashboards/meiva-ops-main.json"
 )
 
 

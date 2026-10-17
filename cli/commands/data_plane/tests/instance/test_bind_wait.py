@@ -1,6 +1,6 @@
 """Bounded wait for the reachable (private-network) bind address before starting pg.
 
-On reboot brew/launchd can start `ava` before the private network has assigned its address;
+On reboot brew/launchd can start `meiva` before the private network has assigned its address;
 binding pg to a not-yet-present address fails and takes the whole autostart
 down. `wait_for_reachable_bind` blocks (bounded) until the address is assigned, and
 fails fast on timeout. A loopback-only single box never waits.

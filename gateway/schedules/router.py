@@ -14,7 +14,7 @@ from pydantic import BaseModel, Field
 from base.cluster import session_name
 from base.config import settings
 from base.db.transaction import write_transaction
-from base.paths import ava_home
+from base.paths import meiva_home
 from gateway.agents.creation import create_and_launch_agent, guarded_draft_key
 from gateway.http.model_catalog import require_model_catalog
 from gateway.routers.receipts import creation as creation_receipts
@@ -142,7 +142,7 @@ def _edit_assignments(changed: dict[str, Any], *, code_changed: bool) -> list[sq
     return assignments
 
 
-# ava:ref gateway/schedules/docs/router-contracts.ava.okf.md#sql-returning-contract
+# meiva:ref gateway/schedules/docs/router-contracts.meiva.okf.md#sql-returning-contract
 def update_blocking(
     pool: ConnectionPool[Any], schedule_id: int, fields: dict[str, Any], key: str | None = None
 ) -> tuple[tuple[Any, ...], bool]:
@@ -209,7 +209,7 @@ async def list_schedules(request: Request) -> list[ScheduleSummary]:
     return await asyncio.to_thread(_list_blocking, request.app.state.db_pool)
 
 
-# ava:ref gateway/schedules/docs/router-contracts.ava.okf.md#sql-returning-contract
+# meiva:ref gateway/schedules/docs/router-contracts.meiva.okf.md#sql-returning-contract
 def create_blocking(
     pool: ConnectionPool[Any], body: ScheduleCreate, key: str | None = None
 ) -> tuple[Any, ...]:
@@ -310,7 +310,7 @@ def delete_blocking(pool: ConnectionPool[Any], schedule_id: int) -> None:
 
 def _remove_schedule_dir(schedule_id: int) -> None:
 
-    shutil.rmtree(ava_home() / "schedules" / str(schedule_id), ignore_errors=True)
+    shutil.rmtree(meiva_home() / "schedules" / str(schedule_id), ignore_errors=True)
 
 
 @router.delete(
@@ -432,14 +432,14 @@ async def get_schedule_runs(
 
 @router.post(
     "/api/keyed/v1/schedules/draft",
-    description="Hand a natural-language request to an ava-schedule-writer agent. Spawns the\nagent (which loads ava-guide.schedules, clarifies, writes the script,\nand POSTs it back) and returns its id so the UI can open the conversation.\nReplays one raw draft intent and its original birth.",
+    description="Hand a natural-language request to an meiva-schedule-writer agent. Spawns the\nagent (which loads meiva-guide.schedules, clarifies, writes the script,\nand POSTs it back) and returns its id so the UI can open the conversation.\nReplays one raw draft intent and its original birth.",
 )
 async def guarded_draft_schedule(
     body: ScheduleDraftRequest, request: Request, key: str = Depends(guarded_draft_key)
 ) -> ScheduleDraftResponse:
 
     prompt = (
-        "You are a schedule writer. Read and follow ava.skills.ava_guide.schedules to turn this "
+        "You are a schedule writer. Read and follow meiva.skills.meiva_guide.schedules to turn this "
         "request into a gateway-hosted schedule: clarify the trigger / skip / error-handling, "
         "write the script, and create it via POST /api/schedules. Request:\n\n" + body.nl
     )
@@ -447,7 +447,7 @@ async def guarded_draft_schedule(
         spawner="user",
         prompt=prompt,
         prompt_source="user",
-        label="ava-schedule-writer",
+        label="meiva-schedule-writer",
     )
     spawned = await create_and_launch_agent(
         body_obj,
@@ -463,7 +463,7 @@ async def guarded_draft_schedule(
     return ScheduleDraftResponse(agent_id=spawned.id)
 
 
-# ava:ref gateway/schedules/docs/router-contracts.ava.okf.md#sql-returning-contract
+# meiva:ref gateway/schedules/docs/router-contracts.meiva.okf.md#sql-returning-contract
 def fetch_full_blocking(pool: ConnectionPool[Any], schedule_id: int) -> tuple[Any, ...]:
 
     with pool.connection() as conn, conn.cursor() as cur:
@@ -477,7 +477,7 @@ def fetch_full_blocking(pool: ConnectionPool[Any], schedule_id: int) -> tuple[An
     return row
 
 
-# ava:ref gateway/schedules/docs/router-contracts.ava.okf.md#sql-returning-contract
+# meiva:ref gateway/schedules/docs/router-contracts.meiva.okf.md#sql-returning-contract
 def control_blocking(
     pool: ConnectionPool[Any], schedule_id: int, action: str, key: str | None
 ) -> tuple[tuple[Any, ...], bool]:

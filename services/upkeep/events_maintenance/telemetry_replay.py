@@ -1,7 +1,7 @@
 """Replay the local JSONL mirror into `telemetry_events`.
 
 The emitter writes every batch to the mirror before it tries the table, so whatever the table
-missed is still in `$AVA_HOME/logs/events-YYYYMMDD.jsonl`: a database that did not answer, or a
+missed is still in `$MEIVA_HOME/logs/events-YYYYMMDD.jsonl`: a database that did not answer, or a
 process that holds no database login (the gate, memory search, the browser daemons). Each pass
 reads the full mirror files from a saved byte position and appends their telemetry and log rows
 by event id, so a row the live writer already stored is skipped and a pass can be repeated.

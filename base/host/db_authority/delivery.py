@@ -4,7 +4,7 @@ Settings-free and database-free. Every consumer of a generation's credentials
 reads them through here, bound to the ledger's credential digest:
 
 - the owned PgBouncer, whose ``auth_file`` holds exactly one generation's two
-  SCRAM verifiers plus the operator admin-console entry ``ava_pooler_admin``
+  SCRAM verifiers plus the operator admin-console entry ``meiva_pooler_admin``
   (a userlist-only name, never a PostgreSQL role);
 - the root launcher, which projects one class login (and its API token) into
   one service's launch environment (``write_grant``); only ``number`` and
@@ -40,10 +40,10 @@ from base.host.db_authority.model import (
 )
 from base.host.net.auth import API_TOKEN_ENV
 
-POOLER_ADMIN = "ava_pooler_admin"
+POOLER_ADMIN = "meiva_pooler_admin"
 # Non-secret launch-environment marker naming the delivered generation; its
-# presence is what makes a launcher-injected AVA_DB_URL authoritative.
-GENERATION_ENV = "AVA_DB_GENERATION"
+# presence is what makes a launcher-injected MEIVA_DB_URL authoritative.
+GENERATION_ENV = "MEIVA_DB_GENERATION"
 
 
 class PoolerAdmin(BaseModel):
@@ -132,7 +132,7 @@ class WriteGrant:
         """The process-environment delivery: the login, its generation marker and
         the class API token."""
         return {
-            "AVA_DB_URL": self.dsn(endpoint),
+            "MEIVA_DB_URL": self.dsn(endpoint),
             GENERATION_ENV: str(self.number),
             API_TOKEN_ENV: self.api_token,
         }
@@ -211,7 +211,7 @@ def operator_environment(home: Path, endpoint: str, *, launcher: str | None) -> 
     """The environment delivery of an operator process on the gateway ``home``.
 
     Processes the root launcher starts carry their class login in the launch
-    environment. An operator process (the ``ava`` CLI, a script, an OS job)
+    environment. An operator process (the ``meiva`` CLI, a script, an OS job)
     that no launcher started (``launcher``, the launcher profile its process
     tree descends from, is None) receives the active gateway login dialing
     ``endpoint`` (and the gateway API token) only while it runs

@@ -88,8 +88,8 @@ def _transport(
 
 @pytest.fixture
 def env(monkeypatch: pytest.MonkeyPatch, tmp_path: Any) -> Path:
-    """Point the state dir at a tmp AVA_HOME and write a test account."""
-    monkeypatch.setenv("AVA_HOME", str(tmp_path))
+    """Point the state dir at a tmp MEIVA_HOME and write a test account."""
+    monkeypatch.setenv("MEIVA_HOME", str(tmp_path))
     account = {
         "account_id": "bot-id",
         "bot_token": "test-bot-token",
@@ -324,7 +324,7 @@ async def test_skips_echo_group_bot_and_textless(native_weixin: NativeWeixin) ->
 async def test_unconfigured_start_skips(monkeypatch: pytest.MonkeyPatch, tmp_path: Any) -> None:
     """No account file -> start() does nothing and send() raises."""
     async with owned_tasks() as _owned_tasks:
-        monkeypatch.setenv("AVA_HOME", str(tmp_path))
+        monkeypatch.setenv("MEIVA_HOME", str(tmp_path))
         adapter = WeixinAdapter(FakeCore())
         assert not adapter._configured
         await adapter.start(_owned_tasks)

@@ -20,7 +20,7 @@ from services.wake.schedule_manager.engine import script_filename
 
 @pytest.fixture(autouse=True)
 def _restore_actor(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.delenv("AVA_SCHEDULE_ID", raising=False)
+    monkeypatch.delenv("MEIVA_SCHEDULE_ID", raising=False)
 
 
 def _insert_schedule(
@@ -55,7 +55,7 @@ def test_run_materializes_and_executes_and_binds_actor(
     db_conn: psycopg.Connection, unit_home: Path, *, machine_identity: MachineIdentity
 ) -> None:
     marker = unit_home / "ran.txt"
-    script = f"import ava.sdk_surface.agent_identity, pathlib\npathlib.Path({str(marker)!r}).write_text(ava.sdk_surface.agent_identity.require_actor())\n"
+    script = f"import meiva.sdk_surface.agent_identity, pathlib\npathlib.Path({str(marker)!r}).write_text(meiva.sdk_surface.agent_identity.require_actor())\n"
     sid = _insert_schedule(db_conn, script=script)
 
     rc = run(sid, machine=machine_identity)
@@ -281,10 +281,10 @@ def test_run_loads_plugins_for_py_script(
     *,
     machine_identity: MachineIdentity,
 ) -> None:
-    import ava
+    import meiva
 
     calls: list[int] = []
-    monkeypatch.setattr(ava, "ensure_plugins_loaded", lambda: calls.append(1))
+    monkeypatch.setattr(meiva, "ensure_plugins_loaded", lambda: calls.append(1))
     sid = _insert_schedule(db_conn, script="x = 1\n")
 
     assert run(sid, machine=machine_identity) == 0
@@ -320,10 +320,10 @@ def test_run_skips_plugin_load_for_non_py_command(
     *,
     machine_identity: MachineIdentity,
 ) -> None:
-    import ava
+    import meiva
 
     calls: list[int] = []
-    monkeypatch.setattr(ava, "ensure_plugins_loaded", lambda: calls.append(1))
+    monkeypatch.setattr(meiva, "ensure_plugins_loaded", lambda: calls.append(1))
     sid = _insert_schedule(db_conn, script="exit 0\n", command="bash run.sh")
 
     assert run(sid, machine=machine_identity) == 0

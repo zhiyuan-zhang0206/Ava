@@ -14,7 +14,7 @@ from __future__ import annotations
 import re
 from datetime import UTC, datetime
 
-REMOTE_ROOT = "ava-logical"
+REMOTE_ROOT = "meiva-logical"
 """The off-site logical-dump namespace."""
 
 DUMP_NAME_RE = re.compile(r"^(?P<db>.+)-(?P<ts>\d{8}T\d{6}Z)\.dump(?:\.enc)?$")

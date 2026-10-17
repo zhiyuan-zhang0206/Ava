@@ -18,7 +18,7 @@ describe("summarizeCode", () => {
   });
 
   it("recorded calls win — the payload text never adds or removes entries", () => {
-    const code = "ava.shell.run('ls')\nava.files.read('a')";
+    const code = "meiva.shell.run('ls')\nmeiva.files.read('a')";
     const s = summarizeCode(code, [{ method: "files.read", count: 1 }]);
     expect(s.calls).toEqual([{ method: "files.read", count: 1 }]);
     expect(s.totalCalls).toBe(1);
@@ -32,7 +32,7 @@ describe("summarizeCode", () => {
   });
 
   it("trusts an authoritative empty array — comment/string mentions never count", () => {
-    const code = "# ava.files.read('comment-only')\nvalue = \"ava.shell.run('string-only')\"";
+    const code = "# meiva.files.read('comment-only')\nvalue = \"meiva.shell.run('string-only')\"";
 
     expect(summarizeCode(code, [])).toEqual({
       calls: [],
@@ -44,7 +44,7 @@ describe("summarizeCode", () => {
   it.each([undefined, null])(
     "absent sdk_calls (%s) shows no calls and never scans the payload",
     (sdkCalls) => {
-      const code = "ava.files.read('a')\nava.shell.run('ls')";
+      const code = "meiva.files.read('a')\nmeiva.shell.run('ls')";
       expect(summarizeCode(code, sdkCalls)).toEqual({
         calls: [],
         totalCalls: 0,

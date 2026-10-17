@@ -21,8 +21,7 @@ from agent.graph.exec.node import exec_node
 from agent.impersonation import protect_native_hooks
 from agent.ownership.hosted import admit_hosted_runtime, apply_hosted_lifecycle
 from agent.startup import wrap_saver_writes_with_nstep_interval
-from ava.boot import process_clients
-from base.agents.context import AvaContext
+from base.agents.context import MeivaContext
 from base.agents.context.identity import AgentIdentity
 from base.agents.history.delta_read_compat import wrap_saver_reads_with_delta_reconstruction
 from base.cluster.machine import MachineIdentity
@@ -41,6 +40,7 @@ from base.native_process.runtime_incarnation import RuntimeIncarnation
 from base.native_process.turn_identity import HostedTurnResources
 from base.packages.composer_commands import CommandCatalog
 from cli.commands.tests.maintenance_cluster import start_cluster_through_ready_gate
+from meiva.boot import process_clients
 from services.agent_runner.agent_host import runtime
 from services.agent_runner.agent_host.host import AgentHost
 from services.agent_runner.agent_host.runtime import TurnOutcome
@@ -218,12 +218,12 @@ async def test_cold_idle_resume_uses_pointer_without_an_extra_model_call(
 
     from agent import state as states
     from agent.graph.claim.node import claim_node
-    from base.agents.context import AvaContext
+    from base.agents.context import MeivaContext
 
     agent = _agent(db_conn, machine_name=machine_identity.name())
     saver = AsyncPostgresSaver(aops_pool)
     await saver.setup()
-    builder: Any = StateGraph(states.AgentState, context_schema=AvaContext)
+    builder: Any = StateGraph(states.AgentState, context_schema=MeivaContext)
     builder.add_node("claim", claim_node, destinations=("before_llm", "__end__", "claim"))
     model = AsyncMock(side_effect=AssertionError("idle restart must not call a model"))
     builder.add_node("before_llm", model)
@@ -280,7 +280,7 @@ async def test_cold_idle_resume_uses_pointer_without_an_extra_model_call(
         catalog=model_catalog,
         commands=CommandCatalog(skills=list),
     )
-    ctx = AvaContext(
+    ctx = MeivaContext(
         ops_pool=aops_pool,
         event_publisher=MagicMock(),
         llm=MagicMock(),
@@ -441,7 +441,7 @@ def _real_exec_graph_builder(model: Any, calls: list[str]) -> Any:
         calls.append("after_exec")
         return Command(goto="claim")
 
-    builder: Any = StateGraph(states.AgentState, context_schema=AvaContext)
+    builder: Any = StateGraph(states.AgentState, context_schema=MeivaContext)
     builder.add_node("claim", claim_node, destinations=("before_llm", "__end__", "claim"))
     builder.add_node(
         "before_llm",
@@ -467,7 +467,7 @@ def _host_driving_invoke_until_done(
     pool: AsyncConnectionPool[Any],
     saver: AsyncPostgresSaver,
     graph: Any,
-    ctx: AvaContext,
+    ctx: MeivaContext,
     model_catalog: ModelCatalog,
     *,
     database_gate: ProcessDbGate,
@@ -548,7 +548,7 @@ async def test_admitted_model_finishes_real_exec_and_after_exec_before_drain_rec
     await graph.aupdate_state(
         config, {"messages": [HumanMessage(content="Do the action")], "halted": False}
     )
-    ctx = AvaContext(
+    ctx = MeivaContext(
         ops_pool=aops_pool,
         event_publisher=MagicMock(),
         llm=MagicMock(),

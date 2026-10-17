@@ -30,11 +30,11 @@ def test_foreign_label_job_bound_to_our_socket_is_refused(
     sock = str(tmp_path / "run" / "permissions-helper.9223.sock")
 
     mine = lifecycle.label()
-    foreign = write_agent_plist(agents, "com.ava.permissions-helper.stray", sock)
+    foreign = write_agent_plist(agents, "com.meiva.permissions-helper.stray", sock)
     other_cluster = write_agent_plist(
         agents,
-        "com.ava.permissions-helper.ava-other-abcdef12",
-        str(tmp_path / ".." / "x") + "/.ava-other/run/permissions-helper.18010.sock",
+        "com.meiva.permissions-helper.meiva-other-abcdef12",
+        str(tmp_path / ".." / "x") + "/.meiva-other/run/permissions-helper.18010.sock",
     )
     own = write_agent_plist(agents, mine, sock)
     recorded: list[list[str]] = []
@@ -62,7 +62,7 @@ def test_foreign_label_refusal_holds_when_the_job_is_not_loaded(
     agents = retire_env(monkeypatch, tmp_path)
     sock = str(tmp_path / "run" / "permissions-helper.9223.sock")
 
-    write_agent_plist(agents, "com.ava.permissions-helper.stray", sock)
+    write_agent_plist(agents, "com.meiva.permissions-helper.stray", sock)
 
     def bootout_job_not_loaded(cmd: list[str], **_kw: object) -> subprocess.CompletedProcess[bytes]:
         return subprocess.CompletedProcess(cmd, 78, b"", b"")
@@ -71,7 +71,7 @@ def test_foreign_label_refusal_holds_when_the_job_is_not_loaded(
 
     with pytest.raises(lifecycle.PermissionsHelperBuildError, match="reconcile them externally"):
         lifecycle.refuse_foreign_label_jobs()
-    assert (agents / "com.ava.permissions-helper.stray.plist").exists()
+    assert (agents / "com.meiva.permissions-helper.stray.plist").exists()
 
 
 def test_unrelated_cluster_plists_are_left_alone(
@@ -84,9 +84,9 @@ def test_unrelated_cluster_plists_are_left_alone(
 
     other = write_agent_plist(
         agents,
-        "com.ava.permissions-helper.ava-demo-1234abcd",
-        str(tmp_path / ".." / "z") + "/.ava-demo/run/permissions-helper.1234.sock",
-        env_key="AVA_PERMISSIONS_HELPER_SOCKET",
+        "com.meiva.permissions-helper.meiva-demo-1234abcd",
+        str(tmp_path / ".." / "z") + "/.meiva-demo/run/permissions-helper.1234.sock",
+        env_key="MEIVA_PERMISSIONS_HELPER_SOCKET",
     )
     monkeypatch.setattr(lifecycle, "helper_socket", lambda: Path(sock))
 

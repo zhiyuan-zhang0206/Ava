@@ -2,7 +2,7 @@
 enable matrix (`/api/inventory`), the installed-skills panel (`/api/skills`),
 and the console contribution aggregate (`/api/ui/contributions`).
 
-Skills are a single-host, gateway-local read: this host's `$AVA_HOME/skills/`
+Skills are a single-host, gateway-local read: this host's `$MEIVA_HOME/skills/`
 load dir correlated with the install registry (`installed.json`). Skills are
 per-machine (the registry is machine-local; there is no cluster-shared row), so
 unlike the cross-machine plugin/MCP inventory this is not a `?machine=` matrix.
@@ -105,10 +105,10 @@ class InventoryWriteResult(BaseModel):
 SkillLayer = Literal["core", "plugin", "machine", "untracked"]
 """Where a skill's content comes from — the registry `origin`, surfaced:
 
-- "core" — a repo skill (`<repo>/ava_builtins/skills/<name>/`), converge-managed.
+- "core" — a repo skill (`<repo>/meiva_builtins/skills/<name>/`), converge-managed.
 - "plugin" — bundled by a plugin (`plugins/<p>/skills/`), converge-managed.
-- "machine" — user-installed / hand-registered on this machine (`ava skill
-  register` / `ava plugins install <git-url>`); converge never touches it.
+- "machine" — user-installed / hand-registered on this machine (`meiva skill
+  register` / `meiva plugins install <git-url>`); converge never touches it.
 - "untracked" — a directory in the load dir with no registry entry: present on
   disk but the skill scanner will not load it.
 """

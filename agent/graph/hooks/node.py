@@ -19,7 +19,7 @@ from agent import state as _state
 from agent.graph.node_log import node_lifecycle
 from agent.hooks import HookName, make_hook_runner
 from agent.nodes import NodeName
-from base.agents.context import AvaContext, agent_id_from_config
+from base.agents.context import MeivaContext, agent_id_from_config
 from base.agents.history.timeline_inputs import TimelineReadInputs
 from base.packages.plugins.extensions import GraphHook
 
@@ -29,14 +29,14 @@ def hook_node(
     default_next: NodeName | Callable[[_state.AgentState], NodeName],
     hooks: Sequence[tuple[str | None, GraphHook]],
 ) -> Callable[
-    [_state.AgentState, Runtime[AvaContext], RunnableConfig], Awaitable[Command[NodeName]]
+    [_state.AgentState, Runtime[MeivaContext], RunnableConfig], Awaitable[Command[NodeName]]
 ]:
     """A LangGraph node that runs `hooks` at one edge, wrapped in the node lifecycle events."""
     runner = make_hook_runner(hook_name, default_next, hooks)
 
     async def run(
         state: _state.AgentState,
-        runtime: Runtime[AvaContext],
+        runtime: Runtime[MeivaContext],
         config: RunnableConfig,
     ) -> Command[NodeName]:
         event_publisher = runtime.context.event_publisher

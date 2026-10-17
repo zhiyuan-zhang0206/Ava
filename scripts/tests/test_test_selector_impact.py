@@ -163,20 +163,20 @@ def test_literal_process_and_resource_boundaries_select_the_consumer(
 
 def test_finite_parametrized_plugin_imports_select_the_registry_consumer(tmp_path: Path) -> None:
     root = _repo(tmp_path)
-    _write(root, "ava_builtins/plugins/ava_memory/metrics.py")
+    _write(root, "meiva_builtins/plugins/meiva_memory/metrics.py")
     _write(
         root,
         "tests/registry/test_metrics.py",
         """import importlib
 import pytest
-@pytest.mark.parametrize("plugin", ["ava_memory"])
+@pytest.mark.parametrize("plugin", ["meiva_memory"])
 def test_metrics(plugin):
-    module_name = f"ava_builtins.plugins.{plugin}.metrics"
+    module_name = f"meiva_builtins.plugins.{plugin}.metrics"
     importlib.import_module(module_name)
 """,
     )
     _assert_selected(
-        root, "ava_builtins/plugins/ava_memory/metrics.py", "tests/registry/test_metrics.py"
+        root, "meiva_builtins/plugins/meiva_memory/metrics.py", "tests/registry/test_metrics.py"
     )
 
 

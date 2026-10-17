@@ -14,10 +14,9 @@ from agent.graph.exec._result import ExecDone
 from agent.graph.exec._stream import ExecOutputChunkPublisher
 from agent.graph.exec.node import exec_node, run_agent_code
 from agent.state import AgentState
-from ava.boot import process_clients
-from base.agents.context import AvaContext
+from base.agents.context import MeivaContext
 from base.agents.context.identity import AgentIdentity
-from base.agents.messages.kwargs import ExecStatus, read_ava_kwargs
+from base.agents.messages.kwargs import ExecStatus, read_meiva_kwargs
 from base.clock import Clock
 from base.config import ConfigBoot, settings
 from base.config.agent_pins import resolve_agent_config_pins
@@ -28,18 +27,19 @@ from base.host.env.agent_slices import AgentSlices
 from base.lm.catalog import ModelCatalog
 from base.packages.plugin_providers import build_model_catalog
 from base.paths import workspace_dir_readonly
+from meiva.boot import process_clients
 
 
 def _plugin(unit_home: Path) -> None:
     plugin = unit_home / "plugins" / "exec_config_probe"
     plugin.mkdir(parents=True)
-    (plugin / "ava-plugin.json").write_text(
+    (plugin / "meiva-plugin.json").write_text(
         json.dumps(
             {
                 "apiVersion": 2,
                 "name": "exec_config_probe",
                 "version": "1.0.0",
-                "engines": {"ava": ">=2026.10.1"},
+                "engines": {"meiva": ">=2026.10.1"},
                 "contributions": {"config": {"schema": "default_config.py"}},
             }
         )
@@ -65,27 +65,27 @@ async def test_concurrent_turn_configs_reach_real_children_without_cross_talk(
     database: Database,
 ) -> None:
     _plugin(unit_home)
-    monkeypatch.setitem(os.environ, "AVA_HOME", str(unit_home))
-    monkeypatch.setenv("AVA_AGENT_CONFIG_OVERLAY", json.dumps({"llm_model": "deepseek-v4-pro"}))
+    monkeypatch.setitem(os.environ, "MEIVA_HOME", str(unit_home))
+    monkeypatch.setenv("MEIVA_AGENT_CONFIG_OVERLAY", json.dumps({"llm_model": "deepseek-v4-pro"}))
     monkeypatch.setenv(
-        "AVA_AGENT_BIRTH_CONFIG",
+        "MEIVA_AGENT_BIRTH_CONFIG",
         json.dumps(
             {"llm_stream_ttft_timeout_seconds": 99.0, "exec_probe_marker": "ambient-parent"}
         ),
     )
     code = (
         "import json, os\n"
-        "from ava.sdk_surface.settings import agent_setting, plugins\n"
+        "from meiva.sdk_surface.settings import agent_setting, plugins\n"
         "print('CONFIG=' + json.dumps([agent_setting('llm_model'), "
         "agent_setting('llm_stream_ttft_timeout_seconds'), "
         "plugins.exec_config_probe.exec_probe_marker, "
-        "os.environ.get('AVA_AGENT_CONFIG_OVERLAY', 'GONE')]))\n"
+        "os.environ.get('MEIVA_AGENT_CONFIG_OVERLAY', 'GONE')]))\n"
     )
 
     async def execute(agent_id: int, slices: AgentSlices | None = None) -> list[object]:
         result, *_ = await run_agent_code(
             AgentState(),
-            AvaContext(
+            MeivaContext(
                 agent=slices or AgentSlices.resolve(default_reader=defaults()),
                 db=database,
                 bus=EventBus.from_settings(),
@@ -139,8 +139,8 @@ def _execution_context(
     event_bus: EventBus,
     model_catalog: ModelCatalog,
     request: pytest.FixtureRequest,
-) -> AvaContext:
-    context = AvaContext(
+) -> MeivaContext:
+    context = MeivaContext(
         agent=AgentSlices.resolve(default_reader=read),
         db=database,
         bus=event_bus,
@@ -154,7 +154,7 @@ def _execution_context(
     return context
 
 
-async def _execution_message(context: AvaContext, code: str) -> ToolMessage:
+async def _execution_message(context: MeivaContext, code: str) -> ToolMessage:
     agent_id = context.require_identity().agent_id
     state = AgentState(
         messages=[
@@ -236,9 +236,9 @@ async def test_exec_shield_reads_each_owner_at_the_existing_timeout_points(
         _execution_message(contexts[0], "import time; time.sleep(60)"),
         _execution_message(contexts[1], "print('done')"),
     )
-    assert read_ava_kwargs(timed_out).get("ava_exec_status") == ExecStatus.TIMED_OUT
+    assert read_meiva_kwargs(timed_out).get("meiva_exec_status") == ExecStatus.TIMED_OUT
     assert "timeout after 5s" in timed_out.text
-    assert read_ava_kwargs(fast).get("ava_exec_status") == ExecStatus.COMPLETED
+    assert read_meiva_kwargs(fast).get("meiva_exec_status") == ExecStatus.COMPLETED
     assert "done" in fast.text
     assert first_reads == [0.002, 5, 5]
     assert second_reads == [30]

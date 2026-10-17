@@ -5,8 +5,8 @@ Reads coverage.json (written by `uv run coverage json -o coverage.json` from
 the combined shard data in the backend CI job) and enforces two tiers:
 
 - the combined line-rate gate over the six core domains
-  (agent/ava/cli/gateway/base/ui) — the legacy 85% gate, unchanged;
-- per-risk-domain minimum line floors for ops/services/ava_builtins — the
+  (agent/meiva/cli/gateway/base/ui) — the legacy 85% gate, unchanged;
+- per-risk-domain minimum line floors for ops/services/meiva_builtins — the
   high-incident operational domains (deploy/backup/watchdog/ops) the
   combined gate never scored (tech audit 2026-08-24 finding #10).
 
@@ -31,9 +31,9 @@ from collections.abc import Sequence
 from pathlib import Path
 
 # The 85% gate denominator — must match [tool.coverage.run].source's core
-# set and the comment in ci.yml's gate step. ops/services/ava_builtins are
+# set and the comment in ci.yml's gate step. ops/services/meiva_builtins are
 # measured into the same data but gated by FLOORS, not by this number.
-CORE_DOMAINS = ("agent", "ava", "cli", "gateway", "base", "ui")
+CORE_DOMAINS = ("agent", "meiva", "cli", "gateway", "base", "ui")
 CORE_THRESHOLD_DEFAULT = 85.0
 
 # Per-risk-domain minimum line floors (percent). Each key is a domain
@@ -42,7 +42,7 @@ CORE_THRESHOLD_DEFAULT = 85.0
 # prefix itself or starts with "prefix/".
 #
 # Calibrated 2026-08-29 from the first measuring CI run (PR #965):
-# ops 92.6% / services 73.1% / ava_builtins 81.6%. Floors sit 2-4 points
+# ops 92.6% / services 73.1% / meiva_builtins 81.6%. Floors sit 2-4 points
 # below the measured baseline — enough buffer for shard-split and flake
 # variance, tight enough that a real regression (a critical module losing
 # its tests) trips the gate.
@@ -50,11 +50,11 @@ CORE_THRESHOLD_DEFAULT = 85.0
 # ops is the deploy/rollout/cluster-lifecycle surface (highest incident
 # exposure — a broken upgrade takes the fleet down), so it keeps the
 # tightest buffer; services carries the data-durability daemons
-# (backup/watchdog) and ava_builtins the plugins.
+# (backup/watchdog) and meiva_builtins the plugins.
 FLOORS: dict[str, float] = {
     "ops": 90.0,
     "services": 70.0,
-    "ava_builtins": 78.0,
+    "meiva_builtins": 78.0,
 }
 
 

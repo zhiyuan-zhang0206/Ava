@@ -38,7 +38,7 @@ from dataclasses import dataclass
 from typing import Literal
 
 from agent.db import ClaimedInbound, has_pending_inbound_after
-from base.agents.context import AvaContext
+from base.agents.context import MeivaContext
 from base.agents.messages.inbound import InboundKind
 
 # The four targets claim itself routes to: BEFORE_LLM (has work), END
@@ -124,7 +124,7 @@ def _durable_routing(batch: list[ClaimedInbound]) -> Routing | None:
 
 
 async def _terminate_veto(
-    ctx: AvaContext,
+    ctx: MeivaContext,
     agent_id: int,
     batch: list[ClaimedInbound],
     latest_exit: ClaimedInbound,
@@ -148,7 +148,7 @@ async def _terminate_veto(
 
 
 async def resolve_routing(
-    ctx: AvaContext,
+    ctx: MeivaContext,
     agent_id: int,
     batch: list[ClaimedInbound],
 ) -> Routing:

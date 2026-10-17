@@ -1,13 +1,13 @@
 # Optional HTTPS browser entry (HTTP/2)
 
 Use a browser-facing HTTPS reverse proxy when several visible console windows
-exhaust HTTP/1.1's six connections with SSE. Keep `AVA_GATEWAY_URL` and the
+exhaust HTTP/1.1's six connections with SSE. Keep `MEIVA_GATEWAY_URL` and the
 existing listener ports as the runner/control-plane addresses. On the gateway
-unit, set `AVA_BROWSER_ORIGIN=https://<entry-host>` (an origin only, no path).
+unit, set `MEIVA_BROWSER_ORIGIN=https://<entry-host>` (an origin only, no path).
 The normal frontend build derives its browser setting from this field; do not
 write `NEXT_PUBLIC_*` overrides. Deploy the change through the normal update
 path so the gateway, gate login page and rebuilt frontend agree. If an explicit
-`AVA_GATEWAY_CORS_ALLOWED_ORIGINS` list exists, add the exact new origin there;
+`MEIVA_GATEWAY_CORS_ALLOWED_ORIGINS` list exists, add the exact new origin there;
 the explicit allowlist remains authoritative.
 
 This setting currently requires a source-built frontend. Retained standalone

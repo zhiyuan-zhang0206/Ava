@@ -1,8 +1,8 @@
 """Cluster RPC — gateway -> agent-runner direct request/response.
 
 The gateway runs a cluster op on a remote agent-runner by POSTing to that
-host's ava-ops server (`services/agent_runner/agent_ops`). The host's reachable address is
-read from the `machines` table (each host registers its ops URL at `ava start`).
+host's meiva-ops server (`services/agent_runner/agent_ops`). The host's reachable address is
+read from the `machines` table (each host registers its ops URL at `meiva start`).
 One synchronous round-trip with bounded retry; no queue, no SSE — the cluster's
 private network makes every node mutually dialable, so a control op is a single
 HTTP call.
@@ -72,7 +72,7 @@ _log = logging.getLogger(__name__)
 # Load-bearing ops retry on transient infrastructure failures with bounded
 # exponential backoff + jitter.
 # Two bounds keep the retry cheap:
-#   * `retries` caps the extra attempts (default AVA_CLUSTER_RPC_MAX_RETRIES,
+#   * `retries` caps the extra attempts (default MEIVA_CLUSTER_RPC_MAX_RETRIES,
 #     3 -> 4 attempts total; worst-case wall for a blackholed host ~4x
 #     timeout_s, which latency-critical callers already shorten per-op);
 #   * the per-attempt delay is capped (_RETRY_MAX_DELAY_S) and jittered ±50% so
@@ -343,7 +343,7 @@ async def dispatch_to_url(
     retrying transient infrastructure failures (transport errors / timeouts and
     5xx statuses) with bounded exponential backoff + jitter (`retry_delay_s`).
     `retries` caps the extra attempts (default
-    `settings.gateway.cluster_rpc_max_retries` / AVA_CLUSTER_RPC_MAX_RETRIES);
+    `settings.gateway.cluster_rpc_max_retries` / MEIVA_CLUSTER_RPC_MAX_RETRIES);
     pass 0 for a fail-fast single attempt (e.g. latency-critical status probes,
     which carry their own per-machine backoff). Business failures
     (status=failed), 4xx statuses, malformed responses and an unresolvable
@@ -357,7 +357,7 @@ async def dispatch_to_url(
     re-executing and duplicating the effect.
 
     `timeout_s` defaults to `settings.gateway.cluster_rpc_timeout_seconds`
-    (AVA_CLUSTER_RPC_TIMEOUT_SECONDS) when omitted. It bounds each attempt.
+    (MEIVA_CLUSTER_RPC_TIMEOUT_SECONDS) when omitted. It bounds each attempt.
 
     `ops_url` is the host's ops base URL, already resolved. A caller that must dial while
     Postgres may be down (the compensating `cluster/resume` of a failed fleet update, the

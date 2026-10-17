@@ -590,7 +590,7 @@ def test_tally_entries_sorts_by_descending_count_then_method() -> None:
 def _exec_output(tool_call_id: str, sdk_calls: list[dict[str, Any]] | None) -> Any:
     from langchain_core.messages import ToolMessage
 
-    kwargs: dict[str, Any] = {"ava_msg_type": "exec_output"}
+    kwargs: dict[str, Any] = {"meiva_msg_type": "exec_output"}
     if sdk_calls is not None:
         kwargs["sdk_calls"] = sdk_calls
     return ToolMessage(content="out", tool_call_id=tool_call_id, additional_kwargs=kwargs)
@@ -716,9 +716,9 @@ def test_cold_capture_import_failure_rejects_body(tmp_path: Path, error_type: st
         ],
         cwd=tmp_path,
         env={
-            **{key: value for key, value in os.environ.items() if key != "AVA_CONFIG_BOOT"},
-            "AVA_HOME": str(tmp_path / "absent-home"),
-            "AVA_CONFIG_FETCH": "skip",
+            **{key: value for key, value in os.environ.items() if key != "MEIVA_CONFIG_BOOT"},
+            "MEIVA_HOME": str(tmp_path / "absent-home"),
+            "MEIVA_CONFIG_FETCH": "skip",
             "TEST_CAPTURE_ERROR": error_type,
         },
         capture_output=True,

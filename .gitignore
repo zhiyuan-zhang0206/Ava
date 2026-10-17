@@ -85,13 +85,13 @@ okf-d3.html
 
 # Stray per-agent memory files: some agents run with the repo checkout itself
 # as cwd (task work on this repo) and their memory-writing path lands at cwd
-# instead of the proper $AVA_HOME/workspaces/<id>/memory/ (agent/graph/_memory_inject.py).
+# instead of the proper $MEIVA_HOME/workspaces/<id>/memory/ (agent/graph/_memory_inject.py).
 # These are debris, not the documented per-agent memory location — see
 # PR disposition notes from an earlier root-strays cleanup.
 /MEMORY.md
 /memory/
 /ui/web/MEMORY.md
-/.ava/agents/
+/.meiva/agents/
 # Scratch notes agents leave in the repo root.
 /task564-notes.md
 # PR-description drafts. Two of these shipped in the first public snapshot;

@@ -45,9 +45,9 @@ if __name__ == "__main__":
     prepare_process_logging()
     from base.native_process.child_env import inherited_process_env
 
-    if "AVA_AGENT_ID" in inherited_process_env():
+    if "MEIVA_AGENT_ID" in inherited_process_env():
         raise RuntimeError("a shared agent host cannot inherit a launched-agent identity")
-    from ava.sdk_surface import process_context as _posture
+    from meiva.sdk_surface import process_context as _posture
 
     _posture.bind_host_process()
 
@@ -62,10 +62,6 @@ from redis.exceptions import TimeoutError as RedisTimeoutError
 
 from agent.llm import execute_code
 from agent.ownership.hosted import settle_stale_running_rows
-from ava import skills as ava_skills
-from ava.boot import process_clients
-from ava.sdk_surface import process_context
-from ava.sdk_surface.installation import Installation
 from base.agents.context.clients import ClientSet
 from base.agents.history.hierarchy.chunk_consumer import understanding_loop_forever
 from base.agents.observation.turn_progress import TurnProgress
@@ -92,6 +88,10 @@ from base.native_process.code_version import CodeVersion
 from base.native_process.stop_timing import CANCEL_UNWIND_TIMEOUT_S
 from base.packages.composer_commands import CommandCatalog
 from base.sessions.helper_chain_guard import parent_chain_intact
+from meiva import skills as meiva_skills
+from meiva.boot import process_clients
+from meiva.sdk_surface import process_context
+from meiva.sdk_surface.installation import Installation
 
 from ...pidfile import acquire_pidfile, pidfile_holds_daemon, remove_pidfile
 from .dispatcher import InboundWakeDispatcher, TurnScheduler
@@ -135,12 +135,12 @@ TURN_PROGRESS_PUBLISH_TIMEOUT_S = 3.0
 
 
 # Plugin-discovery watchdog (issue #170): the host loads external plugins
-# exactly once per process (`ava.sdk_surface.extensions.load_extensions`), so a plugin installed
+# exactly once per process (`meiva.sdk_surface.extensions.load_extensions`), so a plugin installed
 # after boot is invisible to every agent on this runner until a restart. The
 # runner's supervisor (watchdog -> healthcheck) restarts a dead host within a
 # minute, so the fix is not a reload (plugin-spec-v2's S4 dispose contract is
 # unimplemented — a second load would leak and fork class identity) but an
-# intentional, ergonomic restart: watch $AVA_HOME/plugins, and on any change
+# intentional, ergonomic restart: watch $MEIVA_HOME/plugins, and on any change
 # exit so the supervisor brings the host back with the new plugin loaded.
 PLUGINS_POLL_INTERVAL_S = 30.0
 
@@ -186,7 +186,7 @@ async def watch_plugins_for_restart() -> None:
         if now == baseline:
             continue
         host_log.info(
-            "[agent-host] external plugins changed under $AVA_HOME/plugins — "
+            "[agent-host] external plugins changed under $MEIVA_HOME/plugins — "
             "restarting to load them (issue #170)"
         )
         signal.raise_signal(signal.SIGTERM)
@@ -542,7 +542,7 @@ async def _dispatch_host(
 def _state_gated_loader() -> Callable[..., object]:
     """The plugin loader, given the agent kernel's plugin-state admission check."""
     from agent.state import plugin_state_schema
-    from ava.sdk_surface.extensions import load_extensions
+    from meiva.sdk_surface.extensions import load_extensions
 
     return partial(load_extensions, validate_state=plugin_state_schema)
 
@@ -608,7 +608,7 @@ async def run(
             policy=host_policy(config),
             clients=clients,
             extensions=installation.registry,
-            commands=CommandCatalog(skills=ava_skills.names),
+            commands=CommandCatalog(skills=meiva_skills.names),
             plugin_configs=installation.configs,
         )
         # The clock reader is injected, not imported by the scheduler: it owns no
@@ -654,7 +654,7 @@ async def run(
         )
         # One TaskGroup owns the loops beside the dispatcher: a loop that
         # raises cancels the dispatcher and its siblings, and the exception
-        # leaves `run` so the process exits for `ava-root` to restart it. The
+        # leaves `run` so the process exits for `meiva-root` to restart it. The
         # group exits, every loop joined, before the runtime drains turns.
         try:
             await _dispatch_host(

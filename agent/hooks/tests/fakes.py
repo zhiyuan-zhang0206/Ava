@@ -5,7 +5,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 from langgraph.runtime import Runtime
 
-from base.agents.context import AvaContext
+from base.agents.context import MeivaContext
 from base.clock import Clock
 from base.config.tests.configuration import defaults
 from base.db import Database
@@ -39,8 +39,8 @@ def make_fake_ops_pool() -> AsyncMock:
 
 def placeholder_runtime(
     ops_pool: Any = None, *, database_gate: ProcessDbGate
-) -> Runtime[AvaContext]:
-    ctx = AvaContext(
+) -> Runtime[MeivaContext]:
+    ctx = MeivaContext(
         ops_pool=ops_pool or MagicMock(),
         llm=MagicMock(),
         event_publisher=MagicMock(),

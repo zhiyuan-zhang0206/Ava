@@ -35,7 +35,7 @@ def test_relocated_history_is_exempt_but_live_docs_still_fail(
     live.parent.mkdir(parents=True)
     live.write_text("See [the implementation](missing.py).\n")
     monkeypatch.setattr(check_doc_references, "REPO", tmp_path)
-    monkeypatch.setattr(check_doc_references, "ava_flags", dict)
+    monkeypatch.setattr(check_doc_references, "meiva_flags", dict)
     monkeypatch.setattr(check_doc_references, "tracked_docs", lambda: [history])
     assert check_doc_references.main() == 0
     monkeypatch.setattr(check_doc_references, "tracked_docs", lambda: [live])

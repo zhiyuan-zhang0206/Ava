@@ -76,7 +76,7 @@ class StatefulCalls:
         return self.call("mouse_up", **args)
 
     def mouse_release_all(self) -> MouseReleaseAllResult:
-        """Release whatever button Ava holds, quietly and regardless of a stop gesture: the cleanup
+        """Release whatever button Meiva holds, quietly and regardless of a stop gesture: the cleanup
         the daemon runs when the screen changes hands. Names the buttons it released."""
         self.require_capability(
             "mouse_hold_v1",

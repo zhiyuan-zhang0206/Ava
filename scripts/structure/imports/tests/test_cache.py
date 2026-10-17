@@ -8,7 +8,7 @@ from scripts.structure.tests.patch_repo import make_repo, write
 
 def test_an_unchanged_file_is_not_read_again_and_a_changed_one_is(tmp_path: Path) -> None:
     root = make_repo(tmp_path, {"cli/commands/run.py": "from base.net import retry\n"})
-    tops = ("base", "ava", "cli")
+    tops = ("base", "meiva", "cli")
     reads: list[str] = []
 
     def counting(path: Path) -> str:

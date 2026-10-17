@@ -13,7 +13,7 @@ _skip_if_root = pytest.mark.skipif(
 
 def test_is_writable_true_and_cleans_up(tmp_path: Path) -> None:
     assert gd.is_writable(tmp_path) is True
-    assert list(tmp_path.glob(".ava_drive_check_*")) == []
+    assert list(tmp_path.glob(".meiva_drive_check_*")) == []
 
 
 def test_is_writable_false_for_missing_dir(tmp_path: Path) -> None:

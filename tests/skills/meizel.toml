@@ -2,10 +2,10 @@
 "test_inspect_a_trace_fetch.py" = [".agents/skills/inspect-a-trace/scripts"]
 
 [debt.env-patch]
-"test_inspect_a_trace_fetch.py#monkeypatch.delitem os.environ.AVA_API_TOKEN" = 1
-"test_inspect_a_trace_fetch.py#monkeypatch.delitem os.environ.AVA_CLUSTER_SECRET" = 2
-"test_inspect_a_trace_fetch.py#monkeypatch.setitem os.environ.AVA_API_TOKEN" = 1
-"test_inspect_a_trace_fetch.py#monkeypatch.setitem os.environ.AVA_CLUSTER_SECRET" = 3
+"test_inspect_a_trace_fetch.py#monkeypatch.delitem os.environ.MEIVA_API_TOKEN" = 1
+"test_inspect_a_trace_fetch.py#monkeypatch.delitem os.environ.MEIVA_CLUSTER_SECRET" = 2
+"test_inspect_a_trace_fetch.py#monkeypatch.setitem os.environ.MEIVA_API_TOKEN" = 1
+"test_inspect_a_trace_fetch.py#monkeypatch.setitem os.environ.MEIVA_CLUSTER_SECRET" = 3
 
 [debt.stdlib-patch]
 "test_inspect_a_trace_fetch.py#monkeypatch.setattr urllib.request.build_opener" = 1
@@ -13,5 +13,5 @@
 [debt.unresolved-patch]
 "test_inspect_a_trace_fetch.py#monkeypatch.setattr ft.fetch_from_mirror" = 1
 "test_inspect_a_trace_fetch.py#monkeypatch.setattr ft.fetch_from_tempo" = 1
-"test_inspect_a_trace_fetch.py#monkeypatch.setattr ft.resolve_ava_home" = 1
-"test_inspect_a_trace_fetch.py#monkeypatch.setattr rt.resolve_ava_home" = 2
+"test_inspect_a_trace_fetch.py#monkeypatch.setattr ft.resolve_meiva_home" = 1
+"test_inspect_a_trace_fetch.py#monkeypatch.setattr rt.resolve_meiva_home" = 2

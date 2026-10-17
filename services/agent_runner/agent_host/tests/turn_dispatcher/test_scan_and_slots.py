@@ -129,8 +129,8 @@ class TestChannelParsing:
     @pytest.mark.parametrize(
         ("channel", "expected"),
         [
-            ("ava:inbound:42", 42),
-            ("ava:inbound:1", 1),
+            ("meiva:inbound:42", 42),
+            ("meiva:inbound:1", 1),
             ("someprefix:inbound:9999", 9999),
         ],
     )
@@ -139,7 +139,7 @@ class TestChannelParsing:
 
     @pytest.mark.parametrize(
         "channel",
-        ["ava:inbound:", "ava:inbound:abc", "nocolons", "ava:inbound:12x"],
+        ["meiva:inbound:", "meiva:inbound:abc", "nocolons", "meiva:inbound:12x"],
     )
     def test_malformed_channel_is_none_not_a_raise(self, channel: str) -> None:
         """One bad frame must not kill the subscription every other agent shares."""
@@ -176,18 +176,18 @@ class TestDispatcherMessageHandling:
 
     def test_pmessage_wakes_its_agent(self) -> None:
         disp, woken = self._dispatcher()
-        disp._handle({"type": "pmessage", "channel": "ava:inbound:42", "data": "x"})
+        disp._handle({"type": "pmessage", "channel": "meiva:inbound:42", "data": "x"})
         assert woken == [42]
 
     def test_non_pmessage_frames_are_ignored(self) -> None:
         """psubscribe confirmations and plain messages share the stream."""
         disp, woken = self._dispatcher()
-        disp._handle({"type": "psubscribe", "channel": "ava:inbound:*", "data": 1})
+        disp._handle({"type": "psubscribe", "channel": "meiva:inbound:*", "data": 1})
         assert woken == []
 
     def test_unparseable_channel_is_dropped_quietly(self) -> None:
         disp, woken = self._dispatcher()
-        disp._handle({"type": "pmessage", "channel": "ava:inbound:oops", "data": "x"})
+        disp._handle({"type": "pmessage", "channel": "meiva:inbound:oops", "data": "x"})
         assert woken == []
 
 

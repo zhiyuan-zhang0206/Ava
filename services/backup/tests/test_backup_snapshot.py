@@ -45,7 +45,7 @@ def test_interrupted_snapshot_dump_leaves_no_plaintext(
     monkeypatch.setattr(backup, "PROGRESS_INTERVAL_S", 0.2)
     with pytest.raises(KeyboardInterrupt):
         backup.run_backup(
-            db_url="dbname=ava",
+            db_url="dbname=meiva",
             publish=False,
             progress=interrupt,
             db=database,
@@ -63,8 +63,8 @@ def test_stale_partial_waits_for_its_orphaned_writer_to_close(tmp_path: Path) ->
     that writer exits, then the next run removes it."""
     from services.backup.artifact.intermediates import sweep_closed_partials
 
-    held = tmp_path / "ava-20260926T000000Z.dump.partial"
-    closed = tmp_path / "ava-20260925T000000Z.dump.enc.partial"
+    held = tmp_path / "meiva-20260926T000000Z.dump.partial"
+    closed = tmp_path / "meiva-20260925T000000Z.dump.enc.partial"
     key = tmp_path / ".backup-key-abc"
     for path in (held, closed, key):
         path.write_bytes(b"PLAINTEXT")
@@ -117,16 +117,16 @@ def test_every_backup_run_sweeps_closed_intermediates_from_the_backup_directory(
 
     monkeypatch.setattr(backup, "pg_tool", dump_tool)
     stale = [
-        published / "ava-20260920T030000Z.dump.partial",
+        published / "meiva-20260920T030000Z.dump.partial",
         published / ".backup-key-stale",
-        published / ".ava-20260925T030000Z.dump.enc.k3y9.copy",
+        published / ".meiva-20260925T030000Z.dump.enc.k3y9.copy",
     ]
     for path in stale:
         path.write_bytes(b"PLAINTEXT")
     staging = tmp_path / "controls" / "artifact"
     artifact = backup.run_backup(
         datetime(2026, 9, 26, 3, tzinfo=UTC),
-        db_url="dbname=ava",
+        db_url="dbname=meiva",
         publish=False,
         staging=staging,
         db=database,

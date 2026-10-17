@@ -53,11 +53,11 @@ def _private_port() -> int:
 def _pooler_config(directory: Path, port: int, backend_port: int) -> str:
     return (
         "[databases]\n"
-        f"test = host=127.0.0.1 port={backend_port} dbname=ava_citest user=ava\n"
+        f"test = host=127.0.0.1 port={backend_port} dbname=meiva_citest user=meiva\n"
         "[pgbouncer]\nlisten_addr=127.0.0.1\n"
         f"listen_port={port}\nauth_type=trust\nauth_file={directory / 'userlist.txt'}\n"
         f"pidfile={directory / 'pgbouncer.pid'}\nlogfile={directory / 'pgbouncer.log'}\n"
-        "pool_mode=transaction\nunix_socket_dir=\nadmin_users=ava,ava_pooler_admin\n"
+        "pool_mode=transaction\nunix_socket_dir=\nadmin_users=meiva,meiva_pooler_admin\n"
     )
 
 
@@ -108,7 +108,7 @@ def _start_private_pooler(
 def pooler_plane(config: DataPlaneConfig) -> DataPlaneConfig:
     return dataclasses.replace(
         config,
-        db_url="postgresql://ava@127.0.0.1:12345/test",
+        db_url="postgresql://meiva@127.0.0.1:12345/test",
         redis_url=_ABSENT_REDIS,
         redis_admin_password="",
     )
@@ -125,8 +125,8 @@ def native_pooler(
     binary = base_pooler.pgbouncer_bin()
     if not (Path(binary).exists() or shutil.which(binary)):
         pytest.skip("native PgBouncer is not installed")
-    monkeypatch.setenv("AVA_HOME", str(tmp_path))
-    monkeypatch.setattr(base_pooler, "ava_home", lambda: tmp_path)
+    monkeypatch.setenv("MEIVA_HOME", str(tmp_path))
+    monkeypatch.setattr(base_pooler, "meiva_home", lambda: tmp_path)
     plane = pooler_plane(data_plane_config)
     monkeypatch.setattr(settings.data_plane, "db_url", plane.db_url)
     monkeypatch.setattr(settings.data_plane, "redis_url", plane.redis_url)
@@ -134,7 +134,7 @@ def native_pooler(
     directory = tmp_path / "pgbouncer"
     directory.mkdir()
     config = directory / "pgbouncer.ini"
-    (directory / "userlist.txt").write_text('"ava" ""\n"ava_pooler_admin" ""\n')
+    (directory / "userlist.txt").write_text('"meiva" ""\n"meiva_pooler_admin" ""\n')
     with throwaway_postgres(config=throwaway_config) as direct:
         backend_port = urlsplit(direct).port
         assert backend_port is not None
@@ -144,7 +144,7 @@ def native_pooler(
                 conn.execute("CREATE TABLE pooler_stop_receipt (value integer)")
             yield (
                 OwnedPooler(identity, port, config),
-                f"postgresql://ava@127.0.0.1:{port}/test",
+                f"postgresql://meiva@127.0.0.1:{port}/test",
                 direct,
             )
         finally:

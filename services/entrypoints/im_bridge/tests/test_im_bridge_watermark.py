@@ -88,8 +88,8 @@ async def test_equal_stamp_blocks_keep_numeric_order_and_distinct_source_ordinal
         await core.outbound_worker.run_once()
         await core.outbound_worker.run_once()
         assert cast(FakePlainAdapter, core.adapters["telegram"]).sent == [
-            ("chat", "[Ava #7] block 9"),
-            ("chat", "[Ava #7] block 10"),
+            ("chat", "[Meiva #7] block 9"),
+            ("chat", "[Meiva #7] block 10"),
         ]
         await core._push_snapshot(("telegram", "chat"), state, {})
         assert core.outbound_store.pending_streams({"telegram": "test-account"}) == []

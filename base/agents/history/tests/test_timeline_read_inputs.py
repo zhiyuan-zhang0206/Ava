@@ -24,7 +24,9 @@ def test_renderers_are_lazy_isolated_live_and_read_flag_before_clock() -> None:
     first = TimelineReadInputs(lambda: make_clock(0), lambda: flag(0))
     second = TimelineReadInputs(lambda: make_clock(1), lambda: flag(1))
     assert reads == []
-    message = HumanMessage(content="summary", additional_kwargs={"ava_msg_type": "compact_summary"})
+    message = HumanMessage(
+        content="summary", additional_kwargs={"meiva_msg_type": "compact_summary"}
+    )
     rendered, _ = build_timeline_items([message], inputs=first)
     assert rendered[0].payload == "Compact summary [2026-10-04 12:00:00]:\n\nsummary"
     rendered, _ = build_timeline_items([message], inputs=second)

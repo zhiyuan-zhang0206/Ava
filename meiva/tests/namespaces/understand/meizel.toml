@@ -1,0 +1,13 @@
+[uses]
+"test_understand.py" = ["provider_support.py"]
+"test_understand_autosave.py" = ["provider_support.py"]
+"test_understand_batch.py" = ["provider_support.py"]
+"test_understand_injection.py" = ["provider_support.py"]
+
+[debt.env-patch]
+"test_understand.py#patch.dict os.environ" = 1
+"test_understand_autosave.py#monkeypatch.delenv os.environ.MEIVA_AGENT_ID" = 1
+
+[debt.first-party-patch]
+"test_understand_injection.py#assignment meiva.state" = 1
+"test_understand_injection.py#assignment meiva.state_update" = 1

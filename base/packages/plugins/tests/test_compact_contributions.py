@@ -19,13 +19,13 @@ def preparation(_slices: AgentSlices, *, catalog: ModelCatalog) -> str:
 def test_manifest_must_match_compact_preparation(
     tmp_path: Path, declared: bool, provided: bool
 ) -> None:
-    (tmp_path / "ava-plugin.json").write_text(
+    (tmp_path / "meiva-plugin.json").write_text(
         json.dumps(
             {
                 "apiVersion": 2,
                 "name": "example",
                 "version": "1.0.0",
-                "engines": {"ava": ">=2026.10.1"},
+                "engines": {"meiva": ">=2026.10.1"},
                 "contributions": {"compactReminderSections": ["preparation"] if declared else []},
             }
         )

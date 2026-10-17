@@ -26,7 +26,7 @@ def _write(root: Path, rel: str, body: str) -> Path:
     [
         ("tests/components/agent/test_x.py", True),
         ("base/packages/tests/test_x.py", True),
-        ("ava_builtins/skills/integrations/gmail/scripts/tests/test_gmail.py", True),
+        ("meiva_builtins/skills/integrations/gmail/scripts/tests/test_gmail.py", True),
         ("base/db/test_db_guard.py", False),
         ("scripts/ci/test_selector.py", False),
         ("scripts/ci/test_impact.py", False),
@@ -82,28 +82,28 @@ def test_plugin_wrap_lint_exempts_a_plugins_own_tests(
     from scripts.lint.plugins import no_plugin_wrap as lint
 
     monkeypatch.setattr(lint, "_REPO_ROOT", tmp_path)
-    body = "import ava\n\nava.files.read = lambda: None\n"
-    stub = _write(tmp_path, "ava_builtins/plugins/p/tests/test_plugin.py", body)
+    body = "import meiva\n\nmeiva.files.read = lambda: None\n"
+    stub = _write(tmp_path, "meiva_builtins/plugins/p/tests/test_plugin.py", body)
     assert lint.main([]) == 0
     assert lint.main([str(stub)]) == 0
 
-    _write(tmp_path, "ava_builtins/plugins/p/plugin.py", body)
+    _write(tmp_path, "meiva_builtins/plugins/p/plugin.py", body)
     assert lint.main([]) == 1
 
 
-def test_ava_root_scope_lint_exempts_the_supervisors_own_tests(
+def test_meiva_root_scope_lint_exempts_the_supervisors_own_tests(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    from scripts.lint import ava_root_scope as lint
+    from scripts.lint import meiva_root_scope as lint
 
     monkeypatch.setattr(lint, "_REPO_ROOT", tmp_path)
     proof = _write(
-        tmp_path, "services/supervision/ava_root/tests/test_edge.py", 'NAME = "systemd"\n'
+        tmp_path, "services/supervision/meiva_root/tests/test_edge.py", 'NAME = "systemd"\n'
     )
     assert lint.main([]) == 0
     assert lint.main([str(proof)]) == 0
 
-    _write(tmp_path, "services/supervision/ava_root/daemon.py", 'NAME = "systemd"\n')
+    _write(tmp_path, "services/supervision/meiva_root/daemon.py", 'NAME = "systemd"\n')
     assert lint.main([]) == 1
 
 
@@ -126,7 +126,7 @@ def test_fixture_scope_lint_default_scan_reaches_a_package_tests_directory(
 
         @pytest.fixture(scope="session")
         def leaky() -> None:
-            os.environ["AVA_X"] = "1"
+            os.environ["MEIVA_X"] = "1"
     """
     _write(tmp_path, "tests/e2e/conftest.py", fixture)
     assert lint.main([]) == 1
@@ -188,7 +188,7 @@ def test_fixture_scope_lint_ignores_a_module_that_is_not_a_test(
 
         @pytest.fixture(scope="session")
         def leaky() -> None:
-            os.environ["AVA_X"] = "1"
+            os.environ["MEIVA_X"] = "1"
         """,
     )
     assert lint.main([]) == 0
@@ -223,16 +223,16 @@ def test_time_bomb_lint_rule_3_does_not_govern_production_modules(tmp_path: Path
     assert lint.main([], repo_root=tmp_path) == 0
 
 
-@pytest.mark.parametrize("host", ["cli", "ops", "ava_builtins/plugins/p"])
+@pytest.mark.parametrize("host", ["cli", "ops", "meiva_builtins/plugins/p"])
 def test_no_os_environ_default_scan_reaches_tests_in_dirs_it_never_scanned(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, host: str
 ) -> None:
     from scripts.lint import no_os_environ as lint
 
-    monkeypatch.setattr(lint, "settings_managed_aliases", lambda: frozenset({"AVA_DB_URL"}))
+    monkeypatch.setattr(lint, "settings_managed_aliases", lambda: frozenset({"MEIVA_DB_URL"}))
     body = """
         def test_x(monkeypatch) -> None:
-            monkeypatch.setenv("AVA_DB_URL", "x")
+            monkeypatch.setenv("MEIVA_DB_URL", "x")
     """
     for name in (*lint_common.FRAMEWORK_DIRS, "tests"):
         (tmp_path / name).mkdir(exist_ok=True)
@@ -245,7 +245,7 @@ def test_no_os_environ_default_scan_still_reads_only_tests_in_those_dirs(
 ) -> None:
     from scripts.lint import no_os_environ as lint
 
-    monkeypatch.setattr(lint, "settings_managed_aliases", lambda: frozenset({"AVA_DB_URL"}))
+    monkeypatch.setattr(lint, "settings_managed_aliases", lambda: frozenset({"MEIVA_DB_URL"}))
     for name in (*lint_common.FRAMEWORK_DIRS, "tests"):
         (tmp_path / name).mkdir(exist_ok=True)
     _write(tmp_path, "cli/pkg/mod.py", 'import os\n\nHOME = os.environ["HOME"]\n')
@@ -264,15 +264,15 @@ def _hook_selects(hook_id: str, path: str) -> bool:
         ("lint-fixture-scope", "base/packages/tests/conftest.py", True),
         (
             "lint-fixture-scope",
-            "ava_builtins/skills/integrations/gmail/scripts/tests/conftest.py",
+            "meiva_builtins/skills/integrations/gmail/scripts/tests/conftest.py",
             True,
         ),
         ("lint-fixture-scope", "base/packages/conftest_helper.py", False),
         ("lint-async-no-sync-blocking", "gateway/routers/agents.py", True),
         ("lint-async-no-sync-blocking", "gateway/agents/tests/test_x.py", False),
         ("lint-async-no-sync-blocking", "ops/tests/test_x.py", False),
-        ("lint-ava-root-scope", "services/supervision/ava_root/daemon.py", True),
-        ("lint-ava-root-scope", "services/supervision/ava_root/tests/test_daemon.py", False),
+        ("lint-meiva-root-scope", "services/supervision/meiva_root/daemon.py", True),
+        ("lint-meiva-root-scope", "services/supervision/meiva_root/tests/test_daemon.py", False),
         ("types-codegen-fresh", "gateway/routers/agents.py", True),
         ("types-codegen-fresh", "gateway/agents/tests/test_x.py", False),
         ("types-codegen-fresh", "base/api_contracts/contracts.py", True),
@@ -283,7 +283,7 @@ def _hook_selects(hook_id: str, path: str) -> bool:
         ("lint-pyright-test-environments", "base/packages/tests/test_x.py", True),
         (
             "lint-pyright-test-environments",
-            "ava_builtins/skills/integrations/gmail/scripts/tests/x.py",
+            "meiva_builtins/skills/integrations/gmail/scripts/tests/x.py",
             True,
         ),
         ("lint-pyright-test-environments", "pyproject.toml", True),

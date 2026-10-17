@@ -9,7 +9,7 @@ from typing import Any
 
 import pytest
 
-import ava.skills
+import meiva.skills
 from base.clock.tests.manual_timers import ManualTimers
 from base.host.system.tests.fake_commands import fake_host
 from base.sessions.tests.refuse_helper import refuse_helper
@@ -23,15 +23,15 @@ from tests.path_scoped.cli_tests import operator_database as operator_database
 from tests.path_scoped.cli_tests import operator_pipeline as operator_pipeline
 
 REPO = Path(__file__).resolve().parents[4]
-GUIDE = REPO / "ava_builtins" / "skills" / "platform" / "ava-guide"
+GUIDE = REPO / "meiva_builtins" / "skills" / "platform" / "meiva-guide"
 
 
 def _repo(tmp_path: Path) -> Path:
     repo = tmp_path / "repo"
-    shutil.copytree(GUIDE, repo / "ava_builtins" / "skills" / "platform" / "ava-guide")
+    shutil.copytree(GUIDE, repo / "meiva_builtins" / "skills" / "platform" / "meiva-guide")
     shutil.copytree(
-        REPO / "ava_builtins" / "skills" / "practice" / "ava-workflow",
-        repo / "ava_builtins" / "skills" / "practice" / "ava-workflow",
+        REPO / "meiva_builtins" / "skills" / "practice" / "meiva-workflow",
+        repo / "meiva_builtins" / "skills" / "practice" / "meiva-workflow",
     )
     return repo
 
@@ -43,18 +43,18 @@ def test_converged_namespaces_load_real_task_instructions(
     converge_skills(repo, unit_home)
 
     expected = {
-        ("ava_guide", "deploy"): "ava init",
-        ("ava_guide", "operations"): "Alert review",
-        ("ava_guide", "modification_layers"): "L4",
-        ("ava_guide", "packages", "install"): "Find candidates",
-        ("ava_guide", "plugins", "develop"): "plugin.py",
-        ("ava_guide", "schedules"): "resumable",
-        ("ava_guide", "external_agents"): "Mode B",
-        ("ava_guide", "pages"): "user input",
-        ("ava_workflow", "capability_timescale"): "Gather evidence",
+        ("meiva_guide", "deploy"): "meiva init",
+        ("meiva_guide", "operations"): "Alert review",
+        ("meiva_guide", "modification_layers"): "L4",
+        ("meiva_guide", "packages", "install"): "Find candidates",
+        ("meiva_guide", "plugins", "develop"): "plugin.py",
+        ("meiva_guide", "schedules"): "resumable",
+        ("meiva_guide", "external_agents"): "Mode B",
+        ("meiva_guide", "pages"): "user input",
+        ("meiva_workflow", "capability_timescale"): "Gather evidence",
     }
     for segments, instruction in expected.items():
-        skill = ava.skills
+        skill = meiva.skills
         for segment in segments:
             skill = getattr(skill, segment)
         body = skill.__doc__
@@ -62,15 +62,15 @@ def test_converged_namespaces_load_real_task_instructions(
         assert instruction in body
 
     for old in (
-        "ava_package_installer",
-        "ava_schedule_writer",
-        "ava_use_other_agents",
-        "ava_ui",
-        "ava_watcher",
-        "ava_ultra_speed",
+        "meiva_package_installer",
+        "meiva_schedule_writer",
+        "meiva_use_other_agents",
+        "meiva_ui",
+        "meiva_watcher",
+        "meiva_ultra_speed",
     ):
         with pytest.raises(AttributeError):
-            getattr(ava.skills, old)
+            getattr(meiva.skills, old)
 
 
 def _assert_portable_reading_links(target: Path) -> None:
@@ -97,15 +97,15 @@ def test_external_guide_preserves_legacy_copies_and_publishes_nested_resources(
     host_home = tmp_path / "host"
     client_home = host_home / client
     client_home.mkdir(parents=True)
-    ava_home = tmp_path / "ava-home"
-    (ava_home / "configs").mkdir(parents=True)
-    ledger_root = ava_home / "configs" / "external-agent-skills"
+    meiva_home = tmp_path / "meiva-home"
+    (meiva_home / "configs").mkdir(parents=True)
+    ledger_root = meiva_home / "configs" / "external-agent-skills"
     ledger_root.mkdir()
     key = client.removeprefix(".")
     legacy_bytes = b'{"legacy": "private ownership evidence"}\n'
     for name, ledger in (
-        ("operating-ava-cluster", key),
-        ("deploy-ava-cluster", f"{key}-deploy-ava-cluster"),
+        ("operating-meiva-cluster", key),
+        ("deploy-meiva-cluster", f"{key}-deploy-meiva-cluster"),
     ):
         legacy = client_home / "skills" / name
         legacy.mkdir(parents=True)
@@ -114,7 +114,7 @@ def test_external_guide_preserves_legacy_copies_and_publishes_nested_resources(
 
     context = ConvergeCtx(
         repo=repo,
-        ava_home=ava_home,
+        meiva_home=meiva_home,
         roles=None,
         config=command_runtime.config,
         database_factory=operator_database,
@@ -126,7 +126,7 @@ def test_external_guide_preserves_legacy_copies_and_publishes_nested_resources(
         timers=ManualTimers(),
     )
     external_skills.converge_external_agent_skill(context, host_home=host_home)
-    target = client_home / "skills" / "ava-guide"
+    target = client_home / "skills" / "meiva-guide"
     for relative in (
         "references/evaluation.md",
         "deploy/SKILL.md",
@@ -134,7 +134,7 @@ def test_external_guide_preserves_legacy_copies_and_publishes_nested_resources(
         "packages/install/SKILL.md",
         "schedules/SKILL.md",
         "external-agents/scripts/spawn_codex.py",
-        "pages/widgets/ava_reply/reply.js",
+        "pages/widgets/meiva_reply/reply.js",
         "pages/widgets/markdown/md.html",
         "pages/widgets/markdown/vendor/katex.min.js",
         "external-agents/references/collaboration_protocol.md",
@@ -142,17 +142,17 @@ def test_external_guide_preserves_legacy_copies_and_publishes_nested_resources(
     ):
         assert (target / relative).read_bytes() == (GUIDE / relative).read_bytes()
     _assert_portable_reading_links(target)
-    marker = json.loads((target / ".ava-managed.json").read_text())
-    assert marker["skill"] == "ava-guide"
-    assert (ledger_root / f"{key}-ava-guide.json").is_file()
+    marker = json.loads((target / ".meiva-managed.json").read_text())
+    assert marker["skill"] == "meiva-guide"
+    assert (ledger_root / f"{key}-meiva-guide.json").is_file()
     for name, ledger in (
-        ("operating-ava-cluster", key),
-        ("deploy-ava-cluster", f"{key}-deploy-ava-cluster"),
+        ("operating-meiva-cluster", key),
+        ("deploy-meiva-cluster", f"{key}-deploy-meiva-cluster"),
     ):
         assert (client_home / "skills" / name / "SKILL.md").read_text() == "user customization\n"
         assert (ledger_root / f"{ledger}.json").read_bytes() == legacy_bytes
 
-    source = repo / "ava_builtins" / "skills" / "platform" / "ava-guide"
+    source = repo / "meiva_builtins" / "skills" / "platform" / "meiva-guide"
     (source / "schedules" / "SKILL.md").write_text("schedule instructions v2\n")
     external_skills.converge_external_agent_skill(context, host_home=host_home)
     assert (target / "schedules" / "SKILL.md").read_text() == "schedule instructions v2\n"

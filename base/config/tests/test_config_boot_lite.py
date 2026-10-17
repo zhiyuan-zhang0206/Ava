@@ -2,7 +2,7 @@
 
 Every test that must observe the DEFAULT boot (a lite process) runs in a
 subprocess: this pytest process boots eager (`tests/fixtures/env_bootstrap.py`). The child
-env is scrubbed of the surrounding process's `AVA_*` projection so each child
+env is scrubbed of the surrounding process's `MEIVA_*` projection so each child
 sees the CI-clean environment.
 """
 
@@ -20,7 +20,7 @@ _REPO_ROOT = Path(__file__).resolve().parents[3]
 _CHILD = str(Path(__file__).with_name("_boot_lite_child.py"))
 
 # The real merged pin map of a `deepseek-v4-flash` exec child (task #3621
-# BLK-1): what `AVA_AGENT_CONFIG_OVERLAY` carries in production.
+# BLK-1): what `MEIVA_AGENT_CONFIG_OVERLAY` carries in production.
 _PINMAP: dict[str, object] = {
     "agent_communication_style": "off",
     "claude_thinking_budget_tokens": None,
@@ -51,19 +51,19 @@ def _isolated_boot_home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None
     home = tmp_path / "boot-home"
     home.mkdir()
     (home / ".env").write_text(
-        "AVA_MACHINE_SERVE_GATEWAY=true\n"
-        "AVA_DB_URL=postgresql://test:test@127.0.0.1:1/test\n"
-        "AVA_REDIS_URL=redis://127.0.0.1:1/0\n",
+        "MEIVA_MACHINE_SERVE_GATEWAY=true\n"
+        "MEIVA_DB_URL=postgresql://test:test@127.0.0.1:1/test\n"
+        "MEIVA_REDIS_URL=redis://127.0.0.1:1/0\n",
         encoding="utf-8",
     )
-    monkeypatch.setenv("AVA_HOME", str(home))
+    monkeypatch.setenv("MEIVA_HOME", str(home))
 
 
 def _clean_env(**overrides: str) -> dict[str, str]:
-    env = {key: value for key, value in os.environ.items() if not key.startswith("AVA_")}
+    env = {key: value for key, value in os.environ.items() if not key.startswith("MEIVA_")}
     env.pop("VIRTUAL_ENV", None)
     # Keep pytest's isolated home; cleaning config keys must not select a live unit.
-    env["AVA_HOME"] = os.environ["AVA_HOME"]
+    env["MEIVA_HOME"] = os.environ["MEIVA_HOME"]
     env.update(overrides)
     return env
 
@@ -109,13 +109,15 @@ def test_exec_child_closure_stays_lite_with_real_pin_map(
             "assert not any(entry.status == 'error' for entry in result.entries), result\n",
         )
         assert updated.returncode == 0, updated.stderr
-        assert (Path(os.environ["AVA_HOME"]) / "configs" / "ava_fleet" / "config.json").is_file()
+        assert (
+            Path(os.environ["MEIVA_HOME"]) / "configs" / "meiva_fleet" / "config.json"
+        ).is_file()
     request = tmp_path / "req.json"
     result = tmp_path / "res.json"
     code = (
         "import json, sys\n"
         "import base.config as c\n"
-        "from ava.sdk_surface.settings import agent_setting\n"
+        "from meiva.sdk_surface.settings import agent_setting\n"
         f"pins = {{name: agent_setting(name) for name in {tuple(_PINMAP)!r}}}\n"
         "st = c.boot_state()\n"
         "cfgmods = sorted(m for m in sys.modules if m.startswith('base.config'))\n"
@@ -142,10 +144,10 @@ def test_exec_child_closure_stays_lite_with_real_pin_map(
         "-m",
         "agent.execution.child",
         env={
-            "AVA_PROCESS_PROFILE": "agent",
-            "AVA_AGENT_CONFIG_OVERLAY": json.dumps(_PINMAP),
-            "AVA_EXEC_REQUEST_FILE": str(request),
-            "AVA_EXEC_RESULT_FILE": str(result),
+            "MEIVA_PROCESS_PROFILE": "agent",
+            "MEIVA_AGENT_CONFIG_OVERLAY": json.dumps(_PINMAP),
+            "MEIVA_EXEC_REQUEST_FILE": str(request),
+            "MEIVA_EXEC_RESULT_FILE": str(result),
         },
     )
     assert proc.returncode == 0, proc.stderr
@@ -164,7 +166,7 @@ def test_eager_escape_boots_full_at_import() -> None:
     proc = _spawn(
         _CHILD,
         "eager_escape_boots_full_at_import",
-        env={"AVA_CONFIG_BOOT": "eager"},
+        env={"MEIVA_CONFIG_BOOT": "eager"},
     )
     assert proc.returncode == 0, proc.stderr
     assert proc.stdout.startswith("EAGER full Settings "), proc.stdout
@@ -174,27 +176,27 @@ def test_config_fetch_skip_wins_over_eager() -> None:
     proc = _spawn(
         _CHILD,
         "config_fetch_skip_wins_over_eager",
-        env={"AVA_CONFIG_BOOT": "eager", "AVA_CONFIG_FETCH": "skip"},
+        env={"MEIVA_CONFIG_BOOT": "eager", "MEIVA_CONFIG_FETCH": "skip"},
     )
     assert proc.returncode == 0, proc.stderr
     assert proc.stdout.startswith("SKIPWIN lite False"), proc.stdout
 
 
 def test_dotenv_boot_mode_is_not_honored(tmp_path: Path) -> None:
-    """`AVA_CONFIG_BOOT` is read from the PROCESS environment only: a value
+    """`MEIVA_CONFIG_BOOT` is read from the PROCESS environment only: a value
     living in the unit `.env` is loaded later (inside prepare) and cannot flip
     this boot. The design documents this; the test pins it."""
     (tmp_path / ".env").write_text(
-        "AVA_CONFIG_BOOT=eager\n"
-        "AVA_MACHINE_SERVE_GATEWAY=true\n"
-        "AVA_DB_URL=postgresql://ava:pw@127.0.0.1:5432/ava\n"
-        "AVA_REDIS_URL=redis://127.0.0.1:6380/0\n",
+        "MEIVA_CONFIG_BOOT=eager\n"
+        "MEIVA_MACHINE_SERVE_GATEWAY=true\n"
+        "MEIVA_DB_URL=postgresql://meiva:pw@127.0.0.1:5432/meiva\n"
+        "MEIVA_REDIS_URL=redis://127.0.0.1:6380/0\n",
         encoding="utf-8",
     )
     proc = _spawn(
         _CHILD,
         "dotenv_boot_mode_is_not_honored",
-        env={"AVA_HOME": str(tmp_path)},
+        env={"MEIVA_HOME": str(tmp_path)},
     )
     assert proc.returncode == 0, proc.stderr
     assert proc.stdout.startswith("DOTENV lite eager"), proc.stdout
@@ -204,10 +206,10 @@ def test_required_fields_fail_fast_for_a_local_source(tmp_path: Path) -> None:
     """W1: the local-source branch keeps the eager boot's fail-fast for
     no-default fields; the unit's own `.env` must carry the serve flag (the env
     authority pass drops inherited machine-identity keys)."""
-    (tmp_path / ".env").write_text("AVA_MACHINE_SERVE_GATEWAY=true\n", encoding="utf-8")
-    proc = _spawn(_CHILD, "import_config", env={"AVA_HOME": str(tmp_path)})
+    (tmp_path / ".env").write_text("MEIVA_MACHINE_SERVE_GATEWAY=true\n", encoding="utf-8")
+    proc = _spawn(_CHILD, "import_config", env={"MEIVA_HOME": str(tmp_path)})
     assert proc.returncode != 0
-    assert "required config missing" in proc.stderr and "AVA_DB_URL" in proc.stderr, proc.stderr
+    assert "required config missing" in proc.stderr and "MEIVA_DB_URL" in proc.stderr, proc.stderr
 
 
 def test_overlay_writes_stay_pending_and_never_upgrade() -> None:
@@ -226,7 +228,7 @@ def test_overlay_unknown_and_out_of_profile_keys_fail_fast() -> None:
     proc = _spawn(
         _CHILD,
         "overlay_unknown_and_out_of_profile_keys_fail_fast",
-        env={"AVA_PROCESS_PROFILE": "agent"},
+        env={"MEIVA_PROCESS_PROFILE": "agent"},
     )
     assert proc.returncode == 0, proc.stderr
     assert proc.stdout.startswith("BADKEYS KeyError AttributeError 0"), proc.stdout
@@ -243,7 +245,7 @@ def test_lite_reads_see_environment_changes_live() -> None:
 
 def _home_with_env(tmp_path: Path, lines: list[str]) -> dict[str, str]:
     (tmp_path / ".env").write_text("".join(f"{line}\n" for line in lines), encoding="utf-8")
-    return {"AVA_HOME": str(tmp_path)}
+    return {"MEIVA_HOME": str(tmp_path)}
 
 
 def test_first_error_follows_construction_order(tmp_path: Path) -> None:
@@ -259,40 +261,40 @@ def test_first_error_follows_construction_order(tmp_path: Path) -> None:
     lite_env = _home_with_env(
         lite_home,
         [
-            "AVA_DB_POOL_ACQUIRE_TIMEOUT_SECONDS=abc",  # agent domain, early
-            "AVA_TIMEZONE=Bogus/Zone",  # general domain, later
+            "MEIVA_DB_POOL_ACQUIRE_TIMEOUT_SECONDS=abc",  # agent domain, early
+            "MEIVA_TIMEZONE=Bogus/Zone",  # general domain, later
         ],
     )
     lite = _spawn(_CHILD, "import_config", env=lite_env)
     eager = _spawn(
         _CHILD,
         "import_config",
-        env={**lite_env, "AVA_CONFIG_BOOT": "eager"},
+        env={**lite_env, "MEIVA_CONFIG_BOOT": "eager"},
     )
     for proc in (lite, eager):
         assert proc.returncode != 0
-        assert "AVA_DB_POOL_ACQUIRE_TIMEOUT_SECONDS" in proc.stderr
-        assert "AVA_TIMEZONE" not in proc.stderr
+        assert "MEIVA_DB_POOL_ACQUIRE_TIMEOUT_SECONDS" in proc.stderr
+        assert "MEIVA_TIMEZONE" not in proc.stderr
 
     eager_home = tmp_path / "eager"
     eager_home.mkdir()
     non_lite_env = _home_with_env(
         eager_home,
         [
-            "AVA_EXEC_TIMEOUT_SECONDS=abc",  # sandbox domain, constructs early
-            "AVA_TELEGRAM_POLL_TIMEOUT_SECONDS=abc",  # telegram domain, later
+            "MEIVA_EXEC_TIMEOUT_SECONDS=abc",  # sandbox domain, constructs early
+            "MEIVA_TELEGRAM_POLL_TIMEOUT_SECONDS=abc",  # telegram domain, later
         ],
     )
     non_lite_eager = _spawn(
         _CHILD,
         "import_config",
-        env={**non_lite_env, "AVA_CONFIG_BOOT": "eager"},
+        env={**non_lite_env, "MEIVA_CONFIG_BOOT": "eager"},
     )
     non_lite_lite = _spawn(_CHILD, "import_then_ensure_eager", env=non_lite_env)
     for proc in (non_lite_eager, non_lite_lite):
         assert proc.returncode != 0
-        assert "AVA_EXEC_TIMEOUT_SECONDS" in proc.stderr
-        assert "AVA_TELEGRAM_POLL_TIMEOUT_SECONDS" not in proc.stderr
+        assert "MEIVA_EXEC_TIMEOUT_SECONDS" in proc.stderr
+        assert "MEIVA_TELEGRAM_POLL_TIMEOUT_SECONDS" not in proc.stderr
 
 
 def test_concurrent_first_touch_upgrades_once() -> None:
@@ -387,7 +389,7 @@ def test_forked_child_keeps_full_state() -> None:
     proc = _spawn(
         _CHILD,
         "forked_child_keeps_full_state",
-        env={"AVA_CONFIG_BOOT": "eager"},
+        env={"MEIVA_CONFIG_BOOT": "eager"},
     )
     assert proc.returncode == 0, proc.stderr
     assert proc.stdout.startswith("FORK 1"), proc.stdout
@@ -397,14 +399,14 @@ def test_bad_non_lite_field_does_not_block_lite_scripts(tmp_path: Path) -> None:
     """W5-f: a script that only reads lite surfaces keeps working even when an
     unrelated boot-path-external field holds a bad value; touching that field's
     surface upgrades and raises exactly as eager would."""
-    (tmp_path / ".env").write_text("AVA_EXEC_TIMEOUT_SECONDS=not-a-number\n", encoding="utf-8")
+    (tmp_path / ".env").write_text("MEIVA_EXEC_TIMEOUT_SECONDS=not-a-number\n", encoding="utf-8")
     proc = _spawn(
         _CHILD,
         "bad_non_lite_field_does_not_block_lite_scripts",
-        env={"AVA_HOME": str(tmp_path)},
+        env={"MEIVA_HOME": str(tmp_path)},
     )
     assert proc.returncode == 0, proc.stderr
-    assert proc.stdout.startswith("SCRIPT AVA_MODEL "), proc.stdout
+    assert proc.stdout.startswith("SCRIPT MEIVA_MODEL "), proc.stdout
     assert proc.stdout.rstrip().endswith(" 0 yes"), proc.stdout
 
 

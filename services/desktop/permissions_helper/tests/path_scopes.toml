@@ -3,6 +3,6 @@
 "services.backup.artifact.tests.passphrase" = [
     "test_permissions_helper.py",
 ]
-"ava.tests.fixtures.sdk" = [
+"meiva.tests.fixtures.sdk" = [
     "test_helper_retirement.py"
 ]

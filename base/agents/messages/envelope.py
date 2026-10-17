@@ -7,7 +7,7 @@
     | ``system``              | framework internal INSERT      | original text (no wrap)                             |
     | ``system:<subtype>``    | framework internal INSERT      | original text (no wrap)                             |
     | ``agent:N``             | peer agent N                   | "Agent N [ts]:\n\n..."                            |
-    | ``external_agent:S[:I]``| an agent outside Ava (CLI/MCP) | "External agent (S / I; asserted provenance) [ts]:\n\n..." |
+    | ``external_agent:S[:I]``| an agent outside Meiva (CLI/MCP) | "External agent (S / I; asserted provenance) [ts]:\n\n..." |
     | ``user``                | the human user (the UI)        | "[ts]\n\n..."                                     |
     | ``ui:page:<name>``      | an HTML page the agent started | "[ts]\n\n..."                                     |
     | ``watcher:N``           | a watcher session's wake-up    | "Watcher (id N) [ts]:\n\n..."                       |
@@ -16,20 +16,20 @@
 
 ``user`` covers every human-originated inbound — chat from the composer,
 question / report replies, and the lifecycle triggers (restart / terminate /
-resurrect) the user fires. A tool the user drives through the Ava CLI may also
+resurrect) the user fires. A tool the user drives through the Meiva CLI may also
 send as ``user`` (the user speaking through that tool); a tool that wants to
 stay distinguishable from the user declares ``external_agent:<subject>[:<instance>]``
 instead (``subject`` / ``instance`` are 1-20 characters of ``[a-zA-Z0-9_.-]``).
 The declaration is self-asserted, never authenticated: the agent reads it as
 "an external agent says it is S", and no declared field grants authority.
 ``ui:page:<name>`` is a callback POSTed by an HTML
-page the agent itself started (a page registered via ``ava.ui.show``); it wraps
+page the agent itself started (a page registered via ``meiva.ui.show``); it wraps
 as the same bare "[ts]" header as ``user``, and the agent recovers which page
 posted from ``<name>``.
 ``watcher:N`` is a wake-up delivered from inside a watcher session (a scheduled
 fire, or the exit notice sent when the watcher stops); N is the watcher's
 session id, so the agent recovers which watcher fired from N. ``shell:N`` is
-the completion notice of a background shell command (``ava.shell.run_background``);
+the completion notice of a background shell command (``meiva.shell.run_background``);
 N is the shell session id the command ran in. ``schedule:N`` is stamped by a
 gateway-hosted schedule (`schedules` row N) when
 it spawns / wakes / resurrects an agent; the agent recovers which schedule acted
@@ -177,5 +177,5 @@ def wrap_inbound(
     content: str, source: str, *, inputs: EnvelopeReadInputs, created_at: datetime | None = None
 ) -> str:
     """The inbound's content behind its `inbound_head`. The body begins at
-    `len(inbound_head(...))`, which callers record as `ava_inbound_body_start`."""
+    `len(inbound_head(...))`, which callers record as `meiva_inbound_body_start`."""
     return inbound_head(source, inputs=inputs, created_at=created_at) + content

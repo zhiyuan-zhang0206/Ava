@@ -1,13 +1,13 @@
-"""Health preflight — warning-only data-plane + checkout self-check on `ava start`.
+"""Health preflight — warning-only data-plane + checkout self-check on `meiva start`.
 
 This step is the start-time cluster-health checklist (#607): it probes the data
 plane (Postgres + Redis, exactly the URLs the runtime dials) and the checkout
 (dirty marker).
-Every finding is printed and appended to `$AVA_HOME/logs/health_preflight.log`
+Every finding is printed and appended to `$MEIVA_HOME/logs/health_preflight.log`
 for after-the-fact inspection; nothing blocks — a start continues on any
 warning. This is the first line of
 defense for the "a cluster died and nobody knew" incident class (paired with
-the cross-cluster monitor): the next `ava start` / `ava converge` on the box
+the cross-cluster monitor): the next `meiva start` / `meiva converge` on the box
 leaves a dated trail of what was and was not reachable.
 
 Data plane (`data_plane_warnings`), role-aware:
@@ -26,7 +26,7 @@ Checkout (`checkout_warnings`), prod-install only: dev worktrees are a
 development context by construction (always-dirty tree) and are skipped. A
 real install's checkout must be clean. There is no cluster pin to compare
 HEAD against: a source-run home's release identity is the checkout it runs,
-and `ava status` prints it.
+and `meiva status` prints it.
 """
 
 from __future__ import annotations
@@ -145,9 +145,9 @@ def data_plane_warnings(ctx: ConvergeCtx) -> list[str]:
         return []
 
     if "gateway" in ctx.roles:
-        rec = get_record(ctx.ava_home)
+        rec = get_record(ctx.meiva_home)
         if rec is None:
-            raise RuntimeError(f"gateway home {ctx.ava_home} has no recorded ports")
+            raise RuntimeError(f"gateway home {ctx.meiva_home} has no recorded ports")
         plane_up_at_all = not port_free(rec.ports["postgres"]) or not port_free(rec.ports["redis"])
         if not plane_up_at_all:
             # Cold start: neither pg nor redis is bound, and the start sequence
@@ -211,7 +211,7 @@ def ensure_health_preflight(ctx: ConvergeCtx) -> None:
         "check the fleet monitor.",
         file=sys.stderr,
     )
-    log_dir = ctx.ava_home / "logs"
+    log_dir = ctx.meiva_home / "logs"
     log_dir.mkdir(parents=True, exist_ok=True)
     stamp = datetime.now(UTC).isoformat(timespec="seconds")
     with (log_dir / "health_preflight.log").open("a", encoding="utf-8") as f:

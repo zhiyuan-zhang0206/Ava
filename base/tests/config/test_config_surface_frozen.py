@@ -18,18 +18,18 @@ from base.lm.catalog import ModelCatalog
 # rename here silently breaks every deployed `.env`, a first start's materialization, and
 # the config PUT. Spot-check across domains.
 _FROZEN_ALIASES = {
-    "db_url": "AVA_DB_URL",
-    "redis_admin_password": "AVA_REDIS_ADMIN_PASSWORD",
-    "redis_url": "AVA_REDIS_URL",
-    "events_channel": "AVA_EVENTS_CHANNEL",
-    "cluster_secret": "AVA_CLUSTER_SECRET",
-    "llm_model": "AVA_MODEL",
-    "labeler_model": "AVA_LABELER_MODEL",
+    "db_url": "MEIVA_DB_URL",
+    "redis_admin_password": "MEIVA_REDIS_ADMIN_PASSWORD",
+    "redis_url": "MEIVA_REDIS_URL",
+    "events_channel": "MEIVA_EVENTS_CHANNEL",
+    "cluster_secret": "MEIVA_CLUSTER_SECRET",
+    "llm_model": "MEIVA_MODEL",
+    "labeler_model": "MEIVA_LABELER_MODEL",
     "deepseek_api_key": "DEEPSEEK_API_KEY",
-    "exec_timeout_seconds": "AVA_EXEC_TIMEOUT_SECONDS",
-    "telegram_bot_token": "AVA_TELEGRAM_BOT_TOKEN",
-    "skills_to_inject_into_system_prompt": "AVA_SKILLS_TO_INJECT_INTO_SYSTEM_PROMPT",
-    "gateway_port": "AVA_GATEWAY_PORT",
+    "exec_timeout_seconds": "MEIVA_EXEC_TIMEOUT_SECONDS",
+    "telegram_bot_token": "MEIVA_TELEGRAM_BOT_TOKEN",
+    "skills_to_inject_into_system_prompt": "MEIVA_SKILLS_TO_INJECT_INTO_SYSTEM_PROMPT",
+    "gateway_port": "MEIVA_GATEWAY_PORT",
 }
 
 

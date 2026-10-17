@@ -1,4 +1,4 @@
-# ava:ref base/api_contracts/docs/routes.ava.okf.md#route-policy
+# meiva:ref base/api_contracts/docs/routes.meiva.okf.md#route-policy
 from __future__ import annotations
 
 import re

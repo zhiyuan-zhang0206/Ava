@@ -1,0 +1,13 @@
+{
+  "apiVersion": 2,
+  "name": "lm_zhipu",
+  "version": "1.0.0",
+  "engines": {
+    "meiva": ">=2026.10.1"
+  },
+  "contributions": {
+    "providers": [
+      "glm-"
+    ]
+  }
+}

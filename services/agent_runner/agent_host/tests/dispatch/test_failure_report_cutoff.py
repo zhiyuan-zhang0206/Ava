@@ -15,7 +15,7 @@ from agent.graph.llm_errors import FatalProviderError
 from agent.ownership.hosted import TurnFatalStamp, TurnSettlement, admit_hosted_runtime
 from agent.state import BaseAgentState
 from agent.turn.runloop import PendingTurnFailure, publish_turn_failure
-from base.agents.context import AvaContext
+from base.agents.context import MeivaContext
 from base.agents.recovery.breaker import admit_pending_wake
 from base.agents.tests.units import spawn_agent
 from base.cluster.machine import MachineIdentity
@@ -107,7 +107,7 @@ async def test_error_visible_after_cutoff_allows_immediate_new_chat(
     old_claim = _insert(db_conn, agent_id, "user", claimed=True)
     pending = _failure()
     publisher = AgentEventPublisher(event_bus.async_redis(), event_bus.channel, agent_id=agent_id)
-    ctx = AvaContext(
+    ctx = MeivaContext(
         ops_pool=aops_pool,
         event_publisher=publisher,
         bus=event_bus,

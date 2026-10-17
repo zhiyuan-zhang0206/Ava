@@ -8,7 +8,7 @@ them — is gone. Only `setup-runner-native.sh` survived the publish as dead
 weight; it was deleted 2026-08-14.
 
 The current surface is documented in
-[`.github/.github.ava.okf.md`](../.github/.github.ava.okf.md). What follows is
+[`.github/.github.meiva.okf.md`](../.github/.github.meiva.okf.md). What follows is
 the part that is *not* current-state: coverage the private lane had and this one
 does not.
 
@@ -51,5 +51,5 @@ cost pressure that produced the private lane's whole design — commit-modulo
 sampling of full runs on main, percentage sampling of e2e on PRs, a nightly
 backstop to cover what sampling skipped — is gone. Current suite classification,
 backend subset selection and full merge-tree verification are documented in
-the [CI overview](../.github/.github.ava.okf.md). Closing the remaining gaps must
+the [CI overview](../.github/.github.meiva.okf.md). Closing the remaining gaps must
 preserve that coverage while accounting for the wall-clock cost of a longer PR wait.

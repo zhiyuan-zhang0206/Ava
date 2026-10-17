@@ -407,20 +407,20 @@ def _changed_repo(repo: Path, paths: tuple[str, ...]) -> str:
 def test_native_classify_step_preserves_document_and_queue_routing(tmp_path: Path) -> None:
     step = _step(_workflow_jobs()["classify"], "Classify changed paths")
     assert step["env"]["HEAD_REF"] == "${{ github.head_ref }}"
-    doc = "scripts/lint/docs/lint.ava.okf.md"
+    doc = "scripts/lint/docs/lint.meiva.okf.md"
     cases = [
         ("pull_request", "codex/docs", (doc,), ("false", "false")),
         ("pull_request", "codex/mixed", (doc, "scripts/tests/test_x.py"), ("false", "true")),
         (
             "pull_request",
             "codex/frontend-docs",
-            ("ui/web/src/docs/page.ava.okf.md",),
+            ("ui/web/src/docs/page.meiva.okf.md",),
             ("false", "false"),
         ),
         (
             "pull_request",
             "codex/test-data",
-            ("ui/web/tests/docs/data.ava.okf.md",),
+            ("ui/web/tests/docs/data.meiva.okf.md",),
             ("true", "false"),
         ),
         ("pull_request", "trunk-merge/batch-42", (doc,), ("false", "true")),
@@ -458,7 +458,7 @@ def _run_classify(
         text=True,
         check=False,
     )
-    assert not list(output.parent.glob("ava-classify.*")), "classify scratch leaked after exit"
+    assert not list(output.parent.glob("meiva-classify.*")), "classify scratch leaked after exit"
     return result
 
 

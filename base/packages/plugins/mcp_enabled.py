@@ -1,10 +1,10 @@
-"""MCP enable overlay — per-machine local file `~/.ava/mcp_enabled.json`.
+"""MCP enable overlay — per-machine local file `~/.meiva/mcp_enabled.json`.
 
 Different concept from the MCP server definitions themselves (which the
-loader merges from builtin `ava_builtins/mcps/*/.mcp.json` < plugin `.mcp.json` <
+loader merges from builtin `meiva_builtins/mcps/*/.mcp.json` < plugin `.mcp.json` <
 machine `mcp.json`): this overlay only records, per host, which already-defined
 servers are disabled. Symmetric with how plugins are toggled via
-`~/.ava/plugins_config.json`; editable via `ava mcp enable/disable`.
+`~/.meiva/plugins_config.json`; editable via `meiva mcp enable/disable`.
 
 On-disk shape — a flat `mcp_servers` dict: {name: {enabled: bool}}.
 A server NOT present in the map defaults to enabled (default-on); the
@@ -60,8 +60,8 @@ def _validate_schema(data: dict[str, Any]) -> McpEnabledConfig:
 
 
 def local_config_path() -> Path:
-    """Per-machine MCP-enable overlay file path: `~/.ava/mcp_enabled.json`."""
-    return paths.ava_home() / "mcp_enabled.json"
+    """Per-machine MCP-enable overlay file path: `~/.meiva/mcp_enabled.json`."""
+    return paths.meiva_home() / "mcp_enabled.json"
 
 
 class _MalformedOverlayError(McpEnabledConfigError):
@@ -91,7 +91,7 @@ def _read_local() -> dict[str, Any] | None:
 
 def write_local(cfg: McpEnabledConfig) -> None:
     """Full-replace the per-machine MCP-enable overlay file. The write path for
-    `set_mcp_enabled` (and `ava mcp enable/disable`). Atomic (temp + replace):
+    `set_mcp_enabled` (and `meiva mcp enable/disable`). Atomic (temp + replace):
     a crash mid-write must not produce the malformed file that fail-closed
     reads reject (audit 2026-08-08 P2)."""
     p = local_config_path()

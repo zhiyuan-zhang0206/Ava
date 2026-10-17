@@ -7,8 +7,8 @@ import time
 from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
 
-import ava
-from ava.agents import AgentStatus as S
+import meiva
+from meiva.agents import AgentStatus as S
 from schedules.catchup import fire_slot_once
 from base.daemon.schedules.watcher import next_fire
 from base.db import Database
@@ -28,7 +28,7 @@ def report_agent(env_name: str, label: str) -> int:
 
     before_id = None
     while True:
-        page = ava.agents.list_agents(scope="all", query=label, before_id=before_id)
+        page = meiva.agents.list_agents(scope="all", query=label, before_id=before_id)
         for agent in page.agents:
             if agent.label == label and agent.status in (S.RUNNING, S.IDLING, S.TERMINATED):
                 return agent.agent_id

@@ -1,6 +1,6 @@
 "agent.tests.agent_tests" = [
 ]
-"ava.tests.fixtures.ava_tests" = [
+"meiva.tests.fixtures.meiva_tests" = [
     "test_hosted_dispatcher_cancellation.py",
 ]
 "services.backup.artifact.tests.passphrase" = [

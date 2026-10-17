@@ -18,7 +18,7 @@ from base.db.config import db_config_from_boot
 from base.host.exit_codes import hard_exit as _hard_exit
 from base.native_process.code_version import CodeVersion
 from base.native_process.loaded_commit import LoadedCommit
-from base.paths import ava_home
+from base.paths import meiva_home
 from base.telemetry.delivery.receipts import DrainStatus
 from base.telemetry.pipeline_build import build_pipeline
 from base.telemetry.process_logging import init_gateway_process
@@ -50,7 +50,7 @@ def _is_running(config: MemorySearchConfig) -> bool:
 async def run(config: MemorySearchConfig, *, embedding_name_reader: Callable[[], str]) -> None:
     """Load the store, then serve until the graceful-shutdown signal fires.
 
-    The provider config (`AVA_EMBEDDING_BACKEND`) is read at boot: the
+    The provider config (`MEIVA_EMBEDDING_BACKEND`) is read at boot: the
     store's matrix width and wire bound must match the provider that
     produced the vectors, and an unknown provider value fails fast instead
     of serving a half-mismatched search surface."""
@@ -79,7 +79,7 @@ def main() -> None:
     boot = ConfigBoot()
     boot.boot()
     machine = machine_from_boot(boot)
-    process_home = ava_home().resolve()
+    process_home = meiva_home().resolve()
     config = memory_search_config(config=boot)
     if _is_running(config):
         sys.exit(1)

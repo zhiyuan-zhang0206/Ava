@@ -16,8 +16,8 @@ GenerationClass = Literal["gateway", "runner"]
 CLASSES: tuple[GenerationClass, ...] = ("gateway", "runner")
 
 # Stable NOLOGIN capability groups.
-GATEWAY_GROUP = "ava_gateway"
-RUNNER_GROUP = "ava_runner"
+GATEWAY_GROUP = "meiva_gateway"
+RUNNER_GROUP = "meiva_runner"
 
 RoleName = Annotated[str, StringConstraints(pattern=r"^[a-z_][a-z0-9_]{0,62}$")]
 # Credential digest — a one-way sha256 over the secret file's bytes, never
@@ -51,7 +51,7 @@ class CatalogRefusedError(AuthorityRefusedError):
 
 
 # The gateway and runner login names of the home's one generation.
-GENERATION_NAMES: tuple[str, str] = ("ava_g0_gateway", "ava_g0_runner")
+GENERATION_NAMES: tuple[str, str] = ("meiva_g0_gateway", "meiva_g0_runner")
 
 
 class _Record(BaseModel):
@@ -84,7 +84,7 @@ class Origin(_Record):
 
 class Generation(_Record):
     # The only generation a home ever has. The number stays because the role
-    # names (`ava_g0_*`), `generations/0.json` and every delivered environment
+    # names (`meiva_g0_*`), `generations/0.json` and every delivered environment
     # carry it; renaming them would itself be a credential change.
     number: Literal[0]
     gateway: RoleName

@@ -39,26 +39,26 @@ from scripts.verify.boundary import (  # noqa: E402 — standalone script
 # The macOS license allows two guests on one Apple host; the golden image counts while it runs.
 VM_LIMIT = 2
 # Every VM a verification run creates carries this prefix, and only such a VM is ever deleted.
-VM_PREFIX = "ava-verify-"
+VM_PREFIX = "meiva-verify-"
 SHARE_NAME = "src"
 EXPORT_BRANCH = "verify"
 # macOS guests mount a share under /Volumes/My Shared Files/<name>.
 GUEST_SHARE = f"/Volumes/My Shared Files/{SHARE_NAME}"
 # `tart exec` starts commands with a bare PATH; uv lives in ~/.local/bin, Homebrew in /opt/homebrew.
 GUEST_PATH = 'export PATH="$HOME/.local/bin:/opt/homebrew/bin:$PATH"'
-GUEST_SOURCE = "$HOME/.ava/source"
+GUEST_SOURCE = "$HOME/.meiva/source"
 READY_TIMEOUT_S = 180
 
-# The commit goes into `~/.ava/source` as a standalone clone with no remote, the way the
+# The commit goes into `~/.meiva/source` as a standalone clone with no remote, the way the
 # container recipe does it. The golden image carries no cluster, so a home that was
 # already initialized is refused rather than overwritten.
 PREPARE_SOURCE = f"""
 set -euo pipefail
-test ! -e "$HOME/.ava/start-intent.json"
-install -d -m 700 "$HOME/.ava"
-rm -rf "$HOME/.ava/source"
-git init -q "$HOME/.ava/source"
-cd "$HOME/.ava/source"
+test ! -e "$HOME/.meiva/start-intent.json"
+install -d -m 700 "$HOME/.meiva"
+rm -rf "$HOME/.meiva/source"
+git init -q "$HOME/.meiva/source"
+cd "$HOME/.meiva/source"
 git fetch -q --no-tags "{GUEST_SHARE}/source.git" refs/heads/{EXPORT_BRANCH}
 git -c advice.detachedHead=false checkout -q --detach "$1"
 git rev-parse HEAD

@@ -15,7 +15,7 @@ from psycopg_pool import AsyncConnectionPool
 import base.agents.impersonation as agents_impersonation
 from agent import impersonation
 from agent.tests.impersonation.test_impersonation import _notes
-from base.agents.context import AvaContext
+from base.agents.context import MeivaContext
 from base.agents.impersonation.tests.impersonation_support import recorded_tree
 from base.agents.incarnation.resources import ResourceProcess
 from base.agents.observation.relay_supervision import RelaySupervision
@@ -34,8 +34,8 @@ from base.packages.plugin_providers import build_model_catalog
 
 
 @pytest.fixture
-def gate_ctx(database: Database, event_bus: EventBus) -> AvaContext:
-    return AvaContext(
+def gate_ctx(database: Database, event_bus: EventBus) -> MeivaContext:
+    return MeivaContext(
         db=database,
         bus=event_bus,
         catalog=build_model_catalog(),

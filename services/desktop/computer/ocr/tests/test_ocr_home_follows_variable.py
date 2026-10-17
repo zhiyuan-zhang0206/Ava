@@ -11,7 +11,7 @@ def test_the_binary_path_follows_the_variable_after_import(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     first, second = tmp_path / "first", tmp_path / "second"
-    monkeypatch.setenv("AVA_HOME", str(first))
+    monkeypatch.setenv("MEIVA_HOME", str(first))
     assert ocr.bin_path() == first / "logs" / "computer" / "ocr-bin" / "ocr"
-    monkeypatch.setenv("AVA_HOME", str(second))
+    monkeypatch.setenv("MEIVA_HOME", str(second))
     assert ocr.bin_path() == second / "logs" / "computer" / "ocr-bin" / "ocr"

@@ -171,7 +171,7 @@ async def test_send_does_not_override_existing_owner_open_id(adapter: FeishuAdap
 
 
 def test_start_poller_honors_zero_interval() -> None:
-    """AVA_FEISHU_POLL_INTERVAL_SECONDS=0 disables the poller (WS-only)."""
+    """MEIVA_FEISHU_POLL_INTERVAL_SECONDS=0 disables the poller (WS-only)."""
     adapter = FeishuAdapter(FakeCore(), feishu_config(feishu_poll_interval_seconds=0))
     adapter._start_poller(asyncio.TaskGroup())
     assert adapter._poll_task is None

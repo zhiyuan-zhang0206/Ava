@@ -10,7 +10,7 @@ from base.config.base import EnvSettings
 class AgentCompactionSettings(EnvSettings):
     auto_compact_fraction: float | None = Field(
         default=None,
-        alias="AVA_AUTO_COMPACT_FRACTION",
+        alias="MEIVA_AUTO_COMPACT_FRACTION",
         description=(
             "Force-compact ceiling as a fraction of the agent model's context "
             "window: when occupancy exceeds fraction * window, the history is "
@@ -31,7 +31,7 @@ class AgentCompactionSettings(EnvSettings):
 
     auto_compact_ceiling_tokens: int | None = Field(
         default=None,
-        alias="AVA_AUTO_COMPACT_CEILING_TOKENS",
+        alias="MEIVA_AUTO_COMPACT_CEILING_TOKENS",
         description=(
             "Absolute cap on the force-compact threshold, in tokens: the effective "
             "threshold is min(auto_compact_fraction * window, this). 0 disables the "
@@ -55,7 +55,7 @@ class AgentCompactionSettings(EnvSettings):
 
     compact_reminder_fraction: float | None = Field(
         default=None,
-        alias="AVA_COMPACT_REMINDER_FRACTION",
+        alias="MEIVA_COMPACT_REMINDER_FRACTION",
         description=(
             "Soft wind-down reminder as a fraction of the context window: crossing "
             "it (while under auto_compact_fraction) fires a one-time note suggesting "
@@ -75,10 +75,10 @@ class AgentCompactionSettings(EnvSettings):
 
     agent_reply_reminder_cadence: Literal["once_per_compaction", "every_time"] = Field(
         default="once_per_compaction",
-        alias="AVA_AGENT_REPLY_REMINDER_CADENCE",
+        alias="MEIVA_AGENT_REPLY_REMINDER_CADENCE",
         description=(
             "How often the agent-reply reminder fires — the note pointing at "
-            "`ava.agents.send_message` when another agent's message arrives (a plain "
+            "`meiva.agents.send_message` when another agent's message arrives (a plain "
             "text reply is never delivered). 'once_per_compaction': at most once per "
             "context window (default). 'every_time': on every agent inbound."
         ),
@@ -94,10 +94,10 @@ class AgentCompactionSettings(EnvSettings):
 
     sdk_code_reminder_cadence: Literal["once_per_compaction", "every_time"] = Field(
         default="once_per_compaction",
-        alias="AVA_SDK_CODE_REMINDER_CADENCE",
+        alias="MEIVA_SDK_CODE_REMINDER_CADENCE",
         description=(
             "How often SDK code-category reminders fire — the notes pointing at "
-            "the matching `ava` primitive after a native Python equivalent is "
+            "the matching `meiva` primitive after a native Python equivalent is "
             "detected. 'once_per_compaction': at most once per category per context "
             "window (default). 'every_time': on every matching code cell."
         ),
@@ -113,7 +113,7 @@ class AgentCompactionSettings(EnvSettings):
 
     sdk_nameerror_hint_enabled: bool = Field(
         default=True,
-        alias="AVA_SDK_NAMEERROR_HINT_ENABLED",
+        alias="MEIVA_SDK_NAMEERROR_HINT_ENABLED",
         description=(
             "Whether to surface an interpreter-persistence hint when an "
             "execute_code NameError references a name used in an earlier code "
@@ -131,7 +131,7 @@ class AgentCompactionSettings(EnvSettings):
 
     history_dump_enabled: bool = Field(
         default=True,
-        alias="AVA_COMPACT_HISTORY_DUMP",
+        alias="MEIVA_COMPACT_HISTORY_DUMP",
         description=(
             "Dump the full pre-compact conversation history (state.messages) to "
             "a JSONL file in the agent workspace (<workspace>/message-history/"
@@ -154,7 +154,7 @@ class AgentCompactionSettings(EnvSettings):
 
     history_dump_keep: int = Field(
         default=5,
-        alias="AVA_COMPACT_HISTORY_DUMP_KEEP",
+        alias="MEIVA_COMPACT_HISTORY_DUMP_KEEP",
         description=(
             "How many pre-compact history dumps to keep per agent: after writing "
             "a new dump, older files in <workspace>/message-history/ beyond this "

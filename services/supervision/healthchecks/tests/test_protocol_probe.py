@@ -19,7 +19,7 @@ from services.supervision.healthchecks import protocol_probe as probe
 
 @contextlib.contextmanager
 def unix_server(payload: bytes) -> Generator[Path]:
-    with tempfile.TemporaryDirectory(prefix="ava-ping-", dir="/tmp") as directory:
+    with tempfile.TemporaryDirectory(prefix="meiva-ping-", dir="/tmp") as directory:
         path = Path(directory) / "socket"
         code = """
 import socket, sys

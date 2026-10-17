@@ -1,6 +1,6 @@
 """Project-local skill folders: where a repository keeps skills its agents mount.
 
-Used by the ava-code plugin (working-directory skills) and by the cluster-ops
+Used by the meiva-code plugin (working-directory skills) and by the cluster-ops
 skill view, so it lives below both.
 """
 
@@ -27,12 +27,12 @@ def project_skill_roots(cwd: Path) -> list[Path]:
     """Project-local skill folders for the repo containing `cwd`.
 
     Returns the git root's `.claude/skills` (Claude Code compatibility),
-    `.agents/skills` (the open Agent Skills standard directory) and `.ava/skills`
-    (Ava's own repo-local skills), in that order. They are scanned in list order
-    with last-wins, so `.ava/skills` takes precedence on a name collision — an
-    Ava-native skill overrides a same-named compat one, and the Ava-native path
+    `.agents/skills` (the open Agent Skills standard directory) and `.meiva/skills`
+    (Meiva's own repo-local skills), in that order. They are scanned in list order
+    with last-wins, so `.meiva/skills` takes precedence on a name collision — an
+    Meiva-native skill overrides a same-named compat one, and the Meiva-native path
     keeps working after a repo moves its skills to `.agents/skills` and turns
-    `.ava/skills` into a link back to it. Only existing directories are
+    `.meiva/skills` into a link back to it. Only existing directories are
     returned. `cwd` not under a git repo → [].
     """
     root = git_root(cwd)
@@ -41,6 +41,6 @@ def project_skill_roots(cwd: Path) -> list[Path]:
     candidates = (
         root / ".claude" / "skills",
         root / ".agents" / "skills",
-        root / ".ava" / "skills",
+        root / ".meiva" / "skills",
     )
     return [d for d in candidates if d.is_dir()]

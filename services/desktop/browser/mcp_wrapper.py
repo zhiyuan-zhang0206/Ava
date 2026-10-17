@@ -8,9 +8,9 @@ Chrome. The tool list passes through verbatim, so an upstream version bump
 the heavy upstream + the page-affinity / cold-start logic live in the daemon, so
 one Chrome client is shared instead of one per agent.
 
-Wired in ava_builtins/mcps/chrome/.mcp.json; takes no arguments (the socket path is derived
+Wired in meiva_builtins/mcps/chrome/.mcp.json; takes no arguments (the socket path is derived
 from settings, matching the daemon). The MCP daemon spawns it with cwd pinned to
-the repo root (`ava/mcps/config.py:server_cwd`), so the relative interpreter path
+the repo root (`meiva/mcps/config.py:server_cwd`), so the relative interpreter path
 resolves there — launched directly rather than through `uv run`, which would hang
 one resident wrapper process per agent:
 
@@ -29,7 +29,7 @@ from mcp.server.lowlevel import Server
 from mcp.server.stdio import stdio_server
 
 from base.config import ConfigBoot
-from base.paths import ava_home, chrome_mcp_socket
+from base.paths import chrome_mcp_socket, meiva_home
 from services.desktop.browser.mcp_socket_bridge import (
     ReconnectingLink,
     SocketLink,
@@ -117,7 +117,7 @@ def main() -> None:
     config.boot()
     asyncio.run(
         _serve(
-            socket_path=chrome_mcp_socket(ava_home(), config.view.services.browser_cdp_port),
+            socket_path=chrome_mcp_socket(meiva_home(), config.view.services.browser_cdp_port),
             timeout_reader=lambda: config.view.sandbox.mcp_connect_timeout_seconds,
         )
     )

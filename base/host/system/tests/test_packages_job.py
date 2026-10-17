@@ -23,8 +23,8 @@ from base.host.system.tests.fake_crontab import FakeCrontab
 _UID = 501
 
 
-def _ava(*, host: Host) -> str:
-    return "/work tree/.venv/bin/ava"
+def _meiva(*, host: Host) -> str:
+    return "/work tree/.venv/bin/meiva"
 
 
 def _path(*, host: Host) -> str:
@@ -61,8 +61,8 @@ def _refuse(message: str) -> Callable[..., None]:
 @pytest.fixture(autouse=True)
 def _configure_job(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     monkeypatch.setenv("HOME", str(tmp_path))
-    monkeypatch.setattr(cron, "ava_binary_path", _ava)
-    monkeypatch.setattr(cron, "job_home", lambda: str(tmp_path / ".ava"))
+    monkeypatch.setattr(cron, "meiva_binary_path", _meiva)
+    monkeypatch.setattr(cron, "job_home", lambda: str(tmp_path / ".meiva"))
     monkeypatch.setattr(cron, "launchd_path_env", _path)
 
 
@@ -76,14 +76,14 @@ def test_launchd_plist_runs_the_refresh_pass_on_the_tick(tmp_path: Path) -> None
     values = [element.text for element in root.findall("./dict/array/string")]
     command = values[2]
 
-    assert "<string>com.ava.packages-refresh</string>" in content
+    assert "<string>com.meiva.packages-refresh</string>" in content
     assert values[0:2] == ["/bin/sh", "-c"]
     assert command is not None
-    assert "'/work tree/.venv/bin/ava' packages refresh --from-job" in command
+    assert "'/work tree/.venv/bin/meiva' packages refresh --from-job" in command
     tick = settings.packages.refresh_tick_seconds
     assert f"<key>StartInterval</key>\n    <integer>{tick}</integer>" in content
     assert "<key>RunAtLoad</key>\n    <false/>" in content
-    assert f"{tmp_path}/.ava/logs/packages-refresh.log" in content
+    assert f"{tmp_path}/.meiva/logs/packages-refresh.log" in content
 
 
 def test_macos_reregistration_rewrites_and_reloads_idempotently() -> None:
@@ -99,8 +99,8 @@ def test_macos_reregistration_rewrites_and_reloads_idempotently() -> None:
 
 
 def test_linux_registration_replaces_only_its_own_lines(tmp_path: Path) -> None:
-    other = "40 4 * * * /x/ava logs rotate  # ava-logs-maintenance"
-    old = "*/15 * * * * /old/ava packages refresh --from-job  # ava-packages-refresh"
+    other = "40 4 * * * /x/meiva logs rotate  # meiva-logs-maintenance"
+    old = "*/15 * * * * /old/meiva packages refresh --from-job  # meiva-packages-refresh"
     crontab = FakeCrontab(f"{other}\n\n{old}\n{old}\n")
 
     assert job.register_linux(tick_reader=lambda: 900, host=_linux(crontab)) == 0
@@ -108,10 +108,10 @@ def test_linux_registration_replaces_only_its_own_lines(tmp_path: Path) -> None:
     assert other in body
     assert f"{other}\n\n" in body
     assert old not in body
-    assert body.count("# ava-packages-refresh") == 1
+    assert body.count("# meiva-packages-refresh") == 1
     assert "*/15 * * * *" in body
     assert "packages refresh --from-job" in body
-    assert str(tmp_path / ".ava" / "logs" / "packages-refresh.log") in body
+    assert str(tmp_path / ".meiva" / "logs" / "packages-refresh.log") in body
 
 
 def test_linux_crontab_failures_and_empty_table(capsys: pytest.CaptureFixture[str]) -> None:
@@ -137,7 +137,7 @@ def test_linux_crontab_failures_and_empty_table(capsys: pytest.CaptureFixture[st
     assert (
         len(crontab.writes),
         crontab.writes[0].startswith("*/15 * * * * "),
-        crontab.writes[0].endswith("  # ava-packages-refresh\n"),
+        crontab.writes[0].endswith("  # meiva-packages-refresh\n"),
         crontab.writes[0].count("\n"),
     ) == (1, True, True, 1)
 
@@ -170,7 +170,7 @@ def test_macos_bootstrap_failure_and_repeated_unregister(
     assert job.register_macos(tick_reader=lambda: 900, host=host) == 1
     assert [argv[1] for argv in commands.argvs] == ["bootout", "bootstrap"]
     assert errors == [
-        ("launchctl bootstrap failed for {}: {}", "com.ava.packages-refresh", "denied")
+        ("launchctl bootstrap failed for {}: {}", "com.meiva.packages-refresh", "denied")
     ]
 
     plist = job.launchd_plist_path()

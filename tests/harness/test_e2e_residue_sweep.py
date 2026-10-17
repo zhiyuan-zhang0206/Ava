@@ -18,7 +18,7 @@ from tests.e2e import process_support as processes
     [
         (
             "uv run uvicorn gateway.app:create_app_from_environment --factory --port 60758",
-            "AVA_HOME=/x/ava_e2e_home_1_2 AVA_DB_URL=postgresql://u@h/db",
+            "MEIVA_HOME=/x/meiva_e2e_home_1_2 MEIVA_DB_URL=postgresql://u@h/db",
         ),
         ("npm run start -p 60759", ""),
         ("next-server (v16.2.7)", "FOO=bar"),
@@ -39,7 +39,7 @@ def test_process_table_observation_retains_command_and_environment(
     [
         (
             "python server",
-            "AVA_HOME=/r/tmp/ava_e2e_home_43948_1788018418678623",
+            "MEIVA_HOME=/r/tmp/meiva_e2e_home_43948_1788018418678623",
             None,
             (43948, 1788018418678623),
         ),
@@ -68,7 +68,7 @@ def test_e2e_process_classifies_observation(
 def test_frontend_cwd_observation_keeps_path_with_spaces(monkeypatch: pytest.MonkeyPatch) -> None:
     from subprocess import CompletedProcess
 
-    cwd = "/Users/me/Ava with spaces/ui/web/.builds/build-1_2"
+    cwd = "/Users/me/Meiva with spaces/ui/web/.builds/build-1_2"
 
     def lsof(*args: object, **kwargs: object) -> CompletedProcess[str]:
         return CompletedProcess(
@@ -92,15 +92,15 @@ def _fake_ps_rows() -> list[tuple[int, str, str]]:
         (
             100,
             "uv run uvicorn gateway.app:create_app_from_environment --factory",
-            "AVA_HOME=/r/tmp/ava_e2e_home_1_2",
+            "MEIVA_HOME=/r/tmp/meiva_e2e_home_1_2",
         ),
         (200, "next-server (v16.2.7)", ""),
         (
             300,
             "uv run uvicorn gateway.app:create_app_from_environment --factory",
-            "AVA_HOME=/real/home",
+            "MEIVA_HOME=/real/home",
         ),
-        (400, "python -m agent --agent-id 1003", "AVA_HOME=/r/tmp/ava_e2e_home_1_2"),
+        (400, "python -m agent --agent-id 1003", "MEIVA_HOME=/r/tmp/meiva_e2e_home_1_2"),
     ]
 
 
@@ -121,7 +121,7 @@ def test_scan_finds_env_marked_and_frontend_by_cwd() -> None:
 
 
 def _dead_one_row() -> list[tuple[int, str, str]]:
-    return [(100, "uv run uvicorn", "AVA_HOME=/r/ava_e2e_home_1_2")]
+    return [(100, "uv run uvicorn", "MEIVA_HOME=/r/meiva_e2e_home_1_2")]
 
 
 def _no_cwd(_pid: int) -> str | None:
@@ -275,7 +275,7 @@ def test_native_sweep_preserves_an_unreadable_live_owner(tmp_path: Path, owner_s
         probes: list[tuple[int, int]] = []
 
         def rows() -> list[tuple[int, str, str]]:
-            return [(child.pid, command, f"AVA_HOME=/proof/ava_e2e_home_{owner_pid}_1")]
+            return [(child.pid, command, f"MEIVA_HOME=/proof/meiva_e2e_home_{owner_pid}_1")]
 
         def probe(pid: int, sig: int) -> None:
             assert pid == owner_pid and sig == 0
@@ -337,7 +337,9 @@ def test_native_sweep_preserves_a_live_owner_with_a_changed_title(tmp_path: Path
             assert command is not None
             path = tmp_path / "cleanup.jsonl"
             inspection = processes.ProcessInspection(
-                rows=lambda: [(child.pid, command, f"AVA_HOME=/proof/ava_e2e_home_{owner.pid}_1")]
+                rows=lambda: [
+                    (child.pid, command, f"MEIVA_HOME=/proof/meiva_e2e_home_{owner.pid}_1")
+                ]
             )
             assert (
                 processes.sweep_stale_e2e_processes(inspection=inspection, receipt_path=path) == 0
@@ -444,16 +446,16 @@ def test_native_sweep_preserves_live_run_and_recycled_command(tmp_path: Path) ->
 
         def rows() -> list[tuple[int, str, str]]:
             return [
-                (children[0].pid, str(commands[0]), "AVA_HOME=/proof/ava_e2e_home_99999999_1"),
+                (children[0].pid, str(commands[0]), "MEIVA_HOME=/proof/meiva_e2e_home_99999999_1"),
                 (
                     children[1].pid,
                     "foreign command replaced the scanned child",
-                    "AVA_HOME=/proof/ava_e2e_home_99999999_1",
+                    "MEIVA_HOME=/proof/meiva_e2e_home_99999999_1",
                 ),
                 (
                     children[2].pid,
                     str(commands[2]),
-                    f"AVA_HOME=/proof/ava_e2e_home_{os.getpid()}_1",
+                    f"MEIVA_HOME=/proof/meiva_e2e_home_{os.getpid()}_1",
                 ),
             ]
 
@@ -474,10 +476,10 @@ def test_cleanup_receipt_records_decisions_and_guarded_signals(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     rows = [
-        (100, "fixture child", "AVA_HOME=/proof/ava_e2e_home_900_1"),
-        (201, "fixture child", "AVA_HOME=/proof/ava_e2e_home_900_1"),
-        (300, "fixture child", "AVA_HOME=/proof/ava_e2e_home_901_1"),
-        (400, "fixture child", "AVA_HOME=/proof/ava_e2e_home_902_1"),
+        (100, "fixture child", "MEIVA_HOME=/proof/meiva_e2e_home_900_1"),
+        (201, "fixture child", "MEIVA_HOME=/proof/meiva_e2e_home_900_1"),
+        (300, "fixture child", "MEIVA_HOME=/proof/meiva_e2e_home_901_1"),
+        (400, "fixture child", "MEIVA_HOME=/proof/meiva_e2e_home_902_1"),
     ]
     commands: list[int] = []
     probes: list[int] = []
@@ -551,7 +553,7 @@ def test_cleanup_receipt_keeps_signal_exception_contract(
     monkeypatch.setattr(os, "killpg", signal_failure)
     monkeypatch.setattr("time.sleep", _ignore_cleanup_delay)
     inspection = processes.ProcessInspection(
-        rows=lambda: [(100, "fixture child", "AVA_HOME=/proof/ava_e2e_home_900_1")],
+        rows=lambda: [(100, "fixture child", "MEIVA_HOME=/proof/meiva_e2e_home_900_1")],
         group=lambda pid: pid,
         command=lambda _pid: "fixture child",
         probe=_owner_gone,
@@ -592,7 +594,7 @@ def test_cleanup_receipt_records_a_recycled_target_without_signalling(
     monkeypatch.setattr(os, "killpg", refuse_signal)
     monkeypatch.setattr("time.sleep", _ignore_cleanup_delay)
     inspection = processes.ProcessInspection(
-        rows=lambda: [(100, "fixture child", "AVA_HOME=/proof/ava_e2e_home_900_1")],
+        rows=lambda: [(100, "fixture child", "MEIVA_HOME=/proof/meiva_e2e_home_900_1")],
         group=lambda pid: pid,
         command=lambda _pid: "replacement process",
         probe=_owner_gone,

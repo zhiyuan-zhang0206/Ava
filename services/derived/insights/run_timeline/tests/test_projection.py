@@ -40,16 +40,16 @@ def messages(day: int) -> list[BaseMessage]:
         HumanMessage(
             content=f"ask {day}",
             additional_kwargs={
-                "ava_msg_type": "inbound",
-                "ava_inbound_body_start": 0,
-                "ava_created_at": (T0 + timedelta(days=day)).isoformat(),
+                "meiva_msg_type": "inbound",
+                "meiva_inbound_body_start": 0,
+                "meiva_created_at": (T0 + timedelta(days=day)).isoformat(),
             },
         ),
         AIMessage(
             content=f"answer {day}",
             additional_kwargs={
-                "ava_created_at": (T0 + timedelta(days=day, minutes=1)).isoformat(),
-                "ava_usage": {"cost_usd": 0.1234567891},
+                "meiva_created_at": (T0 + timedelta(days=day, minutes=1)).isoformat(),
+                "meiva_usage": {"cost_usd": 0.1234567891},
             },
             usage_metadata={"input_tokens": 100, "output_tokens": 10, "total_tokens": 110},
         ),
@@ -243,8 +243,8 @@ def test_compact_replacement_closes_work_before_the_next_segment(
     replacement[1] = HumanMessage(
         content="Summary of prior work",
         additional_kwargs={
-            "ava_msg_type": compact_kind,
-            "ava_created_at": (T0 + timedelta(days=1)).isoformat(),
+            "meiva_msg_type": compact_kind,
+            "meiva_created_at": (T0 + timedelta(days=1)).isoformat(),
         },
     )
     replacement.append(
@@ -252,9 +252,9 @@ def test_compact_replacement_closes_work_before_the_next_segment(
             content="new result",
             tool_call_id="new",
             additional_kwargs={
-                "ava_msg_type": "exec_output",
-                "ava_exec_body_start": 0,
-                "ava_created_at": (T0 + timedelta(days=1, minutes=2)).isoformat(),
+                "meiva_msg_type": "exec_output",
+                "meiva_exec_body_start": 0,
+                "meiva_created_at": (T0 + timedelta(days=1, minutes=2)).isoformat(),
             },
         )
     )

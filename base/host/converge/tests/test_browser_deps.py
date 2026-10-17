@@ -44,7 +44,7 @@ def test_browser_deps_warning_names_the_npx_reason_and_platform_fix(
     warning = browser_deps.browser_deps_warning(probes.NPX_INCAPABILITY_REASON, host=fake_host())
     assert probes.NPX_INCAPABILITY_REASON in warning
     assert "install-node-here" in warning
-    assert "ava-browser will not run on this host until this is fixed" in warning
+    assert "meiva-browser will not run on this host until this is fixed" in warning
 
 
 def test_browser_deps_warning_explains_that_a_missing_display_needs_no_install(
@@ -54,7 +54,7 @@ def test_browser_deps_warning_explains_that_a_missing_display_needs_no_install(
     warning = browser_deps.browser_deps_warning("no display (headless server)", host=fake_host())
     assert "install-node-here" not in warning
     assert "nothing to" in warning
-    assert "install for ava-browser" in warning
+    assert "install for meiva-browser" in warning
 
 
 def test_browser_deps_warning_explains_how_to_repair_missing_chrome(
@@ -62,11 +62,11 @@ def test_browser_deps_warning_explains_how_to_repair_missing_chrome(
 ) -> None:
     monkeypatch.setattr(browser_deps, "node_install_command", _install_node_here)
     warning = browser_deps.browser_deps_warning(
-        "no Chrome (install it or set AVA_CHROME_BINARY)", host=fake_host()
+        "no Chrome (install it or set MEIVA_CHROME_BINARY)", host=fake_host()
     )
     assert "install-node-here" not in warning
     assert "Install Google Chrome" in warning
-    assert "AVA_CHROME_BINARY" in warning
+    assert "MEIVA_CHROME_BINARY" in warning
 
 
 def test_browser_deps_notice_marks_a_displayless_host_not_applicable() -> None:

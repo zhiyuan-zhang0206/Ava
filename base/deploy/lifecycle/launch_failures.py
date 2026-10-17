@@ -1,11 +1,11 @@
-"""The session names the last `ava start` on this host could not launch.
+"""The session names the last `meiva start` on this host could not launch.
 
 A session spawn failing is not a readiness question — the process was never
 spawned, so no amount of waiting makes it appear. `_launch_sessions` retries
 once and then reports; this module is how that report survives the process
 boundary the rollout puts in the middle.
 
-The rollout's local leg runs `ava start` in a fresh child
+The rollout's local leg runs `meiva start` in a fresh child
 (`update._boot_gateway_fresh`) so start loads the just-synced revision. The
 parent orchestration has to name the failed sessions in the ROLLOUT aftermath
 block, and neither channel it already has can carry them: an exit code is one
@@ -39,7 +39,7 @@ def record(sessions: list[str]) -> None:
     footnote. The write is atomic (temp + rename) so a reader never sees a
     partial list.
     """
-    target = base.paths.launch_failures_path(base.paths.ava_home())
+    target = base.paths.launch_failures_path(base.paths.meiva_home())
     with suppress(OSError):  # a diagnostic footnote must not fail the start
         if not sessions:
             target.unlink(missing_ok=True)
@@ -62,7 +62,7 @@ def take() -> list[str]:
     rollout. The cost of a failed clear is one duplicate report next time, which
     is strictly better than taking the rollout down over a stale footnote.
     """
-    target = base.paths.launch_failures_path(base.paths.ava_home())
+    target = base.paths.launch_failures_path(base.paths.meiva_home())
     try:
         raw = target.read_text(encoding="utf-8")
     except OSError:

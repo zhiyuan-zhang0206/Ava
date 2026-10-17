@@ -23,7 +23,7 @@ def core_metrics() -> list[MetricSpec]:
     specs: list[MetricSpec] = []
     specs.append(
         MetricSpec(
-            name="ava_obs_exec_envelope_size",
+            name="meiva_obs_exec_envelope_size",
             title="Exec envelope size (bytes)",
             description=(
                 "Exec envelope transfer size — serialized request/result envelope "
@@ -74,7 +74,7 @@ def core_metrics() -> list[MetricSpec]:
 
     specs.append(
         MetricSpec(
-            name="ava_obs_exec_envelope_serialize",
+            name="meiva_obs_exec_envelope_serialize",
             title="Exec envelope serialize (ms)",
             description=(
                 "Exec envelope serialization cost — milliseconds spent "

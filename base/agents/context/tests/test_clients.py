@@ -10,7 +10,7 @@ from typing import Any
 import httpx
 import pytest
 
-from base.agents.context import AvaContext
+from base.agents.context import MeivaContext
 from base.agents.context.clients import ClientSet
 
 
@@ -146,7 +146,7 @@ def test_cold_export_observation_and_finalization_build_nothing() -> None:
 def test_description_carries_the_gateway_endpoint_and_no_secret() -> None:
     from base.agents.context.identity import AgentIdentity
 
-    host = AvaContext(
+    host = MeivaContext(
         identity=AgentIdentity(agent_id=7, owns_loop=True),
         clients=ClientSet(gateway_url="http://gateway.test:8000"),
     )
@@ -162,7 +162,7 @@ def test_description_carries_the_gateway_endpoint_and_no_secret() -> None:
         host=lambda: "localhost",
         description=lambda: None,
     )
-    child = AvaContext.from_description(
+    child = MeivaContext.from_description(
         description, clients=ClientSet(gateway_url=description["gateway_url"]), machine=machine
     )
     assert child.require_machine() is machine
@@ -172,7 +172,7 @@ def test_description_carries_the_gateway_endpoint_and_no_secret() -> None:
 
 
 def test_building_a_context_imports_no_connection_stack() -> None:
-    """The exec child builds an `AvaContext` at boot; the clients wait for first use."""
+    """The exec child builds an `MeivaContext` at boot; the clients wait for first use."""
     import subprocess
 
     proc = subprocess.run(  # noqa: S603 — fixed argv, sys.executable is trusted

@@ -3,16 +3,16 @@
 The cluster API always authenticates, so the direct-process stack authenticates the
 way a started cluster does, with the same stores and none of the launcher's custody:
 
-- the e2e home gets a cluster secret (`AVA_CLUSTER_SECRET`, declared in its `.env`
+- the e2e home gets a cluster secret (`MEIVA_CLUSTER_SECRET`, declared in its `.env`
   like every cluster-scope key) and an active write generation in its private ledger
-  (`base.host.db_authority.tests.generation.seed_active_generation`, the ledger `ava start`
+  (`base.host.db_authority.tests.generation.seed_active_generation`, the ledger `meiva start`
   births at first start);
-- the test process carries the generation marker (`AVA_DB_GENERATION`, the one a launcher
+- the test process carries the generation marker (`MEIVA_DB_GENERATION`, the one a launcher
   delivers beside the login), which tells the boot pass of every process descending from
   it that its database login was delivered: this stack has no root custody to admit an
   operator delivery from the ledger;
 - each process the stack starts is delivered the machine API token of its class in
-  `AVA_API_TOKEN`, as `cli.commands.data_plane.bringup.api_delivery` delivers it:
+  `MEIVA_API_TOKEN`, as `cli.commands.data_plane.bringup.api_delivery` delivers it:
   the gateway its gateway-class token (so its `/ops` dials are accepted), the ops
   daemon and the agent host the runner-class token (agent children inherit it);
 - the test process reaches the gateway as an operator would, with the human secret as

@@ -141,8 +141,8 @@ describe("ContextButton", () => {
           estimated: true,
           children: [
             { name: "(intro)", tokens: 200, estimated: true },
-            { name: "ava.self", tokens: 1500, estimated: true },
-            { name: "ava.ui", tokens: 1300, estimated: true },
+            { name: "meiva.self", tokens: 1500, estimated: true },
+            { name: "meiva.ui", tokens: 1300, estimated: true },
           ],
         },
       ],
@@ -156,12 +156,12 @@ describe("ContextButton", () => {
 
     // Rows are collapsed by default: the parent row shows, its children do not.
     expect(screen.getByText("expanded SDK reference")).toBeTruthy();
-    expect(screen.queryByText("ava.self")).toBeNull();
+    expect(screen.queryByText("meiva.self")).toBeNull();
 
     // Clicking the disclosure toggle drills in.
     fireEvent.click(screen.getByRole("button", { name: "Expand expanded SDK reference" }));
-    expect(screen.getByText("ava.self")).toBeTruthy();
-    expect(screen.getByText("ava.ui")).toBeTruthy();
+    expect(screen.getByText("meiva.self")).toBeTruthy();
+    expect(screen.getByText("meiva.ui")).toBeTruthy();
     expect(screen.getByText("(intro)")).toBeTruthy();
 
     // The chevron sits flush against the label — no gap between button and text.

@@ -1,4 +1,4 @@
-"""`ava start`'s one-time browser login link.
+"""`meiva start`'s one-time browser login link.
 
 The link is `<ui>/#ticket=<ticket>`: the ticket is minted by the gateway for the
 home's human secret and travels in the fragment. A start that is not at a

@@ -3,8 +3,8 @@
 The fresh executable prelude drops loguru's default handler, so a CLI process that
 opens no sink discards every record it writes through loguru. On the start
 path some warnings exist only there: a skipped pgvector pre-create, untracked
-migration files that will not be applied. `ava start`, `ava restart`
-and `ava lgtm on|off` (every in-process `cmd_start`)
+migration files that will not be applied. `meiva start`, `meiva restart`
+and `meiva lgtm on|off` (every in-process `cmd_start`)
 open the sinks `base.telemetry.process_logging.init_cli_process` gives: stderr, the unit's
 `logs/cli-<verb>.log` and the event pipeline, without a `service_started`
 row. Other verbs print to the caller's terminal and open none.
@@ -39,7 +39,7 @@ from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
 from base.db.config import DbConfig
 from base.host.system.tests.fake_commands import DARWIN_ARM64, fake_host
-from base.paths import ava_home
+from base.paths import meiva_home
 from base.sessions.tests.refuse_helper import refuse_helper
 from base.telemetry import EventPipeline
 from cli import parsers, preflight, start_identity, start_intent
@@ -62,10 +62,10 @@ _ANSI = re.compile(r"\x1b\[[0-9;]*m")
 _FIRST_START = Path(__file__).with_name("bootstrap") / "child_first_start.py"
 
 
-def test_ava_start_writes_a_loguru_warning_to_stderr_and_its_log(tmp_path: Path) -> None:
+def test_meiva_start_writes_a_loguru_warning_to_stderr_and_its_log(tmp_path: Path) -> None:
     home = tmp_path / "home"
-    env = {key: value for key, value in os.environ.items() if not key.startswith("AVA_")}
-    env.update(AVA_HOME=str(home))
+    env = {key: value for key, value in os.environ.items() if not key.startswith("MEIVA_")}
+    env.update(MEIVA_HOME=str(home))
     child = subprocess.run(  # noqa: S603 — this interpreter, fixed code, a private home
         [sys.executable, "-I", "-B", str(_FIRST_START)],
         cwd=tmp_path,
@@ -97,7 +97,7 @@ def _dispatching(sink: list[str]) -> argparse.ArgumentParser:
         sink.append("dispatched")
         return 0
 
-    parser = argparse.ArgumentParser(prog="ava")
+    parser = argparse.ArgumentParser(prog="meiva")
     parser.add_argument("words", nargs="*")
     parser.set_defaults(func=dispatched)
     return parser
@@ -213,7 +213,7 @@ def test_logging_and_dispatch_borrow_the_same_operator_factory(
     ) -> telemetry.EventPipeline:
         factories.append(database)
         machines.append(machine)
-        assert home == ava_home()
+        assert home == meiva_home()
         return pipeline
 
     def initialize(
@@ -230,7 +230,7 @@ def test_logging_and_dispatch_borrow_the_same_operator_factory(
         inputs.append(args.producer())
         return 0
 
-    parser = argparse.ArgumentParser(prog="ava")
+    parser = argparse.ArgumentParser(prog="meiva")
     parser.add_argument("words", nargs="*")
     parser.set_defaults(func=dispatch)
     monkeypatch.setattr(parsers, "build_parser", _ignoring_retention(lambda: parser))
@@ -310,13 +310,13 @@ def _cold_report(
     (native / "version-prometheus").write_text(versions["prometheus"]["version"])
     (native / "platform-prometheus").write_text(tag)
     monkeypatch.setattr(settings.observability, "lgtm_storage_dir", str(path / "storage"))
-    destination = native / "config/provisioning/dashboards/ava-ops-main.json"
+    destination = native / "config/provisioning/dashboards/meiva-ops-main.json"
     destination.parent.mkdir(parents=True)
     destination.write_text("previous dashboard")
     args.runtime.machine.set(role="observability-station")
     context = ConvergeCtx(
         repo=repo,
-        ava_home=path,
+        meiva_home=path,
         roles=frozenset({"observability-station"}),
         config=args.runtime.config,
         machine=args.runtime.machine,
@@ -400,7 +400,7 @@ def test_cold_reporter_delivers_through_main_owned_pipeline(
         == result
     )
     if name == "dashboard":
-        destination = tmp_path / "lgtm/native/config/provisioning/dashboards/ava-ops-main.json"
+        destination = tmp_path / "lgtm/native/config/provisioning/dashboards/meiva-ops-main.json"
         assert destination.read_text() == "previous dashboard"
     assert factories == [args.database_factory]
     assert len(pipelines) == 1 and pipelines[0].stopped
@@ -513,7 +513,7 @@ def test_status_handler_body_forwards_the_parsed_namespace(
     """The routing test above stubs the `_h_*` handler itself, so no handler body
     ever runs under test — a handler reading a flag the parser no longer defines
     (`args.via_gateway` after `--via-gateway` was dropped) stays green here and
-    AttributeErrors on the first real `ava status`. Stub one level lower instead:
+    AttributeErrors on the first real `meiva status`. Stub one level lower instead:
     `cmd_status`, which `_h_status` lazy-imports, so the real body executes against
     the real Namespace."""
     import cli.commands.lifecycle.status as _status_commands

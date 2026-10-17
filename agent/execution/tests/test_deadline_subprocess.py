@@ -14,13 +14,13 @@ import psutil
 import pytest
 
 from agent.graph.exec.protocol import write_request
-from ava.tests.fixtures.pin_agent import exec_context
 from base.agents.incarnation.exec_owner_protocol import (
     OwnerContext,
     OwnerControl,
     publish_owner_message,
 )
 from base.agents.incarnation.resources import ExecAllocation
+from meiva.tests.fixtures.pin_agent import exec_context
 
 _PROBE = Path(__file__).with_name("_deadline_probe.py")
 
@@ -69,8 +69,8 @@ def _start(context: OwnerContext, path: Path, *, mode: str | None = None) -> psu
         text=True,
         env=os.environ
         | {
-            "AVA_EXEC_REQUEST_FILE": str(context.request_path),
-            "AVA_EXEC_RESULT_FILE": str(context.result_path),
+            "MEIVA_EXEC_REQUEST_FILE": str(context.request_path),
+            "MEIVA_EXEC_RESULT_FILE": str(context.result_path),
         },
     )
 

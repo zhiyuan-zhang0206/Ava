@@ -3,12 +3,12 @@ import sys
 from pathlib import Path
 from typing import Any
 
-import ava
+import meiva
 from agent.extensions import plugin_state_codec
 from agent.state import build_agent_state, plugin_state_schema
-from ava import impersonation
-from ava.impersonation import attachment as attachment_module
 from base.packages.plugins.loading.registry import build_registry
+from meiva import impersonation
+from meiva.impersonation import attachment as attachment_module
 
 SAMPLE = sys.argv[1]
 LEASE: dict[str, Any] = {
@@ -32,13 +32,13 @@ def require_active(_db: Any, _lease_id: Any, *, local_machine: str) -> dict[str,
 
 def load_snapshot(_agent_id: Any, **_kwargs: Any) -> tuple[Any, dict[str, Any], None]:
     state: Any = build_agent_state(build_registry(validate_state=plugin_state_schema))()
-    state.ava_code__cwd = str(Path(SAMPLE).parent)
+    state.meiva_code__cwd = str(Path(SAMPLE).parent)
     return state, {}, None
 
 
 attachment_module.control.require_active = require_active
-os.environ["AVA_MACHINE_NAME"] = "external-cli-probe"
+os.environ["MEIVA_MACHINE_NAME"] = "external-cli-probe"
 plugin_state_codec.load_snapshot = load_snapshot
 
 with impersonation.attach("lease"):
-    assert ava.files.read(SAMPLE) == "tail event"
+    assert meiva.files.read(SAMPLE) == "tail event"

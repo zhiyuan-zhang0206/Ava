@@ -4,7 +4,7 @@ Split out of `daemon.py` so that file stays inside the per-file line budget
 (task #4224); the mechanics and bounds are unchanged.
 
 The launcher redirects the daemon's fd 1/2 straight at
-`$AVA_HOME/logs/ava-agent-host.out.log` — no pty transcript cap, no loguru
+`$MEIVA_HOME/logs/meiva-agent-host.out.log` — no pty transcript cap, no loguru
 rotation, nothing owns the file but the process itself — so a crash storm
 that floods the transcript with tracebacks can balloon it to a disk-filling
 size (2026-09-03: 13.5 GB in ~6 minutes, task #2356). The daemon re-points
@@ -28,14 +28,14 @@ _log = logging.getLogger("services.agent_runner.agent_host.daemon")
 
 STDOUT_LOG_ROTATE_BYTES = 1 << 30  # 1 GiB — rotate the raw transcript past this
 _STDOUT_LOG_ROTATE_POLL_S = 60.0  # cadence of the size check
-_STDOUT_LOG_NAME = "ava-agent-host"  # names $AVA_HOME/logs/<name>.out.log
+_STDOUT_LOG_NAME = "meiva-agent-host"  # names $MEIVA_HOME/logs/<name>.out.log
 
 
 def stdout_log_path() -> Path:
     """The daemon's raw stdout/stderr transcript.
 
     The launcher opens this file and redirects fd 1/2 onto it before the
-    daemon starts (`$AVA_HOME/logs/<name>.out.log`, the posix-session
+    daemon starts (`$MEIVA_HOME/logs/<name>.out.log`, the posix-session
     convention); nothing in the logging stack owns it, which is exactly why it
     needs the size rotation below.
     """

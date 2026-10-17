@@ -1,18 +1,18 @@
-"""`ava plugins` subcommands.
+"""`meiva plugins` subcommands.
 
 - `update`              — auto-merge plugin config disk image schema diff
                           (logic in `base.packages.plugin_config_admin.update_all_disk_images`).
 - `install <url>`       — install an external package from a git source and
                           record it in the install registry (`base.packages.extensions.install_registry`).
                           A bare **skill** (SKILL.md at the package root) lands in
-                          the `~/.ava/skills/` load dir — `ava skill install` is the
+                          the `~/.meiva/skills/` load dir — `meiva skill install` is the
                           fuller skill entry point (local paths + skill collections);
                           a **Claude Code plugin**
                           (`.claude-plugin/plugin.json`) is materialized into
-                          `~/.ava/plugins/` via `_claude_code_plugin` — its
+                          `~/.meiva/plugins/` via `_claude_code_plugin` — its
                           `agents/` become one orchestrator skill, its bundled
                           `.mcp.json` is carried over for the MCP loader, and its
-                          skills are synced into `~/.ava/skills/<name>/` by an
+                          skills are synced into `~/.meiva/skills/<name>/` by an
                           immediate converge pass (`skills_sync`). `--path`
                           selects a subdir of the source repo.
 - `uninstall <name>`    — remove an installed package + its registry entry
@@ -43,7 +43,7 @@ from ._pkg_source import cleanup_temp, clone_git
 
 
 def cmd_plugins_update() -> int:
-    """`ava plugins update` — scan all plugins, auto-merge disk image schema diff.
+    """`meiva plugins update` — scan all plugins, auto-merge disk image schema diff.
 
     Actual scan + merge logic lives in `base.packages.plugin_config_admin.update_all_disk_images`;
     this function only formats the structured result for printing.
@@ -52,10 +52,10 @@ def cmd_plugins_update() -> int:
 
     result = update_all_disk_images()
     if not result.entries:
-        print("[ava plugins update] no plugins found")
+        print("[meiva plugins update] no plugins found")
         return 0
 
-    print(f"[ava plugins update] processing {len(result.entries)} plugin(s)")
+    print(f"[meiva plugins update] processing {len(result.entries)} plugin(s)")
     any_error = False
     for entry in result.entries:
         if entry.status == "no_diff":
@@ -76,12 +76,12 @@ def cmd_plugins_update() -> int:
 
 
 def cmd_plugins_enable(name: str) -> int:
-    """`ava plugins enable <name>` — enable a plugin in this machine's local config."""
+    """`meiva plugins enable <name>` — enable a plugin in this machine's local config."""
     return _set_enabled(name, enabled=True)
 
 
 def cmd_plugins_disable(name: str) -> int:
-    """`ava plugins disable <name>` — disable a plugin in this machine's local config."""
+    """`meiva plugins disable <name>` — disable a plugin in this machine's local config."""
     return _set_enabled(name, enabled=False)
 
 
@@ -92,9 +92,9 @@ def _set_enabled(name: str, *, enabled: bool) -> int:
     try:
         set_local_enabled(name, enabled=enabled)
     except DanglingPlugin as e:
-        print(f"[ava plugins {verb}] {e}", file=sys.stderr)
+        print(f"[meiva plugins {verb}] {e}", file=sys.stderr)
         return 1
-    print(f"[ava plugins {verb}] {name} {verb}d in this machine's local config.")
+    print(f"[meiva plugins {verb}] {name} {verb}d in this machine's local config.")
     print("  takes effect on the next agent graph step; no restart needed.")
     return 0
 
@@ -117,20 +117,20 @@ def _skill_name_at(pkg_dir: Path) -> str | None:
 
 def _sync_skills_load_dir() -> None:
     """Run the skills converge pass so a just-(un)installed plugin's skills
-    land in / leave `~/.ava/skills/` now, keeping the "active on the next
+    land in / leave `~/.meiva/skills/` now, keeping the "active on the next
     skill scan, no restart" promise. Idempotent."""
-    from base.paths import ava_home
+    from base.paths import meiva_home
     from cli.commands._repo import repo_root
     from cli.commands.extensions.skills_sync import converge_skills
 
-    result = converge_skills(repo_root(), ava_home())
+    result = converge_skills(repo_root(), meiva_home())
     for warning in result.warnings:
         print(f"  ! skills: {warning}", file=sys.stderr)
 
 
 def _report_refusal(report: str) -> int:
     """Print a refused scan and the override advice; always returns exit code 1."""
-    print("[ava plugins install] security scan found critical patterns:", file=sys.stderr)
+    print("[meiva plugins install] security scan found critical patterns:", file=sys.stderr)
     print(report, file=sys.stderr)
     print(
         "  Refusing to install. Read the package yourself, then re-run with "
@@ -154,7 +154,7 @@ def _install_bare_skill(
     """Install a cloned bare-skill package into the load dir and register it.
 
     Shares the copy + registry write — and therefore the security scan — with
-    `ava skill install`, so both entry points land a skill on disk the same way.
+    `meiva skill install`, so both entry points land a skill on disk the same way.
     """
     from .skill_package import SkillPackage, SkillPackageError, SkillScanRefused, install
 
@@ -171,9 +171,9 @@ def _install_bare_skill(
     except SkillScanRefused as e:
         return _report_refusal(e.report)
     except SkillPackageError as e:
-        print(f"[ava plugins install] {e}", file=sys.stderr)
+        print(f"[meiva plugins install] {e}", file=sys.stderr)
         return 1
-    print(f"[ava plugins install] installed skill '{name}' -> {dest}")
+    print(f"[meiva plugins install] installed skill '{name}' -> {dest}")
     print(report)
     print("  active on the next skill scan; no restart needed.")
     return 0
@@ -190,7 +190,7 @@ def _register_plugin_install(
 ) -> None:
     """Record a freshly materialized plugin in the install registry.
 
-    Install-failure cleanup (2026-08-28 ava_ledger discipline): if the
+    Install-failure cleanup (2026-08-28 meiva_ledger discipline): if the
     registry write fails, the landed dir is removed again, so a retry does
     not hit "already installed" against an untracked copy.
     """
@@ -220,7 +220,7 @@ def _atomic_plugin_replace(dest: Path, materialize: Callable[[], object]) -> Non
     staging dir and renamed into place, and only then is the backup deleted.
     On any failure the previous version is restored — the plugin on disk is
     always either the previous complete version or the new complete version,
-    never a half-installed tree (2026-08-28 ava_ledger incident).
+    never a half-installed tree (2026-08-28 meiva_ledger incident).
     """
     # Sweep residue from earlier hard-killed runs first — at this point every
     # dot-prefixed sibling is stale (the live backup is created below).
@@ -257,7 +257,7 @@ def _install_claude_code_plugin(
     try:
         result = _claude_code_plugin.materialize(pkg_dir, paths.plugins_dir())
     except _claude_code_plugin.ClaudeCodePluginError as e:
-        print(f"[ava plugins install] {e}", file=sys.stderr)
+        print(f"[meiva plugins install] {e}", file=sys.stderr)
         return 1
     _register_plugin_install(
         result.name,
@@ -276,7 +276,7 @@ def _print_plugin_install(result: Materialized, report: str) -> None:
     from base import paths
 
     print(
-        f"[ava plugins install] installed plugin '{result.name}' "
+        f"[meiva plugins install] installed plugin '{result.name}' "
         f"-> {paths.plugins_dir() / result.name}"
     )
     print(report)
@@ -310,7 +310,7 @@ def cmd_plugins_install(
     database_factory: DatabaseFactory,
     machine: MachineIdentity,
 ) -> int:
-    """`ava plugins install <url> [--path SUBDIR] [--ref REF] [--accept-risk]` —
+    """`meiva plugins install <url> [--path SUBDIR] [--ref REF] [--accept-risk]` —
     install an external package.
 
     A plugin is strictly more dangerous than a skill — its hooks and MCP servers
@@ -323,13 +323,13 @@ def cmd_plugins_install(
     try:
         cloned = clone_git(url, ref)
     except subprocess.CalledProcessError as e:
-        print(f"[ava plugins install] git failed: {e.stderr.strip()}", file=sys.stderr)
+        print(f"[meiva plugins install] git failed: {e.stderr.strip()}", file=sys.stderr)
         return 1
 
     try:
         pkg_dir = cloned / path if path else cloned
         if not pkg_dir.is_dir():
-            print(f"[ava plugins install] path '{path}' not found in source.", file=sys.stderr)
+            print(f"[meiva plugins install] path '{path}' not found in source.", file=sys.stderr)
             return 1
 
         if gate_refuses(pkg_dir, command="plugins install"):
@@ -340,7 +340,7 @@ def cmd_plugins_install(
         try:
             name = _skill_name_at(pkg_dir)
         except SkillFormatError as e:
-            print(f"[ava plugins install] bad SKILL.md: {e}", file=sys.stderr)
+            print(f"[meiva plugins install] bad SKILL.md: {e}", file=sys.stderr)
             return 1
 
         if name is not None:
@@ -360,17 +360,17 @@ def cmd_plugins_install(
 
         if (pkg_dir / ".mcp.json").is_file():
             print(
-                "[ava plugins install] this looks like a standalone MCP package "
-                "(.mcp.json at the package root). Install it with `ava mcp install`.",
+                "[meiva plugins install] this looks like a standalone MCP package "
+                "(.mcp.json at the package root). Install it with `meiva mcp install`.",
                 file=sys.stderr,
             )
             return 1
 
         print(
-            "[ava plugins install] unrecognized package: no SKILL.md and no "
+            "[meiva plugins install] unrecognized package: no SKILL.md and no "
             ".claude-plugin/plugin.json at the package root. A repo that is a "
             "collection of skills (skills/ or .claude/skills/) installs with "
-            "`ava skill install`.",
+            "`meiva skill install`.",
             file=sys.stderr,
         )
         return 1
@@ -383,19 +383,19 @@ def _install_dest(pkg_type: str, name: str) -> Path:
     from base import paths
 
     return (
-        paths.plugins_dir() if pkg_type == "plugin" else paths.skills_dir(paths.ava_home())
+        paths.plugins_dir() if pkg_type == "plugin" else paths.skills_dir(paths.meiva_home())
     ) / name
 
 
 def cmd_plugins_uninstall(name: str) -> int:
-    """`ava plugins uninstall <name>` — remove an installed package + registry entry."""
+    """`meiva plugins uninstall <name>` — remove an installed package + registry entry."""
     from base import paths
     from base.packages.extensions import install_registry
 
     pkg = install_registry.get(name)
     if pkg is None:
         print(
-            f"[ava plugins uninstall] '{name}' is not tracked in the install registry.",
+            f"[meiva plugins uninstall] '{name}' is not tracked in the install registry.",
             file=sys.stderr,
         )
         return 1
@@ -404,7 +404,7 @@ def cmd_plugins_uninstall(name: str) -> int:
         shutil.rmtree(dest)
     if pkg.type == "plugin":
         # Its skills were converged into the load dir; drop that copy too.
-        converged = paths.skills_dir(paths.ava_home()) / name
+        converged = paths.skills_dir(paths.meiva_home()) / name
         if converged.exists():
             shutil.rmtree(converged)
         # Sweep atomic-install residue so nothing ghost-like survives an
@@ -413,17 +413,17 @@ def cmd_plugins_uninstall(name: str) -> int:
 
         _claude_code_plugin.sweep_plugin_residue(dest.parent)
     install_registry.deregister(name)
-    print(f"[ava plugins uninstall] removed '{name}'.")
+    print(f"[meiva plugins uninstall] removed '{name}'.")
     return 0
 
 
 def cmd_plugins_installed() -> int:
-    """`ava plugins installed` — list install-registry entries."""
+    """`meiva plugins installed` — list install-registry entries."""
     from base.packages.extensions import install_registry
 
     pkgs = install_registry.load().packages
     if not pkgs:
-        print("[ava plugins installed] (none)")
+        print("[meiva plugins installed] (none)")
         return 0
     for p in sorted(pkgs, key=lambda x: x.name):
         flag = "enabled" if p.enabled else "disabled"
@@ -433,7 +433,7 @@ def cmd_plugins_installed() -> int:
 
 
 def cmd_plugins_upgrade(name: str) -> int:
-    """`ava plugins upgrade <name>` — re-fetch an installed package
+    """`meiva plugins upgrade <name>` — re-fetch an installed package
     from its source.
 
     A locally edited copy (content differs from what the last install/upgrade
@@ -446,11 +446,11 @@ def cmd_plugins_upgrade(name: str) -> int:
 
     pkg = install_registry.get(name)
     if pkg is None:
-        print(f"[ava plugins upgrade] '{name}' is not tracked.", file=sys.stderr)
+        print(f"[meiva plugins upgrade] '{name}' is not tracked.", file=sys.stderr)
         return 1
     if pkg.source is None:
         print(
-            f"[ava plugins upgrade] '{name}' has no recorded git source "
+            f"[meiva plugins upgrade] '{name}' has no recorded git source "
             f"(converge-managed, origin={pkg.origin}); it updates via the fleet update.",
             file=sys.stderr,
         )
@@ -459,21 +459,21 @@ def cmd_plugins_upgrade(name: str) -> int:
     dest = _install_dest(pkg.type, name)
     if dest.exists() and install_registry.copy_changed(dest, pkg.installed_hash):
         print(
-            f"[ava plugins upgrade] note: '{name}' was modified locally; "
+            f"[meiva plugins upgrade] note: '{name}' was modified locally; "
             "replacing it with the fetched source."
         )
 
     try:
         cloned = clone_git(pkg.source, pkg.ref)
     except subprocess.CalledProcessError as e:
-        print(f"[ava plugins upgrade] git failed: {e.stderr.strip()}", file=sys.stderr)
+        print(f"[meiva plugins upgrade] git failed: {e.stderr.strip()}", file=sys.stderr)
         return 1
 
     try:
         pkg_dir = cloned / pkg.path if pkg.path else cloned
         if not pkg_dir.is_dir():
             print(
-                f"[ava plugins upgrade] path '{pkg.path}' no longer in source; aborting.",
+                f"[meiva plugins upgrade] path '{pkg.path}' no longer in source; aborting.",
                 file=sys.stderr,
             )
             return 1
@@ -484,12 +484,12 @@ def cmd_plugins_upgrade(name: str) -> int:
                     lambda: _claude_code_plugin.materialize(pkg_dir, paths.plugins_dir()),
                 )
             except _claude_code_plugin.ClaudeCodePluginError as e:
-                print(f"[ava plugins upgrade] {e}", file=sys.stderr)
+                print(f"[meiva plugins upgrade] {e}", file=sys.stderr)
                 return 1
         else:
             if not (pkg_dir / "SKILL.md").is_file():
                 print(
-                    "[ava plugins upgrade] source no longer has SKILL.md at the package "
+                    "[meiva plugins upgrade] source no longer has SKILL.md at the package "
                     "root; aborting.",
                     file=sys.stderr,
                 )
@@ -508,7 +508,7 @@ def cmd_plugins_upgrade(name: str) -> int:
             # After the registry write — the converge pass updates this
             # entry's content_hash, which a later register(pkg) would clobber.
             _sync_skills_load_dir()
-        print(f"[ava plugins upgrade] re-fetched '{name}' from {pkg.source}.")
+        print(f"[meiva plugins upgrade] re-fetched '{name}' from {pkg.source}.")
         print("  active on the next skill scan; no restart needed.")
         return 0
     finally:

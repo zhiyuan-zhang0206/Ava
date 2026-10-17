@@ -1,9 +1,9 @@
-"""Settings-free input boundary of ``ava init``.
+"""Settings-free input boundary of ``meiva init``.
 
 Init records one home's identity and nothing else: it validates the first-start
 inputs, then publishes the private intent and `.env` (`cli/start_identity.py`).
 It imports no runtime Settings, starts no process, creates no data plane and
-dials only a joining runner's gateway. The first `ava start` provisions and
+dials only a joining runner's gateway. The first `meiva start` provisions and
 launches.
 """
 
@@ -58,9 +58,9 @@ def config_values(args: argparse.Namespace, home: Path) -> tuple[dict[str, str],
         raise ValueError("first-start config file must be outside the home")
     content = path.read_bytes()
     values = dotenv_values(stream=io.StringIO(content.decode()), interpolate=False)
-    remote_keys = {"AVA_DB_URL", "AVA_REDIS_URL", "AVA_RUNNER_DB_PASSWORD"}
+    remote_keys = {"MEIVA_DB_URL", "MEIVA_REDIS_URL", "MEIVA_RUNNER_DB_PASSWORD"}
     forbidden = (
-        derived_env_keys() | env_identity_keys() | {"AVA_HOME", "AVA_REDIS_ADMIN_PASSWORD"}
+        derived_env_keys() | env_identity_keys() | {"MEIVA_HOME", "MEIVA_REDIS_ADMIN_PASSWORD"}
     ) - remote_keys
     unknown = set(values) - set(FIELD_ALIASES.values()) - remote_keys
     if unknown or set(values) & forbidden or any(v is None for v in values.values()):
@@ -74,12 +74,12 @@ def config_values(args: argparse.Namespace, home: Path) -> tuple[dict[str, str],
 
 
 def _validate_remote_inputs(values: dict[str, str], roles: frozenset[str]) -> None:
-    if "AVA_DB_URL" not in values:
+    if "MEIVA_DB_URL" not in values:
         return
     if "gateway" not in roles:
         raise ValueError("remote data-plane configuration belongs to a gateway unit")
     endpoints = _remote_endpoints(values)
-    local = local_addresses(values.get("AVA_MACHINE_HOST", ""))
+    local = local_addresses(values.get("MEIVA_MACHINE_HOST", ""))
     for endpoint in endpoints:
         _require_foreign_endpoint(endpoint, local)
 
@@ -100,13 +100,13 @@ def _remote_endpoints(values: dict[str, str]) -> tuple[SplitResult, SplitResult]
 
     from psycopg.conninfo import conninfo_to_dict
 
-    db = values["AVA_DB_URL"]
+    db = values["MEIVA_DB_URL"]
     parts = urlsplit(db)
     if (
         parts.scheme not in {"postgres", "postgresql"}
         or not parts.username
         or not parts.path.strip("/")
-        or parts.username == "ava_runner"
+        or parts.username == "meiva_runner"
     ):
         raise ValueError("remote database config requires an explicit database owner URL")
     query = parse_qs(parts.query, keep_blank_values=True, strict_parsing=True)
@@ -115,7 +115,7 @@ def _remote_endpoints(values: dict[str, str]) -> tuple[SplitResult, SplitResult]
             "remote database URL cannot redirect its identity through query parameters"
         )
     conninfo_to_dict(db)
-    redis = urlsplit(values["AVA_REDIS_URL"])
+    redis = urlsplit(values["MEIVA_REDIS_URL"])
     if redis.scheme not in {"redis", "rediss"}:
         raise ValueError("remote Redis config requires a Redis URL")
     return parts, redis
@@ -133,16 +133,16 @@ def _require_foreign_endpoint(endpoint: SplitResult, local: set[str]) -> None:
 
 
 def _first_time_examples() -> str:
-    """What to run, from this checkout: the host's bare `ava` is linked by the first start."""
-    cli = start_intent.checkout() / ".venv" / "bin" / "ava"
+    """What to run, from this checkout: the host's bare `meiva` is linked by the first start."""
+    cli = start_intent.checkout() / ".venv" / "bin" / "meiva"
     return (
-        "\nfirst-time examples (this checkout's CLI; a bare `ava` is linked by the first start):\n"
+        "\nfirst-time examples (this checkout's CLI; a bare `meiva` is linked by the first start):\n"
         "  # single box (owns data plane + runs agents):\n"
         f"  {cli} init --machine-name <name> --serve-gateway --serve-agent-runner\n"
         "  # gateway (data plane + HTTP gateway):\n"
         f"  {cli} init --machine-name <name> --serve-gateway --no-serve-agent-runner \\\n"
         "            --machine-host <this-host-addr> --gateway-url http://<this-host-addr>:8000\n"
-        "  # agent-runner (joins a gateway; AVA_DB_CAPABILITY_KEY set first):\n"
+        "  # agent-runner (joins a gateway; MEIVA_DB_CAPABILITY_KEY set first):\n"
         f"  {cli} init --machine-name <name> --serve-agent-runner --no-serve-gateway \\\n"
         "            --gateway-url <url> --machine-host <this-host-addr> --db-capability <bundle>\n"
         f"then `{cli} start`"
@@ -159,12 +159,12 @@ def _inputs(args: argparse.Namespace, home: Path) -> IdentityInput:
     values: dict[str, str] = dict(stored)
     config, digest = config_values(args, home)
     values.update(config)
-    values["AVA_SERVICE_PATH"] = service_path(values, home)
+    values["MEIVA_SERVICE_PATH"] = service_path(values, home)
     _apply_identity_options(args, stored, values)
-    if config.get("AVA_DB_URL"):
+    if config.get("MEIVA_DB_URL"):
         _validate_remote_inputs(values, roles)
     if "gateway" not in roles:
-        if not values.get("AVA_GATEWAY_URL"):
+        if not values.get("MEIVA_GATEWAY_URL"):
             raise ValueError("a remote unit's init requires --gateway-url")
         join_gateway(values, home, args.db_capability)
     elif args.db_capability is not None:
@@ -178,12 +178,12 @@ def _inputs(args: argparse.Namespace, home: Path) -> IdentityInput:
 def service_path(values: dict[str, str], home: Path) -> str:
     from base.sessions.env_forwarding import admit_service_path
 
-    if "AVA_SERVICE_PATH" in values:
-        return admit_service_path(values["AVA_SERVICE_PATH"])
+    if "MEIVA_SERVICE_PATH" in values:
+        return admit_service_path(values["MEIVA_SERVICE_PATH"])
     if (home / ".env").exists():
-        raise ValueError("existing home requires an explicit AVA_SERVICE_PATH declaration")
-    if "AVA_SERVICE_PATH" in os.environ:
-        return admit_service_path(os.environ["AVA_SERVICE_PATH"])
+        raise ValueError("existing home requires an explicit MEIVA_SERVICE_PATH declaration")
+    if "MEIVA_SERVICE_PATH" in os.environ:
+        return admit_service_path(os.environ["MEIVA_SERVICE_PATH"])
     bin_name = "bin"
     venvs = [start_intent.checkout() / ".venv"]
     if sys.prefix != sys.base_prefix:
@@ -202,14 +202,14 @@ def _apply_identity_options(
 ) -> None:
     for field in IDENTITY_FIELDS:
         explicit = getattr(args, field)
-        key = "AVA_" + field.upper()
+        key = "MEIVA_" + field.upper()
         if explicit is not None:
             if key in stored and stored[key] != explicit:
                 raise ValueError(f"init input conflicts with persisted {key}")
             values[key] = explicit
-    if not values.get("AVA_MACHINE_NAME"):
+    if not values.get("MEIVA_MACHINE_NAME"):
         raise ValueError(f"init requires --machine-name{_first_time_examples()}")
-    for key in ("AVA_MACHINE_NAME", "AVA_MACHINE_HOST"):
+    for key in ("MEIVA_MACHINE_NAME", "MEIVA_MACHINE_HOST"):
         if any(c in values.get(key, "") for c in "\r\n\x00"):
             raise ValueError(f"invalid {key}")
     if args.ssl_cert_file is not None:
@@ -230,8 +230,8 @@ def initialize_home(args: argparse.Namespace, home: Path) -> str:
         flags = _given_flags(args)
         if flags:
             raise ValueError(
-                f"an earlier `ava init` was interrupted before it published this home; "
-                f"re-run `ava init` without flags to finish it (given: {', '.join(flags)})"
+                f"an earlier `meiva init` was interrupted before it published this home; "
+                f"re-run `meiva init` without flags to finish it (given: {', '.join(flags)})"
             )
         resume_claim(home)
     else:
@@ -248,8 +248,8 @@ def run_init(args: argparse.Namespace) -> int:
         with file_lock(home / "start-intent.lock", timeout_s=30):
             verdict = initialize_home(args, home)
         print(f"✓ {verdict}")
-        print(f"next: run `{start_intent.checkout() / '.venv' / 'bin' / 'ava'} start`")
+        print(f"next: run `{start_intent.checkout() / '.venv' / 'bin' / 'meiva'} start`")
         return 0
     except (ValueError, TypeError, RuntimeError, OSError) as exc:
-        print(f"ava init: {exc}", file=sys.stderr)
+        print(f"meiva init: {exc}", file=sys.stderr)
         return 1

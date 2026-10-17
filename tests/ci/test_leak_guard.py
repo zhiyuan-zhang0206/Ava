@@ -27,10 +27,10 @@ from pathlib import Path
 
 import pytest
 
-import ava
-from ava.sdk_surface import agent_identity
-from base.agents.context import AvaContext
+import meiva
+from base.agents.context import MeivaContext
 from base.agents.context.identity import AgentIdentity
+from meiva.sdk_surface import agent_identity
 from scripts.ci import shard_counts
 from scripts.ci.tests import leak_guard_suite
 
@@ -116,7 +116,7 @@ def _child_env(mode: str | None, fault: str) -> dict[str, str]:
         k: v
         for k, v in os.environ.items()
         if not k.startswith(
-            ("PYTEST_", "COV_CORE_", "COVERAGE_", "AVA_LEAK_GUARD", "GITHUB_ACTIONS")
+            ("PYTEST_", "COV_CORE_", "COVERAGE_", "MEIVA_LEAK_GUARD", "GITHUB_ACTIONS")
         )
     }
     env["PYTHONPATH"] = str(
@@ -125,7 +125,7 @@ def _child_env(mode: str | None, fault: str) -> dict[str, str]:
     # Autoloading every installed pytest plugin costs ~1.8 s a run; the suite needs only these two.
     env["PYTEST_DISABLE_PLUGIN_AUTOLOAD"] = "1"
     if mode is not None:
-        env["AVA_LEAK_GUARD"] = mode
+        env["MEIVA_LEAK_GUARD"] = mode
     env["LEAK_SUITE_FAULT"] = fault
     return env
 
@@ -224,13 +224,13 @@ def test_agent_identity_holds_no_process_global_slot() -> None:
 
 
 def test_native_admission_does_not_rebind_the_sdk_identity() -> None:
-    context = ava.context
+    context = meiva.context
     expected = agent_identity.agent_id()
-    hosted = AvaContext(identity=AgentIdentity(43 if expected == 42 else 42, True))
+    hosted = MeivaContext(identity=AgentIdentity(43 if expected == 42 else 42, True))
     assert hosted.require_identity().agent_id != expected
-    assert ava.context is context
+    assert meiva.context is context
     assert agent_identity.agent_id() == expected
-    assert ava.context is context
+    assert meiva.context is context
     assert agent_identity.agent_id() == expected
 
 
@@ -245,7 +245,7 @@ def test_without_the_guard_the_victims_are_the_red_tests(suite: Suite) -> None:
 
 
 def test_fail_is_the_default(suite: Suite) -> None:
-    default, fail = suite.run(), suite.run(mode="fail")  # AVA_LEAK_GUARD unset, and set to fail
+    default, fail = suite.run(), suite.run(mode="fail")  # MEIVA_LEAK_GUARD unset, and set to fail
     assert default.outcomes == fail.outcomes
     assert default.code == fail.code != 0
     assert "leak guard (fail):" in default.out
@@ -307,7 +307,7 @@ def test_under_xdist_the_controller_names_the_same_leakers(suite: Suite) -> None
 def test_an_unknown_mode_stops_the_run(suite: Suite) -> None:
     run = suite.run(mode="loud", select=_CLEAN_FILE)
     assert run.code != 0
-    assert "AVA_LEAK_GUARD='loud': expected one of off, warn, fail" in run.out
+    assert "MEIVA_LEAK_GUARD='loud': expected one of off, warn, fail" in run.out
 
 
 # -- the identity restore ------------------------------------------------------------------------

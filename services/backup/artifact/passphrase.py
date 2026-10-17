@@ -2,7 +2,7 @@
 
 Every pg-backup artifact is encrypted (`openssl enc -aes-256-cbc -pbkdf2`)
 under one passphrase, the one PINNED at
-`$AVA_HOME/backups/logical-backup.passphrase` (0600). It is independent of the
+`$MEIVA_HOME/backups/logical-backup.passphrase` (0600). It is independent of the
 cluster secret (docs/decisions/data/backup/2026-09-28-backup-passphrase-minted-at-birth.md):
 
 - a gateway home's birth mints a random one (`ensure_minted`), whatever its
@@ -112,9 +112,9 @@ def ensure_minted(home: Path) -> None:
 
 def logical_backup_passphrase() -> str:
     """This home's logical-backup passphrase (see the module docstring)."""
-    from base.paths import ava_home
+    from base.paths import meiva_home
 
-    return resolve(ava_home())
+    return resolve(meiva_home())
 
 
 def write_key_file(directory: Path) -> Path:

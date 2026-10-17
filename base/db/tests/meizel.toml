@@ -5,8 +5,8 @@ exports = ["fakes.py", "live_agents.py"]
 "test_connect_helpers.py" = ["_stale_worker_child.py"]
 
 [debt.env-patch]
-"test_db_guard.py#monkeypatch.delenv os.environ.AVA_TEST_DB" = 5
-"test_db_guard.py#monkeypatch.setenv os.environ.AVA_TEST_DB" = 4
+"test_db_guard.py#monkeypatch.delenv os.environ.MEIVA_TEST_DB" = 5
+"test_db_guard.py#monkeypatch.setenv os.environ.MEIVA_TEST_DB" = 4
 
 [debt.first-party-patch]
 "fakes.py#monkeypatch.setattr base.db.Database" = 1

@@ -1,6 +1,6 @@
-"""base.packages.extensions.install_registry unit tests — file-based ~/.ava/installed.json read/write + query.
+"""base.packages.extensions.install_registry unit tests — file-based ~/.meiva/installed.json read/write + query.
 
-Use `unit_home` fixture to point AVA_HOME to tmp, isolating the real registry file.
+Use `unit_home` fixture to point MEIVA_HOME to tmp, isolating the real registry file.
 """
 
 import subprocess
@@ -13,7 +13,7 @@ from base.config import ConfigBoot
 from base.config.domains.packages import PackagesSettings
 from base.native_process.os_platform import LockTimeoutError
 from base.packages.extensions import install_registry as reg
-from base.paths import ava_home, install_registry_path
+from base.paths import install_registry_path, meiva_home
 
 
 def _pkg(
@@ -25,7 +25,7 @@ def _pkg(
 
 
 def test_load_missing_file_is_empty(unit_home: Path) -> None:
-    assert not install_registry_path(ava_home()).exists()
+    assert not install_registry_path(meiva_home()).exists()
     assert reg.load().packages == []
 
 
@@ -34,7 +34,7 @@ def test_register_save_load_roundtrip(unit_home: Path) -> None:
     reg.register(_pkg("beta", enabled=False))
     loaded = reg.load()
     assert {p.name for p in loaded.packages} == {"alpha", "beta"}
-    assert install_registry_path(ava_home()).exists()
+    assert install_registry_path(meiva_home()).exists()
 
 
 def test_register_replaces_same_name(unit_home: Path) -> None:
@@ -71,20 +71,20 @@ def test_enabled_skill_names_filters_type_and_enabled(unit_home: Path) -> None:
 
 
 def test_malformed_json_raises(unit_home: Path) -> None:
-    install_registry_path(ava_home()).write_text("{ not json", encoding="utf-8")
+    install_registry_path(meiva_home()).write_text("{ not json", encoding="utf-8")
     with pytest.raises(reg.SchemaInvalid):
         reg.load()
 
 
 def test_empty_file_is_empty_registry(unit_home: Path) -> None:
-    install_registry_path(ava_home()).write_text("   \n", encoding="utf-8")
+    install_registry_path(meiva_home()).write_text("   \n", encoding="utf-8")
     assert reg.load().packages == []
 
 
 def test_save_is_atomic_and_leaves_no_temp(unit_home: Path) -> None:
     """save() stages through a temp sibling + rename (audit #2): no `.tmp`
     lingers, and a stale temp from a crashed earlier writer is swept."""
-    stale = install_registry_path(ava_home()).with_name("installed.json.tmp")
+    stale = install_registry_path(meiva_home()).with_name("installed.json.tmp")
     stale.write_text("{ truncated", encoding="utf-8")
 
     reg.register(_pkg("alpha"))
@@ -96,21 +96,21 @@ def test_save_is_atomic_and_leaves_no_temp(unit_home: Path) -> None:
     # the on-disk file is complete, parseable JSON
     import json
 
-    json.loads(install_registry_path(ava_home()).read_text(encoding="utf-8"))
+    json.loads(install_registry_path(meiva_home()).read_text(encoding="utf-8"))
 
 
 def test_load_raises_on_rows_that_fold_to_one_key(unit_home: Path) -> None:
-    """Dash and underscore are one name (design R2-B1): `ava-code` and
-    `ava_code` as separate rows is the dual-row state that used to crash the
+    """Dash and underscore are one name (design R2-B1): `meiva-code` and
+    `meiva_code` as separate rows is the dual-row state that used to crash the
     skill scanner fleet-wide (audit 02 #4) — the read refuses it now."""
     import json
 
-    install_registry_path(ava_home()).write_text(
+    install_registry_path(meiva_home()).write_text(
         json.dumps(
             {
                 "packages": [
-                    {"name": "ava-code", "type": "skill"},
-                    {"name": "ava_code", "type": "skill"},
+                    {"name": "meiva-code", "type": "skill"},
+                    {"name": "meiva_code", "type": "skill"},
                 ]
             }
         ),
@@ -122,9 +122,9 @@ def test_load_raises_on_rows_that_fold_to_one_key(unit_home: Path) -> None:
 
 def test_load_accepts_spelling_variants_that_do_not_collide(unit_home: Path) -> None:
     """Distinct keys stay distinct — only true folding duplicates refuse."""
-    reg.register(_pkg("ava-code"))
-    reg.register(_pkg("ava-fleet"))
-    assert {p.name for p in reg.load().packages} == {"ava-code", "ava-fleet"}
+    reg.register(_pkg("meiva-code"))
+    reg.register(_pkg("meiva-fleet"))
+    assert {p.name for p in reg.load().packages} == {"meiva-code", "meiva-fleet"}
 
 
 # ─── the cross-process registry lock ───
@@ -156,7 +156,7 @@ def _mutator_argv(home: Path, name: str, *, marker: Path, role: str) -> list[str
 def test_concurrent_mutators_in_separate_processes_both_survive(tmp_path: Path) -> None:
     """Two OS processes adding different packages keep both rows.
 
-    `ava skill install` from an agent's shell, `ava converge` on a restart, and
+    `meiva skill install` from an agent's shell, `meiva converge` on a restart, and
     the gateway's skills-toggle handler are three processes mutating one
     `installed.json`. `save` being atomic only guarantees no torn file — it does
     nothing about a lost update, and a row lost here is a package that stops
@@ -205,7 +205,7 @@ def test_v1_file_is_refused(unit_home: Path) -> None:
     """The lazy v1 migration is retired: a v1 file fails fast, never loads."""
     import json
 
-    path = install_registry_path(ava_home())
+    path = install_registry_path(meiva_home())
     path.write_text(
         json.dumps(
             {
@@ -215,7 +215,7 @@ def test_v1_file_is_refused(unit_home: Path) -> None:
                         "name": "alpha",
                         "type": "skill",
                         "origin": "repo",
-                        "origin_path": "/x/ava_builtins/skills/alpha",
+                        "origin_path": "/x/meiva_builtins/skills/alpha",
                     }
                 ],
             }
@@ -230,7 +230,7 @@ def test_v1_file_is_refused(unit_home: Path) -> None:
 def test_newer_schema_version_is_refused(unit_home: Path) -> None:
     import json
 
-    install_registry_path(ava_home()).write_text(
+    install_registry_path(meiva_home()).write_text(
         json.dumps({"version": 3, "packages": []}), encoding="utf-8"
     )
     with pytest.raises(reg.SchemaInvalid):
@@ -242,7 +242,7 @@ def test_resolved_policy_resolves_from_source_class(
 ) -> None:
 
     repo_pkg = reg.InstalledPackage(
-        name="r", type="skill", origin="repo", origin_path="/x/ava_builtins/skills/r"
+        name="r", type="skill", origin="repo", origin_path="/x/meiva_builtins/skills/r"
     )
     pol = reg.resolved_policy(repo_pkg, defaults_reader=lambda: process_config.view.packages)
     assert pol.channel == "core"
@@ -271,7 +271,7 @@ def test_resolved_policy_plugin_channel_follows_origin_path(
         name="p",
         type="skill",
         origin="plugin",
-        origin_path=str(paths.repo_root() / "ava_builtins" / "plugins" / "ava_code" / "skills"),
+        origin_path=str(paths.repo_root() / "meiva_builtins" / "plugins" / "meiva_code" / "skills"),
     )
     assert (
         reg.resolved_policy(inside, defaults_reader=lambda: process_config.view.packages).channel
@@ -320,7 +320,8 @@ def test_resolved_policy_reads_only_missing_defaults() -> None:
     seen: list[str] = []
 
     defaults = PackagesSettings(
-        AVA_PACKAGES_REFRESH_DEFAULT_MODE="off", AVA_PACKAGES_REFRESH_DEFAULT_INTERVAL_SECONDS=123
+        MEIVA_PACKAGES_REFRESH_DEFAULT_MODE="off",
+        MEIVA_PACKAGES_REFRESH_DEFAULT_INTERVAL_SECONDS=123,
     )
 
     def read_defaults() -> PackagesSettings:

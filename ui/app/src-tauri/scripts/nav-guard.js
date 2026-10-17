@@ -9,8 +9,8 @@
 // a page can always defeat a JS-level navigation guard, and the native one runs
 // even when this script fails to install.
 (function () {
-  if (window.__AVA_APP_NAV_GUARD__) return;
-  window.__AVA_APP_NAV_GUARD__ = true;
+  if (window.__MEIVA_APP_NAV_GUARD__) return;
+  window.__MEIVA_APP_NAV_GUARD__ = true;
 
   function openExternal(raw) {
     var href;
@@ -22,7 +22,7 @@
     window.__TAURI_INTERNALS__
       .invoke("app_open_external", { url: href })
       .catch(function (error) {
-        console.error("[ava-app] could not hand off an external link", error);
+        console.error("[meiva-app] could not hand off an external link", error);
       });
   }
 

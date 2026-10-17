@@ -27,7 +27,7 @@ def _git(cwd: Path, *args: str) -> subprocess.CompletedProcess[str]:
 
 def _clean(repo: Path, home: Path, *extra: str) -> subprocess.CompletedProcess[str]:
     """Run the real script under a deliberate environment, never the host's venv."""
-    env = {"PATH": os.environ["PATH"], "HOME": str(home.parent), "AVA_HOME": str(home)}
+    env = {"PATH": os.environ["PATH"], "HOME": str(home.parent), "MEIVA_HOME": str(home)}
     return subprocess.run(  # noqa: S603 — repository-owned script, deliberate environment
         ["bash", str(repo / "scripts" / "worktree.sh"), "clean", *extra],
         cwd=repo,
@@ -50,7 +50,7 @@ def _make_repo(tmp_path: Path) -> Path:
         "-c",
         "user.name=test",
         "-c",
-        "user.email=test@ava",
+        "user.email=test@meiva",
         "commit",
         "-q",
         "--allow-empty",
@@ -63,7 +63,7 @@ def _make_repo(tmp_path: Path) -> Path:
 def _add_worktree(repo: Path) -> Path:
     """The worktree cmd_clean targets, on the branch setup-worktree.sh names after it."""
     target = repo / ".worktrees" / "t1"
-    _git(repo, "worktree", "add", "-q", ".worktrees/t1", "-b", "ava-t1")
+    _git(repo, "worktree", "add", "-q", ".worktrees/t1", "-b", "meiva-t1")
     return target
 
 
@@ -80,8 +80,8 @@ def _plant_usable_python(repo: Path) -> None:
 
 
 def _fake_home(tmp_path: Path) -> Path:
-    """An empty $AVA_HOME: no pty-sessions service listens in it."""
-    home = tmp_path / "ava-home"
+    """An empty $MEIVA_HOME: no pty-sessions service listens in it."""
+    home = tmp_path / "meiva-home"
     (home / "run").mkdir(parents=True)
     return home
 
@@ -124,14 +124,14 @@ def test_anchored_worktree_is_refused_and_force_overrides(tmp_path: Path) -> Non
         assert "removal refused" in refused.stderr
         assert "live-anchor check passed" not in refused.stdout
         assert target.is_dir()
-        assert _branch_exists(repo, "ava-t1")
+        assert _branch_exists(repo, "meiva-t1")
 
         forced = _clean(repo, home, "t1", "--force")
 
         assert forced.returncode == 0, forced.stderr
         assert "removing anyway (--force)" in forced.stderr
         assert not target.exists()
-        assert not _branch_exists(repo, "ava-t1")
+        assert not _branch_exists(repo, "meiva-t1")
     finally:
         service.close()
 
@@ -146,14 +146,14 @@ def test_unusable_checker_environment_refuses_and_force_overrides(tmp_path: Path
     assert refused.returncode == 1
     assert "no python with psutil" in refused.stderr
     assert target.is_dir()
-    assert _branch_exists(repo, "ava-t1")
+    assert _branch_exists(repo, "meiva-t1")
 
     forced = _clean(repo, home, "t1", "--force")
 
     assert forced.returncode == 0, forced.stderr
     assert "SKIPPED (--force)" in forced.stderr
     assert not target.exists()
-    assert not _branch_exists(repo, "ava-t1")
+    assert not _branch_exists(repo, "meiva-t1")
 
 
 def test_missing_checker_refuses_and_force_overrides(tmp_path: Path) -> None:
@@ -187,7 +187,7 @@ def test_crashed_checker_refuses_and_force_overrides(tmp_path: Path) -> None:
     assert refused.returncode == 1
     assert "live-anchor check failed" in refused.stderr
     assert target.is_dir()
-    assert _branch_exists(repo, "ava-t1")
+    assert _branch_exists(repo, "meiva-t1")
 
     forced = _clean(repo, home, "t1", "--force")
 
@@ -209,14 +209,14 @@ def test_dirty_worktree_is_kept_without_force(tmp_path: Path) -> None:
     assert refused.returncode == 1
     assert "removal failed" in refused.stderr
     assert junk.exists()
-    assert _branch_exists(repo, "ava-t1")
+    assert _branch_exists(repo, "meiva-t1")
 
     forced = _clean(repo, home, "t1", "--force")
 
     assert forced.returncode == 0, forced.stderr
     assert "force-removing worktree (--force)" in forced.stdout
     assert not target.exists()
-    assert not _branch_exists(repo, "ava-t1")
+    assert not _branch_exists(repo, "meiva-t1")
 
 
 def test_clean_worktree_is_removed_and_branch_deleted(tmp_path: Path) -> None:
@@ -230,26 +230,34 @@ def test_clean_worktree_is_removed_and_branch_deleted(tmp_path: Path) -> None:
     assert done.returncode == 0, done.stderr
     assert "live-anchor check passed" in done.stdout
     assert "worktree removed" in done.stdout
-    assert "branch deleted: ava-t1" in done.stdout
+    assert "branch deleted: meiva-t1" in done.stdout
     assert not target.exists()
-    assert not _branch_exists(repo, "ava-t1")
+    assert not _branch_exists(repo, "meiva-t1")
 
 
 def test_agent_style_branch_is_deleted_with_the_worktree(tmp_path: Path) -> None:
-    """Task #3710: a task already named ava-<id>-<slug> (the agent convention)
-    keeps that name as its branch — clean must find it, not ava-ava-<id>-<slug>."""
+    """Task #3710: a task already named meiva-<id>-<slug> (the agent convention)
+    keeps that name as its branch — clean must find it, not meiva-meiva-<id>-<slug>."""
     repo = _make_repo(tmp_path)
-    target = repo / ".worktrees" / "ava-9999-demo-task"
-    _git(repo, "worktree", "add", "-q", ".worktrees/ava-9999-demo-task", "-b", "ava-9999-demo-task")
+    target = repo / ".worktrees" / "meiva-9999-demo-task"
+    _git(
+        repo,
+        "worktree",
+        "add",
+        "-q",
+        ".worktrees/meiva-9999-demo-task",
+        "-b",
+        "meiva-9999-demo-task",
+    )
     _plant_usable_python(repo)
     home = _fake_home(tmp_path)
 
-    done = _clean(repo, home, "ava-9999-demo-task")
+    done = _clean(repo, home, "meiva-9999-demo-task")
 
     assert done.returncode == 0, done.stderr
-    assert "branch deleted: ava-9999-demo-task" in done.stdout
+    assert "branch deleted: meiva-9999-demo-task" in done.stdout
     assert not target.exists()
-    assert not _branch_exists(repo, "ava-9999-demo-task")
+    assert not _branch_exists(repo, "meiva-9999-demo-task")
 
 
 def test_custom_branch_is_left_alone(tmp_path: Path) -> None:
@@ -263,7 +271,7 @@ def test_custom_branch_is_left_alone(tmp_path: Path) -> None:
     done = _clean(repo, home, "t1")
 
     assert done.returncode == 0, done.stderr
-    assert "no branch ava-t1 to delete" in done.stdout
+    assert "no branch meiva-t1 to delete" in done.stdout
     assert not target.exists()
     assert _branch_exists(repo, "feature/custom")
 

@@ -1,4 +1,4 @@
-# ava:ref base/host/env/docs/agent-slices.ava.okf.md#turn-snapshot
+# meiva:ref base/host/env/docs/agent-slices.meiva.okf.md#turn-snapshot
 from __future__ import annotations
 
 from collections.abc import Callable, Mapping

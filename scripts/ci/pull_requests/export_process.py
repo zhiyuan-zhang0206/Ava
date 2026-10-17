@@ -11,7 +11,7 @@ from base.db.code_version_gate import ProcessDbGate
 from base.log import logger
 from base.native_process.code_version import CodeVersion
 from base.native_process.loaded_commit import LoadedCommit
-from base.paths import ava_home
+from base.paths import meiva_home
 from base.telemetry import DrainStatus, EventPipeline, build_pipeline
 
 __all__ = ["owned_event_pipeline"]
@@ -35,7 +35,7 @@ def owned_event_pipeline(process: str, *, image: LoadedCommit | None) -> Generat
 
     config = ConfigBoot()
     machine = machine_from_boot(config)
-    pipeline = build_pipeline(database=database, machine=machine, home=ava_home())
+    pipeline = build_pipeline(database=database, machine=machine, home=meiva_home())
     primary: BaseException | None = None
     try:
         yield pipeline

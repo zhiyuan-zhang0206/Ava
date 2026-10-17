@@ -43,7 +43,7 @@ async def test_claim_terminate_kind_appends_lifecycle_marker_and_routes_to_end(
     machine_identity: MachineIdentity,
 ):
     """terminate inbound → claim appends lifecycle marker (HumanMessage containing
-    'Termination was accepted from {source}' text + ava_msg_type='lifecycle' metadata)
+    'Termination was accepted from {source}' text + meiva_msg_type='lifecycle' metadata)
     + goto END with exit_requested=True, so the per-turn runloop returns
     (instead of re-invoking) and the process exits naturally."""
     tid = running_agent()
@@ -72,8 +72,8 @@ async def test_claim_terminate_kind_appends_lifecycle_marker_and_routes_to_end(
     assert content.startswith("[")  # timestamp start: e.g. [2026-...
     assert "[system]" in content
     assert "[system [" not in content  # anti-regression: double bracket bug
-    assert lifecycle.additional_kwargs.get("ava_msg_type") == "system_note"  # pyright: ignore[reportUnknownMemberType]
-    assert lifecycle.additional_kwargs.get("ava_note_tag") == "lifecycle_terminate"  # pyright: ignore[reportUnknownMemberType]
+    assert lifecycle.additional_kwargs.get("meiva_msg_type") == "system_note"  # pyright: ignore[reportUnknownMemberType]
+    assert lifecycle.additional_kwargs.get("meiva_note_tag") == "lifecycle_terminate"  # pyright: ignore[reportUnknownMemberType]
 
 
 async def test_claim_turn_boundary_ends_invocation_instead_of_waiting(
@@ -428,7 +428,7 @@ async def test_claim_terminate_self_renders_by_yourself(
     database_gate: ProcessDbGate,
     machine_identity: MachineIdentity,
 ):
-    """source='self' (ava.self.terminate() suicide) → marker text spells 'by yourself'
+    """source='self' (meiva.self.terminate() suicide) → marker text spells 'by yourself'
     instead of 'by self', more accurately expressing 'agent shuts itself down' semantics."""
     tid = running_agent()
     insert_inbound_kind(db_conn, tid, "", "terminate", source="self")

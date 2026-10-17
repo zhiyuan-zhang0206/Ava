@@ -3,9 +3,6 @@ from __future__ import annotations
 import psycopg
 import pytest
 
-from ava.tests.fixtures.sdk import sdk_environment as sdk_environment
-from ava.tests.fixtures.sdk import sdk_identity as sdk_identity
-from ava.tests.fixtures.sdk import sdk_metering as sdk_metering
 from base.agents.birth.spawn import create_agent_row
 from base.cluster.machine import MachineIdentity
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
@@ -15,6 +12,9 @@ from base.db import Database
 from base.events.live.bus import EventBus
 from base.packages.plugin_providers import build_model_catalog
 from base.paths.tests.homes import unit_home as unit_home
+from meiva.tests.fixtures.sdk import sdk_environment as sdk_environment
+from meiva.tests.fixtures.sdk import sdk_identity as sdk_identity
+from meiva.tests.fixtures.sdk import sdk_metering as sdk_metering
 from tests.e2e.fakes.scenarios import lifecycle_restart
 
 

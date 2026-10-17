@@ -329,7 +329,7 @@ class TestMultimodalMessage:
             )
             assert up.status_code == 200
             url = up.json()["files"][0]["url"]
-            assert url.startswith(f"/api/agents/{tid}/uploads/ava-upload-")
+            assert url.startswith(f"/api/agents/{tid}/uploads/meiva-upload-")
             assert _pending_rows(db_conn, tid) == []
 
             resp = client.post(

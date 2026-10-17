@@ -22,32 +22,32 @@ _REPO_ROOT = Path(__file__).resolve().parents[4]
 
 # (field, env alias, raw value) — one exercise per kind and per failure mode.
 _CASES: list[tuple[str, str, str]] = [
-    ("llm_model", "AVA_MODEL", "parity-model"),
-    ("db_pool_acquire_timeout_seconds", "AVA_DB_POOL_ACQUIRE_TIMEOUT_SECONDS", "5"),
-    ("db_pool_acquire_timeout_seconds", "AVA_DB_POOL_ACQUIRE_TIMEOUT_SECONDS", "2.5"),
-    ("db_pool_acquire_timeout_seconds", "AVA_DB_POOL_ACQUIRE_TIMEOUT_SECONDS", "abc"),
-    ("gateway_client_retry_delay_seconds", "AVA_GATEWAY_RETRY_DELAY_SECONDS", "1.5"),
-    ("eval_isolation", "AVA_EVAL_ISOLATION", "yes"),
-    ("eval_isolation", "AVA_EVAL_ISOLATION", "0"),
-    ("eval_isolation", "AVA_EVAL_ISOLATION", "TRUE"),
-    ("eval_isolation", "AVA_EVAL_ISOLATION", "bogus"),
-    ("eval_network_allowlist", "AVA_EVAL_NETWORK_ALLOWLIST", "a.com, b.com"),
-    ("eval_network_allowlist", "AVA_EVAL_NETWORK_ALLOWLIST", "not-a-host,ok.com"),
-    ("timezone", "AVA_TIMEZONE", "Asia/Shanghai"),
-    ("timezone", "AVA_TIMEZONE", "Bogus/Zone"),
-    ("telemetry_otlp_port", "AVA_TELEMETRY_OTLP_PORT", "3200"),
-    ("telemetry_otlp_port", "AVA_TELEMETRY_OTLP_PORT", "70000"),
-    ("machine_serve_gateway", "AVA_MACHINE_SERVE_GATEWAY", "true"),
+    ("llm_model", "MEIVA_MODEL", "parity-model"),
+    ("db_pool_acquire_timeout_seconds", "MEIVA_DB_POOL_ACQUIRE_TIMEOUT_SECONDS", "5"),
+    ("db_pool_acquire_timeout_seconds", "MEIVA_DB_POOL_ACQUIRE_TIMEOUT_SECONDS", "2.5"),
+    ("db_pool_acquire_timeout_seconds", "MEIVA_DB_POOL_ACQUIRE_TIMEOUT_SECONDS", "abc"),
+    ("gateway_client_retry_delay_seconds", "MEIVA_GATEWAY_RETRY_DELAY_SECONDS", "1.5"),
+    ("eval_isolation", "MEIVA_EVAL_ISOLATION", "yes"),
+    ("eval_isolation", "MEIVA_EVAL_ISOLATION", "0"),
+    ("eval_isolation", "MEIVA_EVAL_ISOLATION", "TRUE"),
+    ("eval_isolation", "MEIVA_EVAL_ISOLATION", "bogus"),
+    ("eval_network_allowlist", "MEIVA_EVAL_NETWORK_ALLOWLIST", "a.com, b.com"),
+    ("eval_network_allowlist", "MEIVA_EVAL_NETWORK_ALLOWLIST", "not-a-host,ok.com"),
+    ("timezone", "MEIVA_TIMEZONE", "Asia/Shanghai"),
+    ("timezone", "MEIVA_TIMEZONE", "Bogus/Zone"),
+    ("telemetry_otlp_port", "MEIVA_TELEMETRY_OTLP_PORT", "3200"),
+    ("telemetry_otlp_port", "MEIVA_TELEMETRY_OTLP_PORT", "70000"),
+    ("machine_serve_gateway", "MEIVA_MACHINE_SERVE_GATEWAY", "true"),
 ]
 
 _CHILD = Path(__file__).with_name("_lite_parity_child.py")
 
 
 def _run_child(home: Path) -> list[dict[str, Any]]:
-    env = {key: value for key, value in os.environ.items() if not key.startswith("AVA_")}
+    env = {key: value for key, value in os.environ.items() if not key.startswith("MEIVA_")}
     env.pop("VIRTUAL_ENV", None)
-    env["AVA_HOME"] = str(home)
-    env["AVA_CONFIG_FETCH"] = "skip"
+    env["MEIVA_HOME"] = str(home)
+    env["MEIVA_CONFIG_FETCH"] = "skip"
     env["PARITY_CASES"] = json.dumps(_CASES)
     proc = subprocess.run(  # noqa: S603 — fixed argv, sys.executable owns the child
         [sys.executable, "-B", str(_CHILD)],

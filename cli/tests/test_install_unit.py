@@ -1,4 +1,4 @@
-"""`ava cluster db-authority install-unit` installs a sealed capability on an initialized runner."""
+"""`meiva cluster db-authority install-unit` installs a sealed capability on an initialized runner."""
 
 from __future__ import annotations
 
@@ -17,7 +17,7 @@ from base.host.env import bootstrap
 from cli import start_identity
 from cli.commands.cluster.control import cmd_db_authority_install_unit
 
-_ENDPOINT = "postgresql://ava@remote.invalid/db"
+_ENDPOINT = "postgresql://meiva@remote.invalid/db"
 _MACHINE = "mini"
 _GATEWAY_URL = "http://127.0.0.1:1"
 
@@ -40,7 +40,7 @@ def bearers(monkeypatch: pytest.MonkeyPatch) -> list[object]:
 
     def served(*_a: object, **kwargs: object) -> dict[str, str]:
         seen.append(kwargs.get("bearer"))
-        return {"AVA_DB_URL": _ENDPOINT, "AVA_REDIS_URL": "redis://remote.invalid/0"}
+        return {"MEIVA_DB_URL": _ENDPOINT, "MEIVA_REDIS_URL": "redis://remote.invalid/0"}
 
     monkeypatch.setattr(bootstrap, "fetch_bootstrap_config", served)
     # The seeded ledger's logins are no PostgreSQL roles: skip the install's login probe.
@@ -78,19 +78,19 @@ def issue(tmp_path: Path, seed_write_generation: Callable[[Path], Any]) -> Calla
 def _runner(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, *, roles: frozenset[str] | None = None
 ) -> Path:
-    """An initialized home: what `ava init` leaves."""
+    """An initialized home: what `meiva init` leaves."""
     home = (tmp_path / "runner").resolve()
     roles = roles or frozenset({"agent-runner"})
     values = {
-        "AVA_MACHINE_NAME": _MACHINE,
-        "AVA_GATEWAY_URL": _GATEWAY_URL,
-        "AVA_SERVICE_PATH": str(tmp_path / "tools"),
+        "MEIVA_MACHINE_NAME": _MACHINE,
+        "MEIVA_GATEWAY_URL": _GATEWAY_URL,
+        "MEIVA_SERVICE_PATH": str(tmp_path / "tools"),
     }
     monkeypatch.setattr(cluster, "port_free", _every_port_free)
     start_identity.prepare_identity(
         start_identity.IdentityInput(home, tmp_path / "checkout", roles, values)
     )
-    monkeypatch.setenv("AVA_HOME", str(home))
+    monkeypatch.setenv("MEIVA_HOME", str(home))
     return home
 
 
@@ -151,12 +151,12 @@ def test_it_refuses_a_home_init_has_not_initialized(
     bearers: list[object],
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    monkeypatch.setenv("AVA_HOME", str((tmp_path / "runner").resolve()))
+    monkeypatch.setenv("MEIVA_HOME", str((tmp_path / "runner").resolve()))
     bundle = issue("unit.bundle")
 
     assert cmd_db_authority_install_unit(bundle=str(bundle)) == 1
 
-    assert "not initialized: run `ava init` first" in capsys.readouterr().err
+    assert "not initialized: run `meiva init` first" in capsys.readouterr().err
     assert bundle.exists() and bearers == []
 
 

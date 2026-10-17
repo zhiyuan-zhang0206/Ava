@@ -20,7 +20,7 @@ from base.host.system.hostport import Host
 __all__ = ["github_pr_blocker", "memory_repo_slug"]
 
 # Each `gh` subprocess gets a bounded wait so a hung/offline call surfaces as a
-# blocker reason instead of stalling `ava start`.
+# blocker reason instead of stalling `meiva start`.
 _GH_TIMEOUT = 20
 
 # A viewerPermission at or above WRITE can push branches and merge PRs.

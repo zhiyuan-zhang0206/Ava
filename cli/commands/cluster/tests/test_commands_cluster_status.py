@@ -17,7 +17,7 @@ from cli.database.tests.command_fakes import fake_session_backends as fake_sessi
 from cli.database.tests.command_fakes import gateway_role_pinned as gateway_role_pinned
 from cli.database.tests.command_fakes import hermetic_gateway_base as hermetic_gateway_base
 
-# ─── ava cluster status roster code column ───────────────────────────────────
+# ─── meiva cluster status roster code column ───────────────────────────────────
 
 
 def test_code_cell_matches_checkout() -> None:
@@ -166,7 +166,7 @@ def test_cmd_cluster_status_role_column_shows_observability_station(
     assert "observability-station" not in runner_line
 
 
-# ─── ava cluster status transport failures report, they do not traceback ──────────
+# ─── meiva cluster status transport failures report, they do not traceback ──────────
 
 
 def test_cmd_cluster_status_read_timeout_reports_friendly(
@@ -174,7 +174,7 @@ def test_cmd_cluster_status_read_timeout_reports_friendly(
 ) -> None:
     """A gateway that does not answer within the derived read budget prints one
     stderr line and exits 1. An unreachable machine is exactly when an operator
-    runs `ava cluster status`; the derived budget already covers a black-holed
+    runs `meiva cluster status`; the derived budget already covers a black-holed
     machine's probe (probe budget + margin), so a timeout here means the
     gateway itself is silent — a bare ReadTimeout traceback would hide the
     diagnosis the command exists for (#219, #4900)."""
@@ -281,7 +281,7 @@ def test_cmd_cluster_status_unresolvable_gateway_reports_friendly(
     monkeypatch.setattr(
         machine,
         "gateway_api_base",
-        gateway_api_base_raises(GatewayApiBaseMissing("AVA_GATEWAY_URL unset")),
+        gateway_api_base_raises(GatewayApiBaseMissing("MEIVA_GATEWAY_URL unset")),
     )
     rc = cluster_control.cmd_cluster_status()
     assert rc == 1
@@ -388,10 +388,10 @@ def test_cmd_cluster_status_without_held_hosts_has_no_banner(
     assert "host left held" not in capsys.readouterr().out
 
 
-# ─── ava cluster resume machine-side checklist ───────────────────────────────
+# ─── meiva cluster resume machine-side checklist ───────────────────────────────
 
 
-# ─── ava cluster pause / resume / staging wording ────────────────────────────
+# ─── meiva cluster pause / resume / staging wording ────────────────────────────
 
 
 def _post_returns(monkeypatch: pytest.MonkeyPatch, payload: dict[str, object]) -> None:

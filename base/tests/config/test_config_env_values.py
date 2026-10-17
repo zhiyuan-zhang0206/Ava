@@ -1,4 +1,4 @@
-"""Env decode round-trips and warnings for the served config values, plus AVA_TIMEZONE validation; split from base/tests/test_config.py (task #4922)."""
+"""Env decode round-trips and warnings for the served config values, plus MEIVA_TIMEZONE validation; split from base/tests/test_config.py (task #4922)."""
 
 from __future__ import annotations
 
@@ -83,10 +83,10 @@ def test_bootstrap_serves_comma_list_not_repr(
 
     monkeypatch.setattr(dotenv_file, "unit_home", lambda: tmp_path)
     rt.write_fields({"skills_to_inject_into_system_prompt": ["alpha", "beta"]}, set())
-    upsert_env(tmp_path / ".env", {"AVA_DB_URL": str(config.settings.data_plane.db_url)})
+    upsert_env(tmp_path / ".env", {"MEIVA_DB_URL": str(config.settings.data_plane.db_url)})
 
     vals = authority.bootstrap_config_values(provider_key_envs=(), plugin_cluster_config="")
-    assert vals["AVA_SKILLS_TO_INJECT_INTO_SYSTEM_PROMPT"] == "alpha,beta"
+    assert vals["MEIVA_SKILLS_TO_INJECT_INTO_SYSTEM_PROMPT"] == "alpha,beta"
 
 
 def test_current_field_values_decodes_nodecode_comma_list(
@@ -113,7 +113,7 @@ def test_current_field_values_decodes_nodecode_comma_list_without_warning(
     """P1 regression: a NoDecode comma-list value is a SUPPORTED .env spelling,
     not a decode failure. Decoding through the owning model must not emit the
     "cannot be decoded" warning — it fired on every panel read / agent spawn
-    for AVA_IM_DISABLED_ADAPTERS='weixin,feishu' — and a list[float] field must
+    for MEIVA_IM_DISABLED_ADAPTERS='weixin,feishu' — and a list[float] field must
     come back floats, not a wrong-typed string split."""
     from base.config import runtime_config as rt
     from base.host.env import dotenv_file
@@ -189,19 +189,19 @@ def test_retired_env_aliases_are_not_read(monkeypatch: pytest.MonkeyPatch) -> No
     from base.config.domains.services.settings import ServiceSettings
 
     for key in (
-        "AVA_GATEWAY_URL",
-        "AVA_SECURITY_SCAN_ENABLED",
-        "AVA_PERMISSIONS_HELPER_PORT",
-        "AVA_AGENT_COMMUNICATION_STYLE",
-        "AVA_ALERTS_WEBHOOK_TOKEN",
+        "MEIVA_GATEWAY_URL",
+        "MEIVA_SECURITY_SCAN_ENABLED",
+        "MEIVA_PERMISSIONS_HELPER_PORT",
+        "MEIVA_AGENT_COMMUNICATION_STYLE",
+        "MEIVA_ALERTS_WEBHOOK_TOKEN",
     ):
         monkeypatch.delitem(os.environ, key, raising=False)
-    monkeypatch.setitem(os.environ, "AVA_PRIMARY_GATEWAY_URL", "http://legacy-gw")
-    monkeypatch.setitem(os.environ, "AVA_SKIP_AUTH", "true")
-    monkeypatch.setitem(os.environ, "AVA_SKIP_SECURITY_SCAN", "true")
-    monkeypatch.setitem(os.environ, "AVA_NATIVE_HELPER_PORT", "11111")
-    monkeypatch.setitem(os.environ, "AVA_SYSTEM_PROMPT_PROGRESS", "true")
-    monkeypatch.setitem(os.environ, "AVA_OPS_ALERTS_WEBHOOK_TOKEN", "tok-legacy")
+    monkeypatch.setitem(os.environ, "MEIVA_PRIMARY_GATEWAY_URL", "http://legacy-gw")
+    monkeypatch.setitem(os.environ, "MEIVA_SKIP_AUTH", "true")
+    monkeypatch.setitem(os.environ, "MEIVA_SKIP_SECURITY_SCAN", "true")
+    monkeypatch.setitem(os.environ, "MEIVA_NATIVE_HELPER_PORT", "11111")
+    monkeypatch.setitem(os.environ, "MEIVA_SYSTEM_PROMPT_PROGRESS", "true")
+    monkeypatch.setitem(os.environ, "MEIVA_OPS_ALERTS_WEBHOOK_TOKEN", "tok-legacy")
 
     assert GatewaySettings().gateway_url == ""
     assert AgentEvalSettings().security_scan_enabled is True
@@ -222,10 +222,10 @@ def test_eval_isolation_env_aliases_parse(tmp_path: Path) -> None:
         text=True,
         env={
             **os.environ,
-            "AVA_HOME": str(tmp_path),
-            "AVA_CONFIG_FETCH": "skip",
-            "AVA_EVAL_ISOLATION": "true",
-            "AVA_EVAL_NETWORK_ALLOWLIST": "web, understand",
+            "MEIVA_HOME": str(tmp_path),
+            "MEIVA_CONFIG_FETCH": "skip",
+            "MEIVA_EVAL_ISOLATION": "true",
+            "MEIVA_EVAL_NETWORK_ALLOWLIST": "web, understand",
         },
         check=False,
     )
@@ -287,15 +287,17 @@ def test_current_field_values_serves_the_explicit_runner_db_projection(
 
     rec = _Logged(loguru_records)
     monkeypatch.setenv("HOME", str(tmp_path))
-    home = tmp_path / ".ava"
+    home = tmp_path / ".meiva"
     home.mkdir()
     runtime = config.settings.model_copy(deep=True, update={"profile": "agent"})
     runtime.data_plane.cluster_secret = secrets.token_urlsafe(16)
-    runtime.data_plane.db_url = "postgresql://ava_g0_runner@127.0.0.1:5433/ava?hostaddr=127.0.0.1"
+    runtime.data_plane.db_url = (
+        "postgresql://meiva_g0_runner@127.0.0.1:5433/meiva?hostaddr=127.0.0.1"
+    )
     authority = ConfigAuthority(runtime, config.settings, home / ".env")
     monkeypatch.setattr(dotenv_file, "unit_home", lambda: home)
     boot = authority.current_field_values()["db_url"]
-    rt.write_fields({"db_url": "postgresql://ava_main:owner-pw@127.0.0.1:5433/ava"}, set())
+    rt.write_fields({"db_url": "postgresql://meiva_main:owner-pw@127.0.0.1:5433/meiva"}, set())
 
     values = authority.current_field_values()
 
@@ -316,11 +318,13 @@ def test_current_field_values_rejects_bad_db_url_with_runner_projection(
 
     rec = _Logged(loguru_records)
     monkeypatch.setenv("HOME", str(tmp_path))
-    home = tmp_path / ".ava"
+    home = tmp_path / ".meiva"
     home.mkdir()
     runtime = config.settings.model_copy(deep=True, update={"profile": "agent"})
     runtime.data_plane.cluster_secret = secrets.token_urlsafe(16)
-    runtime.data_plane.db_url = "postgresql://ava_g0_runner@127.0.0.1:5433/ava?hostaddr=127.0.0.1"
+    runtime.data_plane.db_url = (
+        "postgresql://meiva_g0_runner@127.0.0.1:5433/meiva?hostaddr=127.0.0.1"
+    )
     authority = ConfigAuthority(runtime, config.settings, home / ".env")
     monkeypatch.setattr(dotenv_file, "unit_home", lambda: home)
     rt.write_fields({"db_url": "postgresql://[::1"}, set())
@@ -350,7 +354,7 @@ def test_current_field_values_isolates_bad_env_from_good_file_value(
     # setitem, not setenv: the lint bans setenv on Settings aliases (the
     # singleton never re-reads env); this plants the bad value for the decode
     # path only.
-    monkeypatch.setitem(os.environ, "AVA_IM_SEND_RETRY_DELAYS", "banana")
+    monkeypatch.setitem(os.environ, "MEIVA_IM_SEND_RETRY_DELAYS", "banana")
 
     values = authority.current_field_values()
 
@@ -358,22 +362,22 @@ def test_current_field_values_isolates_bad_env_from_good_file_value(
     assert rec.warnings == []
 
 
-# ─── AVA_TIMEZONE fails fast at Settings construction ───
+# ─── MEIVA_TIMEZONE fails fast at Settings construction ───
 
 
 def test_timezone_validated_at_construction(monkeypatch: pytest.MonkeyPatch) -> None:
-    """A bad AVA_TIMEZONE crashed the first inbound turn of every agent
+    """A bad MEIVA_TIMEZONE crashed the first inbound turn of every agent
     (ZoneInfo raises in now_timestamp with no try/except); the validator moves
     the failure to Settings construction, where it is loud and immediate."""
     from pydantic import ValidationError
 
     from base.config.domains.general import GeneralSettings
 
-    monkeypatch.setitem(os.environ, "AVA_TIMEZONE", "Not/A_Timezone")
+    monkeypatch.setitem(os.environ, "MEIVA_TIMEZONE", "Not/A_Timezone")
     with pytest.raises(ValidationError, match="not a valid IANA timezone"):
         GeneralSettings()
 
-    monkeypatch.setitem(os.environ, "AVA_TIMEZONE", "Asia/Shanghai")
+    monkeypatch.setitem(os.environ, "MEIVA_TIMEZONE", "Asia/Shanghai")
     assert GeneralSettings().timezone == "Asia/Shanghai"
 
 
@@ -395,7 +399,7 @@ def _capture_loguru_warnings() -> tuple[list[str], int]:
 
 
 def test_timezone_default_warns_when_unset(monkeypatch: pytest.MonkeyPatch) -> None:
-    """A missing AVA_TIMEZONE must not drift silently onto the
+    """A missing MEIVA_TIMEZONE must not drift silently onto the
     America/Los_Angeles default: a schedule runner with that default fires cron
     jobs at PT midnight instead of the cluster's midnight (2026-08-21 incident,
     schedule #3). The warning names the missing key so the operator fixes the
@@ -404,26 +408,26 @@ def test_timezone_default_warns_when_unset(monkeypatch: pytest.MonkeyPatch) -> N
 
     from base.config.domains.general import GeneralSettings
 
-    monkeypatch.delitem(os.environ, "AVA_TIMEZONE", raising=False)
+    monkeypatch.delitem(os.environ, "MEIVA_TIMEZONE", raising=False)
     records, sink_id = _capture_loguru_warnings()
     try:
         GeneralSettings()
     finally:
         logger.remove(sink_id)
-    assert any("AVA_TIMEZONE is not set" in r and "America/Los_Angeles" in r for r in records)
+    assert any("MEIVA_TIMEZONE is not set" in r and "America/Los_Angeles" in r for r in records)
 
 
 def test_timezone_explicit_value_does_not_warn(monkeypatch: pytest.MonkeyPatch) -> None:
-    """An explicit AVA_TIMEZONE (any zone, including PT) is a deliberate
+    """An explicit MEIVA_TIMEZONE (any zone, including PT) is a deliberate
     choice — no warning."""
     from loguru import logger
 
     from base.config.domains.general import GeneralSettings
 
-    monkeypatch.setitem(os.environ, "AVA_TIMEZONE", "America/Los_Angeles")
+    monkeypatch.setitem(os.environ, "MEIVA_TIMEZONE", "America/Los_Angeles")
     records, sink_id = _capture_loguru_warnings()
     try:
         GeneralSettings()
     finally:
         logger.remove(sink_id)
-    assert not any("AVA_TIMEZONE is not set" in r for r in records)
+    assert not any("MEIVA_TIMEZONE is not set" in r for r in records)

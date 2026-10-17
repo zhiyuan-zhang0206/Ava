@@ -83,7 +83,7 @@ class _World:
 
     def _identify(self, repo: Path) -> None:
         self.git(repo, "config", "user.name", "test")
-        self.git(repo, "config", "user.email", "test@ava")
+        self.git(repo, "config", "user.email", "test@meiva")
 
     def _install_hooks(self) -> None:
         interpreter = self.main / ".venv/bin/python"
@@ -190,12 +190,12 @@ def test_creates_the_worktree_off_fresh_origin_main_and_bootstraps_in_order(
 
     path = world.worktree("t1")
     assert done.returncode == 0, done.stderr
-    assert done.stdout.splitlines()[-1] == _ready_line(path, "ava-t1")
+    assert done.stdout.splitlines()[-1] == _ready_line(path, "meiva-t1")
     assert world.git(path, "rev-parse", "HEAD") == landed != stale_main
-    assert world.git(path, "branch", "--show-current") == "ava-t1"
+    assert world.git(path, "branch", "--show-current") == "meiva-t1"
     # Branching off origin/main must not make a later bare `git push` resolve to main.
     tracking = subprocess.run(
-        ["git", "config", "--get", "branch.ava-t1.merge"],
+        ["git", "config", "--get", "branch.meiva-t1.merge"],
         cwd=path,
         env=world.env(),
         capture_output=True,
@@ -220,7 +220,7 @@ def test_from_inside_another_worktree_the_new_one_lands_under_the_main_clone(
     done = world.setup("t2", cwd=world.worktree("t1"))
 
     assert done.returncode == 0, done.stderr
-    assert done.stdout.splitlines()[-1] == _ready_line(world.worktree("t2"), "ava-t2")
+    assert done.stdout.splitlines()[-1] == _ready_line(world.worktree("t2"), "meiva-t2")
     assert not (world.worktree("t1") / ".worktrees").exists()
 
 
@@ -233,7 +233,7 @@ def test_rerunning_only_rebootstraps_the_existing_worktree(world: _World) -> Non
 
     assert (first.returncode, again.returncode) == (0, 0), again.stderr
     assert "already exists" in again.stdout
-    assert again.stdout.splitlines()[-1] == _ready_line(path, "ava-t1")
+    assert again.stdout.splitlines()[-1] == _ready_line(path, "meiva-t1")
     assert world.git(path, "rev-parse", "HEAD") == head
     assert world.git(world.main, "worktree", "list").count("\n") == 1  # main + t1 only
     commands = [command.split()[0] for command, _ in world.calls()]
@@ -261,7 +261,7 @@ def test_a_path_that_is_not_a_worktree_is_never_overwritten(world: _World) -> No
     assert done.returncode != 0
     assert "not a worktree" in done.stderr
     assert (squatter / "keep.txt").read_text() == "mine\n"
-    assert not world.branch_exists("ava-t1")
+    assert not world.branch_exists("meiva-t1")
     assert world.calls() == []
 
 
@@ -278,7 +278,7 @@ def test_a_registered_worktree_whose_directory_is_gone_points_at_prune(world: _W
 def test_a_branch_checked_out_elsewhere_is_named_in_the_error(world: _World) -> None:
     assert world.setup("t1").returncode == 0
 
-    done = world.setup("t2", "--branch", "ava-t1")
+    done = world.setup("t2", "--branch", "meiva-t1")
 
     assert done.returncode != 0
     assert f"checked out at {world.worktree('t1')}" in done.stderr
@@ -286,12 +286,12 @@ def test_a_branch_checked_out_elsewhere_is_named_in_the_error(world: _World) -> 
 
 
 def test_an_existing_unused_branch_is_refused_not_reused(world: _World) -> None:
-    world.git(world.main, "branch", "ava-t3", "origin/main")
+    world.git(world.main, "branch", "meiva-t3", "origin/main")
 
     done = world.setup("t3")
 
     assert done.returncode != 0
-    assert "already exists" in done.stderr and "git branch -d ava-t3" in done.stderr
+    assert "already exists" in done.stderr and "git branch -d meiva-t3" in done.stderr
     assert not world.worktree("t3").exists()
 
 
@@ -328,7 +328,7 @@ def test_a_failed_bootstrap_keeps_the_worktree_and_resumes_on_rerun(world: _Worl
     resumed = world.setup(cwd=path)
 
     assert resumed.returncode == 0, resumed.stderr
-    assert resumed.stdout.splitlines()[-1] == _ready_line(path, "ava-t1")
+    assert resumed.stdout.splitlines()[-1] == _ready_line(path, "meiva-t1")
 
 
 def test_unhealthy_shared_hooks_stop_the_bootstrap_before_any_install(tmp_path: Path) -> None:
@@ -371,9 +371,9 @@ def test_a_leaked_virtual_env_does_not_steer_the_bootstrap(world: _World, tmp_pa
 def test_branch_naming_base_override_and_task_validation(world: _World) -> None:
     sha = world.git(world.main, "rev-parse", "origin/main")
 
-    agent_style = world.setup("ava-77-demo", "--base", sha)
+    agent_style = world.setup("meiva-77-demo", "--base", sha)
     assert agent_style.returncode == 0, agent_style.stderr
-    assert world.branch_exists("ava-77-demo") and not world.branch_exists("ava-ava-77-demo")
+    assert world.branch_exists("meiva-77-demo") and not world.branch_exists("meiva-meiva-77-demo")
 
     custom = world.setup("t5", "--branch", "feature/five")
     assert custom.returncode == 0, custom.stderr

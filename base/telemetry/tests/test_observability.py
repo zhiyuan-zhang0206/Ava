@@ -31,10 +31,10 @@ def test_collector_allowed_for_home_marker_or_explicit_endpoint(
         (home / "lgtm-host").touch()
     if endpoint_override:
         monkeypatch.setitem(
-            os.environ, "AVA_TELEMETRY_OTLP_ENDPOINT", "http://collector.invalid:4318"
+            os.environ, "MEIVA_TELEMETRY_OTLP_ENDPOINT", "http://collector.invalid:4318"
         )
     else:
-        monkeypatch.delitem(os.environ, "AVA_TELEMETRY_OTLP_ENDPOINT", raising=False)
+        monkeypatch.delitem(os.environ, "MEIVA_TELEMETRY_OTLP_ENDPOINT", raising=False)
 
     assert (
         observability.collector_allowed_for_home(home, machine=machine_identity(), unit_home=home)
@@ -45,7 +45,7 @@ def test_collector_allowed_for_home_marker_or_explicit_endpoint(
 def test_collector_allowed_for_home_none_home_is_never_gated(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.delitem(os.environ, "AVA_TELEMETRY_OTLP_ENDPOINT", raising=False)
+    monkeypatch.delitem(os.environ, "MEIVA_TELEMETRY_OTLP_ENDPOINT", raising=False)
     assert (
         observability.collector_allowed_for_home(
             None, machine=machine_identity(), unit_home=Path("unused")
@@ -86,7 +86,7 @@ def test_station_capability_never_leaks_to_foreign_home(tmp_path: Path) -> None:
 def test_collector_allowed_for_home_accepts_station_capability(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    monkeypatch.delitem(os.environ, "AVA_TELEMETRY_OTLP_ENDPOINT", raising=False)
+    monkeypatch.delitem(os.environ, "MEIVA_TELEMETRY_OTLP_ENDPOINT", raising=False)
     machine = machine_identity(roles=frozenset({"gateway", "observability-station"}))
     assert observability.collector_allowed_for_home(tmp_path, machine=machine, unit_home=tmp_path)
     assert not observability.collector_allowed_for_home(

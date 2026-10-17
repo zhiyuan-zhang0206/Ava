@@ -86,8 +86,8 @@ def _transport(
 
 @pytest.fixture
 def env(monkeypatch: pytest.MonkeyPatch, tmp_path: Any) -> None:
-    """A tmp AVA_HOME for the adapter's offset file."""
-    monkeypatch.setenv("AVA_HOME", str(tmp_path))
+    """A tmp MEIVA_HOME for the adapter's offset file."""
+    monkeypatch.setenv("MEIVA_HOME", str(tmp_path))
 
 
 def _config(**overrides: Any) -> TelegramCredentialsConfig:
@@ -457,13 +457,13 @@ async def test_send_attaches_inline_keyboard_buttons(env: Any) -> None:
         await adapter.send(
             "42",
             "\u9009\u62e9 agent",
-            buttons=[("405 Ava", "/switch 405"), ("228 CEO", "/switch 228")],
+            buttons=[("405 Meiva", "/switch 405"), ("228 CEO", "/switch 228")],
         )
     (request,) = captured
     markup = json.loads(request.content)["reply_markup"]
     assert markup == {
         "inline_keyboard": [
-            [{"text": "405 Ava", "callback_data": "/switch 405"}],
+            [{"text": "405 Meiva", "callback_data": "/switch 405"}],
             [{"text": "228 CEO", "callback_data": "/switch 228"}],
         ]
     }

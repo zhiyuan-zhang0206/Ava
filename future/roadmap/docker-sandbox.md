@@ -1,8 +1,8 @@
 # Docker isolation — a disposable containerized cluster
 
-Today `execute_code` lands directly in the agent process and `ava.shell`
+Today `execute_code` lands directly in the agent process and `meiva.shell`
 subprocesses spawn straight onto the bare host — no isolation. The isolation
-this needs is **not** a per-agent micro-sandbox; it is a **whole disposable Ava
+this needs is **not** a per-agent micro-sandbox; it is a **whole disposable Meiva
 cluster running inside one Docker** — a complete gateway + Redis + agent-runner +
 a set of agents, throwaway.
 
@@ -12,7 +12,7 @@ Run an eval task or a self_evolution run inside a containerized cluster, grade
 it, throw the container away. A destructive task ("buy this", "rm -rf") or a bad
 self-code-change cannot escape to the host or to the real prod cluster — the
 blast radius is the container. That is exactly the boundary the deferred work
-needs, and it is the *natural* unit because an Ava deployment is a cluster, not a
+needs, and it is the *natural* unit because an Meiva deployment is a cluster, not a
 lone process.
 
 The important update vs. the earlier "#1 unbuilt gap" framing: **this is mostly

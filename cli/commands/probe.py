@@ -61,7 +61,7 @@ class OccupiedPort(NamedTuple):
     """One health port this start was about to bind that someone else answers on.
 
     `detail` is the probe's own words, which already name the occupant's
-    `$AVA_HOME` and the URL — the two facts an operator needs to decide which
+    `$MEIVA_HOME` and the URL — the two facts an operator needs to decide which
     unit should move.
     """
 
@@ -70,7 +70,7 @@ class OccupiedPort(NamedTuple):
 
 
 def _binds_a_daemon_health_port(spec: ServiceSpec) -> bool:
-    """Whether `spec`'s port answers an Ava `/healthz` whose body names its home.
+    """Whether `spec`'s port answers an Meiva `/healthz` whose body names its home.
 
     Read off what the spec declares, not off its URL: a standard daemon carries a
     `health_name` (its URL is built from the same `ServiceEndpoints` row the
@@ -86,11 +86,11 @@ def _binds_a_daemon_health_port(spec: ServiceSpec) -> bool:
 def occupied_health_ports(specs: tuple[ServiceSpec, ...]) -> tuple[OccupiedPort, ...]:
     """The health ports among `specs` that another unit already answers on.
 
-    `ava start` probes before it binds because the alternative is worse in both
+    `meiva start` probes before it binds because the alternative is worse in both
     directions. A daemon launched onto a taken port dies on `[Errno 48] Address
     already in use` and is respawned every watchdog round forever; a daemon whose
     port is being *relayed* from elsewhere is worse still, because the watchdog's
-    probe is answered — by the wrong process — and the operator's `ava start`
+    probe is answered — by the wrong process — and the operator's `meiva start`
     prints a clean roster (issue #977: 402 identity-mismatch lines over one
     afternoon, each ending "manual intervention needed").
 
@@ -174,8 +174,8 @@ def print_unready_services(wait: ReadinessWait, timeout_s: float) -> None:
             f"— their sessions are gone: {names}\n"
             f"  They died or were never launched, so the {timeout_s:.0f}s readiness bound was "
             f"not spent and raising it would change nothing;\n"
-            f"  read why in $AVA_HOME/logs. ava-root keeps trying to revive them and "
-            f"`ava start` is idempotent to retry.",
+            f"  read why in $MEIVA_HOME/logs. meiva-root keeps trying to revive them and "
+            f"`meiva start` is idempotent to retry.",
             file=sys.stderr,
         )
         return
@@ -184,8 +184,8 @@ def print_unready_services(wait: ReadinessWait, timeout_s: float) -> None:
         f"({wait.elapsed_s:.1f}s elapsed): {names}\n"
         f"  Their sessions are running and still not serving — their rows above show the "
         f"failing probe. Every start step itself succeeded,\n"
-        f"  so this host is up but incomplete; ava-root keeps trying to revive them, "
-        f"`ava status` re-checks, and `ava start` is idempotent to retry.",
+        f"  so this host is up but incomplete; meiva-root keeps trying to revive them, "
+        f"`meiva status` re-checks, and `meiva start` is idempotent to retry.",
         file=sys.stderr,
     )
 
@@ -202,8 +202,8 @@ def print_non_critical_unready_services(specs: tuple[ServiceSpec, ...]) -> None:
         f"\n✗ {len(specs)} non-critical service(s) currently unavailable: {names}\n"
         f"  They do not fail this start (the readiness gate waits for the critical roster "
         f"only),\n"
-        f"  but a service_start_unready event was emitted; ava-root keeps trying to revive them and "
-        f"`ava start` is idempotent to retry.",
+        f"  but a service_start_unready event was emitted; meiva-root keeps trying to revive them and "
+        f"`meiva start` is idempotent to retry.",
         file=sys.stderr,
     )
 
@@ -248,7 +248,7 @@ def print_service_row(
     # hidden. The marks still reflect real liveness, so a still-running but now-
     # gated session reads as "✓ ... -- skipped: <reason>", surfacing the mismatch.
     # A failing probe's detail rides on the same line: "down" and "answering, but
-    # its home is /home/ava/.ava" call for completely different actions, and the
+    # its home is /home/meiva/.meiva" call for completely different actions, and the
     # operator has no other place to learn which one they are looking at.
     suffix = f"   -- skipped: {skip_reason}" if skip_reason else ""
     if not suffix and probe.detail:

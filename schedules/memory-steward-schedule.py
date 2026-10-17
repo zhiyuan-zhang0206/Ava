@@ -2,30 +2,30 @@
 #
 # This file is the version-controlled template for the cluster's memory
 # schedule (gateway schedule id=2). The running copy lives at
-# ~/.ava/schedules/2/memory-steward-schedule.py (deployed copy, same name) and is deployed with:
+# ~/.meiva/schedules/2/memory-steward-schedule.py (deployed copy, same name) and is deployed with:
 #
-#     ava schedules update 2 --script-file <this file>
-#     ava schedules restart 2
+#     meiva schedules update 2 --script-file <this file>
+#     meiva schedules restart 2
 #
 # Edit the template here, PR it, then deploy from the merged main.
 
 """Memory Arbiter schedule — 4AM consolidation, 7AM health check.
 
 Gateway-hosted, resumable. Reuses the Memory Arbiter agent by label.
-Fire times are CLUSTER wall clock (`AVA_TIMEZONE`, `cluster-pinned`), not the
+Fire times are CLUSTER wall clock (`MEIVA_TIMEZONE`, `cluster-pinned`), not the
 host's OS timezone: every machine in the fleet fires at the same instant, and
 moving a laptop across timezones does not move the schedule. Both hours sit in
 the off-peak trough of a workday whose peak is 9-12 / 14-18 cluster time.
-`AVA_TIMEZONE` is read at process start, so changing it needs
-`ava schedules restart <id>`.
+`MEIVA_TIMEZONE` is read at process start, so changing it needs
+`meiva schedules restart <id>`.
 """
 
 from uuid import uuid4
 
 import time
 from datetime import UTC, datetime
-import ava
-from ava.agents import AgentStatus as S
+import meiva
+from meiva.agents import AgentStatus as S
 from schedules.agent_status_guard import ensure_agent_status_members
 from schedules.catchup import cluster_timezone, fire_slot_once
 from base.daemon.schedules.watcher import next_fire
@@ -46,20 +46,20 @@ def ensure_agent(label, prompt):
     """Find or resurrect the Memory Steward agent by label."""
     before_id = None
     while True:
-        page = ava.agents.list_agents(scope="all", query=label, before_id=before_id)
+        page = meiva.agents.list_agents(scope="all", query=label, before_id=before_id)
         # Directory pages are newest first; substring search still needs an exact label match.
         for agent in page.agents:
             if agent.label != label:
                 continue
             if agent.status == S.TERMINATED:
-                ava.agents.resurrect(agent.agent_id, prompt)
+                meiva.agents.resurrect(agent.agent_id, prompt)
             else:
-                ava.agents.send_message(agent.agent_id, prompt)
+                meiva.agents.send_message(agent.agent_id, prompt)
             return agent.agent_id
         if page.next_cursor is None:
             break
         before_id = page.next_cursor
-    return ava.agents.spawn(prompt=prompt, label=label, idempotency_key=str(uuid4()))  # pyright: ignore[reportCallIssue] — fleet plugin wraps spawn with label
+    return meiva.agents.spawn(prompt=prompt, label=label, idempotency_key=str(uuid4()))  # pyright: ignore[reportCallIssue] — fleet plugin wraps spawn with label
 
 
 def fire_memory_maintenance(_slot: datetime, message: str) -> None:
@@ -103,7 +103,7 @@ if __name__ == "__main__":
         {"TERMINATED"},
         schedule_name="memory-arbiter",
     )
-    entry_inputs = globals().get("AVA_SCHEDULE_INPUTS")
+    entry_inputs = globals().get("MEIVA_SCHEDULE_INPUTS")
     if entry_inputs is None:
         from base.log import prepare_process_logging
 

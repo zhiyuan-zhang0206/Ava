@@ -39,12 +39,12 @@ def _cluster_clock(monkeypatch: pytest.MonkeyPatch) -> None:
 
 def _inbound(text: str, at: str | None = "2026-10-05T03:04:05+00:00") -> HumanMessage:
     kwargs: dict[str, str | int] = {
-        "ava_msg_type": "inbound",
-        "ava_source": "user",
-        "ava_inbound_body_start": 0,
+        "meiva_msg_type": "inbound",
+        "meiva_source": "user",
+        "meiva_inbound_body_start": 0,
     }
     if at is not None:
-        kwargs["ava_created_at"] = at
+        kwargs["meiva_created_at"] = at
     return HumanMessage(content=text, additional_kwargs=kwargs)
 
 
@@ -59,8 +59,8 @@ def _turn(code: str, n: int, result: str = "ok", **result_kwargs: Any) -> list[B
             content=f"{_HEADER}{result}",
             tool_call_id=f"tc{n}",
             additional_kwargs={
-                "ava_msg_type": "exec_output",
-                "ava_exec_body_start": len(_HEADER),
+                "meiva_msg_type": "exec_output",
+                "meiva_exec_body_start": len(_HEADER),
                 **result_kwargs,
             },
         ),
@@ -86,8 +86,8 @@ def _think_turn(think: str, code: str, n: int, result: str = "ok", **kw: Any) ->
             content=f"{_HEADER}{result}",
             tool_call_id=f"tc{n}",
             additional_kwargs={
-                "ava_msg_type": "exec_output",
-                "ava_exec_body_start": len(_HEADER),
+                "meiva_msg_type": "exec_output",
+                "meiva_exec_body_start": len(_HEADER),
                 **kw,
             },
         ),
@@ -131,9 +131,9 @@ def test_a_work_line_leaves_out_the_parts_the_unit_does_not_have() -> None:
 
 def test_a_work_lines_output_part_is_the_start_of_the_output_whatever_its_status() -> None:
     chunk = [
-        *_turn("a", 1, "boom", ava_exit_code=2),
-        *_turn("b", 2, "x", ava_timed_out=True),
-        *_turn("e", 5, "Traceback (most recent call last):\n  File x", ava_exit_code=1),
+        *_turn("a", 1, "boom", meiva_exit_code=2),
+        *_turn("b", 2, "x", meiva_timed_out=True),
+        *_turn("e", 5, "Traceback (most recent call last):\n  File x", meiva_exit_code=1),
     ]
     lines = build_catalog(chunk, divide_units(chunk, timeline_inputs=_TIMELINE_INPUTS)).splitlines()
     assert lines == [
@@ -144,12 +144,12 @@ def test_a_work_lines_output_part_is_the_start_of_the_output_whatever_its_status
 
 
 def test_a_work_lines_call_part_skips_import_lines_and_keeps_all_import_code_whole() -> None:
-    code = "import ava, os\nfrom pathlib import Path\n\n# check the queue\nprint(ava.shell.run('gh pr list'))"
+    code = "import meiva, os\nfrom pathlib import Path\n\n# check the queue\nprint(meiva.shell.run('gh pr list'))"
     chunk = [_inbound("go"), *_turn(code, 1), *_turn("import os\nimport sys", 2)]
     lines = build_catalog(chunk, divide_units(chunk, timeline_inputs=_TIMELINE_INPUTS)).splitlines()
     assert (
         lines[1]
-        == "[2] work: call\u300c# check the queue print(ava.shell.run('gh pr list'))\u300d | output\u300cok\u300d"
+        == "[2] work: call\u300c# check the queue print(meiva.shell.run('gh pr list'))\u300d | output\u300cok\u300d"
     )
     assert lines[2] == "[3] work: call\u300cimport os import sys\u300d | output\u300cok\u300d"
 
@@ -163,7 +163,7 @@ def test_the_turns_text_is_its_own_line_before_its_work_line() -> None:
     result = ToolMessage(
         content=f"{_HEADER}files",
         tool_call_id="t",
-        additional_kwargs={"ava_msg_type": "exec_output", "ava_exec_body_start": len(_HEADER)},
+        additional_kwargs={"meiva_msg_type": "exec_output", "meiva_exec_body_start": len(_HEADER)},
     )
     chunk: list[BaseMessage] = [turn, result]
     assert build_catalog(
@@ -179,12 +179,12 @@ def test_inbound_lines_carry_the_sender_as_their_type_and_drop_the_header_at_the
 ):
     def inbound(source: str | None, text: str) -> HumanMessage:
         kwargs: dict[str, object] = {
-            "ava_msg_type": "inbound",
-            "ava_created_at": "2026-10-05T03:04:05+00:00",
-            "ava_inbound_body_start": text.index("\n\n") + 2 if "\n\n" in text else 0,
+            "meiva_msg_type": "inbound",
+            "meiva_created_at": "2026-10-05T03:04:05+00:00",
+            "meiva_inbound_body_start": text.index("\n\n") + 2 if "\n\n" in text else 0,
         }
         if source:
-            kwargs["ava_source"] = source
+            kwargs["meiva_source"] = source
         return HumanMessage(content=text, additional_kwargs=kwargs)
 
     chunk = [
@@ -210,17 +210,17 @@ def test_an_inbound_without_a_recorded_body_offset_is_refused() -> None:
     chunk: list[BaseMessage] = [
         HumanMessage(
             content="[2026-10-05 Mon 11:04:09]\n\nold",
-            additional_kwargs={"ava_msg_type": "inbound", "ava_source": "user"},
+            additional_kwargs={"meiva_msg_type": "inbound", "meiva_source": "user"},
         )
     ]
-    with pytest.raises(ValueError, match="ava_inbound_body_start"):
+    with pytest.raises(ValueError, match="meiva_inbound_body_start"):
         build_catalog(chunk, divide_units(chunk, timeline_inputs=_TIMELINE_INPUTS))
 
 
 def _note(kind: str | None, tag: str | None = None) -> HumanMessage:
-    kwargs: dict[str, str] = {} if kind is None else {"ava_msg_type": kind}
+    kwargs: dict[str, str] = {} if kind is None else {"meiva_msg_type": kind}
     if tag:
-        kwargs["ava_note_tag"] = tag
+        kwargs["meiva_note_tag"] = tag
     return HumanMessage(content="a long framework text that is not shown", additional_kwargs=kwargs)
 
 

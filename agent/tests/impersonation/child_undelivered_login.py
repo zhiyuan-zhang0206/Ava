@@ -1,8 +1,8 @@
 import os
 from unittest.mock import patch
 
-from ava import impersonation
 from base.db import NoDatabaseAuthorityError
+from meiva import impersonation
 
 before = dict(os.environ)
 with patch("psycopg.connect", side_effect=AssertionError("native dial must not run")):

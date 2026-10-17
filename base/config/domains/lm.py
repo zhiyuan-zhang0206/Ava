@@ -1,4 +1,4 @@
-# ava:ref base/config/docs/process-profiles.ava.okf.md#lm-settings-domain
+# meiva:ref base/config/docs/process-profiles.meiva.okf.md#lm-settings-domain
 from __future__ import annotations
 
 from pydantic import Field, SecretStr
@@ -9,7 +9,7 @@ from base.config.base import EnvSettings
 class LmSettings(EnvSettings):
     llm_model: str = Field(
         default="deepseek-flash",
-        alias="AVA_MODEL",
+        alias="MEIVA_MODEL",
         description=(
             "Agent model name, e.g. deepseek-flash or claude-*. Per-agent "
             "overridable; a cross-provider override needs that provider's API key "
@@ -28,7 +28,7 @@ class LmSettings(EnvSettings):
 
     labeler_model: str = Field(
         default="deepseek-flash",
-        alias="AVA_LABELER_MODEL",
+        alias="MEIVA_LABELER_MODEL",
         description=(
             "Model used only to generate a conversation's short display name "
             "from its first message. Same provider matrix as llm_model; one "
@@ -47,7 +47,7 @@ class LmSettings(EnvSettings):
 
     hierarchy_model: str = Field(
         default="deepseek-flash",
-        alias="AVA_HIERARCHY_MODEL",
+        alias="MEIVA_HIERARCHY_MODEL",
         description=(
             "Fallback model for the understanding-layer generation pass "
             "(hierarchical run-timeline node summaries, task #3704). The "
@@ -71,7 +71,7 @@ class LmSettings(EnvSettings):
 
     reply_suggestion_enabled: bool = Field(
         default=True,
-        alias="AVA_REPLY_SUGGESTION_ENABLED",
+        alias="MEIVA_REPLY_SUGGESTION_ENABLED",
         description=(
             "Cluster switch for reply suggestions: after an agent's turn ends the web "
             "console asks the gateway to draft a reply for the user, shown as grey text "
@@ -90,7 +90,7 @@ class LmSettings(EnvSettings):
 
     reply_suggestion_model: str = Field(
         default="deepseek-flash",
-        alias="AVA_REPLY_SUGGESTION_MODEL",
+        alias="MEIVA_REPLY_SUGGESTION_MODEL",
         description=(
             "Chat model that drafts the suggested reply, run with reasoning off (a "
             "reasoning pass makes a one-line draft take tens of seconds). Must be a "
@@ -107,7 +107,7 @@ class LmSettings(EnvSettings):
 
     reply_suggestion_gate_model: str = Field(
         default="jev-1.13.0",
-        alias="AVA_REPLY_SUGGESTION_GATE_MODEL",
+        alias="MEIVA_REPLY_SUGGESTION_GATE_MODEL",
         description=(
             "Decision model that judges whether a reply suggestion would help the user "
             "before any draft is generated. Must be a registered decision "
@@ -126,7 +126,7 @@ class LmSettings(EnvSettings):
         default=0.5,
         ge=0.0,
         le=1.0,
-        alias="AVA_REPLY_SUGGESTION_GATE_THRESHOLD",
+        alias="MEIVA_REPLY_SUGGESTION_GATE_THRESHOLD",
         description=(
             "Minimum probability (0-1) the gate model must give to 'a reply suggestion "
             "would help the user' for replies to be drafted. Raise it to draft less often."
@@ -143,7 +143,7 @@ class LmSettings(EnvSettings):
     reply_suggestion_max_input_tokens: int = Field(
         default=1500,
         gt=0,
-        alias="AVA_REPLY_SUGGESTION_MAX_INPUT_TOKENS",
+        alias="MEIVA_REPLY_SUGGESTION_MAX_INPUT_TOKENS",
         description=(
             "Token budget of the conversation excerpt (the user's latest message and the "
             "agent's last-turn text) given to the gate and the draft model. The user's "
@@ -162,10 +162,10 @@ class LmSettings(EnvSettings):
 
     llm_invoke_timeout_seconds: float = Field(
         default=60.0,
-        alias="AVA_LLM_INVOKE_TIMEOUT_SECONDS",
+        alias="MEIVA_LLM_INVOKE_TIMEOUT_SECONDS",
         description=(
             "Total timeout (seconds) for one non-streaming model invoke on the "
-            "SDK paths (ava.understand, ava.web.fetch's answer step). Bounds a "
+            "SDK paths (meiva.understand, meiva.web.fetch's answer step). Bounds a "
             "wedged provider that would otherwise hold the call at the provider "
             "SDK default (~600s). Applies per attempt; llm_invoke_retry_attempts "
             "restarts the whole bounded call."
@@ -180,10 +180,10 @@ class LmSettings(EnvSettings):
 
     llm_invoke_retry_attempts: int = Field(
         default=1,
-        alias="AVA_LLM_INVOKE_RETRY_ATTEMPTS",
+        alias="MEIVA_LLM_INVOKE_RETRY_ATTEMPTS",
         description=(
             "Retries after a timed-out or transiently-failed non-streaming "
-            "invoke (ava.understand, ava.web.fetch answer). The call is "
+            "invoke (meiva.understand, meiva.web.fetch answer). The call is "
             "read-only/idempotent, so a bounded retry is safe; 0 disables."
         ),
         json_schema_extra={
@@ -196,11 +196,11 @@ class LmSettings(EnvSettings):
 
     llm_invoke_retry_delay_seconds: float = Field(
         default=2.0,
-        alias="AVA_LLM_INVOKE_RETRY_DELAY_SECONDS",
+        alias="MEIVA_LLM_INVOKE_RETRY_DELAY_SECONDS",
         description=(
             "Base wait (seconds) for non-streaming invoke retries; doubles "
             "per attempt (exponential backoff) up to "
-            "AVA_LLM_INVOKE_RETRY_MAX_DELAY_SECONDS, plus up to 1s jitter."
+            "MEIVA_LLM_INVOKE_RETRY_MAX_DELAY_SECONDS, plus up to 1s jitter."
         ),
         json_schema_extra={
             "restart_required": "agent",
@@ -212,11 +212,11 @@ class LmSettings(EnvSettings):
 
     llm_invoke_retry_max_delay_seconds: float = Field(
         default=30.0,
-        alias="AVA_LLM_INVOKE_RETRY_MAX_DELAY_SECONDS",
+        alias="MEIVA_LLM_INVOKE_RETRY_MAX_DELAY_SECONDS",
         description=(
             "Cap (seconds) on the exponential-backoff interval between "
-            "non-streaming invoke retries (ava.understand / ava.web.fetch "
-            "answer). The base AVA_LLM_INVOKE_RETRY_DELAY_SECONDS doubles per "
+            "non-streaming invoke retries (meiva.understand / meiva.web.fetch "
+            "answer). The base MEIVA_LLM_INVOKE_RETRY_DELAY_SECONDS doubles per "
             "attempt up to this cap, plus up to 1s jitter; a provider "
             "Retry-After header asking for longer than the backoff is "
             "respected (capped at 120s)."
@@ -231,7 +231,7 @@ class LmSettings(EnvSettings):
 
     llm_compact_timeout_seconds: float = Field(
         default=120.0,
-        alias="AVA_LLM_COMPACT_TIMEOUT_SECONDS",
+        alias="MEIVA_LLM_COMPACT_TIMEOUT_SECONDS",
         description=(
             "Total timeout (seconds) for one compaction-summary generation "
             "(auto-compact + compact_request). The summary call is larger than "
@@ -248,7 +248,7 @@ class LmSettings(EnvSettings):
 
     llm_stream_ttft_timeout_seconds: float | None = Field(
         default=None,
-        alias="AVA_LLM_STREAM_TTFT_TIMEOUT_SECONDS",
+        alias="MEIVA_LLM_STREAM_TTFT_TIMEOUT_SECONDS",
         description=(
             "Streaming time-to-first-token timeout (seconds): abort the turn if no "
             "first chunk arrives in time. Separate from the inter-chunk timeout so a "
@@ -268,7 +268,7 @@ class LmSettings(EnvSettings):
 
     llm_stream_total_timeout_seconds: float | None = Field(
         default=None,
-        alias="AVA_LLM_STREAM_TOTAL_TIMEOUT_SECONDS",
+        alias="MEIVA_LLM_STREAM_TOTAL_TIMEOUT_SECONDS",
         description=(
             "Total duration ceiling (seconds) for one streaming LLM attempt, "
             "even while chunks keep arriving. This bounds a drip-fed stream and "
@@ -288,7 +288,7 @@ class LmSettings(EnvSettings):
 
     llm_stream_inter_chunk_timeout_seconds: float | None = Field(
         default=None,
-        alias="AVA_LLM_STREAM_INTER_CHUNK_TIMEOUT_SECONDS",
+        alias="MEIVA_LLM_STREAM_INTER_CHUNK_TIMEOUT_SECONDS",
         description=(
             "Streaming inter-chunk timeout (seconds): abort the turn if the gap "
             "between chunks exceeds this. Unset resolves the per-model default "
@@ -307,7 +307,7 @@ class LmSettings(EnvSettings):
 
     llm_retry_max_attempts: int | None = Field(
         default=None,
-        alias="AVA_LLM_RETRY_MAX_ATTEMPTS",
+        alias="MEIVA_LLM_RETRY_MAX_ATTEMPTS",
         description=(
             "Max LLM attempts per turn (initial + retries). Unset resolves the "
             "per-model default (base/lm/registry.py; shared floor 6, sized for "
@@ -324,7 +324,7 @@ class LmSettings(EnvSettings):
     llm_retry_max_total_seconds: float = Field(
         default=420.0,
         gt=0,
-        alias="AVA_LLM_RETRY_MAX_TOTAL_SECONDS",
+        alias="MEIVA_LLM_RETRY_MAX_TOTAL_SECONDS",
         description=(
             "Hard wall-clock budget (seconds) across an LLM node's initial "
             "attempt, retries, and retry waits. The retry policy clips its next "
@@ -341,7 +341,7 @@ class LmSettings(EnvSettings):
 
     llm_retry_initial_interval_seconds: float = Field(
         default=30.0,
-        alias="AVA_LLM_RETRY_INITIAL_INTERVAL_SECONDS",
+        alias="MEIVA_LLM_RETRY_INITIAL_INTERVAL_SECONDS",
         description="First LLM retry wait (seconds); doubles each attempt (30→60→120→…).",
         json_schema_extra={
             "restart_required": "agent",
@@ -353,7 +353,7 @@ class LmSettings(EnvSettings):
 
     llm_retry_max_interval_seconds: float = Field(
         default=480.0,
-        alias="AVA_LLM_RETRY_MAX_INTERVAL_SECONDS",
+        alias="MEIVA_LLM_RETRY_MAX_INTERVAL_SECONDS",
         description="Cap on the LLM retry backoff interval (seconds).",
         json_schema_extra={
             "restart_required": "agent",
@@ -365,7 +365,7 @@ class LmSettings(EnvSettings):
 
     llm_fatal_provider_error_types: str = Field(
         default="engine_overloaded_error",
-        alias="AVA_LLM_FATAL_PROVIDER_ERROR_TYPES",
+        alias="MEIVA_LLM_FATAL_PROVIDER_ERROR_TYPES",
         description=(
             "Comma-separated provider error `type` strings (from the response body "
             "`error.type`) treated as fatal — fail fast, no retry. Empty disables "
@@ -383,7 +383,7 @@ class LmSettings(EnvSettings):
 
     llm_silent_idle_max_output_tokens: int = Field(
         default=2048,
-        alias="AVA_LLM_SILENT_IDLE_MAX_OUTPUT_TOKENS",
+        alias="MEIVA_LLM_SILENT_IDLE_MAX_OUTPUT_TOKENS",
         description=(
             "Cumulative output-token budget ceiling for consecutive silent-idle "
             "turns (reasoning but no text and no tool_call). A provider-reported "
@@ -401,7 +401,7 @@ class LmSettings(EnvSettings):
 
     llm_override: str = Field(
         default="",
-        alias="AVA_LLM_OVERRIDE",
+        alias="MEIVA_LLM_OVERRIDE",
         description="Test-only fake-chat-model injection, format `module.path:factory_name`. Empty = use the real provider.",
         json_schema_extra={
             "restart_required": "agent",
@@ -413,7 +413,7 @@ class LmSettings(EnvSettings):
 
     reasoning_effort: str | None = Field(
         default=None,
-        alias="AVA_REASONING_EFFORT",
+        alias="MEIVA_REASONING_EFFORT",
         description=(
             "Cross-provider reasoning effort (`` / `none` / `minimal` / `low` / "
             "`medium` / `high` / `xhigh` / `max`). Unset resolves the per-model "
@@ -433,7 +433,7 @@ class LmSettings(EnvSettings):
 
     claude_thinking_budget_tokens: int | None = Field(
         default=None,
-        alias="AVA_CLAUDE_THINKING_BUDGET_TOKENS",
+        alias="MEIVA_CLAUDE_THINKING_BUDGET_TOKENS",
         description=(
             "Extended-thinking token budget for Claude models that default thinking "
             "OFF (currently claude-haiku-4-5-20251001). 0 = explicitly leave off; when > 0 "
@@ -454,8 +454,8 @@ class LmSettings(EnvSettings):
 
     understand_text_model: str = Field(
         default="deepseek-flash",
-        alias="AVA_UNDERSTAND_TEXT_MODEL",
-        description="Model for `ava.understand`'s text path (strings and text files). Any agent model id works.",
+        alias="MEIVA_UNDERSTAND_TEXT_MODEL",
+        description="Model for `meiva.understand`'s text path (strings and text files). Any agent model id works.",
         json_schema_extra={
             "restart_required": "agent",
             "writable": True,
@@ -466,9 +466,9 @@ class LmSettings(EnvSettings):
 
     understand_media_model: str = Field(
         default="gemini-3.8-flash",
-        alias="AVA_UNDERSTAND_MEDIA_MODEL",
+        alias="MEIVA_UNDERSTAND_MEDIA_MODEL",
         description=(
-            "Model for `ava.understand`'s media path (image/video/audio/PDF). "
+            "Model for `meiva.understand`'s media path (image/video/audio/PDF). "
             "Must be a Gemini model — the media wire format is Gemini-specific, "
             "so a non-Gemini id fails fast with a clear error. The provider "
             "abstraction (factory routing / endpoint override / quality knobs) "
@@ -484,9 +484,9 @@ class LmSettings(EnvSettings):
 
     understand_media_resolution: str = Field(
         default="high",
-        alias="AVA_UNDERSTAND_MEDIA_RESOLUTION",
+        alias="MEIVA_UNDERSTAND_MEDIA_RESOLUTION",
         description=(
-            "Media resolution for `ava.understand`'s media path: `low` / `medium` / "
+            "Media resolution for `meiva.understand`'s media path: `low` / `medium` / "
             "`high`. Higher costs more input tokens per image/frame; drop it to cut "
             "cost on bulk media."
         ),
@@ -500,9 +500,9 @@ class LmSettings(EnvSettings):
 
     understand_media_thinking_level: str = Field(
         default="medium",
-        alias="AVA_UNDERSTAND_MEDIA_THINKING_LEVEL",
+        alias="MEIVA_UNDERSTAND_MEDIA_THINKING_LEVEL",
         description=(
-            "Thinking level for `ava.understand`'s media path: `minimal` / `low` / "
+            "Thinking level for `meiva.understand`'s media path: `minimal` / `low` / "
             "`medium` / `high`. Higher = deeper but slower and pricier."
         ),
         json_schema_extra={
@@ -515,9 +515,9 @@ class LmSettings(EnvSettings):
 
     understand_media_base_url: str | None = Field(
         default=None,
-        alias="AVA_UNDERSTAND_MEDIA_BASE_URL",
+        alias="MEIVA_UNDERSTAND_MEDIA_BASE_URL",
         description=(
-            "Gemini endpoint override for `ava.understand`'s media path (the "
+            "Gemini endpoint override for `meiva.understand`'s media path (the "
             "`generativelanguage.googleapis.com` base). None = the SDK default "
             "official endpoint. Point it at a self-hosted relay or a provider "
             "mirror without code changes; the same auth as Gemini is sent "
@@ -558,7 +558,7 @@ class LmSettings(EnvSettings):
     gemini_api_key: SecretStr | None = Field(
         default=None,
         alias="GEMINI_API_KEY",
-        description="Google Gemini API key, used by `ava.understand`'s media path and any gemini-* agent model. Empty = media understand raises.",
+        description="Google Gemini API key, used by `meiva.understand`'s media path and any gemini-* agent model. Empty = media understand raises.",
         json_schema_extra={
             "capability": "common",
             "restart_required": "agent",
@@ -633,7 +633,7 @@ class LmSettings(EnvSettings):
 
     dashscope_base_url: str = Field(
         default="https://dashscope.aliyuncs.com/compatible-mode/v1",
-        alias="AVA_DASHSCOPE_BASE_URL",
+        alias="MEIVA_DASHSCOPE_BASE_URL",
         description=(
             "OpenAI-compatible endpoint qwen* models dial. Defaults to Alibaba's "
             "public Beijing endpoint; a dedicated Model Studio workspace serves the "

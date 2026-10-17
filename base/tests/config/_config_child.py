@@ -31,7 +31,7 @@ elif mode == "respawn":
     sys.stdout.write(
         f"{c.settings.data_plane.db_url}\n"
         f"{os.environ['DEEPSEEK_API_KEY']}\n"
-        f"{os.environ['AVA_HOME']}\n"
+        f"{os.environ['MEIVA_HOME']}\n"
     )
 elif mode == "skip_defers_prepare":
     import base.config as c
@@ -41,7 +41,7 @@ elif mode == "skip_defers_prepare":
     value = c.settings.lm.llm_model
     sys.stdout.write(
         f"DEFER {prepared_before} {c.boot_state()['prepared']} {value} "
-        f"{os.environ.get('AVA_DB_URL') == PLACEHOLDER_DB_URL}\n"
+        f"{os.environ.get('MEIVA_DB_URL') == PLACEHOLDER_DB_URL}\n"
     )
 elif mode == "eval_isolation":
     from base.config.domains.agent.eval import AgentEvalSettings
@@ -50,9 +50,9 @@ elif mode == "eval_isolation":
     assert config.eval_isolation is True
     assert config.eval_network_allowlist == ["web", "understand"]
     sys.stdout.write("ok\n")
-elif mode == "ava_home":
+elif mode == "meiva_home":
     import base.paths as p
 
-    sys.stdout.write(f"{p.ava_home()}\n")
+    sys.stdout.write(f"{p.meiva_home()}\n")
 else:
     raise SystemExit(f"unknown mode: {mode}")

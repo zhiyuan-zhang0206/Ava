@@ -167,7 +167,7 @@ def test_billing_error_types_are_billing(error_type: str) -> None:
     ],
 )
 def test_dashscope_billing_codes_are_billing(error_code: str) -> None:
-    # ava:ref base/packages/tests/lm/docs/contracts.ava.okf.md#billing-evidence
+    # meiva:ref base/packages/tests/lm/docs/contracts.meiva.okf.md#billing-evidence
     exc = _sdk_status_error(
         400,
         {"error": {"type": "invalid_request_error", "code": error_code, "message": "no balance"}},
@@ -176,7 +176,7 @@ def test_dashscope_billing_codes_are_billing(error_code: str) -> None:
 
 
 def test_billing_code_match_does_not_widen_the_reported_error_type() -> None:
-    # ava:ref base/packages/tests/lm/docs/contracts.ava.okf.md#billing-evidence
+    # meiva:ref base/packages/tests/lm/docs/contracts.meiva.okf.md#billing-evidence
     exc = _sdk_status_error(
         400, {"error": {"type": "invalid_request_error", "code": "Arrearage", "message": "x"}}
     )
@@ -258,7 +258,7 @@ _GEMINI_PREPAY_DETAILS: Mapping[str, object] = {
 
 
 def test_google_genai_prepay_depletion_is_billing() -> None:
-    # ava:ref base/packages/tests/lm/docs/contracts.ava.okf.md#billing-evidence
+    # meiva:ref base/packages/tests/lm/docs/contracts.meiva.okf.md#billing-evidence
     exc = _genai_error(429, _GEMINI_PREPAY_DETAILS)
     result = classify_error(exc)
     assert result.status == 429
@@ -301,7 +301,7 @@ def test_generic_google_wrapper_cannot_borrow_transient_sdk_cause(status: int) -
     ],
 )
 def test_google_genai_rate_limit_429_is_not_billing(message: str) -> None:
-    # ava:ref base/packages/tests/lm/docs/contracts.ava.okf.md#billing-evidence
+    # meiva:ref base/packages/tests/lm/docs/contracts.meiva.okf.md#billing-evidence
     details = {"error": {"code": 429, "message": message, "status": "RESOURCE_EXHAUSTED"}}
     result = classify_error(_genai_error(429, details))
     assert result.error_class is ErrorClass.TRANSIENT

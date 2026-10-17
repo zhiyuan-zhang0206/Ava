@@ -5,14 +5,14 @@ not see. Read before adding an import that points "up", and when `meizel check` 
 
 **Source of truth.** The root `meizel.toml` (`[uses]`, and the recorded `[debt]` of the
 directories). This page says what the declarations mean; where the two differ, the manifests win.
-How the rule works: [the checker](../../meizel/docs/checker/checker.ava.okf.md). Direction between
+How the rule works: [the checker](../../meizel/docs/checker/checker.meiva.okf.md). Direction between
 modules of one package (`base.x` against `base.y`) is the manifest of that package.
 
 ## The stack
 
-`base < ava < agent < gateway < cli`: a lower layer never imports a higher one. A higher layer
+`base < meiva < agent < gateway < cli`: a lower layer never imports a higher one. A higher layer
 may import any lower layer, not only the next one down. In the root manifest that is the absence
-of the edge: `base` declares no use of `ava`, `agent`, `gateway` or `cli`, `ava` none of `agent`,
+of the edge: `base` declares no use of `meiva`, `agent`, `gateway` or `cli`, `meiva` none of `agent`,
 `gateway`, `cli`, and so on up. An import against the direction is an `undeclared-edge`, and
 declaring it would close a cycle in the root's local graph, which `manifest-cycle` refuses.
 
@@ -23,9 +23,9 @@ below them, in `base` (`base.api_contracts`) or `ops`.
 
 | Rule | In the root manifest |
 |---|---|
-| `base < ava < agent < gateway < cli` | no declared edge pointing up the stack |
+| `base < meiva < agent < gateway < cli` | no declared edge pointing up the stack |
 | `services.agent_runner.agent_host` sits above `agent`; nothing below it imports it | nothing declares a use of `services`, below `cli` |
-| `services` does not import the agent kernel, except the hosted runner and the targets it uses | `"services/agent_runner/agent_host" = ["agent/...", ...]`: an edge narrowed to the one source and its listed targets ([narrowed endpoints](../../meizel/docs/checker/narrowing.ava.okf.md)) |
+| `services` does not import the agent kernel, except the hosted runner and the targets it uses | `"services/agent_runner/agent_host" = ["agent/...", ...]`: an edge narrowed to the one source and its listed targets ([narrowed endpoints](../../meizel/docs/checker/narrowing.meiva.okf.md)) |
 | `base` does not import `services` | `base` declares no use of `services` |
 | `services` does not import `cli` | `services` declares no use of `cli` |
 | `ops` imports `base` but not `gateway` or `cli`; `base` does not import `ops`; `gateway` and `cli` are independent | no edge from `ops` to `gateway` or `cli`, none from `base` to `ops` |
@@ -35,20 +35,20 @@ returns to a lower layer would close a cycle.
 
 ## Recorded debt
 
-Some edges against the direction exist today (`ava` using `agent`, `gateway` using `cli`, tests
+Some edges against the direction exist today (`meiva` using `agent`, `gateway` using `cli`, tests
 that reach up). They are not exemptions: each fact on such an edge is a recorded `cycle-edge` debt in
 the manifest of the directory whose graph has the cycle, counted per source and target file, so a new
 import on the same edge is a new violation and the recorded ones can only shrink. `python -m meizel debt`
-shows what is left. See [recorded debt](../../meizel/docs/checker/debt.ava.okf.md).
+shows what is left. See [recorded debt](../../meizel/docs/checker/debt.meiva.okf.md).
 
 ## Packages outside the stack
 
 - **`services`** is not a layer. The manifests fix four things: `base` does not use it; it does not
   use `cli`; it uses `agent` only through the narrowed hosted-runner edge; and nothing below `agent`
   uses `services.agent_runner.agent_host`. That puts `services` below `cli`, above `base` and outside the
-  agent kernel. Nothing names a direction between `services` and `gateway`, `ava` or `ops`.
+  agent kernel. Nothing names a direction between `services` and `gateway`, `meiva` or `ops`.
 - **`ops`** is above `base` and below `gateway` and `cli`.
-- **`ava_builtins`** (built-in plugins and skills) imports `base`, `ava`, `agent`, `ops` and `services`,
+- **`meiva_builtins`** (built-in plugins and skills) imports `base`, `meiva`, `agent`, `ops` and `services`,
   and `agent` and `ops` each import back into it; those cycles are recorded debt.
 - **`scripts/`, `tests/`, `schedules/` and `demos/`** are directories of the root like any other: what
   they import is declared in the root manifest, and their own tests under a package are judged in that package.

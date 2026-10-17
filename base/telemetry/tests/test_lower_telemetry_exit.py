@@ -12,7 +12,7 @@ CHILD = Path(__file__).with_name("_lower_exit_child.py")
 
 def _child(scenario: str, home: Path) -> subprocess.CompletedProcess[str]:
     env = os.environ.copy()
-    env["AVA_HOME"] = str(home)
+    env["MEIVA_HOME"] = str(home)
     return subprocess.run(  # noqa: S603 — fixed interpreter and test-owned child script
         [sys.executable, "-I", str(CHILD), scenario],
         env=env,

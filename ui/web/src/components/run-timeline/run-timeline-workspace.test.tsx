@@ -35,7 +35,7 @@ describe("RunTimelineWorkspace", () => {
   it("bounds the side panel in pixels", () => {
     expect(SIDE_PANEL_MIN).toBe("300px");
     expect(SIDE_PANEL_MAX).toBe("760px");
-    expect(RUN_TIMELINE_SPLIT_LAYOUT_ID).toBe("ava.run-timeline.split");
+    expect(RUN_TIMELINE_SPLIT_LAYOUT_ID).toBe("meiva.run-timeline.split");
   });
 
   it("stacks the details under the timeline on a narrow viewport, with no separator", async () => {

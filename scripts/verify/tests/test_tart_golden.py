@@ -14,9 +14,9 @@ from scripts.verify.tart_vm import Tart
 SHA1 = "CF503E0148DD7F8349FC23EE3D414CF40B925E37"
 GRANTED: dict[str, Any] = {
     "ping": {"preflight_screen": True, "ax_trusted": True},
-    "identity": f'  1) {SHA1} "Ava Permissions Helper Code Signing" (CSSMERR_TP_NOT_TRUSTED)',
+    "identity": f'  1) {SHA1} "Meiva Permissions Helper Code Signing" (CSSMERR_TP_NOT_TRUSTED)',
     "signature": [
-        'designated => identifier "com.ava.permissions-helper" and certificate leaf = '
+        'designated => identifier "com.meiva.permissions-helper" and certificate leaf = '
         f'H"{SHA1.lower()}"',
         "CDHash=c2cd6485ef1fa91d10ff82fec89864ac666fe394",
     ],
@@ -36,7 +36,7 @@ def test_a_dry_run_prints_every_step_in_order_and_touches_nothing(
     tart = Tart(str(tmp_path / "no-tart-here"), dry_run=True)
 
     status = tart_golden.build_golden(
-        "HEAD", evidence_root, name="ava-golden", repo=repo, tart=tart
+        "HEAD", evidence_root, name="meiva-golden", repo=repo, tart=tart
     )
 
     printed = capsys.readouterr().out
@@ -70,9 +70,11 @@ def test_the_golden_build_never_overwrites_a_vm_or_boots_a_third(tmp_path: Path)
             return self.rows
 
     repo = Path(__file__).resolve().parents[3]
-    exists = Listing([{"Name": "ava-golden", "Running": False, "Source": "local"}])
+    exists = Listing([{"Name": "meiva-golden", "Running": False, "Source": "local"}])
     with pytest.raises(RunFailedError, match="delete it yourself"):
-        tart_golden.build_golden("HEAD", tmp_path / "ev", name="ava-golden", repo=repo, tart=exists)
+        tart_golden.build_golden(
+            "HEAD", tmp_path / "ev", name="meiva-golden", repo=repo, tart=exists
+        )
 
     crowded = Listing(
         [
@@ -82,13 +84,13 @@ def test_the_golden_build_never_overwrites_a_vm_or_boots_a_third(tmp_path: Path)
     )
     with pytest.raises(RunFailedError, match="at most 2"):
         tart_golden.build_golden(
-            "HEAD", tmp_path / "ev", name="ava-golden", repo=repo, tart=crowded
+            "HEAD", tmp_path / "ev", name="meiva-golden", repo=repo, tart=crowded
         )
 
 
 def test_the_guest_scripts_pin_the_pieces_the_experiment_found_necessary() -> None:
     assert "launchctl kickstart -k" in tart_golden.RESTART_HELPER
-    assert tart_golden.FINALIZE.splitlines()[-1] == 'rm -rf "$HOME/.ava/source"'
+    assert tart_golden.FINALIZE.splitlines()[-1] == 'rm -rf "$HOME/.meiva/source"'
     assert "sqlite3" in tart_golden.VERIFY and "-readonly" in tart_golden.VERIFY
     assert not re.search(r"\b(insert|update|delete)\b", tart_golden.VERIFY, re.I)
 

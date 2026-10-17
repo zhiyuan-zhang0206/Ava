@@ -24,7 +24,7 @@ class ServiceSettings(ServiceHealthPortFields, ServiceRuntimeSettings):
     labeler_max_chars: int = Field(
         default=64,
         gt=0,
-        alias="AVA_LABELER_MAX_CHARS",
+        alias="MEIVA_LABELER_MAX_CHARS",
         description=(
             "Character ceiling for an auto-generated agent label: the model is "
             "asked for a label of at most this many characters, and the output is "
@@ -44,13 +44,13 @@ class ServiceSettings(ServiceHealthPortFields, ServiceRuntimeSettings):
         default=3,
         ge=0,
         le=23,
-        alias="AVA_BACKUP_HOUR",
+        alias="MEIVA_BACKUP_HOUR",
         description=(
             "Cluster-clock hour (0-23) at which the daily logical dump becomes due: "
             "the scheduler's first wake at/after this hour starts it, so a host that "
             "was down at that hour catches up on its next tick. 03:00 runs in the "
             "quiet window, and the newest dump is then only hours old when the "
-            "morning reads it; the hour is read on AVA_TIMEZONE (cluster time), "
+            "morning reads it; the hour is read on MEIVA_TIMEZONE (cluster time), "
             "never the host clock."
         ),
         json_schema_extra={
@@ -64,7 +64,7 @@ class ServiceSettings(ServiceHealthPortFields, ServiceRuntimeSettings):
     backup_keep: int = Field(
         default=7,
         gt=0,
-        alias="AVA_BACKUP_KEEP",
+        alias="MEIVA_BACKUP_KEEP",
         description=(
             "How many of the newest daily dumps the local pool keeps. 7 is a week "
             "of dailies: a bad migration found a day later must not have already "
@@ -79,7 +79,7 @@ class ServiceSettings(ServiceHealthPortFields, ServiceRuntimeSettings):
     )
     backup_offsite_endpoint: str = Field(
         default="",
-        alias="AVA_BACKUP_OFFSITE_ENDPOINT",
+        alias="MEIVA_BACKUP_OFFSITE_ENDPOINT",
         description=(
             "Aliyun OSS region endpoint (e.g. https://oss-cn-shanghai.aliyuncs.com) "
             "the daily dump is published to. The off-site leg is skipped, with one "
@@ -96,8 +96,8 @@ class ServiceSettings(ServiceHealthPortFields, ServiceRuntimeSettings):
     )
     backup_offsite_bucket: str = Field(
         default="",
-        alias="AVA_BACKUP_OFFSITE_BUCKET",
-        description="Aliyun OSS bucket the daily dump is published to (under `ava-logical/`).",
+        alias="MEIVA_BACKUP_OFFSITE_BUCKET",
+        description="Aliyun OSS bucket the daily dump is published to (under `meiva-logical/`).",
         json_schema_extra={
             "restart_required": "gateway",
             "writable": True,
@@ -108,7 +108,7 @@ class ServiceSettings(ServiceHealthPortFields, ServiceRuntimeSettings):
     )
     backup_offsite_credentials_file: Path | None = Field(
         default=None,
-        alias="AVA_BACKUP_OFFSITE_CREDENTIALS_FILE",
+        alias="MEIVA_BACKUP_OFFSITE_CREDENTIALS_FILE",
         description=(
             "0600 JSON holding the Aliyun OSS RAM AccessKey pair "
             "(access_key_id, access_key_secret) the off-site publish uses. "
@@ -126,7 +126,7 @@ class ServiceSettings(ServiceHealthPortFields, ServiceRuntimeSettings):
 
     gateway_pidfile: Path = Field(
         default_factory=lambda: unit_home() / "run" / "gateway.pid",
-        alias="AVA_GATEWAY_PIDFILE",
+        alias="MEIVA_GATEWAY_PIDFILE",
         description="Gateway uvicorn pidfile path. healthcheck goes via HTTP; this is auxiliary only.",
         json_schema_extra={
             "restart_required": "",
@@ -139,8 +139,8 @@ class ServiceSettings(ServiceHealthPortFields, ServiceRuntimeSettings):
 
     frontend_healthcheck_url: str = Field(
         default="http://localhost:3000",
-        alias="AVA_FRONTEND_HEALTHCHECK_URL",
-        description="The fleet UI entry the user reaches — Gate's port (the Next.js app itself binds AVA_APP_PORT and is proxied).",
+        alias="MEIVA_FRONTEND_HEALTHCHECK_URL",
+        description="The fleet UI entry the user reaches — Gate's port (the Next.js app itself binds MEIVA_APP_PORT and is proxied).",
         json_schema_extra={
             "restart_required": "",
             "writable": False,
@@ -152,7 +152,7 @@ class ServiceSettings(ServiceHealthPortFields, ServiceRuntimeSettings):
 
     app_port: int | None = Field(
         default=None,
-        alias="AVA_APP_PORT",
+        alias="MEIVA_APP_PORT",
         description="The Next.js app port the gate proxies to (the gate owns the entry port). Unset = entry port + 1; converge writes the explicit value from the cluster record.",
         json_schema_extra={
             "restart_required": "all",
@@ -164,8 +164,8 @@ class ServiceSettings(ServiceHealthPortFields, ServiceRuntimeSettings):
 
     gateway_health_url: str = Field(
         default="http://localhost:8000/api/health",
-        alias="AVA_GATEWAY_HEALTH_URL",
-        description="Gateway healthcheck probe URL. Pure agent-runners derive it from AVA_GATEWAY_URL when no host override is set; gateway-capable units default to the local gateway.",
+        alias="MEIVA_GATEWAY_HEALTH_URL",
+        description="Gateway healthcheck probe URL. Pure agent-runners derive it from MEIVA_GATEWAY_URL when no host override is set; gateway-capable units default to the local gateway.",
         json_schema_extra={
             "restart_required": "",
             "writable": False,
@@ -178,11 +178,11 @@ class ServiceSettings(ServiceHealthPortFields, ServiceRuntimeSettings):
     maintenance_hold_alert_after_s: int = Field(
         default=1800,
         gt=0,
-        alias="AVA_MAINTENANCE_HOLD_ALERT_AFTER_S",
+        alias="MEIVA_MAINTENANCE_HOLD_ALERT_AFTER_S",
         description=(
             "Age, in seconds since its acquisition, after which a still-held local "
             "maintenance hold raises the `maintenance_hold_overdue` alert. A hold freezes "
-            "every wake on its machine until `ava start` releases it, and an ordinary "
+            "every wake on its machine until `meiva start` releases it, and an ordinary "
             "stop, restart or start completes well inside this window; 1800 (30 minutes) "
             "leaves room for a slow drain without letting a forgotten hold go unnoticed. "
             "The alert reports only: nothing releases the hold."
@@ -198,7 +198,7 @@ class ServiceSettings(ServiceHealthPortFields, ServiceRuntimeSettings):
 
     im_bridge_enabled: bool = Field(
         default=True,
-        alias="AVA_IM_BRIDGE_ENABLED",
+        alias="MEIVA_IM_BRIDGE_ENABLED",
         description="Whether the im_bridge service is part of this cluster's service roster. A cluster with no IM adapters configured (all Telegram/Weixin/Feishu credentials absent) can disable the service: its daemon exits immediately with zero adapters, and the watchdog's healthcheck then fails it every round (2026-08-10 preview noise).",
         json_schema_extra={
             "restart_required": "all",
@@ -210,7 +210,7 @@ class ServiceSettings(ServiceHealthPortFields, ServiceRuntimeSettings):
 
     im_bridge_health_url: str = Field(
         default="",
-        alias="AVA_IM_BRIDGE_HEALTH_URL",
+        alias="MEIVA_IM_BRIDGE_HEALTH_URL",
         description="IM Bridge healthcheck URL. Empty = derive from the im_bridge row of base.daemon.endpoints.ServiceEndpoints.",
         json_schema_extra={
             "restart_required": "",
@@ -223,7 +223,7 @@ class ServiceSettings(ServiceHealthPortFields, ServiceRuntimeSettings):
 
     im_disabled_adapters: Annotated[list[str], NoDecode] = Field(
         default=[],
-        alias="AVA_IM_DISABLED_ADAPTERS",
+        alias="MEIVA_IM_DISABLED_ADAPTERS",
         description="Comma-separated IM adapter names to skip at daemon load (code stays; e.g. 'weixin' — WeChat iLink production-disabled since 2026-08-06; Feishu re-enabled 2026-09).",
         json_schema_extra={
             "restart_required": "gateway",
@@ -235,7 +235,7 @@ class ServiceSettings(ServiceHealthPortFields, ServiceRuntimeSettings):
 
     im_send_retry_delays: Annotated[list[float], NoDecode] = Field(
         default=[2.0, 4.0, 8.0, 16.0, 32.0],
-        alias="AVA_IM_SEND_RETRY_DELAYS",
+        alias="MEIVA_IM_SEND_RETRY_DELAYS",
         description="Comma-separated backoff delays (seconds) between gateway enqueue retries. A gateway mid-rollout is down for roughly a minute; 2+4+8+16+32 covers it. When every retry fails the error propagates and the sender is told delivery is unconfirmed; nothing is queued or replayed.",
         json_schema_extra={
             "restart_required": "gateway",
@@ -248,7 +248,7 @@ class ServiceSettings(ServiceHealthPortFields, ServiceRuntimeSettings):
     im_push_retry_backoff_seconds: float = Field(
         default=1.0,
         ge=0.0,
-        alias="AVA_IM_PUSH_RETRY_BACKOFF_SECONDS",
+        alias="MEIVA_IM_PUSH_RETRY_BACKOFF_SECONDS",
         description=(
             "Base wait (seconds) before an im_bridge outbound send is retried once "
             "(the push path and the ops-alert notify leg share it). Connection-level "
@@ -267,7 +267,7 @@ class ServiceSettings(ServiceHealthPortFields, ServiceRuntimeSettings):
     im_push_retry_jitter_seconds: float = Field(
         default=2.0,
         ge=0.0,
-        alias="AVA_IM_PUSH_RETRY_JITTER_SECONDS",
+        alias="MEIVA_IM_PUSH_RETRY_JITTER_SECONDS",
         description=(
             "Upper bound (seconds) of the uniform jitter added to "
             "im_push_retry_backoff_seconds before an im_bridge outbound retry "
@@ -284,7 +284,7 @@ class ServiceSettings(ServiceHealthPortFields, ServiceRuntimeSettings):
 
     im_sse_read_timeout_seconds: float = Field(
         default=120.0,
-        alias="AVA_IM_SSE_READ_TIMEOUT_SECONDS",
+        alias="MEIVA_IM_SSE_READ_TIMEOUT_SECONDS",
         description="Read timeout (seconds) for the IM Bridge SSE subscription stream. The stream is long-lived and mostly idle (the gateway sends a keep-alive comment about once a second), so this only trips on a genuinely dead connection (task #698 G8).",
         json_schema_extra={
             "restart_required": "gateway",
@@ -297,7 +297,7 @@ class ServiceSettings(ServiceHealthPortFields, ServiceRuntimeSettings):
     im_bridge_timeline_window: int = Field(
         default=20,
         gt=0,
-        alias="AVA_IM_BRIDGE_TIMELINE_WINDOW",
+        alias="MEIVA_IM_BRIDGE_TIMELINE_WINDOW",
         description=(
             "Raw timeline items the IM bridge fetches for a /switch replay before "
             "filtering to dialog messages: the raw feed mixes in non-dialog items "
@@ -317,7 +317,7 @@ class ServiceSettings(ServiceHealthPortFields, ServiceRuntimeSettings):
     im_bridge_replay_messages: int = Field(
         default=5,
         gt=0,
-        alias="AVA_IM_BRIDGE_REPLAY_MESSAGES",
+        alias="MEIVA_IM_BRIDGE_REPLAY_MESSAGES",
         description=(
             "How many of the most recent dialog messages a /switch replay pushes "
             "to the chat. 5 gives enough scroll-back to re-orient without flooding "
@@ -335,7 +335,7 @@ class ServiceSettings(ServiceHealthPortFields, ServiceRuntimeSettings):
     im_bridge_notice_reply_window_seconds: int = Field(
         default=300,
         gt=0,
-        alias="AVA_IM_BRIDGE_NOTICE_REPLY_WINDOW_SECONDS",
+        alias="MEIVA_IM_BRIDGE_NOTICE_REPLY_WINDOW_SECONDS",
         description=(
             "How long after tapping [Reply] on a notice the chat stays in reply "
             "mode — plain text sent in the window answers the notice. 300 (5 "
@@ -354,7 +354,7 @@ class ServiceSettings(ServiceHealthPortFields, ServiceRuntimeSettings):
     im_bridge_notice_open_limit: int = Field(
         default=50,
         gt=0,
-        alias="AVA_IM_BRIDGE_NOTICE_OPEN_LIMIT",
+        alias="MEIVA_IM_BRIDGE_NOTICE_OPEN_LIMIT",
         description=(
             "Cap on one open-notices listing for the /notice queue view (the "
             "direct-DB read and the HTTP fallback both pass it). Each listed "
@@ -371,13 +371,13 @@ class ServiceSettings(ServiceHealthPortFields, ServiceRuntimeSettings):
 
     im_push_health_channels: Annotated[list[str], NoDecode] = Field(
         default=["telegram", "feishu"],
-        alias="AVA_IM_PUSH_HEALTH_CHANNELS",
+        alias="MEIVA_IM_PUSH_HEALTH_CHANNELS",
         description=(
             "IM channels that get a periodic push-health sample for the leg-level "
             "staleness signal (task #4935): the two polling legs. weixin is omitted "
             "on purpose -- a weixin stall is the iLink context_token expiry, already "
             "its own signal (im_push_failed). Add a channel when a new polling leg "
-            "needs staleness detection. Parses like AVA_IM_DISABLED_ADAPTERS."
+            "needs staleness detection. Parses like MEIVA_IM_DISABLED_ADAPTERS."
         ),
         json_schema_extra={
             "restart_required": "gateway",
@@ -390,7 +390,7 @@ class ServiceSettings(ServiceHealthPortFields, ServiceRuntimeSettings):
     im_push_health_interval_seconds: float = Field(
         default=60.0,
         gt=0,
-        alias="AVA_IM_PUSH_HEALTH_INTERVAL_SECONDS",
+        alias="MEIVA_IM_PUSH_HEALTH_INTERVAL_SECONDS",
         description=(
             "Sampling interval (seconds) of the per-leg im_push_health event (task "
             "#4935). 60 bounds event-stream noise at one line per leg per minute "
@@ -407,7 +407,7 @@ class ServiceSettings(ServiceHealthPortFields, ServiceRuntimeSettings):
 
     ops_concurrency: int = Field(
         default=8,
-        alias="AVA_OPS_CONCURRENCY",
+        alias="MEIVA_OPS_CONCURRENCY",
         description="Max concurrent cluster ops the agent-runner executes; further inbound /ops requests queue. Prevents one fan-out from overwhelming the runner.",
         json_schema_extra={
             "capability": "agent-runner",
@@ -436,7 +436,7 @@ class ServiceSettings(ServiceHealthPortFields, ServiceRuntimeSettings):
     @classmethod
     def _parse_str_list(cls, v: object) -> object:
         """String-list env values arrive as raw strings (NoDecode):
-        AVA_IM_DISABLED_ADAPTERS and AVA_IM_PUSH_HEALTH_CHANNELS. Accept a JSON
+        MEIVA_IM_DISABLED_ADAPTERS and MEIVA_IM_PUSH_HEALTH_CHANNELS. Accept a JSON
         array ("[\"weixin\", \"feishu\"]"), a comma-separated list
         ("weixin,feishu"), or an empty value -> [] (Task #855; P0 fix: without
         this validator any env value raised ValidationError and the settings

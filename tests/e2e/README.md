@@ -12,7 +12,7 @@ What is (and is not) covered, feature by feature, lives in [FEATURES.md](FEATURE
 
 The stack authenticates like a started cluster (`_credentials.py`). `e2e_process_env`
 gives the e2e home a cluster secret and an active write generation in its private
-ledger (the one `ava start` births at first start). The gateway is delivered its
+ledger (the one `meiva start` births at first start). The gateway is delivered its
 gateway-class machine API token, the ops daemon and the agent host the runner-class
 token (agent children inherit it), so the gateway's authenticated `/ops` dials are
 accepted. The test process reaches the gateway with the human secret as a Bearer header
@@ -38,7 +38,7 @@ HEADED=1 .venv/bin/pytest tests/e2e/flow/test_message_flow.py -v
 ```
 
 On failure, full tracebacks are in `tmp/e2e-logs/{gateway,frontend}.log` and
-`~/.ava/logs/agent-*.log`. CI failures also upload artifacts.
+`~/.meiva/logs/agent-*.log`. CI failures also upload artifacts.
 
 `tmp/e2e-logs/cleanup-<worker-pid>_<timestamp>.jsonl` records the existing
 residue sweep's observations, owner liveness decisions, selected targets and
@@ -55,7 +55,7 @@ exit code of `-15` alone does not identify its signal sender.
    The `build` signature must match the `base/lm/factory.py:_LLMFactory` Protocol
    (model name and explicit agent id → BaseChatModel). Host model factories must
    use this id for records and scenario selection; the host does not bind the
-   process-local `ava` SDK. None denotes a caller outside an agent. The
+   process-local `meiva` SDK. None denotes a caller outside an agent. The
    `isinstance(BaseChatModel)` at the end of `_resolve_override`
    catches bad factories immediately at build time.
 2. The test function uses `@pytest.mark.scenario("tests.e2e.fakes.scenarios.<name>:build")`.
@@ -105,7 +105,7 @@ for arbitrarily long or concurrent runs.
 
 ## Key constraints
 
-- **CI runs e2e serially (`-n 1`, dedicated `ava-ci-e2e` box)** — only one full stack runs per machine at a time,
+- **CI runs e2e serially (`-n 1`, dedicated `meiva-ci-e2e` box)** — only one full stack runs per machine at a time,
   for resource determinism (a stack gets exclusive CPU, timing-sensitive lifecycle waits are not preempted
   by sibling stacks on the same machine). The gateway owns one bound socket from module import through
   frontend build and per-test restarts. POSIX `pass_fds` transfers it directly to the existing
@@ -120,13 +120,13 @@ for arbitrarily long or concurrent runs.
   for independent native clusters per worker. This gateway FD path targets the existing POSIX E2E CI.
 - **dev and e2e can run simultaneously** — ports/databases/channels are all separate
   (see `_ports.py` + `conftest.py` env override section).
-- **gateway is function-scoped** — restarts per test with fresh `AVA_LLM_OVERRIDE`
+- **gateway is function-scoped** — restarts per test with fresh `MEIVA_LLM_OVERRIDE`
   env; frontend / browser are session-scoped (slow to start, not related to env injection).
 - **lifecycle daemons publish the start boundary** — the bare gateway fixture opens
   a fresh generation before gateway launch; after its health checks, the process
   restarter or hosted agent-host marks that generation serving. The fixture clears
   it after each test, because the file-backed marker outlives database truncation.
-- **AVA_* env forwarding**: sessions (daemons, agent shells) get an explicitly built env —
+- **MEIVA_* env forwarding**: sessions (daemons, agent shells) get an explicitly built env —
   handed over out-of-band, never argv — from the built env dict / 0600 envfile (argv is
   world-readable, issue #974).
 
@@ -134,18 +134,18 @@ for arbitrarily long or concurrent runs.
 
 | File | scenario | What it validates |
 |---|---|---|
-| `lifecycle/test_self_terminate.py` | `lifecycle_terminate` | `ava.self.terminate` → status='terminated' + inbound source='self' |
-| `lifecycle/test_self_restart.py` | `lifecycle_restart` | `ava.self.restart` → restarter respawn → new PID + status back to idling |
+| `lifecycle/test_self_terminate.py` | `lifecycle_terminate` | `meiva.self.terminate` → status='terminated' + inbound source='self' |
+| `lifecycle/test_self_restart.py` | `lifecycle_restart` | `meiva.self.restart` → restarter respawn → new PID + status back to idling |
 | `lifecycle/test_self_resurrect.py` | `lifecycle_resurrect` | after `terminate`, `POST /resurrect` → fresh process + 'resurrect' inbound |
 | `lifecycle/test_fork_identity.py` | `fork_identity` | `POST /api/keyed/v1/agents` fork_from=source+prompt → forked agent (new id) replies `FORK_OK` after a model call sees both the fork marker and prompt; does not prove this was the first call |
 | `flow/test_message_flow.py` | `message_flow` | **Panoramic Case 1 (#1018)** — one user message → reasoning + code tool call + real exec + reply; REST timeline fan-out (reasoning/code/output/chat), reply rendered in browser via SSE, zero unrecognized-marker alarms + zero `[timeline] unrecognized` console warnings |
 | `flow/test_compact_flow.py` | `compact_flow` | **Panoramic Case 2 (#1018)** — native compact history fixture (not public manual admission) → Compaction LLM (script turn) → clean wipe → `inbound_compact_request` envelope renders, NO unrecognized-marker alarm (#1017 regression), agent replies post-compact |
 | `flow/test_error_recovery.py` | `error_recovery` | **Panoramic Case 3 (#1018)** — LLM raises FatalProviderError (no retry) → SSE `error` event → `[error]` marker in browser (NOT the unrecognized alarm), aborted turn commits no agent_chat, next message recovers normally |
 | `state/test_shell_history_state.py` | `shell_history` | **task #4585** — browser back/forward between `/?agent_id=N` and `/shell/N/S` restores each container's scroll position (per history entry) with no blank / invalid-params frame on either return, and the shell poll + manual refresh stay alive |
-| `plugins/test_ava_code_effects.py` | `ava_code:*` (`build_cwd_notes`, `build_context_files`, `build_cwd_tools`, `build_cwd_restart`, `build_system_prompt`, `build_after_compact`) | **ava_code effects, asserted on the messages the model actually received** (a recording fake logs each call's input), the files the exec wrote, and the checkpoint: cwd-change note + project-skills note reach the next model input and are consumed; AGENTS.md / CLAUDE.md injected on read once (path + content-hash dedup, direct-read exempt, oversize head+tail with archive); relative SDK paths follow the logical cwd; cwd survives restart and a vanished cwd falls back to the workspace; coding conventions are in the system prompt; compaction re-surfaces skills + context files |
-| `lifecycle/test_lifecycle_effects.py` | `lifecycle_effects:*` | **Agent lifecycle effects, asserted on what each agent's model was handed, inbound rows and disk**: `ava.agents.send_message` reaches the peer's model with the sender in the inbound; `ava.agents.spawn` starts a child that runs its prompt; external terminate stores a message that greets the revival; forced terminate and a canonical native cancel command kill a running exec (its post-sleep marker never appears) and the agent stays usable; `ava.self.compact` replaces history with the summary |
-| `flow/test_sdk_effects.py` | `sdk_effects:*` | **execute_code and SDK effects, asserted on the tool output / notes the model is handed back and on disk**: a raising or hard-crashing exec is reported and the agent carries on; `ava.files.edit` missing/ambiguous/replace_all contract; reading injection-like content yields a SECURITY note (source and triggers, never the body); a `/command` expands into the model input and is listed by `ava.agents.commands()`; an uploaded file is announced to the agent and readable at the announced path; an exec timeout kills the child and its own subprocess |
-| `flow/test_schedules_api.py` | `schedules:build` | **Schedule management through real gateway and CLI processes**: REST CRUD and version snapshots; start/stop/restart persist a sync request for the absent manager; runs and transcript reads; draft launches a writer whose model sees the request; `ava schedules` verbs reach the same gateway rows. Session execution is covered separately by SC2/SC3. |
+| `plugins/test_meiva_code_effects.py` | `meiva_code:*` (`build_cwd_notes`, `build_context_files`, `build_cwd_tools`, `build_cwd_restart`, `build_system_prompt`, `build_after_compact`) | **meiva_code effects, asserted on the messages the model actually received** (a recording fake logs each call's input), the files the exec wrote, and the checkpoint: cwd-change note + project-skills note reach the next model input and are consumed; AGENTS.md / CLAUDE.md injected on read once (path + content-hash dedup, direct-read exempt, oversize head+tail with archive); relative SDK paths follow the logical cwd; cwd survives restart and a vanished cwd falls back to the workspace; coding conventions are in the system prompt; compaction re-surfaces skills + context files |
+| `lifecycle/test_lifecycle_effects.py` | `lifecycle_effects:*` | **Agent lifecycle effects, asserted on what each agent's model was handed, inbound rows and disk**: `meiva.agents.send_message` reaches the peer's model with the sender in the inbound; `meiva.agents.spawn` starts a child that runs its prompt; external terminate stores a message that greets the revival; forced terminate and a canonical native cancel command kill a running exec (its post-sleep marker never appears) and the agent stays usable; `meiva.self.compact` replaces history with the summary |
+| `flow/test_sdk_effects.py` | `sdk_effects:*` | **execute_code and SDK effects, asserted on the tool output / notes the model is handed back and on disk**: a raising or hard-crashing exec is reported and the agent carries on; `meiva.files.edit` missing/ambiguous/replace_all contract; reading injection-like content yields a SECURITY note (source and triggers, never the body); a `/command` expands into the model input and is listed by `meiva.agents.commands()`; an uploaded file is announced to the agent and readable at the announced path; an exec timeout kills the child and its own subprocess |
+| `flow/test_schedules_api.py` | `schedules:build` | **Schedule management through real gateway and CLI processes**: REST CRUD and version snapshots; start/stop/restart persist a sync request for the absent manager; runs and transcript reads; draft launches a writer whose model sees the request; `meiva schedules` verbs reach the same gateway rows. Session execution is covered separately by SC2/SC3. |
 
 The test files sit in subdirectories by domain, which also keeps `tests/e2e` under its direct-entry budget: `flow/` (full-turn panoramic cases), `lifecycle/` (restart, resurrect, terminate, fork, impersonation), `state/` (browser scroll and navigation state), `visual/` (layout, accessibility and snapshot tests with their `_layout_assertions.py`, `_visual_snapshot.py` helpers and the `__snapshots__/` goldens). The shared helpers (`_db.py`, `fixture_environment.py`, `_ports.py`, `process_support.py`, `_settings.py`, `_truncate.py`) and `conftest.py` stay at the top level, so the package-scoped fixtures cover every subdirectory.
 
@@ -236,4 +236,4 @@ length when changing the fake. The helper's `rounds` counter increments before
 confirming page arrival, so `rounds >= 2` alone does not prove two successful
 loads; history availability and the actual page/anchor assertions matter too.
 
-Browser fixture premises: [[tests/docs/e2e-fixture-contracts.ava.okf.md]].
+Browser fixture premises: [[tests/docs/e2e-fixture-contracts.meiva.okf.md]].

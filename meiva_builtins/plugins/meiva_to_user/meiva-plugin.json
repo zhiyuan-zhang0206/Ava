@@ -1,0 +1,18 @@
+{
+  "apiVersion": 2,
+  "name": "meiva_to_user",
+  "version": "1.0.0",
+  "engines": {
+    "meiva": ">=2026.10.1"
+  },
+  "contributions": {
+    "hooks": [
+      "after_exec"
+    ],
+    "sdkWraps": [
+      "files.write",
+      "files.append",
+      "files.edit"
+    ]
+  }
+}

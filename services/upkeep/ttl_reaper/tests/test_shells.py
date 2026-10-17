@@ -367,7 +367,7 @@ async def test_reap_expired_shells_notifies_for_a_watcher_shaped_session(
     database_gate: ProcessDbGate,
     event_bus: EventBus,
 ) -> None:
-    """A watcher (`ava.watcher.at/cron/launch`) is just an `agent_shell_ttls`
+    """A watcher (`meiva.watcher.at/cron/launch`) is just an `agent_shell_ttls`
     row with no registry of its own (docs/decisions/2026-09-27-watchers-are-never-
     restarted.md): there is no special case left in this pass, so a reclaimed
     watcher-shaped session — one that was actually running a script, exactly

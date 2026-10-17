@@ -5,7 +5,7 @@ from inspect import cleandoc
 
 def compact_contract() -> str:
     """Disclose the SDK-owned contract when the summary model cannot call tools."""
-    from ava.self import compact
+    from meiva.self import compact
 
     if compact.__doc__ is None:
         raise RuntimeError("compaction requires its SDK contract")

@@ -1,4 +1,4 @@
-# ava:ref base/config/docs/prompt-composition.ava.okf.md#sdk-defaults
+# meiva:ref base/config/docs/prompt-composition.meiva.okf.md#sdk-defaults
 from __future__ import annotations
 
 from typing import Annotated, Literal
@@ -12,10 +12,10 @@ from base.config.base import EnvSettings
 class AgentPromptSettings(EnvSettings):
     sdk_disable: Annotated[list[str], NoDecode] = Field(
         default_factory=list,
-        alias="AVA_SDK_DISABLE",
+        alias="MEIVA_SDK_DISABLE",
         description=(
             "Comma-separated agent-facing SDK paths to remove before the agent "
-            "imports `ava`. Each entry is a top-level module (`monitor`) or a dotted "
+            "imports `meiva`. Each entry is a top-level module (`monitor`) or a dotted "
             "module.attr (`self.terminate`); the name then raises on import/access. "
             "Used to scope the SDK to a context, e.g. a benchmark runner that owns "
             "the agent lifecycle."
@@ -32,20 +32,20 @@ class AgentPromptSettings(EnvSettings):
 
     sdk_expand_in_system_prompt: Annotated[list[str], NoDecode] = Field(
         default_factory=lambda: ["shell", "files", "agents", "tasks"],
-        alias="AVA_SDK_EXPAND",
+        alias="MEIVA_SDK_EXPAND",
         description=(
             "Comma-separated SDK paths whose full contract (signatures + "
             "docstrings) is expanded into the system prompt after the SDK overview, "
             "so the agent calls them without a drill-down turn. Each entry is a "
-            "dotted path under `ava`; `*` expands every top-level public namespace "
+            "dotted path under `meiva`; `*` expands every top-level public namespace "
             "(combine with an explicit nested path, `*,shell.sessions`, to also "
             "expand a sub-namespace). `*` skips the capability surfaces `skills` "
             "and `mcps` — those are indexed once by the `# Capabilities` section, "
             "and expanding them here would render a second full index; name one "
-            "explicitly (`*,skills`) to override. Names in AVA_SDK_DISABLE are "
+            "explicitly (`*,skills`) to override. Names in MEIVA_SDK_DISABLE are "
             "excluded; unresolved entries are skipped with a warning. Empty "
             "expands nothing. Default shell,files,agents,tasks is the production "
-            "P95 module set; other contracts load on demand through ava.help. "
+            "P95 module set; other contracts load on demand through meiva.help. "
             "Plugin-declared expansions still apply."
         ),
         json_schema_extra={
@@ -58,12 +58,12 @@ class AgentPromptSettings(EnvSettings):
 
     skills_to_inject_into_system_prompt: Annotated[list[str], NoDecode] = Field(
         default_factory=lambda: ["*"],
-        alias="AVA_SKILLS_TO_INJECT_INTO_SYSTEM_PROMPT",
+        alias="MEIVA_SKILLS_TO_INJECT_INTO_SYSTEM_PROMPT",
         description=(
             "Comma-separated skill names whose name + one-line description are "
             "injected into the system prompt as an always-on index; the agent loads "
             "the full body on demand. Each entry resolves by `.`-identifier "
-            "(`ava-memory.consolidation`) then bare frontmatter name, dash and underscore "
+            "(`meiva-memory.consolidation`) then bare frontmatter name, dash and underscore "
             "spellings alike; `*` (the default) selects every loaded skill and "
             "groups descendants under their entry skills for on-demand discovery. "
             "Unresolved names are skipped. Set an explicit list per agent to "
@@ -82,7 +82,7 @@ class AgentPromptSettings(EnvSettings):
 
     skills_to_expand_at_start: Annotated[list[str], NoDecode] = Field(
         default_factory=list,
-        alias="AVA_SKILLS_TO_EXPAND_AT_START",
+        alias="MEIVA_SKILLS_TO_EXPAND_AT_START",
         description=(
             "Comma-separated skill names whose FULL body is preloaded as a system "
             "note at session start and after each compact, so the agent has read "
@@ -105,11 +105,11 @@ class AgentPromptSettings(EnvSettings):
 
     system_prompt_extra: Annotated[list[str], NoDecode] = Field(
         default_factory=list,
-        alias="AVA_SYSTEM_PROMPT_EXTRA",
+        alias="MEIVA_SYSTEM_PROMPT_EXTRA",
         description=(
             "Comma-separated extra system-prompt section keys to enable; each maps "
             "to a plugin-registered section that is off by default (e.g. "
-            "`ava_code_workflow`). Empty (default) enables none."
+            "`meiva_code_workflow`). Empty (default) enables none."
         ),
         json_schema_extra={
             "restart_required": "agent",
@@ -123,7 +123,7 @@ class AgentPromptSettings(EnvSettings):
 
     workspace_in_system_prompt: bool = Field(
         default=True,
-        alias="AVA_WORKSPACE_IN_SYSTEM_PROMPT",
+        alias="MEIVA_WORKSPACE_IN_SYSTEM_PROMPT",
         description=(
             "Inject the `# Workspace` section pointing the agent at its per-agent "
             "workspace folder. Gates the prompt section only — the folder is still "
@@ -141,12 +141,12 @@ class AgentPromptSettings(EnvSettings):
     to_user_soft_limit_words: int = Field(
         default=1500,
         gt=0,
-        alias="AVA_TO_USER_SOFT_LIMIT_WORDS",
+        alias="MEIVA_TO_USER_SOFT_LIMIT_WORDS",
         description=(
             "Soft word limit of the workspace `to_user.md` panel displayed next to the "
             "agent's messages. Counted CJK-aware: every CJK character counts one word and "
             "every run of letters/digits counts one, so English reads roughly as words. "
-            "When a panel written through `ava.files` exceeds the limit, a reminder "
+            "When a panel written through `meiva.files` exceeds the limit, a reminder "
             "note points the agent at keeping the panel easy to scan and carrying detail "
             "in linked files. The limit never blocks or truncates a write."
         ),
@@ -162,7 +162,7 @@ class AgentPromptSettings(EnvSettings):
 
     to_user_limit_reminder_cadence: Literal["once_per_compaction", "every_time"] = Field(
         default="once_per_compaction",
-        alias="AVA_TO_USER_LIMIT_REMINDER_CADENCE",
+        alias="MEIVA_TO_USER_LIMIT_REMINDER_CADENCE",
         description=(
             "How often the to_user soft-limit reminder fires after a panel write that "
             "leaves the panel over `to_user_soft_limit_words`. 'once_per_compaction': at "
@@ -182,7 +182,7 @@ class AgentPromptSettings(EnvSettings):
 
     commands_enabled: bool = Field(
         default=True,
-        alias="AVA_COMMANDS_ENABLED",
+        alias="MEIVA_COMMANDS_ENABLED",
         description=(
             "Enable the `/<name>` command module: discovery + expansion of a "
             "leading `/<name>` chat inbound into the command's prompt. When False "
@@ -198,9 +198,9 @@ class AgentPromptSettings(EnvSettings):
 
     prompt_sdk_overview_enabled: bool = Field(
         default=True,
-        alias="AVA_SYSTEM_PROMPT_SDK_OVERVIEW",
+        alias="MEIVA_SYSTEM_PROMPT_SDK_OVERVIEW",
         description=(
-            "Include the SDK overview (# ava + namespace index) in the system "
+            "Include the SDK overview (# meiva + namespace index) in the system "
             "prompt. When False, only the bare identity paragraph is shown."
         ),
         json_schema_extra={
@@ -213,7 +213,7 @@ class AgentPromptSettings(EnvSettings):
 
     prompt_knowledge_cutoff_enabled: bool = Field(
         default=True,
-        alias="AVA_PROMPT_KNOWLEDGE_CUTOFF",
+        alias="MEIVA_PROMPT_KNOWLEDGE_CUTOFF",
         description=(
             "Append a 'Knowledge cutoff: YYYY-MM' line to the system prompt. "
             "When False, the line is omitted — useful for benchmark runs where "
@@ -229,9 +229,9 @@ class AgentPromptSettings(EnvSettings):
 
     prompt_prefer_sdk_enabled: bool | None = Field(
         default=None,
-        alias="AVA_SYSTEM_PROMPT_PREFER_SDK",
+        alias="MEIVA_SYSTEM_PROMPT_PREFER_SDK",
         description=(
-            "Inject a one-line 'Prefer your SDK' section: use an `ava.*` tool over "
+            "Inject a one-line 'Prefer your SDK' section: use an `meiva.*` tool over "
             "a plain-Python or raw-shell equivalent when one exists. Unset resolves "
             "the per-model default (shared floor: on)."
         ),
@@ -245,7 +245,7 @@ class AgentPromptSettings(EnvSettings):
 
     prompt_keep_it_simple_enabled: bool | None = Field(
         default=None,
-        alias="AVA_SYSTEM_PROMPT_KEEP_IT_SIMPLE",
+        alias="MEIVA_SYSTEM_PROMPT_KEEP_IT_SIMPLE",
         description=(
             "Inject a 'Keep It Simple' section — prefer the mechanically correct, "
             "conceptually simple solution over clever shortcuts; relentless: favor "
@@ -262,7 +262,7 @@ class AgentPromptSettings(EnvSettings):
 
     agent_communication_style: Literal["oriented", "silent", "concise", "off"] | None = Field(
         default=None,
-        alias="AVA_AGENT_COMMUNICATION_STYLE",
+        alias="MEIVA_AGENT_COMMUNICATION_STYLE",
         description=(
             "Optional communication style. 'oriented': live pairing with substantive "
             "findings and checkpoints. 'concise': brief milestone updates. 'silent': "
@@ -283,7 +283,7 @@ class AgentPromptSettings(EnvSettings):
 
     prompt_memory_behavior_enabled: bool | None = Field(
         default=None,
-        alias="AVA_SYSTEM_PROMPT_MEMORY",
+        alias="MEIVA_SYSTEM_PROMPT_MEMORY",
         description=(
             "Inject a 'Remembering across sessions' section: when and what to "
             "persist/recall for the long-term memory pool. Auto-suppressed when the "
@@ -300,7 +300,7 @@ class AgentPromptSettings(EnvSettings):
 
     prompt_output_conciseness_enabled: bool | None = Field(
         default=None,
-        alias="AVA_SYSTEM_PROMPT_CONCISENESS",
+        alias="MEIVA_SYSTEM_PROMPT_CONCISENESS",
         description=(
             "Inject an 'Output shape' section: keep replies matched to the task, "
             "answer-first, and reference paths/lines instead of pasting output "
@@ -316,7 +316,7 @@ class AgentPromptSettings(EnvSettings):
 
     prompt_ui_delivery_enabled: bool | None = Field(
         default=None,
-        alias="AVA_SYSTEM_PROMPT_UI_DELIVERY",
+        alias="MEIVA_SYSTEM_PROMPT_UI_DELIVERY",
         description=(
             "Inject a 'Deliver through the UI' section: content for the user goes "
             "through the UI, not as a bare path to a Markdown file. Files stay "
@@ -333,7 +333,7 @@ class AgentPromptSettings(EnvSettings):
 
     prompt_user_tone_enabled: bool | None = Field(
         default=None,
-        alias="AVA_SYSTEM_PROMPT_USER_TONE",
+        alias="MEIVA_SYSTEM_PROMPT_USER_TONE",
         description=(
             "Inject the 'Communicating with the user' section: per-family tone "
             "guidance (honest judgment over flattery; directness; no condescension); "
@@ -350,7 +350,7 @@ class AgentPromptSettings(EnvSettings):
 
     prompt_outcome_reporting_enabled: bool | None = Field(
         default=None,
-        alias="AVA_SYSTEM_PROMPT_REPORTING",
+        alias="MEIVA_SYSTEM_PROMPT_REPORTING",
         description=(
             "Inject a 'Reporting honestly' section: state outcomes as they are, "
             "don't round a partial result up to success. Unset resolves the "
@@ -366,7 +366,7 @@ class AgentPromptSettings(EnvSettings):
 
     prompt_action_caution_enabled: bool | None = Field(
         default=None,
-        alias="AVA_SYSTEM_PROMPT_CAUTION",
+        alias="MEIVA_SYSTEM_PROMPT_CAUTION",
         description=(
             "Inject a 'Before irreversible or outward-facing actions' section: "
             "confirm before hard-to-reverse or outward actions, and treat sending "
@@ -383,7 +383,7 @@ class AgentPromptSettings(EnvSettings):
 
     prompt_align_before_action_enabled: bool | None = Field(
         default=None,
-        alias="AVA_SYSTEM_PROMPT_ALIGN",
+        alias="MEIVA_SYSTEM_PROMPT_ALIGN",
         description=(
             "Inject an 'Aligning before you commit to a direction' section: resolve "
             "material outcome, cost, autonomy, and authority choices while respecting "
@@ -400,13 +400,13 @@ class AgentPromptSettings(EnvSettings):
 
     prompt_delegation_check_enabled: bool | None = Field(
         default=None,
-        alias="AVA_SYSTEM_PROMPT_DELEGATION_CHECK",
+        alias="MEIVA_SYSTEM_PROMPT_DELEGATION_CHECK",
         description=(
             "Inject a 'Before you act \u2014 check' section: does a skill already "
             "cover this, is someone else already responsible, do they have better "
             "tools, and proactively parallelize independent work. Fork for valuable "
             "existing context; otherwise spawn fresh or reuse a suitable available agent. "
-            "Route non-trivial work through ava-workflow when available. "
+            "Route non-trivial work through meiva-workflow when available. "
             "The skill-index step is dropped when this agent renders "
             "no Capabilities section. Unset resolves the per-model default (shared "
             "floor: on)."
@@ -421,7 +421,7 @@ class AgentPromptSettings(EnvSettings):
 
     prompt_cross_machine_delegation_enabled: bool | None = Field(
         default=None,
-        alias="AVA_SYSTEM_PROMPT_CROSS_MACHINE_DELEGATION",
+        alias="MEIVA_SYSTEM_PROMPT_CROSS_MACHINE_DELEGATION",
         description=(
             "Inject a one-sentence cross-machine delegation hint: when working "
             "across different machines, consider spawning an agent on the "
@@ -438,7 +438,7 @@ class AgentPromptSettings(EnvSettings):
 
     prompt_file_driven_work_enabled: bool | None = Field(
         default=None,
-        alias="AVA_SYSTEM_PROMPT_FILE_DRIVEN_WORK",
+        alias="MEIVA_SYSTEM_PROMPT_FILE_DRIVEN_WORK",
         description=(
             "Inject a 'File-driven workflow for complex tasks' section: write "
             "intermediate results to files instead of holding everything in context; "
@@ -455,7 +455,7 @@ class AgentPromptSettings(EnvSettings):
 
     prompt_temporal_awareness_enabled: bool | None = Field(
         default=None,
-        alias="AVA_SYSTEM_PROMPT_TEMPORAL",
+        alias="MEIVA_SYSTEM_PROMPT_TEMPORAL",
         description=(
             "Inject a 'Temporal awareness' section: for facts that may have changed "
             "after the training cutoff (product/model/framework versions, recent "
@@ -472,7 +472,7 @@ class AgentPromptSettings(EnvSettings):
 
     prompt_invest_future_enabled: bool | None = Field(
         default=None,
-        alias="AVA_SYSTEM_PROMPT_INVEST_FUTURE",
+        alias="MEIVA_SYSTEM_PROMPT_INVEST_FUTURE",
         description=(
             "Inject the merged future-signal section (former 'Beyond the task at hand' "
             "content): act on anything that could improve later work this turn with "
@@ -489,7 +489,7 @@ class AgentPromptSettings(EnvSettings):
 
     prompt_codeact_enabled: bool = Field(
         default=True,
-        alias="AVA_SYSTEM_PROMPT_CODEACT",
+        alias="MEIVA_SYSTEM_PROMPT_CODEACT",
         description=(
             "Inject a 'CodeAct \u2014 batch work into fewer calls' section: "
             "pack several operations into one `execute_code` call (batch file "
@@ -509,7 +509,7 @@ class AgentPromptSettings(EnvSettings):
 
     prompt_sequential_tool_calls_enabled: bool = Field(
         default=False,
-        alias="AVA_SYSTEM_PROMPT_SEQUENTIAL_TOOL_CALLS",
+        alias="MEIVA_SYSTEM_PROMPT_SEQUENTIAL_TOOL_CALLS",
         description=(
             "Add one sentence to the base prompt: several tool calls in one "
             "response run one at a time in order, and an error in one does not "

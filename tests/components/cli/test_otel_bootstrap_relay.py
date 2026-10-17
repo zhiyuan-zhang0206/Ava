@@ -34,20 +34,20 @@ def test_bootstrap_routes_to_gateway_with_distinct_local_listener(
     command_machine: MachineIdentity,
 ) -> None:
     (tmp_path / ".env").write_text(
-        "AVA_MACHINE_SERVE_GATEWAY=true\n"
-        f"AVA_DB_URL={config.settings.data_plane.db_url}\n"
-        f"AVA_REDIS_URL={config.settings.data_plane.redis_url}\n"
-        "AVA_RUNNER_DB_PASSWORD=relay-test-password\n"
-        f"AVA_TELEMETRY_OTLP_PORT={gateway_port}\n"
-        f"AVA_TELEMETRY_OTLP_ENDPOINT=http://127.0.0.1:{gateway_port}\n"
-        "AVA_GATEWAY_OTLP_ENDPOINT=http://stale.invalid:1\n"
+        "MEIVA_MACHINE_SERVE_GATEWAY=true\n"
+        f"MEIVA_DB_URL={config.settings.data_plane.db_url}\n"
+        f"MEIVA_REDIS_URL={config.settings.data_plane.redis_url}\n"
+        "MEIVA_RUNNER_DB_PASSWORD=relay-test-password\n"
+        f"MEIVA_TELEMETRY_OTLP_PORT={gateway_port}\n"
+        f"MEIVA_TELEMETRY_OTLP_ENDPOINT=http://127.0.0.1:{gateway_port}\n"
+        "MEIVA_GATEWAY_OTLP_ENDPOINT=http://stale.invalid:1\n"
     )
     monkeypatch.setattr(dotenv_file, "unit_home", lambda: tmp_path)
-    monkeypatch.setattr(paths, "ava_home", lambda: tmp_path)
+    monkeypatch.setattr(paths, "meiva_home", lambda: tmp_path)
     monkeypatch.setattr(config.settings.general, "machine_host", "10.0.0.10")
     monkeypatch.setattr(config.settings.data_plane, "cluster_secret", "relay-test-token")
     owner = config.ConfigBoot()
-    with patch.dict(os.environ, {"AVA_HOME": str(tmp_path)}):
+    with patch.dict(os.environ, {"MEIVA_HOME": str(tmp_path)}):
         owner.ensure_eager()
     owner.set_field("machine_host", "10.0.0.10")
     owner.set_field("db_url", config.settings.data_plane.db_url)
@@ -60,15 +60,15 @@ def test_bootstrap_routes_to_gateway_with_distinct_local_listener(
         )
     assert response.status_code == 200
     payload = response.json()
-    assert "AVA_TELEMETRY_OTLP_ENDPOINT" not in payload
-    assert "AVA_TELEMETRY_OTLP_PORT" not in payload
+    assert "MEIVA_TELEMETRY_OTLP_ENDPOINT" not in payload
+    assert "MEIVA_TELEMETRY_OTLP_PORT" not in payload
     remote = f"http://10.0.0.10:{gateway_port}"
-    assert payload["AVA_GATEWAY_OTLP_ENDPOINT"] == remote
+    assert payload["MEIVA_GATEWAY_OTLP_ENDPOINT"] == remote
     local = f"http://127.0.0.1:{local_port}"
     settings = ObservabilitySettings.model_validate(
         {
             **payload,
-            "AVA_TELEMETRY_OTLP_PORT": local_port,
+            "MEIVA_TELEMETRY_OTLP_PORT": local_port,
         }
     )
     monkeypatch.setattr(config.settings, "observability", settings)
@@ -145,13 +145,13 @@ def test_local_otlp_config_stays_host_owned(config_authority: ConfigAuthority) -
 
 
 def test_explicit_local_collector_endpoint_is_preserved(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.delitem(os.environ, "AVA_TELEMETRY_OTLP_ENDPOINT", raising=False)
-    local = ObservabilitySettings.model_validate({"AVA_TELEMETRY_OTLP_PORT": 4319})
+    monkeypatch.delitem(os.environ, "MEIVA_TELEMETRY_OTLP_ENDPOINT", raising=False)
+    local = ObservabilitySettings.model_validate({"MEIVA_TELEMETRY_OTLP_PORT": 4319})
     assert local.telemetry_otlp_endpoint == "http://127.0.0.1:4319"
     explicit = ObservabilitySettings.model_validate(
         {
-            "AVA_TELEMETRY_OTLP_PORT": 4319,
-            "AVA_TELEMETRY_OTLP_ENDPOINT": "http://collector.test:54444",
+            "MEIVA_TELEMETRY_OTLP_PORT": 4319,
+            "MEIVA_TELEMETRY_OTLP_ENDPOINT": "http://collector.test:54444",
         }
     )
     assert explicit.telemetry_otlp_endpoint == "http://collector.test:54444"

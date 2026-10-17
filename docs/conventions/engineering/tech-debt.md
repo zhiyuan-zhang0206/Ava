@@ -12,7 +12,7 @@ A confirmed finding names concrete files or symbols and the defect or shared
 decision. A grep hit, old date, available upgrade, or co-change score is a
 candidate, not proof. If a broad repair is outside the authorized change,
 record actionable evidence in the ledger. Do not create a parallel tracker.
-The optional [generic sweeper skill](../../../ava_builtins/skills/practice/sweeper/SKILL.md)
+The optional [generic sweeper skill](../../../meiva_builtins/skills/practice/sweeper/SKILL.md)
 can reconcile the ledger using this document as its project input.
 
 ## Rule ownership

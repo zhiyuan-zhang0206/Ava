@@ -33,7 +33,7 @@ def history(count: int) -> list[BaseMessage]:
         out.append(
             HumanMessage(
                 content=f"message {n}" + "x" * 40,
-                additional_kwargs={"ava_msg_type": "inbound", "ava_created_at": STAMP},
+                additional_kwargs={"meiva_msg_type": "inbound", "meiva_created_at": STAMP},
             )
         )
     return out
@@ -128,7 +128,7 @@ def test_ai_parts_carry_their_kinds() -> None:
         AIMessage(
             content=[{"type": "thinking", "thinking": "plan"}, {"type": "text", "text": "hi"}],
             tool_calls=[{"name": "execute_code", "args": {"code": "ls"}, "id": "t"}],
-            additional_kwargs={"ava_created_at": STAMP},
+            additional_kwargs={"meiva_created_at": STAMP},
         )
     ]
     result = route.get_run_timeline_messages(
@@ -141,7 +141,7 @@ def test_a_message_without_a_read_time_has_no_timestamp() -> None:
     messages: list[BaseMessage] = [
         HumanMessage(
             content="stamped",
-            additional_kwargs={"ava_msg_type": "inbound", "ava_created_at": STAMP},
+            additional_kwargs={"meiva_msg_type": "inbound", "meiva_created_at": STAMP},
         ),
         AIMessage(content="written before messages were stamped"),
     ]

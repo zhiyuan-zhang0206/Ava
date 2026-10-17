@@ -37,7 +37,7 @@ def _serve_on_loopback(monkeypatch: pytest.MonkeyPatch, born: Born) -> ConfigAut
 
     monkeypatch.setattr(dotenv_file, "unit_home", lambda: born.home)
     monkeypatch.setattr(config.settings.general, "machine_host", "localhost")
-    monkeypatch.setitem(os.environ, "AVA_MACHINE_SERVE_GATEWAY", "true")
+    monkeypatch.setitem(os.environ, "MEIVA_MACHINE_SERVE_GATEWAY", "true")
     complete = config.settings if config.settings.profile is None else config.Settings(profile=None)
     return ConfigAuthority(config.settings, complete, born.home / ".env")
 
@@ -91,15 +91,15 @@ def test_issued_bundle_starts_a_runner_that_connects_as_the_generation_login(
     printed, key = _issue_bundle(bundle, runner, capsys)
     renewal = tmp_path / "mini-renewal.bundle"
     _, renewal_key = _issue_bundle(renewal, runner, capsys)
-    assert "`.venv/bin/ava init --db-capability <bundle>`" in printed, printed
-    assert "`ava cluster db-authority install-unit <bundle>`" in printed, printed
+    assert "`.venv/bin/meiva init --db-capability <bundle>`" in printed, printed
+    assert "`meiva cluster db-authority install-unit <bundle>`" in printed, printed
     assert bundle.stat().st_mode & 0o777 == 0o600
     served = config.bootstrap_config_values(
         bootstrap_authority,
         provider_key_envs=(binding.key_env for binding in build_model_catalog().bindings.values()),
         plugin_cluster_config=plugin_bootstrap_config(),
     )
-    assert urlsplit(served["AVA_DB_URL"]).password is None
+    assert urlsplit(served["MEIVA_DB_URL"]).password is None
 
     checkout = tmp_path / "checkout"
     checkout.mkdir()
@@ -113,28 +113,28 @@ def test_issued_bundle_starts_a_runner_that_connects_as_the_generation_login(
 
     monkeypatch.setattr(bootstrap, "fetch_bootstrap_config", fetch)
     with patch.dict(os.environ):
-        os.environ.pop("AVA_MACHINE_SERVE_GATEWAY")
-        os.environ.pop("AVA_CLUSTER_SECRET", None)
-        os.environ["AVA_HOME"] = str(runner)
+        os.environ.pop("MEIVA_MACHINE_SERVE_GATEWAY")
+        os.environ.pop("MEIVA_CLUSTER_SECRET", None)
+        os.environ["MEIVA_HOME"] = str(runner)
         os.environ[unit.CAPABILITY_KEY_ENV] = key
         prepare_init_identity(_runner_args(bundle))
         assert unit.CAPABILITY_KEY_ENV not in os.environ
         _install_on_initialized_unit(renewal, renewal_key)
     assert not bundle.exists()
     env = dotenv_values(runner / ".env")
-    assert "AVA_DB_URL" not in env and unit.CAPABILITY_KEY_ENV not in env
-    assert "AVA_CLUSTER_SECRET" not in env
+    assert "MEIVA_DB_URL" not in env and unit.CAPABILITY_KEY_ENV not in env
+    assert "MEIVA_CLUSTER_SECRET" not in env
 
     capability = unit.require_unit_capability(runner)
     assert capability.api is not None and bearers == [capability.api.token] * 2
     with psycopg.connect(capability.dsn, prepare_threshold=None, connect_timeout=5) as conn:
-        assert conn.execute("SELECT current_user").fetchone() == ("ava_g0_runner",)
+        assert conn.execute("SELECT current_user").fetchone() == ("meiva_g0_runner",)
         assert conn.execute("SELECT count(*) FROM agents_meta").fetchone() is not None
     with monkeypatch.context() as scoped:
-        scoped.setenv("AVA_HOME", str(runner))
+        scoped.setenv("MEIVA_HOME", str(runner))
         scoped.setattr("base.host.env.bootstrap.config_source_is_local", lambda: False)
         assert bringup.db_delivery("runner", remote_data_plane=False) == {
-            "AVA_DB_URL": capability.dsn,
+            "MEIVA_DB_URL": capability.dsn,
             delivery.GENERATION_ENV: "0",
         }
 
@@ -142,6 +142,6 @@ def test_issued_bundle_starts_a_runner_that_connects_as_the_generation_login(
 def test_a_remote_unit_home_holding_the_human_secret_refuses_to_join(tmp_path: Path) -> None:
     home = (tmp_path / "legacy-runner").resolve()
     home.mkdir(mode=0o700)
-    values = {"AVA_GATEWAY_URL": "http://10.0.0.7:8000", "AVA_CLUSTER_SECRET": HUMAN}
+    values = {"MEIVA_GATEWAY_URL": "http://10.0.0.7:8000", "MEIVA_CLUSTER_SECRET": HUMAN}
     with pytest.raises(ValueError, match="records the human cluster secret"):
         unit_join.join_gateway(values, home, None)

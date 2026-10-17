@@ -16,8 +16,7 @@ from psycopg_pool import AsyncConnectionPool
 from agent.graph.exec import node
 from agent.graph.interrupt import InterruptEvent
 from agent.hooks.tests.fakes import make_fake_ops_pool
-from ava.tests.fixtures.pin_agent import hosted_resources as hosted_resources
-from base.agents.context import AvaContext
+from base.agents.context import MeivaContext
 from base.agents.incarnation.native_work_models import NativeWorkTarget
 from base.clock import Clock
 from base.config.tests.configuration import defaults
@@ -29,6 +28,7 @@ from base.host.env.agent_slices import AgentSlices
 from base.native_process.runtime_incarnation import RuntimeIncarnation
 from base.native_process.turn_identity import HostedTurnResources
 from base.packages.plugin_providers import build_model_catalog
+from meiva.tests.fixtures.pin_agent import hosted_resources as hosted_resources
 
 
 def install_cancel_event(monkeypatch: pytest.MonkeyPatch, event: InterruptEvent) -> None:
@@ -75,15 +75,15 @@ def make_runtime(
     ops_pool=None,
     event_publisher=None,
     database_gate: ProcessDbGate,
-) -> Runtime[AvaContext]:
-    """Test helper: assemble an AvaContext and wrap it in Runtime."""
+) -> Runtime[MeivaContext]:
+    """Test helper: assemble an MeivaContext and wrap it in Runtime."""
     if llm is None:
         llm = MagicMock()
     if isinstance(llm, MagicMock):
         llm.bind_tools.return_value = llm
     if ops_pool is None:
         ops_pool = make_fake_ops_pool()
-    ctx = AvaContext(
+    ctx = MeivaContext(
         hosted_resources=hosted_resources,
         ops_pool=ops_pool,  # pyright: ignore[reportUnknownArgumentType]
         llm=llm,  # pyright: ignore[reportUnknownArgumentType]

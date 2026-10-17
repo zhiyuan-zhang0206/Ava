@@ -107,7 +107,7 @@ def test_provider_repair_restores_catalog_after_safe_failure(
     with gateway_test_client(machine=machine_identity, boot=boot) as client:
         bootstrap = client.get("/api/bootstrap")
         assert bootstrap.status_code == 503, bootstrap.text
-        assert "AVA_DB_URL" not in bootstrap.json()
+        assert "MEIVA_DB_URL" not in bootstrap.json()
         response = client.get("/api/models")
         assert response.status_code == 503, response.text
         assert response.json()["code"] == "model_catalog_unavailable"

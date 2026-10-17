@@ -13,8 +13,7 @@ import services.agent_runner.agent_host.host as agent_host_host
 from agent.graph.exec._subprocess import run_in_subprocess
 from agent.ownership import hosted
 from agent.tests.claim.test_inbound_ownership import admit_owner, agent_row
-from ava.tests.fixtures.pin_agent import exec_context as ctx_of
-from base.agents.context import AvaContext
+from base.agents.context import MeivaContext
 from base.agents.impersonation import ImpersonationError
 from base.agents.incarnation.hosted_force import install_hosted_force
 from base.cluster.machine import MachineIdentity
@@ -25,6 +24,7 @@ from base.events.live.bus import EventBus
 from base.host.env.agent_slices import AgentSlices
 from base.lm.catalog import ModelCatalog
 from base.packages.composer_commands import CommandCatalog
+from meiva.tests.fixtures.pin_agent import exec_context as ctx_of
 from services.agent_runner.agent_host.host import AgentHost
 from services.agent_runner.agent_host.settlement import close_hosted_turn
 from services.agent_runner.agent_host.tests.host_policy import configured_machine, configured_policy
@@ -114,7 +114,7 @@ async def test_the_applied_force_mid_invocation_closes_quietly(
         outcome = await host._invoke_until_done(
             agent_id,
             replace(
-                AvaContext(
+                MeivaContext(
                     ops_pool=aops_pool,
                     event_publisher=publisher,
                     agent=AgentSlices.resolve(default_reader=configured_policy().default_reader),
@@ -171,7 +171,7 @@ async def test_the_force_still_classifies_after_the_resurrect_nulls_the_row(
     outcome = await host._invoke_until_done(
         agent_id,
         replace(
-            AvaContext(
+            MeivaContext(
                 ops_pool=aops_pool,
                 agent=AgentSlices.resolve(default_reader=configured_policy().default_reader),
                 db=Database.from_settings(gate=database_gate),
@@ -202,7 +202,7 @@ async def test_the_turn_starting_under_the_force_closes_quietly(
     outcome = await host._invoke_until_done(
         agent_id,
         replace(
-            AvaContext(
+            MeivaContext(
                 ops_pool=aops_pool,
                 agent=AgentSlices.resolve(default_reader=configured_policy().default_reader),
                 db=Database.from_settings(gate=database_gate),
@@ -235,7 +235,7 @@ async def test_a_cli_style_user_force_closes_quietly_too(
     outcome = await host._invoke_until_done(
         agent_id,
         replace(
-            AvaContext(
+            MeivaContext(
                 ops_pool=aops_pool,
                 agent=AgentSlices.resolve(default_reader=configured_policy().default_reader),
                 db=Database.from_settings(gate=database_gate),
@@ -296,7 +296,7 @@ async def test_an_observed_force_still_crashes(
         await host._invoke_until_done(
             agent_id,
             replace(
-                AvaContext(
+                MeivaContext(
                     catalog=model_catalog,
                     ops_pool=aops_pool,
                     agent=AgentSlices.resolve(default_reader=configured_policy().default_reader),
@@ -330,7 +330,7 @@ async def test_a_foreign_incarnation_force_still_crashes(
         await host._invoke_until_done(
             agent_id,
             replace(
-                AvaContext(
+                MeivaContext(
                     catalog=model_catalog,
                     ops_pool=aops_pool,
                     agent=AgentSlices.resolve(default_reader=configured_policy().default_reader),
@@ -365,7 +365,7 @@ async def test_a_detached_pointer_still_crashes(
         await host._invoke_until_done(
             agent_id,
             replace(
-                AvaContext(
+                MeivaContext(
                     catalog=model_catalog,
                     ops_pool=aops_pool,
                     agent=AgentSlices.resolve(default_reader=configured_policy().default_reader),
@@ -401,7 +401,7 @@ async def test_a_non_impersonation_exception_still_crashes(
         await host._invoke_until_done(
             agent_id,
             replace(
-                AvaContext(
+                MeivaContext(
                     catalog=model_catalog,
                     ops_pool=aops_pool,
                     agent=AgentSlices.resolve(default_reader=configured_policy().default_reader),
@@ -443,7 +443,7 @@ async def test_a_superseded_older_force_cannot_classify(
         await host._invoke_until_done(
             agent_id,
             replace(
-                AvaContext(
+                MeivaContext(
                     catalog=model_catalog,
                     ops_pool=aops_pool,
                     agent=AgentSlices.resolve(default_reader=configured_policy().default_reader),
@@ -479,7 +479,7 @@ async def test_a_lapsed_lease_still_crashes(
         await host._invoke_until_done(
             agent_id,
             replace(
-                AvaContext(
+                MeivaContext(
                     catalog=model_catalog,
                     ops_pool=aops_pool,
                     agent=AgentSlices.resolve(default_reader=configured_policy().default_reader),

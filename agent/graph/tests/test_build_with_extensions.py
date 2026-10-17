@@ -24,7 +24,7 @@ from base.telemetry.tests.capture.event_capture import EmittedEvents
 from base.telemetry.tests.capture.event_capture import emitted_events as emitted_events
 
 # Every dotted name `load_extensions` can register a plugin module under.
-_PLUGIN_MODULE_PREFIXES = ("ava_builtins.plugins.", "plugins.")
+_PLUGIN_MODULE_PREFIXES = ("meiva_builtins.plugins.", "plugins.")
 
 
 @pytest.fixture(autouse=True)
@@ -36,8 +36,8 @@ def _isolate_paths(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, model_catalo
     user.mkdir()
     monkeypatch.setattr(paths, "repo_plugins_dir", lambda: repo)
     monkeypatch.setattr(paths, "plugins_dir", lambda: user)
-    monkeypatch.setenv("AVA_HOME", str(tmp_path / "ava"))
-    monkeypatch.setattr(paths, "ava_home", lambda: tmp_path)
+    monkeypatch.setenv("MEIVA_HOME", str(tmp_path / "meiva"))
+    monkeypatch.setattr(paths, "meiva_home", lambda: tmp_path)
 
 
 @pytest.fixture(autouse=True)
@@ -58,15 +58,15 @@ def _restore_plugin_modules() -> Iterator[None]:
 
 
 def _write_manifest(plugin_dir: Path, *, sections: tuple[str, ...] = ()) -> None:
-    """The `ava-plugin.json` every plugin ships, declaring the given system prompt sections."""
+    """The `meiva-plugin.json` every plugin ships, declaring the given system prompt sections."""
     contributions = {"systemPromptSections": list(sections)} if sections else {}
-    (plugin_dir / "ava-plugin.json").write_text(
+    (plugin_dir / "meiva-plugin.json").write_text(
         json.dumps(
             {
                 "apiVersion": 2,
                 "name": plugin_dir.name,
                 "version": "1.0.0",
-                "engines": {"ava": ">=0.1.0"},
+                "engines": {"meiva": ">=0.1.0"},
                 "contributions": contributions,
             }
         )
@@ -105,8 +105,8 @@ def test_only_enabled_plugins_are_imported(monkeypatch: pytest.MonkeyPatch):
         }
     )
 
-    from ava.sdk_surface import extensions as _loader
     from base.packages.plugins.loading import plugin_loader
+    from meiva.sdk_surface import extensions as _loader
 
     loaded: list[str] = []
     real = plugin_loader.load_plugin_module
@@ -125,7 +125,7 @@ def test_only_enabled_plugins_are_imported(monkeypatch: pytest.MonkeyPatch):
 
 
 def test_external_plugin_also_loaded(monkeypatch: pytest.MonkeyPatch):
-    """External plugins (~/.ava/plugins/) are also loaded."""
+    """External plugins (~/.meiva/plugins/) are also loaded."""
     _make_plugin("compact")
     _make_external_plugin("audit")
 
@@ -138,8 +138,8 @@ def test_external_plugin_also_loaded(monkeypatch: pytest.MonkeyPatch):
         }
     )
 
-    from ava.sdk_surface import extensions as _loader
     from base.packages.plugins.loading import plugin_loader
+    from meiva.sdk_surface import extensions as _loader
 
     loaded: list[str] = []
     real = plugin_loader.load_plugin_module
@@ -157,10 +157,10 @@ def test_external_plugin_also_loaded(monkeypatch: pytest.MonkeyPatch):
 
 
 def test_load_extensions_installs_metering(monkeypatch: pytest.MonkeyPatch):
-    """load_extensions must install the SDK-usage recorder over the final ava.*
+    """load_extensions must install the SDK-usage recorder over the final meiva.*
     surface (after plugins load), so every agent's SDK calls get metered."""
-    from ava.sdk_surface import extensions as _loader
-    from ava.sdk_surface import metering
+    from meiva.sdk_surface import extensions as _loader
+    from meiva.sdk_surface import metering
 
     installed: list[bool] = []
 
@@ -192,7 +192,7 @@ def test_a_repeat_load_reuses_the_module_object_so_a_patch_still_lands(
     built at import time — keeps the old object, while `mock.patch` resolves the
     dotted path through `sys.modules` and patches the new one. The patch then
     silently never reaches the code under test: it is not a mock failure, it is
-    two live copies of one module. `ava_builtins/plugins/ava_syntax_fix/tests/test_syntax_fix.py` failed
+    two live copies of one module. `meiva_builtins/plugins/meiva_syntax_fix/tests/test_syntax_fix.py` failed
     exactly this way whenever a plugin-loading sibling ran first in the same
     xdist worker, and passed in isolation.
 
@@ -208,10 +208,10 @@ def test_a_repeat_load_reuses_the_module_object_so_a_patch_still_lands(
     )
     write_local({"plugins": {"demo": {"enabled": True}}})
 
-    from ava.sdk_surface import extensions as _loader
+    from meiva.sdk_surface import extensions as _loader
 
     _loader.load_extensions()
-    dotted = "ava_builtins.plugins.demo.plugin"
+    dotted = "meiva_builtins.plugins.demo.plugin"
     first = sys.modules[dotted]
     stale_probe = first.probe  # the reference an earlier importer would be holding
 
@@ -239,10 +239,10 @@ def test_a_different_file_under_the_same_name_gets_a_fresh_module(
     _make_plugin("demo", "__description__ = 'demo'\nGHOST = 'first file'\n")
     write_local({"plugins": {"demo": {"enabled": True}}})
 
-    from ava.sdk_surface import extensions as _loader
+    from meiva.sdk_surface import extensions as _loader
 
     _loader.load_extensions()
-    dotted = "ava_builtins.plugins.demo.plugin"
+    dotted = "meiva_builtins.plugins.demo.plugin"
     first = sys.modules[dotted]
     assert first.GHOST == "first file"
 
@@ -304,8 +304,8 @@ def test_build_registry_holds_what_each_enabled_plugin_declares():
         _make_face(name, _CONTRIBUTING_FACE.format(name=name), sections=(f"{name}_section",))
     write_local({"plugins": {"alpha": {"enabled": True}, "beta": {"enabled": True}}})
 
-    from ava.sdk_surface import extensions as _loader
     from base.packages.plugins.loading.registry import build_registry
+    from meiva.sdk_surface import extensions as _loader
 
     _loader.load_extensions()
     registry = build_registry()
@@ -337,15 +337,15 @@ def test_a_face_whose_contribute_misbehaves_is_skipped_not_fatal(contribute_body
     _make_face("bad", f"def contribute():\n{contribute_body}\n")
     write_local({"plugins": {"good": {"enabled": True}, "bad": {"enabled": True}}})
 
-    from ava.sdk_surface import extensions as _loader
     from base.packages.plugins.loading.registry import build_registry
+    from meiva.sdk_surface import extensions as _loader
 
     _loader.load_extensions()
 
     assert [p for p, _fn in build_registry().system_prompt_sections()] == ["good"]
 
 
-# --- fail-soft loading (2026-08-28 ava_ledger incident) --------------------
+# --- fail-soft loading (2026-08-28 meiva_ledger incident) --------------------
 
 
 def _make_external_plugin_with(name: str, body: str) -> None:
@@ -363,29 +363,29 @@ def test_broken_external_plugin_skipped_and_others_load(
     """Fail-soft contract: a plugin whose plugin.py raises at import is skipped
     with a loud warning; the load proceeds; other plugins load.
 
-    The 2026-08-28 ava_ledger incident shape: plugin.py present, a sibling
+    The 2026-08-28 meiva_ledger incident shape: plugin.py present, a sibling
     module it imports missing — `from . import _ledger` raised
-    ModuleNotFoundError and took `import ava` down with it.
+    ModuleNotFoundError and took `import meiva` down with it.
     """
-    _make_external_plugin_with("ava_ledger", "from . import _missing\n__description__ = 'x'\n")
+    _make_external_plugin_with("meiva_ledger", "from . import _missing\n__description__ = 'x'\n")
     _make_external_plugin("audit")
-    write_local({"plugins": {"ava_ledger": {"enabled": True}, "audit": {"enabled": True}}})
+    write_local({"plugins": {"meiva_ledger": {"enabled": True}, "audit": {"enabled": True}}})
 
-    from ava.sdk_surface import extensions as _loader
+    from meiva.sdk_surface import extensions as _loader
 
     _loader.load_extensions()  # must not raise
 
     # the healthy plugin loaded
     assert "plugins.audit.plugin" in sys.modules
     # the broken one left no half-executed module behind
-    assert "plugins.ava_ledger.plugin" not in sys.modules
+    assert "plugins.meiva_ledger.plugin" not in sys.modules
     # loud: a loguru error naming the plugin
     assert any(
-        "ava_ledger" in r["message"] and "failed to load" in r["message"] for r in loguru_records
+        "meiva_ledger" in r["message"] and "failed to load" in r["message"] for r in loguru_records
     )
     # loud: a plugin_load_failed event carrying the plugin + the exception
     attrs = emitted_events.attributes("plugin_load_failed")
-    assert [a["plugin"] for a in attrs] == ["ava_ledger"]
+    assert [a["plugin"] for a in attrs] == ["meiva_ledger"]
     # the missing sibling surfaces as an ImportError-family exception
     error = str(attrs[0]["error"])
     assert "ImportError" in error and "_missing" in error
@@ -399,12 +399,12 @@ def test_broken_builtin_plugin_skipped_and_others_load(
     _make_plugin("compact")
     write_local({"plugins": {"syntax_fix": {"enabled": True}, "compact": {"enabled": True}}})
 
-    from ava.sdk_surface import extensions as _loader
+    from meiva.sdk_surface import extensions as _loader
 
     _loader.load_extensions()  # must not raise
 
-    assert "ava_builtins.plugins.compact.plugin" in sys.modules
-    assert "ava_builtins.plugins.syntax_fix.plugin" not in sys.modules
+    assert "meiva_builtins.plugins.compact.plugin" in sys.modules
+    assert "meiva_builtins.plugins.syntax_fix.plugin" not in sys.modules
 
 
 def test_external_plugin_relative_import_resolves_when_plugins_prefix_is_shadowed(
@@ -414,9 +414,9 @@ def test_external_plugin_relative_import_resolves_when_plugins_prefix_is_shadowe
     the plugin's own directory even when the top-level `plugins` package
     resolves somewhere else entirely.
 
-    The exec child boots with cwd=$AVA_HOME/source, so `plugins` resolves to
+    The exec child boots with cwd=$MEIVA_HOME/source, so `plugins` resolves to
     the checkout's legacy `plugins/` dir (or to nothing) — never to
-    $AVA_HOME/plugins. The loader registers the `plugins.<name>` parent
+    $MEIVA_HOME/plugins. The loader registers the `plugins.<name>` parent
     package itself, so the relative import works regardless of where the
     plain `plugins` name points.
     """
@@ -427,7 +427,7 @@ def test_external_plugin_relative_import_resolves_when_plugins_prefix_is_shadowe
     decoy.__path__ = ["/nonexistent/decoy"]  # pyright: ignore[reportAttributeAccessIssue]
     monkeypatch.setitem(sys.modules, "plugins", decoy)
 
-    pdir = paths.plugins_dir() / "ava_ledger"
+    pdir = paths.plugins_dir() / "meiva_ledger"
     pdir.mkdir(parents=True)
     (pdir / "plugin.py").write_text(
         "from . import _helper\n__description__ = 'x'\nMARK = _helper.VALUE\n",
@@ -435,14 +435,14 @@ def test_external_plugin_relative_import_resolves_when_plugins_prefix_is_shadowe
     )
     (pdir / "_helper.py").write_text("VALUE = 7\n", encoding="utf-8")
     _write_manifest(pdir)
-    write_local({"plugins": {"ava_ledger": {"enabled": True}}})
+    write_local({"plugins": {"meiva_ledger": {"enabled": True}}})
 
-    from ava.sdk_surface import extensions as _loader
+    from meiva.sdk_surface import extensions as _loader
 
     _loader.load_extensions()  # must not raise
 
-    assert sys.modules["plugins.ava_ledger.plugin"].MARK == 7
-    assert sys.modules["plugins.ava_ledger"].__path__ == [str(pdir)]
+    assert sys.modules["plugins.meiva_ledger.plugin"].MARK == 7
+    assert sys.modules["plugins.meiva_ledger"].__path__ == [str(pdir)]
 
 
 def test_dangling_config_entry_reported_and_skipped(emitted_events: EmittedEvents) -> None:
@@ -456,7 +456,7 @@ def test_dangling_config_entry_reported_and_skipped(emitted_events: EmittedEvent
     _make_external_plugin("audit")
     write_local({"plugins": {"audit": {"enabled": True}, missing: {"enabled": True}}})
 
-    from ava.sdk_surface import extensions as _loader
+    from meiva.sdk_surface import extensions as _loader
 
     loaded = _loader.load_extensions()  # must not raise
 

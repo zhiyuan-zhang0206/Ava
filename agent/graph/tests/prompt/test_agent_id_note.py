@@ -8,14 +8,14 @@ from psycopg import OperationalError
 
 from agent.graph.prompt import context_notes
 from agent.graph.prompt.context_notes import agent_id_note, machine_clause, own_label
-from ava.tests.fixtures.pin_agent import pin_agent, pin_no_identity
-from base.agents.context import AvaContext
+from base.agents.context import MeivaContext
 from base.agents.context.identity import AgentIdentity
 from base.agents.messages.kwargs import NoteTag
 from base.clock import Clock
 from base.config import settings
 from base.host.env.agent_slices import AgentSlices
 from base.packages.plugin_providers import build_model_catalog
+from meiva.tests.fixtures.pin_agent import pin_agent, pin_no_identity
 
 
 @pytest.fixture(autouse=True)
@@ -24,8 +24,8 @@ def _agent_identity(monkeypatch: pytest.MonkeyPatch) -> None:
     pin_agent(29)
 
 
-def _context(agent_id: int | None = 29) -> AvaContext:
-    return AvaContext(
+def _context(agent_id: int | None = 29) -> MeivaContext:
+    return MeivaContext(
         identity=AgentIdentity(agent_id=agent_id, owns_loop=True) if agent_id is not None else None,
         agent=AgentSlices.resolve(
             default_reader=lambda domain, field: getattr(getattr(settings, domain), field)
@@ -35,11 +35,11 @@ def _context(agent_id: int | None = 29) -> AvaContext:
     )
 
 
-def _no_label(_ctx: AvaContext, _agent_id: int) -> str | None:
+def _no_label(_ctx: MeivaContext, _agent_id: int) -> str | None:
     return None
 
 
-def _no_machine(_ctx: AvaContext) -> str | None:
+def _no_machine(_ctx: MeivaContext) -> str | None:
     return None
 
 
@@ -51,11 +51,11 @@ def _no_optional_clauses(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(settings.agent, "workspace_in_system_prompt", False)
 
 
-def _steward_label(_ctx: AvaContext, _agent_id: int) -> str | None:
+def _steward_label(_ctx: MeivaContext, _agent_id: int) -> str | None:
     return "memory steward"
 
 
-def _runner_machine(_ctx: AvaContext) -> str | None:
+def _runner_machine(_ctx: MeivaContext) -> str | None:
     return "runner-a"
 
 
@@ -63,7 +63,7 @@ def _content() -> str:
 
     note = agent_id_note(_context())
     assert note is not None
-    assert note.additional_kwargs["ava_note_tag"] == NoteTag.AGENT_ID
+    assert note.additional_kwargs["meiva_note_tag"] == NoteTag.AGENT_ID
     content = str(note.content)
     assert content.startswith("[system] ")
     return content[len("[system] ") :]
@@ -129,7 +129,7 @@ def test_renders_under_a_hosted_turn_identity(monkeypatch: pytest.MonkeyPatch) -
 
     context = _context(31)
     pin_no_identity()
-    monkeypatch.delenv("AVA_AGENT_ID", raising=False)
+    monkeypatch.delenv("MEIVA_AGENT_ID", raising=False)
     note = agent_id_note(context)
 
     assert note is not None
@@ -140,7 +140,7 @@ def test_opts_out_without_any_identity(monkeypatch: pytest.MonkeyPatch) -> None:
 
     context = _context(None)
     pin_no_identity()
-    monkeypatch.delenv("AVA_AGENT_ID", raising=False)
+    monkeypatch.delenv("MEIVA_AGENT_ID", raising=False)
     assert agent_id_note(context) is None
 
 
@@ -169,7 +169,7 @@ class _FakeDB:
         return _FakeCursor(self._row)
 
 
-def _fake_sql(monkeypatch: pytest.MonkeyPatch, fake: object) -> AvaContext:
+def _fake_sql(monkeypatch: pytest.MonkeyPatch, fake: object) -> MeivaContext:
 
     ctx = _context()
     monkeypatch.setattr(ctx.clients, "_sql", fake)
@@ -234,8 +234,8 @@ def test_unset_machine_name_drops_only_the_machine_clause(monkeypatch: pytest.Mo
     def _broken() -> str:
         raise RuntimeError("settings unreadable")
 
-    def context(reader: Callable[[], str]) -> AvaContext:
-        return AvaContext(
+    def context(reader: Callable[[], str]) -> MeivaContext:
+        return MeivaContext(
             machine=machine.MachineIdentity(
                 name=reader,
                 role=lambda: frozenset({"agent-runner"}),

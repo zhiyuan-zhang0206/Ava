@@ -18,7 +18,7 @@ an autouse fixture ahead of `leak_guard`.
 
 Order is load-bearing:
 
-1. `env_bootstrap` first. It redirects `AVA_HOME`, pins the cluster-scope
+1. `env_bootstrap` first. It redirects `MEIVA_HOME`, pins the cluster-scope
    environment without building Settings; isolation must happen before any project
    module is imported, and it fails the run loudly when a project module was
    already loaded (`_assert_env_precedes_project_imports`).

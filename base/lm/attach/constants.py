@@ -1,8 +1,8 @@
 """Attachment limits and the shared suffix-to-MIME table — a pure-data leaf.
 
 The constants below are read by paths that must not pull the provider stack:
-the SDK registration/validation surface (`ava.sdk_surface.attachment_transport`), the SDK media
-classification (`ava.understand`), the exec merge validator
+the SDK registration/validation surface (`meiva.sdk_surface.attachment_transport`), the SDK media
+classification (`meiva.understand`), the exec merge validator
 (`agent.graph._attach_merge`), and the turn-boundary packer
 (`base.lm.attach.packing`) itself. Keep this module import-free; anything that needs
 LangChain belongs in `base.lm.attach.packing` (startup-laziness
@@ -11,7 +11,7 @@ invariant, task #3587).
 
 from __future__ import annotations
 
-# Moved from ava._understand so both paths classify binary media identically.
+# Moved from meiva._understand so both paths classify binary media identically.
 ATTACH_MEDIA_MIME: dict[str, str] = {
     ".mp4": "video/mp4",
     ".mov": "video/quicktime",

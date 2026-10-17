@@ -21,12 +21,12 @@ describe("config display grouping tables", () => {
   });
 
   it("places compact-history depth with the general timeline controls", () => {
-    expect(GROUP_ENV_VARS["config-general"]).toContain("AVA_TIMELINE_COMPACT_HISTORY");
+    expect(GROUP_ENV_VARS["config-general"]).toContain("MEIVA_TIMELINE_COMPACT_HISTORY");
   });
 
   it("routes display-domain fields into the Display & general bucket", () => {
     const field = {
-      env_var: "AVA_TIMELINE_DEFAULT_LIMIT",
+      env_var: "MEIVA_TIMELINE_DEFAULT_LIMIT",
       group: "Display",
     } as ConfigFieldView;
     expect(displayGroupId(field)).toBe("config-general");

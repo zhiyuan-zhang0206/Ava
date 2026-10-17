@@ -1,4 +1,4 @@
-"""The connections a process holds for its `AvaContext`: built on first use, closed together.
+"""The connections a process holds for its `MeivaContext`: built on first use, closed together.
 
 An exec child (or any process that runs as an agent) depends on a SQL connection, a Redis client
 and a gateway HTTP client, plus whatever its SDK layer adds (the MCP clients). None of it persists
@@ -8,7 +8,7 @@ owner of those objects:
 - nothing is built at construction: importing psycopg / redis / httpx waits for the first call that
   needs it, which keeps a child that never touches the database off that stack;
 - a set built in a child resolves credentials from the child's own settings and environment; the
-  description a host sends (`AvaContext.describe`) carries endpoints, never a secret;
+  description a host sends (`MeivaContext.describe`) carries endpoints, never a secret;
   its composition root supplies lazy builders and the endpoint resolver;
 - `close()` releases everything the set built. A client a test or an embedder supplied with
   `using_gateway` is not the set's to close. Constructor-specific factory builders
@@ -37,7 +37,7 @@ if TYPE_CHECKING:
 
 type DatabaseHandle = Database
 type DatabaseFactory = Callable[[], DatabaseHandle]
-# The gateway client by name, for SDK modules on the `import ava` path that must not import httpx.
+# The gateway client by name, for SDK modules on the `import meiva` path that must not import httpx.
 type GatewayHandle = httpx.Client
 
 

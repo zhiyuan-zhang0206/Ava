@@ -57,7 +57,7 @@ class DefaultModelView(BaseModel):
     `source` names where `model` came from, because the two cases behave
     differently on the next `.env` edit: `cluster` is the DB row (a deliberate
     choice through this endpoint, which outranks `.env`), `config` is the ordinary
-    chain (`.env` AVA_MODEL, else the code default) showing through because no
+    chain (`.env` MEIVA_MODEL, else the code default) showing through because no
     cluster choice has been made.
     """
 

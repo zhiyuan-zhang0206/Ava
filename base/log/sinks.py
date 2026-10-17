@@ -82,7 +82,7 @@ FIRST_PARTY_LOGGER_NAMES = (
     "base",
     "gateway",
     "agent",
-    "ava_builtins",
+    "meiva_builtins",
 )
 
 

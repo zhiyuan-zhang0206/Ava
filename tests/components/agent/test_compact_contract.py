@@ -1,4 +1,4 @@
-"""Contract: the compaction triggers point at the ava.self.compact contract in ava_builtins/commands/compact.md."""
+"""Contract: the compaction triggers point at the meiva.self.compact contract in meiva_builtins/commands/compact.md."""
 
 import pytest
 
@@ -7,7 +7,7 @@ from base.packages.plugins.extensions import EMPTY
 
 
 @pytest.fixture
-def ava_compact_loaded():
+def meiva_compact_loaded():
     """Compact is built-in (Issue #1284). The wrapper function lives in
     agent.graph.hooks.compact; state fields are on BaseAgentState. Returns
     (state_cls, wrap_fn) for tests to call.
@@ -18,16 +18,16 @@ def ava_compact_loaded():
     return build_agent_state(EMPTY), compact_reminder
 
 
-def test_compact_triggers_point_at_the_contract(ava_compact_loaded):
+def test_compact_triggers_point_at_the_contract(meiva_compact_loaded):
     """Each compaction trigger (forced/auto instruction, the reminder nudge, the
-    /compact command) names the `ava.self.compact` contract. Forced compaction
+    /compact command) names the `meiva.self.compact` contract. Forced compaction
     appends the SDK-owned text; other triggers can discover it on demand."""
     from agent.graph.hooks import compact as _p
     from base.paths import repo_root
 
-    compact_md = (repo_root() / "ava_builtins" / "commands" / "compact.md").read_text(
+    compact_md = (repo_root() / "meiva_builtins" / "commands" / "compact.md").read_text(
         encoding="utf-8"
     )
-    assert "ava.self.compact" in COMPACTION_INSTRUCTION
-    assert "ava.self.compact" in _p.COMPACT_REMINDER_NOTE
-    assert "ava.self.compact" in compact_md
+    assert "meiva.self.compact" in COMPACTION_INSTRUCTION
+    assert "meiva.self.compact" in _p.COMPACT_REMINDER_NOTE
+    assert "meiva.self.compact" in compact_md

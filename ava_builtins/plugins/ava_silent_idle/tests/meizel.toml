@@ -1,2 +1,0 @@
-[debt.first-party-patch]
-"test_ava_silent_idle_plugin.py#monkeypatch.setattr agent.graph.hooks.compact.resolve_context_budget" = 1

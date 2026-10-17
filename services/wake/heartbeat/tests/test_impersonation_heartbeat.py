@@ -4,7 +4,6 @@ import psycopg
 import pytest
 from psycopg_pool import ConnectionPool
 
-from ava.sdk_surface.installation import Installation
 from base.agents import impersonation as leases
 from base.cluster.machine import MachineIdentity
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
@@ -14,6 +13,7 @@ from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
 from base.events.live.bus import EventBus
 from base.tests.impersonation.support import accept_controller, create_native_owner
+from meiva.sdk_surface.installation import Installation
 from services.wake.heartbeat.daemon import (
     reconcile_checkin_outcomes,
     select_idle_agents_needing_heartbeat,
@@ -213,14 +213,14 @@ def test_sdk_attachment_can_pause_heartbeat(
     database_gate: ProcessDbGate,
     machine_identity: MachineIdentity,
 ):
-    import ava
+    import meiva
     from agent.extensions import plugin_state_codec
     from agent.state import BaseAgentState
-    from ava import impersonation
-    from ava.tests.fixtures.pin_agent import pin_agent
     from base.agents.sdk import call_policy
+    from meiva import impersonation
+    from meiva.tests.fixtures.pin_agent import pin_agent
 
-    monkeypatch.setattr(ava, "__plugin_installation__", model_installation, raising=False)
+    monkeypatch.setattr(meiva, "__plugin_installation__", model_installation, raising=False)
 
     def _policy_for_test(_owner: call_policy.SamplingPolicyOwner) -> call_policy.SamplingPolicy:
         return call_policy.SamplingPolicy()
@@ -242,7 +242,7 @@ def test_sdk_attachment_can_pause_heartbeat(
 
     monkeypatch.setattr(plugin_state_codec, "load_snapshot", snapshot)
     with impersonation.attach(lease["id"]):
-        ava.self.pause_heartbeat(1800)
+        meiva.self.pause_heartbeat(1800)
     assert lease["agent_id"] not in selected(pool)
     assert db_conn.execute(
         "SELECT duration_s FROM heartbeat_pause_log WHERE agent_id=%s", (lease["agent_id"],)

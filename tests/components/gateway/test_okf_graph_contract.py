@@ -26,7 +26,7 @@ def test_parse_frontmatter_equivalent_to_legacy_on_repo_bundles() -> None:
 
     repo_root = Path(__file__).resolve().parents[3]
     bundles = find_files(repo_root)
-    assert bundles, "repo has no .ava.okf.md bundles — fixture assumption broken"
+    assert bundles, "repo has no .meiva.okf.md bundles — fixture assumption broken"
 
     for rel in bundles:
         text = (repo_root / rel).read_text(encoding="utf-8")

@@ -104,7 +104,7 @@ def test_hold_is_not_automatically_unsealed_by_late_copy_proof(
 
 
 @pytest.mark.parametrize(
-    "directory", ["relative", "/elsewhere", "/Downloads/AvaAgent-1/.delivered-v1/wrong"]
+    "directory", ["relative", "/elsewhere", "/Downloads/MeivaAgent-1/.delivered-v1/wrong"]
 )
 def test_unusable_native_directory_never_accepts_inbound(
     uploaded_agent: tuple[GatewayTestClient, int],

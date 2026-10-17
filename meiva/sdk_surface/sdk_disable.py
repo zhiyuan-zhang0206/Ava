@@ -1,0 +1,180 @@
+"""`MEIVA_SDK_DISABLE` — remove pieces of the agent-facing SDK after install.
+
+The env-var parse, the sentinel module, and the apply machinery live here.
+`meiva.sdk_surface.install` applies the env entries as the first step of building an
+installation (after the submodule imports + `__all_for_meiva__` exist, before any
+plugin namespace applies, so a disabled plugin namespace is refused): the installed
+surface is a value, and its applied-disable set is part of it. Later additions (a
+per-agent `config_overlay`, the eval-isolation boundary) apply additively on top
+(`apply_sdk_disable`). The shared host does not mutate exports per turn; a
+disposable exec child applies its agent overlay after the plugin load.
+"""
+
+import importlib.util
+import inspect
+import os as _os
+import sys as _sys
+import types as _types
+from typing import Any
+
+from . import meiva_module
+from .installation import installed, record_disabled
+
+
+# MEIVA_SDK_DISABLE removes pieces of the agent-facing SDK after the regular
+# imports finish. Each comma-separated entry is either:
+#   - a top-level module name (`monitor`, `schedule`, `agents`) — the submodule
+#     attribute is deleted from this package and the entry in sys.modules is
+#     replaced with a sentinel module that raises a legible error on any
+#     attribute access. So `meiva.<name>` raises AttributeError (not found on
+#     parent package), `import meiva.<name>` returns the sentinel (no crash),
+#     but `meiva.<name>.anything` raises a clear "disabled by MEIVA_SDK_DISABLE"
+#     error. help(meiva) does not list disabled modules.
+#   - a dotted path (`self.terminate`, `agents.spawn`, `shell.sessions`) — the
+#     leaf is resolved at apply time. If it's a nested submodule (e.g.
+#     `shell.sessions`) it's disabled as a module: deleted from its parent and
+#     its sys.modules entry swapped for the sentinel, so `import meiva.a.b` /
+#     `meiva.a.b.x` raise the same legible "disabled by MEIVA_SDK_DISABLE" error as
+#     a top-level module. If it's a plain attribute / function
+#     (`self.terminate`) it's just deleted; `meiva.<module>.<attr>` then raises
+#     AttributeError. Either way help() stops listing it.
+# Used to scope the SDK to a context — e.g. a benchmark runner that owns the
+# agent lifecycle disables watcher / self / agents / shell.sessions.
+def env_entries() -> list[str]:
+    """The entries `MEIVA_SDK_DISABLE` names right now, parsed.
+
+    Applied by `meiva.sdk_surface.install` as it builds an installation — after its
+    submodule imports and `__all_for_meiva__` exist, before any plugin namespace
+    applies."""
+    return [e.strip() for e in _os.environ.get("MEIVA_SDK_DISABLE", "").split(",") if e.strip()]
+
+
+class DisabledSDKModule(_types.ModuleType):
+    """Stand-in for a module removed by MEIVA_SDK_DISABLE.
+
+    Returned by `import meiva.<name>` after `<name>` is in the disable list so a
+    plugin author trying to use a disabled SDK gets a legible error on first
+    attribute access instead of a raw ModuleNotFoundError at import time.
+    """
+
+    def __getattr__(self, attr: str) -> Any:
+        leaf = self.__name__.split(".", 1)[1]
+        raise AttributeError(
+            f"{self.__name__}.{attr} — module is disabled by MEIVA_SDK_DISABLE "
+            f"(entry: {leaf!r}). If the caller needs it, remove {leaf!r} from "
+            "MEIVA_SDK_DISABLE."
+        )
+
+
+def apply_entries(entries: list[str]) -> None:
+    """Apply SDK-disable entries to the `meiva` surface — the mechanics, no bookkeeping.
+
+    Raises:
+        ValueError: an entry names a framework module (see `_refuse_framework_module`).
+    """
+    for entry in entries:
+        _refuse_framework_module(entry)
+
+    # Top-level modules: delete from this package + swap sys.modules entry
+    # with the sentinel so `import meiva.<mod>` returns it — its __getattr__
+    # raises legibly on first use. Also remove from __all_for_meiva__ so
+    # help(meiva) does not list it.
+    for _mod in {e for e in entries if "." not in e}:
+        _disable_top_level_module(_mod)
+
+    # Dotted entries: resolve the leaf. A nested submodule is disabled as a
+    # module (delete from parent + swap its sys.modules entry for the sentinel,
+    # so `import meiva.a.b` / `meiva.a.b.x` raise legibly, same as a top-level
+    # module); a plain attribute / function is just deleted (`meiva.a.b` then
+    # raises AttributeError).
+    for _entry in [e for e in entries if "." in e]:
+        _disable_dotted_entry(_entry)
+
+
+def apply_sdk_disable(entries: list[str]) -> None:
+    """Apply SDK-disable entries additively on top of the installed SDK surface.
+
+    Each call computes the delta (entries not yet applied) and processes only those;
+    the applied set is the installation's (`Installation.disabled`), so the surface
+    stays a value like everything else the install owns — idempotent, cumulative,
+    re-entrant. The env baseline is applied by `meiva.sdk_surface.install` as it builds
+    the installation; this is the entry for later additions (a per-agent
+    `config_overlay`, the eval-isolation boundary).
+
+    Raises:
+        RuntimeError: no SDK surface is installed in this process.
+    """
+    installation = installed()
+    if installation is None:
+        raise RuntimeError(
+            "apply_sdk_disable requires an installed SDK surface; the env entries are "
+            "applied by install(), and per-agent additions apply after the plugin load"
+        )
+    new_entries = [e for e in entries if e not in installation.disabled]
+    if not new_entries:
+        return
+    apply_entries(new_entries)
+    record_disabled(installation.disabled | set(new_entries))
+
+
+def applied_entries() -> frozenset[str]:
+    """The disable entries applied to the installed SDK surface (empty when none is installed).
+
+    The runtime answer beside the agent's configured list
+    (`agent/graph/prompt/capabilities.py`): entries recorded on the installation,
+    including removals applied at runtime without touching settings."""
+    current = installed()
+    return frozenset() if current is None else current.disabled
+
+
+def _refuse_framework_module(entry: str) -> None:
+    """Fail fast when an entry names a framework module rather than a piece of
+    the agent-facing SDK: disabling `meiva.sdk_surface.agent_identity` or `meiva.sdk_surface`
+    would break the framework itself, not scope what the agent sees. A name that
+    is on the surface, or not a real `meiva` submodule at all (a plugin namespace
+    registered later), stays disable-able."""
+    name = entry.split(".", 1)[0]
+    surface = getattr(meiva_module(), "__all_for_meiva__", None) or []
+    if name in surface or isinstance(_sys.modules.get(f"meiva.{name}"), DisabledSDKModule):
+        return  # agent-facing, or already disabled by an earlier entry
+    bound = getattr(meiva_module(), name, None)
+    owner = bound.__name__ if inspect.ismodule(bound) else f"meiva.{name}"
+    if importlib.util.find_spec(owner) is not None:
+        raise ValueError(
+            f"MEIVA_SDK_DISABLE entry {entry!r} names the framework module {owner}, "
+            "which is not part of the agent-facing SDK (`meiva.__all_for_meiva__`); "
+            "only agent-facing namespaces and their members can be disabled"
+        )
+
+
+def _disable_top_level_module(name: str) -> None:
+    """Remove a top-level SDK module: drop the package attribute, swap the
+    ``sys.modules`` entry for the sentinel, and hide it from ``help(meiva)``."""
+    pkg = meiva_module()
+    if hasattr(pkg, name):
+        delattr(pkg, name)
+    _sys.modules[f"meiva.{name}"] = DisabledSDKModule(f"meiva.{name}")
+    surface = getattr(pkg, "__all_for_meiva__", None)
+    if surface is not None and name in surface:
+        surface.remove(name)
+
+
+def _disable_dotted_entry(entry: str) -> None:
+    """Disable one dotted ``MEIVA_SDK_DISABLE`` entry by resolving its leaf.
+
+    A nested submodule is disabled as a module (delete from parent + swap its
+    ``sys.modules`` entry for the sentinel); a plain attribute / function is
+    just deleted. Missing parents or leaves are skipped."""
+    parts = entry.split(".")
+    parent: Any = getattr(meiva_module(), parts[0], None)
+    for p in parts[1:-1]:
+        parent = getattr(parent, p, None)
+    if parent is None:
+        return
+    leaf = parts[-1]
+    target = getattr(parent, leaf, None)
+    if target is None:
+        return
+    delattr(parent, leaf)
+    if inspect.ismodule(target):
+        _sys.modules[f"meiva.{entry}"] = DisabledSDKModule(f"meiva.{entry}")

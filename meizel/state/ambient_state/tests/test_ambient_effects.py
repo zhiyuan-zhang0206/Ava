@@ -232,12 +232,12 @@ def test_a_thread_is_reported_by_function(tmp_path: pathlib.Path, call: str) -> 
     [
         ("base/mod.py", True),
         ("schedules/daily.py", True),
-        ("ava_builtins/plugins/ava_fleet/runtime.py", True),
+        ("meiva_builtins/plugins/meiva_fleet/runtime.py", True),
         ("base/tests/test_mod.py", False),
         ("tests/components/base/test_mod.py", False),
         ("base/__main__.py", False),
-        ("ava_builtins/skills/web/scripts/fetch.py", False),
-        ("ava_builtins/plugins/ava_code/skills/review/scripts/run.py", False),
+        ("meiva_builtins/skills/web/scripts/fetch.py", False),
+        ("meiva_builtins/plugins/meiva_code/skills/review/scripts/run.py", False),
         ("scripts/lint/x.py", False),
         ("ui/web/x.py", False),
     ],
@@ -252,7 +252,7 @@ def test_an_out_of_scope_module_measures_nothing(tmp_path: pathlib.Path) -> None
     source = "_REGISTRY = {}\n_CLIENT = make()\n"
 
     assert _sites(tmp_path, source, rel="base/tests/test_mod.py") == {}
-    assert _sites(tmp_path, source, rel="ava_builtins/skills/web/scripts/run.py") == {}
+    assert _sites(tmp_path, source, rel="meiva_builtins/skills/web/scripts/run.py") == {}
     assert _sites(tmp_path, source, rel="schedules/daily.py") == {
         "ambient-container:_REGISTRY": 1,
         "ambient-instance:_CLIENT": 1,

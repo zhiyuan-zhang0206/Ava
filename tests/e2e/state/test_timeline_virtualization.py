@@ -193,7 +193,7 @@ def test_parked_deep_history_mounts_a_bounded_window(e2e_env: E2EEnv, kind: str)
         metric["value"] for metric in metrics if metric["name"] == "JSHeapUsedSize"
     )
     sample["prependAnchorDeltaPx"] = landed_offset - anchor["viewportOffsetPx"]
-    if kind == "agent_chat" and (output := os.environ.get("AVA_TIMELINE_BENCH_OUT")):
+    if kind == "agent_chat" and (output := os.environ.get("MEIVA_TIMELINE_BENCH_OUT")):
         Path(output).write_text(json.dumps(sample, indent=2, sort_keys=True) + "\n")
     _assert_bounded_sample(sample, kind)
 

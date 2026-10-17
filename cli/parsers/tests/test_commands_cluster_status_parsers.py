@@ -21,10 +21,10 @@ from cli.database.tests.command_inputs import command_runtime as command_runtime
 def test_cmd_cluster_resume_checklist_names_only_commands_that_parse(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    """Every `ava ...` command the resume checklist prints must parse with the real
+    """Every `meiva ...` command the resume checklist prints must parse with the real
     CLI parser — an operator following it after an address change is exactly the
     person who cannot afford a step that exits 2. The pg_hba step names the
-    current regeneration path: a gateway `ava restart` rewrites pg_hba.conf and
+    current regeneration path: a gateway `meiva restart` rewrites pg_hba.conf and
     reloads the retained Postgres on its start leg."""
     import re
 
@@ -39,10 +39,10 @@ def test_cmd_cluster_resume_checklist_names_only_commands_that_parse(
     )
     assert cluster_control.cmd_cluster_resume("runner-a") == 0
     out = capsys.readouterr().out
-    commands = re.findall(r"`(ava [^`]+)`", out)
+    commands = re.findall(r"`(meiva [^`]+)`", out)
     assert commands, out
     parser = build_parser()
     for command in commands:
         parser.parse_args(command.split()[1:])  # SystemExit(2) fails the test
-    assert "`ava restart`" in out
+    assert "`meiva restart`" in out
     assert "--restart-only" not in out

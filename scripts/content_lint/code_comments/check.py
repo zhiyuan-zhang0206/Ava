@@ -104,7 +104,7 @@ def check_contract(repo: Repository, contract: Contract, *, projection: bool = T
         check_api(repo, contract, projection=projection)
 
 
-# ava:ref scripts/content_lint/code_comments/docs/code_comments.ava.okf.md#api-help-owner
+# meiva:ref scripts/content_lint/code_comments/docs/code_comments.meiva.okf.md#api-help-owner
 def check_api(repo: Repository, contract: Contract, *, projection: bool) -> None:
     match query(ModuleIndex(repo.root), contract.api):
         case MemberProof() as proof:
@@ -160,7 +160,7 @@ def unreferenced_note(
                 "line directive needs a valid typed rationale bound to its definition",
             )
         return None
-    if strict or (note.kind == NoteKind.COMMENT and "ava:ref" in note.text):
+    if strict or (note.kind == NoteKind.COMMENT and "meiva:ref" in note.text):
         return Finding(
             path,
             note.line,
@@ -170,7 +170,7 @@ def unreferenced_note(
     return None
 
 
-# ava:ref scripts/content_lint/code_comments/docs/code_comments.ava.okf.md#python-machine-directives
+# meiva:ref scripts/content_lint/code_comments/docs/code_comments.meiva.okf.md#python-machine-directives
 def check_notes(
     source: Source,
     contracts: dict[str, Contract],
@@ -254,7 +254,7 @@ def check(
             continue
         strict = strict_paths is not None and path in strict_paths
         try:
-            if not strict and path not in repo.sources and "ava:ref" not in repo.text(path):
+            if not strict and path not in repo.sources and "meiva:ref" not in repo.text(path):
                 continue
             source = repo.source(path)
             problems, references = check_notes(

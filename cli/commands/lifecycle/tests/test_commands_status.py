@@ -99,7 +99,7 @@ def test_status_explains_persistently_unselected_services(
 
 
 def test_fetch_gateway_cluster_status_sends_bearer(monkeypatch: pytest.MonkeyPatch) -> None:
-    """The `ava status` cluster-status probe presents the cluster-secret bearer, so
+    """The `meiva status` cluster-status probe presents the cluster-secret bearer, so
     an authenticated-but-healthy gateway reads as up instead of a false 401."""
     import httpx
 
@@ -134,7 +134,7 @@ def test_fetch_gateway_cluster_status_without_a_credential_raises_instead_of_dia
     from base.cluster.machine import GatewayApiTokenMissing
     from cli.commands.cluster.control import fetch_gateway_cluster_status
 
-    monkeypatch.delenv("AVA_API_TOKEN", raising=False)
+    monkeypatch.delenv("MEIVA_API_TOKEN", raising=False)
     monkeypatch.setattr(settings.data_plane, "cluster_secret", "")
 
     def _no_dial(*_args: object, **_kwargs: object) -> None:
@@ -236,8 +236,8 @@ def test_status_shows_browser_skip_reason(
     *,
     command_runtime: CommandRuntime,
 ) -> None:
-    """Issue #1111: an enabled-but-incapable ava-browser is shown WITH its reason
-    rather than silently dropped, so `ava status` (the first diagnostic command)
+    """Issue #1111: an enabled-but-incapable meiva-browser is shown WITH its reason
+    rather than silently dropped, so `meiva status` (the first diagnostic command)
     is not blind to the broken service."""
 
     def read_roles(*, machine: MachineIdentity) -> frozenset[str] | None:
@@ -418,7 +418,7 @@ def test_status_reads_root_units(
     )
     assert rc == 0
     out = cast(str, capsys.readouterr().out)  # pyright: ignore[reportUnknownMemberType]
-    rows = {line.split()[0]: line.split() for line in out.splitlines() if line.startswith("ava-")}
+    rows = {line.split()[0]: line.split() for line in out.splitlines() if line.startswith("meiva-")}
     assert rows[_sess("gateway")][1] == "✓"
     assert rows[_sess("frontend")][1] == "✓"
     assert _sess("gateway-watchdog") not in rows
@@ -463,7 +463,7 @@ def test_status_root_mode_survives_an_unreachable_root(
     )
     assert rc == 0
     out = cast(str, capsys.readouterr().out)  # pyright: ignore[reportUnknownMemberType]
-    rows = {line.split()[0]: line.split() for line in out.splitlines() if line.startswith("ava-")}
+    rows = {line.split()[0]: line.split() for line in out.splitlines() if line.startswith("meiva-")}
     assert rows[_sess("gateway")][1] == "✗"
 
 
@@ -511,7 +511,7 @@ def _init_prod_source(source: Path, *, branch: str = "main") -> None:
 def test_detect_prod_source_drift_absent(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     """No source repo → None (nothing to check)."""
 
-    monkeypatch.setenv("AVA_HOME", str(tmp_path))
+    monkeypatch.setenv("MEIVA_HOME", str(tmp_path))
     assert _cluster_drift.prod_source_branch_drift() is None
 
 
@@ -519,7 +519,7 @@ def test_detect_prod_source_drift_on_main(monkeypatch: pytest.MonkeyPatch, tmp_p
     """Prod source on `main` → None (no drift)."""
 
     _init_prod_source(tmp_path / "source")
-    monkeypatch.setenv("AVA_HOME", str(tmp_path))
+    monkeypatch.setenv("MEIVA_HOME", str(tmp_path))
     assert _cluster_drift.prod_source_branch_drift() is None
 
 
@@ -529,16 +529,16 @@ def test_detect_prod_source_drift_feature_branch(
     """Prod source on a feature branch → returns the branch (the 2026-06-01
     incident: an agent developing in the prod tree instead of a worktree)."""
 
-    _init_prod_source(tmp_path / "source", branch="ava-7/fix")
-    monkeypatch.setenv("AVA_HOME", str(tmp_path))
-    assert _cluster_drift.prod_source_branch_drift() == "ava-7/fix"
+    _init_prod_source(tmp_path / "source", branch="meiva-7/fix")
+    monkeypatch.setenv("MEIVA_HOME", str(tmp_path))
+    assert _cluster_drift.prod_source_branch_drift() == "meiva-7/fix"
 
 
 def test_detect_prod_source_drift_detached(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     """Prod source detached at the released commit → "HEAD" (source-mode steady state)."""
 
     _init_prod_source(tmp_path / "source", branch="DETACHED")
-    monkeypatch.setattr(paths, "ava_home", lambda: tmp_path)
+    monkeypatch.setattr(paths, "meiva_home", lambda: tmp_path)
     assert _cluster_drift.prod_source_branch_drift() == "HEAD"
 
 
@@ -557,7 +557,7 @@ def test_cmd_status_warns_on_prod_source_drift(
         return frozenset({"agent-runner"})
 
     monkeypatch.setattr(_repo_commands, "roles_or_none", read_roles)
-    monkeypatch.setattr(_cluster_drift, "prod_source_branch_drift", lambda: "ava-7/fix")
+    monkeypatch.setattr(_cluster_drift, "prod_source_branch_drift", lambda: "meiva-7/fix")
     rc = _status_commands.cmd_status(
         database_factory=operator_database,
         machine=command_runtime.machine,
@@ -567,7 +567,7 @@ def test_cmd_status_warns_on_prod_source_drift(
     assert rc == 0
     out = capsys.readouterr().out  # pyright: ignore[reportUnknownMemberType]
     assert "prod source" in out
-    assert "ava-7/fix" in out
+    assert "meiva-7/fix" in out
     assert "un-reviewed" in out
     assert "do not `checkout main`" in out
 
@@ -605,7 +605,7 @@ def test_cmd_status_detached_prod_source_is_not_a_warning(
 
 
 def _quiet_status(monkeypatch: pytest.MonkeyPatch, home: Path) -> None:
-    """Isolate `ava status` to its release section: a runner-only role, no probes."""
+    """Isolate `meiva status` to its release section: a runner-only role, no probes."""
 
     def read_roles(*, machine: MachineIdentity) -> frozenset[str] | None:
         del machine
@@ -613,7 +613,7 @@ def _quiet_status(monkeypatch: pytest.MonkeyPatch, home: Path) -> None:
 
     monkeypatch.setattr(_repo_commands, "roles_or_none", read_roles)
     monkeypatch.setattr(_cluster_drift, "prod_source_branch_drift", lambda: None)
-    monkeypatch.setattr(paths, "ava_home", lambda: home)
+    monkeypatch.setattr(paths, "meiva_home", lambda: home)
 
 
 def test_cmd_status_names_the_source_checkout_it_runs(
@@ -648,7 +648,7 @@ def test_cmd_status_shows_gateway_snapshot_by_default(
     *,
     command_runtime: CommandRuntime,
 ) -> None:
-    """`ava status` (no flag) runs local probes AND prints the gateway snapshot."""
+    """`meiva status` (no flag) runs local probes AND prints the gateway snapshot."""
 
     patch_gateway_http(monkeypatch)
     monkeypatch.setattr(subprocess, "run", lambda *_a, **_kw: FakeResult(returncode=0))  # pyright: ignore[reportUnknownArgumentType]
@@ -683,7 +683,7 @@ def test_cmd_status_gateway_unreachable_is_inline_not_fatal(
     *,
     command_runtime: CommandRuntime,
 ) -> None:
-    """A down gateway prints inline; `ava status` still returns 0 (local probes ran)."""
+    """A down gateway prints inline; `meiva status` still returns 0 (local probes ran)."""
     import httpx
 
     patch_gateway_http(monkeypatch)
@@ -703,7 +703,7 @@ def test_cmd_status_gateway_unreachable_is_inline_not_fatal(
     assert "gateway unreachable" in capsys.readouterr().out
 
 
-# ─── `ava status` keeps a live host reading with no observability backend ─────
+# ─── `meiva status` keeps a live host reading with no observability backend ─────
 
 
 def test_status_prints_a_live_host_reading(
@@ -713,7 +713,7 @@ def test_status_prints_a_live_host_reading(
     *,
     command_runtime: CommandRuntime,
 ) -> None:
-    """`ava status` reads CPU/memory/disk straight from psutil.
+    """`meiva status` reads CPU/memory/disk straight from psutil.
 
     Since issue #46 the host HISTORY is Prometheus's; this line is the answer
     that must survive a deployment whose LGTM backend is down or was never
@@ -785,4 +785,4 @@ def test_status_host_reading_failure_does_not_hide_the_rest(
     )
     out = cast(str, capsys.readouterr().out)  # pyright: ignore[reportUnknownMemberType]
     assert "unavailable (no psutil here)" in out
-    assert "[ava status]" in out
+    assert "[meiva status]" in out

@@ -181,7 +181,7 @@ def test_enabled_inits_traceloop_with_otlp_exporter(
     )
 
     def label(_home: Path | None = None) -> str:
-        return ".ava-test"
+        return ".meiva-test"
 
     monkeypatch.setattr(tracing_mod, "cluster_label", label)
     monkeypatch.setattr(derive, "production_identity", deny_identity)
@@ -203,8 +203,8 @@ def test_enabled_inits_traceloop_with_otlp_exporter(
     assert kw["telemetry_enabled"] is False
     assert kw["disable_batch"] is False
     assert kw["resource_attributes"] == {
-        "cluster": ".ava-test",
-        "service.line": "ava",
+        "cluster": ".meiva-test",
+        "service.line": "meiva",
         "environment": "dev",
     }
 
@@ -222,11 +222,11 @@ def test_enabled_inits_traceloop_with_otlp_exporter(
 def test_gateway_trace_recording_skips_without_lgtm_marker(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    home = tmp_path / ".ava-preview"
+    home = tmp_path / ".meiva-preview"
     home.mkdir()
     monkeypatch.setattr(config.settings.observability, "trace_enabled", True)
     monkeypatch.setattr(telemetry_otlp, "production_identity", allow_identity)
-    monkeypatch.delitem(os.environ, "AVA_TELEMETRY_OTLP_ENDPOINT", raising=False)
+    monkeypatch.delitem(os.environ, "MEIVA_TELEMETRY_OTLP_ENDPOINT", raising=False)
 
     calls: list[dict[str, object]] = []
 
@@ -245,13 +245,13 @@ def test_gateway_trace_recording_skips_without_lgtm_marker(
 def test_gateway_trace_recording_arms_with_lgtm_marker(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    home = tmp_path / ".ava"
+    home = tmp_path / ".meiva"
     home.mkdir()
     (home / "lgtm-host").touch()
     monkeypatch.setattr(config.settings.observability, "trace_enabled", True)
     monkeypatch.setattr(telemetry_otlp, "production_identity", allow_identity)
     monkeypatch.setattr(derive, "production_identity", allow_identity)
-    monkeypatch.delitem(os.environ, "AVA_TELEMETRY_OTLP_ENDPOINT", raising=False)
+    monkeypatch.delitem(os.environ, "MEIVA_TELEMETRY_OTLP_ENDPOINT", raising=False)
 
     under_watermark(monkeypatch)
     calls: list[dict[str, object]] = []
@@ -267,8 +267,8 @@ def test_gateway_trace_recording_arms_with_lgtm_marker(
 
     assert len(calls) == 1
     assert calls[0]["resource_attributes"] == {
-        "cluster": ".ava",
-        "service.line": "ava",
+        "cluster": ".meiva",
+        "service.line": "meiva",
         "environment": "prod",
     }
 
@@ -453,12 +453,12 @@ def test_arm_tracing_skips_init_when_already_resolved(
 
     tracing_mod._state["initialized"] = True
     tracing_mod._state["arm_failed"] = False
-    _arm_tracing("http://127.0.0.1:4318", production=False, home=Path(".ava"))
+    _arm_tracing("http://127.0.0.1:4318", production=False, home=Path(".meiva"))
     assert calls == []
 
     tracing_mod._state["initialized"] = False
     tracing_mod._state["arm_failed"] = True
-    _arm_tracing("http://127.0.0.1:4318", production=False, home=Path(".ava"))
+    _arm_tracing("http://127.0.0.1:4318", production=False, home=Path(".meiva"))
     assert calls == []
 
 
@@ -489,7 +489,7 @@ def test_concurrent_arm_threads_init_once(monkeypatch: pytest.MonkeyPatch, tmp_p
     first = threading.Thread(
         target=_arm_tracing,
         args=("http://127.0.0.1:4318",),
-        kwargs={"production": False, "home": Path(".ava")},
+        kwargs={"production": False, "home": Path(".meiva")},
         daemon=True,
     )
     first.start()
@@ -511,7 +511,7 @@ def test_concurrent_arm_threads_init_once(monkeypatch: pytest.MonkeyPatch, tmp_p
     second = threading.Thread(
         target=_arm_tracing,
         args=("http://127.0.0.1:4318",),
-        kwargs={"production": False, "home": Path(".ava")},
+        kwargs={"production": False, "home": Path(".meiva")},
         daemon=True,
     )
     second.start()
@@ -614,10 +614,10 @@ def spans_received(posts: list[tuple[str, bytes, dict]]) -> list[Any]:
 def assert_turn_root_exported_at_start(spans: list[Any]) -> Any:
     assert len(spans) == 1, f"root must export at turn start, got {len(spans)}"
     root = spans[0]
-    assert root.name == "ava-agent-7"
+    assert root.name == "meiva-agent-7"
     attrs = {kv.key: kv.value.string_value or kv.value.int_value for kv in root.attributes}
     assert attrs["session.id"] == "7"
-    assert attrs["ava.turn"] == 3
+    assert attrs["meiva.turn"] == 3
     assert root.end_time_unix_nano > 0, "placeholder root must be ended when exported"
     return root
 

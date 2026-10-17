@@ -13,7 +13,7 @@ mechanisms, both scoped to agent-owned pages only:
   only safety net (2026-09-11 ruling): every page this stack CREATED (an
   explicit new_page, or the auto-created page on a page-less first navigate) is
   registered in ``PageRegistry.ttl_deadlines`` with a deadline of
-  ``now + AVA_CHROME_PAGE_DEFAULT_TTL_SECONDS`` (24h default), and the sweep
+  ``now + MEIVA_CHROME_PAGE_DEFAULT_TTL_SECONDS`` (24h default), and the sweep
   closes it once that deadline passes. Activity never extends the deadline;
   ``renew_agent_page`` (the ``renew_page`` tool) moves it to ``now + ttl``
   explicitly, at most 24h per call. It bounds a page an agent keeps USING
@@ -330,7 +330,7 @@ async def renew_agent_page(
 ) -> types.CallToolResult:
     """Handle one ``renew_page`` tool call: move the agent page's TTL deadline.
 
-    Semantics mirror ``ava.shell.sessions.renew`` (the shell-TTL ruling): the
+    Semantics mirror ``meiva.shell.sessions.renew`` (the shell-TTL ruling): the
     deadline becomes ``now + ttl`` — never stacked on the old one — each call
     grants at most 24h, and an already-passed deadline is NOT renewable (the
     sweep owns the page; there is no renewable expired state). ``ttl`` is

@@ -20,7 +20,7 @@ from langchain_core.messages import HumanMessage
 
 from agent.messages import attach_message
 from agent.state import AttachState, BaseAgentState
-from base.agents.context import AvaContext
+from base.agents.context import MeivaContext
 from base.lm.attach.packing import AttachEntry, pack_attachments
 from base.lm.catalog import ModelCatalog
 
@@ -43,7 +43,7 @@ def build_attach_message(
     return attach_message(blocks=pack.blocks, text=pack.text, created_at=datetime.now(UTC))
 
 
-def build_attach_drain(state: BaseAgentState, ctx: AvaContext) -> dict[str, Any] | None:
+def build_attach_drain(state: BaseAgentState, ctx: MeivaContext) -> dict[str, Any] | None:
     """Build a tail-message update for files pending at a completed turn boundary.
 
     Fallback path only: the exec node normally drains attachments in its own

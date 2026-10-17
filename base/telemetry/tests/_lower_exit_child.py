@@ -1,6 +1,6 @@
 """Clean-interpreter exit scenarios for the lower telemetry owners; never imported by a production entry.
 
-Run as ``python -I _lower_exit_child.py <cold|loaded>`` with ``AVA_HOME`` set by the parent.
+Run as ``python -I _lower_exit_child.py <cold|loaded>`` with ``MEIVA_HOME`` set by the parent.
 """
 
 from __future__ import annotations
@@ -51,7 +51,7 @@ def loaded() -> None:
         stop_requested.wait()
 
     tracing._arm_tracing = arm  # type: ignore[assignment]
-    tracing.start_arm_thread("http://local-test-collector", machine_identity(), Path(".ava"))
+    tracing.start_arm_thread("http://local-test-collector", machine_identity(), Path(".meiva"))
     assert entered.wait(5)
     owners.append(tracing._state["arm_owner"])
 

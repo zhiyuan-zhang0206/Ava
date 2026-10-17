@@ -16,9 +16,9 @@ from base.db import Database, DbConfig
 from base.db.code_version_gate import ProcessDbGate
 from base.host.env.dotenv_boot import PLACEHOLDER_DB_URL
 
-_POOLED = "postgresql://ava_main:sek@127.0.0.1:6433/ava_main"
-_DIRECT = "postgresql://ava_main:sek@127.0.0.1:5433/ava_main"
-_HOME = "/x/.ava-t"
+_POOLED = "postgresql://meiva_main:sek@127.0.0.1:6433/meiva_main"
+_DIRECT = "postgresql://meiva_main:sek@127.0.0.1:5433/meiva_main"
+_HOME = "/x/.meiva-t"
 
 
 def test_pgbouncer_enabled_defaults_on() -> None:
@@ -40,7 +40,7 @@ def _set_record(monkeypatch: pytest.MonkeyPatch, rec: ClusterRecord | None) -> N
     from base import paths
 
     monkeypatch.setattr(direct_url, "get_record", lambda home: rec if str(home) == _HOME else None)  # pyright: ignore[reportUnknownArgumentType]
-    monkeypatch.setattr(paths, "ava_home", lambda: Path(_HOME))
+    monkeypatch.setattr(paths, "meiva_home", lambda: Path(_HOME))
 
 
 def _config(url: str, *, pooling: bool = True) -> DbConfig:
@@ -89,9 +89,9 @@ def test_direct_handle_uses_owned_lazy_readers_and_preserves_short_circuits(
     "url",
     [
         PLACEHOLDER_DB_URL,
-        "postgresql://host:bad/ava",
-        "postgresql://host/ava",
-        "postgresql://[/ava",
+        "postgresql://host:bad/meiva",
+        "postgresql://host/meiva",
+        "postgresql://[/meiva",
     ],
 )
 def test_direct_url_short_circuits_read_neither_dependency(url: str) -> None:
@@ -121,7 +121,7 @@ def test_local_unknown_port_preserves_url_without_reading_gateway(
     monkeypatch: pytest.MonkeyPatch, rec: ClusterRecord | None, loguru_records: list[dict[str, Any]]
 ) -> None:
     _set_record(monkeypatch, rec)
-    url = "postgresql://ava:dev@localhost:5432/ava"
+    url = "postgresql://meiva:dev@localhost:5432/meiva"
     assert direct_db_url(_config(url), gateway_url_reader=_unused_reader) == url
     assert [record["level"].name for record in loguru_records] == ["INFO"]
 
@@ -136,13 +136,13 @@ def test_direct_db_url_uses_the_ports_the_record_names(
     monkeypatch: pytest.MonkeyPatch, pg_port: int, pooler_port: int
 ) -> None:
     rec = _rec(
-        "/x/.ava-other",
+        "/x/.meiva-other",
         {"gateway": 18000, "postgres": pg_port, "redis": 18012, "pgbouncer": pooler_port},
     )
     _set_record(monkeypatch, rec)
-    url = f"postgresql://ava:sek@127.0.0.1:{pooler_port}/ava?sslmode=prefer"
+    url = f"postgresql://meiva:sek@127.0.0.1:{pooler_port}/meiva?sslmode=prefer"
     assert direct_db_url(_config(url), gateway_url_reader=_unused_reader) == (
-        f"postgresql://ava:sek@127.0.0.1:{pg_port}/ava?sslmode=prefer"
+        f"postgresql://meiva:sek@127.0.0.1:{pg_port}/meiva?sslmode=prefer"
     )
 
 
@@ -174,7 +174,7 @@ def test_remote_fallback_logs_only_for_its_gateway(
         reads.append("gateway")
         return gateway_url
 
-    url = f"postgresql://ava_main:sek@{host}:6433/ava_main"
+    url = f"postgresql://meiva_main:sek@{host}:6433/meiva_main"
     resolver = ClusterDirectUrl(local_host, gateway_url_reader=gateway_reader)
     assert reads == []
     assert resolver(_config(url)) == url
@@ -188,7 +188,7 @@ def test_pooling_off_does_not_read_gateway_or_log(
     monkeypatch: pytest.MonkeyPatch, loguru_records: list[dict[str, Any]], host: str
 ) -> None:
     _set_record(monkeypatch, None)
-    url = f"postgresql://ava:dev@{host}:5432/ava"
+    url = f"postgresql://meiva:dev@{host}:5432/meiva"
     assert (
         direct_db_url(
             _config(url, pooling=False),
@@ -204,7 +204,7 @@ def test_resolvers_read_their_own_live_gateway_values(loguru_records: list[dict[
     gateways = {"first": "http://db.example:8000", "second": "http://elsewhere:8000"}
     first = ClusterDirectUrl(lambda: "owned-host", gateway_url_reader=lambda: gateways["first"])
     second = ClusterDirectUrl(lambda: "owned-host", gateway_url_reader=lambda: gateways["second"])
-    config = _config("postgresql://ava:dev@db.example:6433/ava")
+    config = _config("postgresql://meiva:dev@db.example:6433/meiva")
     assert first(config) == config.db_url
     assert len(loguru_records) == 1
     assert second(config) == config.db_url
@@ -225,7 +225,7 @@ def test_gateway_reader_failure_propagates() -> None:
 
     with pytest.raises(AttributeError) as caught:
         direct_db_url(
-            _config("postgresql://ava:dev@db.example:6433/ava"),
+            _config("postgresql://meiva:dev@db.example:6433/meiva"),
             gateway_url_reader=unavailable,
             local_host=lambda: "owned-host",
         )

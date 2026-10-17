@@ -184,7 +184,7 @@ def test_put_records_write_audit_with_value_diff(clean_overrides: Path) -> None:
     latest = records[-1]
     entries = cast("list[dict[str, object]]", latest["changed"])
     changed = {str(entry["alias"]): entry for entry in entries}
-    assert changed["AVA_MODEL"]["new"] == "audit-model-1"
+    assert changed["MEIVA_MODEL"]["new"] == "audit-model-1"
     assert "actor" in latest
 
 
@@ -205,20 +205,20 @@ def test_get_config_audit_default_last_comes_from_display_config(
     monkeypatch.setattr(machines, "lookup_role", _unregistered)
 
     env_path = dotenv_file.env_file_path()
-    env_path.write_text("AVA_MODEL=audit-one\n")
+    env_path.write_text("MEIVA_MODEL=audit-one\n")
     audit.record_env_write(
         env_path,
-        {"AVA_MODEL"},
+        {"MEIVA_MODEL"},
         set(),
         site="test-one",
-        changes=[{"alias": "AVA_MODEL", "old": "old", "new": "audit-one"}],
+        changes=[{"alias": "MEIVA_MODEL", "old": "old", "new": "audit-one"}],
     )
     audit.record_env_write(
         env_path,
-        {"AVA_MODEL"},
+        {"MEIVA_MODEL"},
         set(),
         site="test-two",
-        changes=[{"alias": "AVA_MODEL", "old": "audit-one", "new": "audit-two"}],
+        changes=[{"alias": "MEIVA_MODEL", "old": "audit-one", "new": "audit-two"}],
     )
 
     monkeypatch.setattr(settings.display, "config_audit_default_last", 1)
@@ -238,13 +238,13 @@ def test_get_config_audit_reads_own_records(
 
     monkeypatch.setattr(machines, "lookup_role", _unregistered)
     env_path = dotenv_file.env_file_path()
-    env_path.write_text("AVA_MODEL=audit-self\n")
+    env_path.write_text("MEIVA_MODEL=audit-self\n")
     audit.record_env_write(
         env_path,
-        {"AVA_MODEL"},
+        {"MEIVA_MODEL"},
         set(),
         site="test-self",
-        changes=[{"alias": "AVA_MODEL", "old": "old", "new": "audit-self"}],
+        changes=[{"alias": "MEIVA_MODEL", "old": "old", "new": "audit-self"}],
     )
 
     with gateway_test_client(machine=machine_identity) as client:
@@ -255,7 +255,7 @@ def test_get_config_audit_reads_own_records(
     assert records[-1]["site"] == "test-self"
     assert records[-1]["machine"] == machine_identity.name()
     changed = records[-1]["changed"]
-    assert changed[0]["alias"] == "AVA_MODEL"
+    assert changed[0]["alias"] == "MEIVA_MODEL"
     assert changed[0]["new"] == "audit-self"
 
 

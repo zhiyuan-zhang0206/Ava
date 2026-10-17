@@ -140,7 +140,7 @@ class ModelCache:
         self._lock = threading.Lock()  # jobs build models from several worker threads
 
     def get(self, model: str, overrides: ModelOverrides, reasoning: str = "") -> Any:
-        """The model; `reasoning` is `AVA_UNDERSTANDING_GROUP_REASONING`'s value: empty keeps
+        """The model; `reasoning` is `MEIVA_UNDERSTANDING_GROUP_REASONING`'s value: empty keeps
         the model's own tier, `off` disables thinking, anything else is the effort asked."""
         key = (model, overrides, reasoning)
         with self._lock:
@@ -633,7 +633,7 @@ async def understanding_loop_forever(
     Every due job runs at once, one agent's never together.
     """
     if not inputs.enabled():
-        logger.info("[agent-host] understanding consumer idle — AVA_UNDERSTANDING_ENABLED is off")
+        logger.info("[agent-host] understanding consumer idle — MEIVA_UNDERSTANDING_ENABLED is off")
         return
     await Consumer(
         pool, db, tools, catalog=catalog, llm_override=llm_override, inputs=inputs

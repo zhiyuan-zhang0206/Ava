@@ -55,7 +55,7 @@ def test_annotated_keeps_heartbeat_with_disabled_reason(
 ) -> None:
     monkeypatch.setattr(settings.daemon, "heartbeat_enabled", False)
     annotated = _annotated("gateway", machine=command_machine)
-    assert annotated["heartbeat"] == "disabled (AVA_HEARTBEAT_ENABLED off)"
+    assert annotated["heartbeat"] == "disabled (MEIVA_HEARTBEAT_ENABLED off)"
     assert "heartbeat" not in _sessions("gateway", machine=command_machine)
 
 

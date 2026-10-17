@@ -1,7 +1,7 @@
 """Log in and inject a gateway session cookie into the shared managed Chrome.
 
 The gateway reverse-proxies agent-served pages under auth (session cookie or
-Bearer token), so the managed browser needs its own ``ava_session`` cookie to
+Bearer token), so the managed browser needs its own ``meiva_session`` cookie to
 open page URLs. This module obtains an opaque server-side session through the
 gateway's normal login endpoint, then injects that returned cookie over CDP.
 

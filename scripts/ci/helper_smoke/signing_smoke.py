@@ -9,7 +9,7 @@ Hosted macOS runners cannot codesign with an imported identity (platform limitat
 runner-images#13884 family; all lookup paths return errSecItemNotFound). Real signing verification
 is carried by the production preflight hard gate on real hosts. This lane signs ad-hoc so the
 build, identity, partition, launchd and ping chain stays real. The keychain is the lane's isolated
-throwaway one (`AVA_PERMISSIONS_HELPER_KEYCHAIN`); its password protects nothing and is passed in.
+throwaway one (`MEIVA_PERMISSIONS_HELPER_KEYCHAIN`); its password protects nothing and is passed in.
 """
 
 from __future__ import annotations
@@ -75,9 +75,9 @@ def import_signing_identity(keychain_password: str) -> None:
 def build_app() -> Path:
     """Compile and assemble the real helper app bundle."""
     build_dir = permissions_helper_app_dir()
-    app = build_dir / "AvaPermissionsHelper.app"
+    app = build_dir / "MeivaPermissionsHelper.app"
     build_dir.mkdir(parents=True, exist_ok=True)
-    binary = build_dir / "AvaPermissionsHelper"
+    binary = build_dir / "MeivaPermissionsHelper"
     lifecycle.run_tool(["swiftc", "-O", str(lifecycle.SOURCE), "-o", str(binary)])
     lifecycle.remove_app(app)
     exe = lifecycle.app_executable(app)

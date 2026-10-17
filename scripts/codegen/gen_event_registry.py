@@ -31,7 +31,7 @@ from base.events.live.projection import GLOBAL_ROLES, SYSTEM_ROLES
 
 _OUT = Path("base/events/registry.md")
 
-_HEADER = """# Ava event name registry
+_HEADER = """# Meiva event name registry
 
 > This document is **generated**: produced by `scripts/codegen/gen_event_registry.py` from
 > the `EVENTS` registry in `base/events/contract.py`, merged from the domain modules of

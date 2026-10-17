@@ -19,7 +19,7 @@ The fleet task daemon follows this path; see
 Layer: this module family lives in ``services/supervision``; it imports ``base``,
 plus lazy function-local reaches into the shared-tier browser identity probe and
 gate app-port source. Nothing reaches up into cli/gateway, so start, root
-monitoring, and ``ava status`` share one roster.
+monitoring, and ``meiva status`` share one roster.
 
 Native Postgres, Redis, and PgBouncer have separate data-plane custody so they
 can remain available during an application-root transition. The macOS helper
@@ -44,7 +44,7 @@ from base.host.system.probes import (
     permissions_helper_incapability,
 )
 from base.log import logger
-from base.paths import ava_home
+from base.paths import meiva_home
 from base.telemetry.observability import collector_allowed_for_home, gateway_observability_home
 from services.supervision.roster import build_services
 from services.supervision.roster.plugin_services import PluginServiceError
@@ -62,7 +62,7 @@ def _computer_mcp_gate_reason(*, host: Host) -> str | None:
     code-enforced (user ruling 2026-08-10).
     """
     if not settings.services.permissions_helper_enabled:
-        return "disabled (AVA_PERMISSIONS_HELPER_ENABLED off)"
+        return "disabled (MEIVA_PERMISSIONS_HELPER_ENABLED off)"
     if permissions_helper_incapability(host=host) is not None:
         return permissions_helper_incapability(host=host)
     return None
@@ -72,11 +72,11 @@ def _redis_bridge_gate_reason(*, machine: MachineIdentity) -> str | None:
     """Why redis-bridge is gated out, or None when this host needs the relay.
 
     The relay exists only on a macOS gateway with a local data plane and a declared
-    non-loopback address; the same answer drives `ava status` and the cluster health probe.
+    non-loopback address; the same answer drives `meiva status` and the cluster health probe.
     """
     try:
         endpoint = redis_bridge_endpoint(
-            ava_home(),
+            meiva_home(),
             machine_host=machine.host,
             remote_data_plane=lambda: settings.data_plane.is_remote,
         )
@@ -92,19 +92,19 @@ def _otel_collector_gate_reason(*, machine: MachineIdentity) -> str | None:
     ``cli/commands/observability/otel_collector.py`` and ``_collector_serves_this_home`` in
     ``services/supervision/healthchecks/otel_collector.py``. All three share
     ``collector_allowed_for_home`` (marker OR station capability OR explicit
-    ``AVA_TELEMETRY_OTLP_ENDPOINT`` override) so the roster, ``ava start``,
-    ``ava status``, the root, rollout readiness, and cluster health probe agree
+    ``MEIVA_TELEMETRY_OTLP_ENDPOINT`` override) so the roster, ``meiva start``,
+    ``meiva status``, the root, rollout readiness, and cluster health probe agree
     about which gateway owns the collector. Pure agent-runners retain their
     relay collector.
     """
-    home = ava_home()
+    home = meiva_home()
     if not collector_allowed_for_home(
         gateway_observability_home(machine, home=home), machine=machine, unit_home=home
     ):
         return (
             "this gateway home is not the observability station (lgtm-host "
             "marker absent, no observability-station capability); telemetry "
-            "export is unavailable; set AVA_TELEMETRY_OTLP_ENDPOINT to use an "
+            "export is unavailable; set MEIVA_TELEMETRY_OTLP_ENDPOINT to use an "
             "explicit collector"
         )
     return None
@@ -122,17 +122,17 @@ _FLAG_GATES: tuple[tuple[str, Callable[[], bool], str], ...] = (
     (
         "heartbeat",
         lambda: settings.daemon.heartbeat_enabled,
-        "disabled (AVA_HEARTBEAT_ENABLED off)",
+        "disabled (MEIVA_HEARTBEAT_ENABLED off)",
     ),
     (
         "delivery-watchdog",
         lambda: settings.daemon.delivery_watchdog_enabled,
-        "disabled (AVA_DELIVERY_WATCHDOG_ENABLED off)",
+        "disabled (MEIVA_DELIVERY_WATCHDOG_ENABLED off)",
     ),
     (
         "im-bridge",
         lambda: settings.services.im_bridge_enabled,
-        "disabled (AVA_IM_BRIDGE_ENABLED off)",
+        "disabled (MEIVA_IM_BRIDGE_ENABLED off)",
     ),
 )
 
@@ -147,7 +147,7 @@ def _flag_gate_reason(session: str) -> str | None:
 
 def _browser_family_gate_reason(*, host: Host) -> str | None:
     if not settings.services.browser_enabled:
-        return "disabled (AVA_BROWSER_ENABLED off)"
+        return "disabled (MEIVA_BROWSER_ENABLED off)"
     return browser_incapability(
         settings.services.chrome_binary, host=host
     )  # display / Chrome / npx, or None when capable
@@ -186,7 +186,7 @@ def _plugin_gate_reason(spec: ServiceSpec) -> str | None:
 def gate_reason(spec: ServiceSpec, *, machine: MachineIdentity, host: Host) -> str | None:
     """Why a service is config/capability-gated OUT of the start roster, or None if
     it will run. The single place the gate's *reason* is computed, so the start
-    path (drops it), ``ava start`` (logs it), and ``ava status`` (shows it) stay
+    path (drops it), ``meiva start`` (logs it), and ``meiva status`` (shows it) stay
     consistent.
 
     A service that carries its own ``gate`` (plugin-registered services) is asked
@@ -217,8 +217,8 @@ def services_for_capabilities_annotated(
 
     Config/capability-gated services (browser, disabled heartbeat; and
     plugin services with their own gate, e.g. disabled task-maintenance) are kept
-    in this list WITH their reason rather than dropped, so ``ava start`` /
-    ``ava status`` can show WHY a service is absent instead of silently shrinking
+    in this list WITH their reason rather than dropped, so ``meiva start`` /
+    ``meiva status`` can show WHY a service is absent instead of silently shrinking
     the roster. ``services_for_capabilities`` is the start-roster view that drops
     them.
     """

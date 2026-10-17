@@ -11,7 +11,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 
 from base.agents.upload_delivery.paths import MAX_UPLOAD_BYTES
 from base.host.db_authority.unit import UnitIdentity
-from base.paths import ava_home
+from base.paths import meiva_home
 
 NAMESPACE = ".delivered-v1"
 BATCH_ID_PATTERN = r"^[0-9a-f]{32}$"
@@ -122,7 +122,7 @@ def current_unit(
     *,
     local_machine: str,
 ) -> UnitIdentity:
-    return UnitIdentity(machine=local_machine, home=str(ava_home().resolve()))
+    return UnitIdentity(machine=local_machine, home=str(meiva_home().resolve()))
 
 
 def make_manifest(agent_id: int, names: list[str], batch: list[tuple[str, bytes, str]]) -> Manifest:

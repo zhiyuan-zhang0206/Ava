@@ -1,11 +1,11 @@
-# Grafana dashboards — Ava Ops (as code)
+# Grafana dashboards — Meiva Ops (as code)
 
 This directory is the provisioning source. At converge,
 `cli/commands/observability/lgtm_native.py` renders the whole provisioning tree into
-`$AVA_HOME/lgtm/native/config/provisioning/` (content-hash user-edit
+`$MEIVA_HOME/lgtm/native/config/provisioning/` (content-hash user-edit
 protected; datasource/webhook URLs are Grafana-native `$__env{}` references,
 so the checkout files are always valid). Every file is copied VERBATIM
-except `ava-ops-main.json`, which is generated from the metric registries
+except `meiva-ops-main.json`, which is generated from the metric registries
 (task #3697 S3) — the checked-in copy here is the render's reference output,
 not the provisioning source. Native Grafana receives the rendered
 directory's absolute file-provider path through `GRAFANA_PROVISIONING_PATH`
@@ -14,10 +14,10 @@ in the rendered `runtime.env` and hot-reloads changed dashboards within
 
 ## One dashboard (2026-08-23 merge, task #1399)
 
-`ava-ops-main.json` is the **single shipped dashboard** — the four
-dashboards (Ava Ops, Plugin Metrics, Overview, Host & Data Plane) were
-merged into one, sectioned like Ava Ops (user ruling: "merge into one big
-dashboard"). `uid` is fixed at `ava-ops-main` — the dashboard link and user
+`meiva-ops-main.json` is the **single shipped dashboard** — the four
+dashboards (Meiva Ops, Plugin Metrics, Overview, Host & Data Plane) were
+merged into one, sectioned like Meiva Ops (user ruling: "merge into one big
+dashboard"). `uid` is fixed at `meiva-ops-main` — the dashboard link and user
 bookmarks depend on it; never change it.
 
 Eleven sections, one row per section — `core` is the 2026-08-06 user-ruling
@@ -49,12 +49,12 @@ restored by task #3689). All sections are **expanded by default**
 4. **`Fleet`** — windowed agent spawns by source, windowed lifecycle totals,
    delivery-stalled total, SSE backlog, and the Max Agent ID growth curve
    (the events-maintenance service's 60s `agent_registry` gauge + its deriv rate, task #2010).
-5. **`ava_fleet`** — the task-completion-rate panel.
-6. **`ava_memory`** — passive-recall runs / empty ratio / deadline-skip ratio /
+5. **`meiva_fleet`** — the task-completion-rate panel.
+6. **`meiva_memory`** — passive-recall runs / empty ratio / deadline-skip ratio /
    skips plus the search latency and the notes injected per pass.
-7. **`ava_syntax_fix`** — the syntax-fix metric panels: fix count (per minute)
+7. **`meiva_syntax_fix`** — the syntax-fix metric panels: fix count (per minute)
    and fixes (window).
-8. **`Host & data plane`** — the former `ava-host-dataplane` panels: host
+8. **`Host & data plane`** — the former `meiva-host-dataplane` panels: host
    CPU / memory / load / filesystem / disk / network throughput + Postgres
    connections / transactions / size + Redis memory / clients / throughput.
 9. **`Cost analysis`** — two cost projections, interval-bucketed cost, and
@@ -104,25 +104,25 @@ summaries cover the same information.
 
 ## Files
 
-- `ava-ops-main.json` — the only dashboard, rendered from the metric
+- `meiva-ops-main.json` — the only dashboard, rendered from the metric
   registries since task #3697: `base/telemetry/metrics/grafana_dashboard.py` renders the
   registries into this file's shape (every panel registry-covered, slice
-  S2), `ava lgtm render` previews (diff) or force-writes the host
-  provisioning copy, and converge (every `ava start`) regenerates its
+  S2), `meiva lgtm render` previews (diff) or force-writes the host
+  provisioning copy, and converge (every `meiva start`) regenerates its
   provisioning copy from the same render (slice S3) and replaces a differing
   file unconditionally — derived state, no user-edit guard, so a file written
-  by `ava lgtm render --force` cannot freeze it — plugin installs/uninstalls
+  by `meiva lgtm render --force` cannot freeze it — plugin installs/uninstalls
   and MetricSpec changes move the panels with no hand mirror here; the
   checked-in copy is the render's reference output.
 - Deleted 2026-08-23 (a dashboard file removed from this directory is
   dropped from Grafana on the next provisioning reload — `dashboards.yml`
   has `disableDeletion: false`, verified live on the merge day):
-  - `ava-ops-plugins.json` — plugin-only subset, fully duplicated in the
+  - `meiva-ops-plugins.json` — plugin-only subset, fully duplicated in the
     main dashboard.
-  - `ava-overview.json` — its Prometheus panels duplicated the richer Loki
+  - `meiva-overview.json` — its Prometheus panels duplicated the richer Loki
     event panels; only the logs panel survived (into `core`), and the
     Tempo panel left with it.
-  - `ava-host-dataplane.json` — content merged into the `Host & data
+  - `meiva-host-dataplane.json` — content merged into the `Host & data
     plane` section. The Resources block on `/insights` was removed 2026-08-24
     (user ruling, task #1479): Grafana's `Host & data plane` section is now the
     only surface for per-host CPU/memory/load/filesystem/disk/network, while
@@ -135,8 +135,8 @@ for the four resolution tiles, the fixed gauges published by the gateway and
 the PR-flow export job (Fleet growth task #2010, PR flow task #2139),
 turn-duration percentile alerting, and the
 host & data-plane panels
-(per-machine OTel Collector sidecar scrapes, `job="ava-infra"` + `host` (OS
-hostname) and `machine_name` (Ava roster name) labels; panels group by
+(per-machine OTel Collector sidecar scrapes, `job="meiva-infra"` + `host` (OS
+hostname) and `machine_name` (Meiva roster name) labels; panels group by
 `machine_name`). The unresolved tiles read the daemon's absolute
 resolution gauges, not raw event lines.
 
@@ -144,7 +144,7 @@ resolution gauges, not raw event lines.
 
 Core metric definitions live in `base/telemetry/metrics/core/panels.py` (the core
 dashboard panels, including the Statistics-coverage tiles),
-`base/telemetry/metrics/core/observability.py` (the former `ava_observability`
+`base/telemetry/metrics/core/observability.py` (the former `meiva_observability`
 plugin pack, promoted to core the same day — the repo's own observability
 is not a plugin, per user ruling), `base/telemetry/metrics/core/events.py` (the
 event-stream panels: the Events trio and the gateway sample count) and
@@ -215,7 +215,7 @@ of mass-editing targets.
 
 ## Writing a plugin metric
 
-1. Add `metrics.py` to your plugin dir (e.g. `ava_builtins/plugins/<name>/metrics.py`).
+1. Add `metrics.py` to your plugin dir (e.g. `meiva_builtins/plugins/<name>/metrics.py`).
 2. Export `contribute()` returning `PluginContributions(metrics=(MetricSpec(...), ...))` —
    the plugin name is filled when the data registry admits the declaration; do not pass it.
 3. The `query` template is **LogQL** (`query_type="logql"`) — the live event
@@ -229,16 +229,16 @@ of mass-editing targets.
    that matches the panel's information density; stats and tables remain
    instant over `[$__range]`; every count wraps in `sum(...)`.
 4. `output` selects the surfaces: `["grafana"]`, `["inspector"]`, or both.
-5. **No hand edit**: converge generates `ava-ops-main.json` from the metric
-   registries (task #3697 S3) and `ava lgtm render` previews the result —
+5. **No hand edit**: converge generates `meiva-ops-main.json` from the metric
+   registries (task #3697 S3) and `meiva lgtm render` previews the result —
    the panel lands under the row named after the plugin (every
    metric-shipping plugin owns a row; ids >= 1000 are renderer-allocated).
    `tests/components/plugins/test_plugin_metrics_logql.py` also locks every registered
    grafana spec against the JSON.
 
-Shipped examples: `ava_builtins/plugins/ava_syntax_fix/metrics.py` (syntax_fix
-trend/stat), `ava_builtins/plugins/ava_fleet/metrics.py` (task completion
-rate), `ava_builtins/plugins/ava_memory/metrics.py` (passive-recall runs /
+Shipped examples: `meiva_builtins/plugins/meiva_syntax_fix/metrics.py` (syntax_fix
+trend/stat), `meiva_builtins/plugins/meiva_fleet/metrics.py` (task completion
+rate), `meiva_builtins/plugins/meiva_memory/metrics.py` (passive-recall runs /
 empty ratio / deadline-skip ratio plus search latency and notes injected).
 
 ## Layout
@@ -261,12 +261,12 @@ watch Loki panel latency and shrink the window again if it degrades).
 ## Syncing to the live Grafana
 
 There is no sync: native Grafana (host port 3003 by default, 53003 on the
-station via `AVA_LGTM_GRAFANA_PORT`) reads the rendered directory through
+station via `MEIVA_LGTM_GRAFANA_PORT`) reads the rendered directory through
 the absolute `GRAFANA_PROVISIONING_PATH` set in
 `runtime.env`, and its file provider reloads a changed file within ~30s.
 Editing a file here and checking out on the LGTM host is the deployment —
-except `ava-ops-main.json`, which converge generates from the metric
-registries (edit the specs, not the JSON). The `uid` must stay `ava-ops-main`, and
+except `meiva-ops-main.json`, which converge generates from the metric
+registries (edit the specs, not the JSON). The `uid` must stay `meiva-ops-main`, and
 datasource uids must match `datasources.yml`. Loki and Prometheus datasource
 URLs use host loopback; Tempo is the station-native trace backend.
 
@@ -287,13 +287,13 @@ provisioning cycle when needed.
   API route. The frontend only ever dials `{API_BASE}/grafana/...`.
 - **Postgres datasource** reachable from Grafana with read access to
   `agents_meta` (and the `postgres` plugin enabled).
-- The Insights page links to `/grafana/d/ava-ops-main` from `/insights#ops`.
+- The Insights page links to `/grafana/d/meiva-ops-main` from `/insights#ops`.
 
 ## Alerting
 
 **Live**: Grafana Alerting rules, as code in
 [`../alerting/rules.yml`](../alerting/rules.yml) — thirty-eight rules (2026-09-18)
-split between the one-minute `ava-ops` group and five-minute `ava-ops-slow`
+split between the one-minute `meiva-ops` group and five-minute `meiva-ops-slow`
 group over Loki and Prometheus: the event-health,
 backlog, LLM-latency, delivery, freshness, trace-watermark,
 billing, host/data-plane, and collector-delivery rules, plus the three

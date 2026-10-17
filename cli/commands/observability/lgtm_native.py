@@ -280,19 +280,19 @@ def _warn_listen_read_mismatches() -> None:
     backends = (
         (
             "loki",
-            "AVA_TELEMETRY_LOKI_URL",
+            "MEIVA_TELEMETRY_LOKI_URL",
             observability.lgtm_listen_host,
             observability.telemetry_loki_url,
         ),
         (
             "prometheus",
-            "AVA_TELEMETRY_PROMETHEUS_URL",
+            "MEIVA_TELEMETRY_PROMETHEUS_URL",
             observability.lgtm_listen_host,
             observability.telemetry_prometheus_url,
         ),
         (
             "grafana",
-            "AVA_TELEMETRY_GRAFANA_URL",
+            "MEIVA_TELEMETRY_GRAFANA_URL",
             observability.lgtm_grafana_listen_host,
             observability.telemetry_grafana_url,
         ),
@@ -308,7 +308,7 @@ def _warn_listen_read_mismatches() -> None:
         )
 
 
-def warn_env_file_divergence(ava_home: Path, values: dict[str, str]) -> None:
+def warn_env_file_divergence(meiva_home: Path, values: dict[str, str]) -> None:
     """Warn when a value about to be rendered disagrees with this unit's .env.
 
     Settings give an inherited environment value precedence over the file for
@@ -320,7 +320,7 @@ def warn_env_file_divergence(ava_home: Path, values: dict[str, str]) -> None:
     key it hits. A key the file does not declare is skipped: env-only supply is
     legitimate (a not-yet-enrolled unit, the test suites).
     """
-    env_file = ava_home / ".env"
+    env_file = meiva_home / ".env"
     if not env_file.exists():
         return
     declared = dotenv_values(env_file)
@@ -338,7 +338,7 @@ def warn_env_file_divergence(ava_home: Path, values: dict[str, str]) -> None:
 def render_configs(
     repo: Path,
     native_dir: Path,
-    ava_home: Path,
+    meiva_home: Path,
     *,
     database_factory: DatabaseFactory,
     producer: Callable[[], EventPipeline],
@@ -357,36 +357,36 @@ def render_configs(
     lgtm_listen_host = settings.observability.lgtm_listen_host
     if _has_loopback_host(tempo_query_url) != _has_loopback_host(tempo_intake_endpoint):
         print(
-            "lgtm native: AVA_TELEMETRY_TEMPO_QUERY_URL resolves to "
+            "lgtm native: MEIVA_TELEMETRY_TEMPO_QUERY_URL resolves to "
             f"{tempo_query_url} but the Tempo intake endpoint is {tempo_intake_endpoint} "
-            "— set AVA_TELEMETRY_TEMPO_QUERY_URL to the remote cluster's query URL",
+            "— set MEIVA_TELEMETRY_TEMPO_QUERY_URL to the remote cluster's query URL",
             file=sys.stderr,
         )
     _warn_listen_read_mismatches()
     warn_env_file_divergence(
-        ava_home,
+        meiva_home,
         {
-            "AVA_TELEMETRY_TEMPO_QUERY_URL": tempo_query_url,
-            "AVA_TELEMETRY_TEMPO_ENDPOINT": tempo_intake_endpoint,
-            "AVA_TELEMETRY_LOKI_URL": settings.observability.telemetry_loki_url,
-            "AVA_TELEMETRY_PROMETHEUS_URL": settings.observability.telemetry_prometheus_url,
-            "AVA_TELEMETRY_GRAFANA_URL": settings.observability.telemetry_grafana_url,
-            "AVA_OBSERVABILITY_URL": settings.observability.observability_url,
-            "AVA_LGTM_LISTEN_HOST": lgtm_listen_host,
-            "AVA_LGTM_GRAFANA_LISTEN_HOST": settings.observability.lgtm_grafana_listen_host,
-            "AVA_LGTM_LOKI_PORT": str(settings.observability.lgtm_loki_port),
-            "AVA_LGTM_GRAFANA_PORT": str(settings.observability.lgtm_grafana_port),
+            "MEIVA_TELEMETRY_TEMPO_QUERY_URL": tempo_query_url,
+            "MEIVA_TELEMETRY_TEMPO_ENDPOINT": tempo_intake_endpoint,
+            "MEIVA_TELEMETRY_LOKI_URL": settings.observability.telemetry_loki_url,
+            "MEIVA_TELEMETRY_PROMETHEUS_URL": settings.observability.telemetry_prometheus_url,
+            "MEIVA_TELEMETRY_GRAFANA_URL": settings.observability.telemetry_grafana_url,
+            "MEIVA_OBSERVABILITY_URL": settings.observability.observability_url,
+            "MEIVA_LGTM_LISTEN_HOST": lgtm_listen_host,
+            "MEIVA_LGTM_GRAFANA_LISTEN_HOST": settings.observability.lgtm_grafana_listen_host,
+            "MEIVA_LGTM_LOKI_PORT": str(settings.observability.lgtm_loki_port),
+            "MEIVA_LGTM_GRAFANA_PORT": str(settings.observability.lgtm_grafana_port),
         },
     )
     loki_url, prometheus_url, pg_url = observability_datasource_urls(
         database_factory=database_factory
     )
     substitutions = {
-        "AVA_HOME": str(ava_home),
-        "LGTM_STORAGE_DIR": str(_storage_dir(ava_home)),
-        "AVA_PROVISIONING_PATH": str(rendered_provisioning),
+        "MEIVA_HOME": str(meiva_home),
+        "LGTM_STORAGE_DIR": str(_storage_dir(meiva_home)),
+        "MEIVA_PROVISIONING_PATH": str(rendered_provisioning),
         "GRAFANA_PROVISIONING_PATH": str(rendered_provisioning / "dashboards"),
-        "AVA_TEMPO_QUERY_URL": tempo_query_url,
+        "MEIVA_TEMPO_QUERY_URL": tempo_query_url,
         # Datasources and webhooks use their configured service endpoints;
         # provisioning consumes them via Grafana's $__env{} expansion.
         "LOKI_URL": loki_url,
@@ -405,12 +405,14 @@ def render_configs(
         if name == "prometheus.yml":
             template_substitutions = {
                 **substitutions,
-                "AVA_TEMPO_QUERY_URL": _url_host_port(tempo_query_url),
-                "AVA_PROMETHEUS_SCRAPE_TARGET": _url_host_port(
+                "MEIVA_TEMPO_QUERY_URL": _url_host_port(tempo_query_url),
+                "MEIVA_PROMETHEUS_SCRAPE_TARGET": _url_host_port(
                     settings.observability.telemetry_prometheus_url
                 ),
-                "AVA_LOKI_SCRAPE_TARGET": _url_host_port(settings.observability.telemetry_loki_url),
-                "AVA_GRAFANA_SCRAPE_TARGET": _url_host_port(
+                "MEIVA_LOKI_SCRAPE_TARGET": _url_host_port(
+                    settings.observability.telemetry_loki_url
+                ),
+                "MEIVA_GRAFANA_SCRAPE_TARGET": _url_host_port(
                     settings.observability.telemetry_grafana_url
                 ),
             }
@@ -467,15 +469,15 @@ def _render_grafana_telegram_env(native_dir: Path) -> None:
         env_file.unlink(missing_ok=True)
         return
     content = (
-        f"export AVA_ALERTS_TELEGRAM_BOT_TOKEN={shlex.quote(token)}\n"
-        f"export AVA_ALERTS_TELEGRAM_CHAT_ID={owner}\n"
+        f"export MEIVA_ALERTS_TELEGRAM_BOT_TOKEN={shlex.quote(token)}\n"
+        f"export MEIVA_ALERTS_TELEGRAM_CHAT_ID={owner}\n"
     )
     write_if_changed(env_file, content, mode=0o600)
 
 
 def ensure_lgtm_native(
     repo: Path,
-    ava_home: Path,
+    meiva_home: Path,
     *,
     services: frozenset[str],
     database_factory: DatabaseFactory,
@@ -483,16 +485,16 @@ def ensure_lgtm_native(
     machine: MachineIdentity,
     host: Host,
 ) -> None:
-    """Prepare selected pinned binaries and config; lifecycle belongs to ava-root."""
+    """Prepare selected pinned binaries and config; lifecycle belongs to meiva-root."""
     if not services or services - set(BACKENDS):
         raise ValueError("native LGTM preparation requires selected backend names")
     tag = platform_tag(host.platform)
     if tag not in SUPPORTED_TAGS:
         raise RuntimeError("Native LGTM has no pinned binaries for this platform")
-    native_dir = ava_home / "lgtm/native"
+    native_dir = meiva_home / "lgtm/native"
     for directory in ("bin", "config", "logs"):
         (native_dir / directory).mkdir(parents=True, exist_ok=True)
-    storage = _storage_dir(ava_home)
+    storage = _storage_dir(meiva_home)
     for sub in ("", "loki", "prom"):
         (storage / sub).mkdir(parents=True, exist_ok=True)
     for name, asset in native_versions(repo, platform=host.platform).items():
@@ -513,7 +515,7 @@ def ensure_lgtm_native(
     render_configs(
         repo,
         native_dir,
-        ava_home,
+        meiva_home,
         database_factory=database_factory,
         producer=producer,
         machine=machine,
@@ -522,7 +524,7 @@ def ensure_lgtm_native(
         render_grafana_admin_password(native_dir)
         _render_grafana_telegram_env(native_dir)
     if "loki" in services:
-        verify_loki(ava_home, host=host)
+        verify_loki(meiva_home, host=host)
 
 
 def verify_loki(home: Path, *, host: Host) -> None:
@@ -549,14 +551,14 @@ def ensure_lgtm_native_step(ctx: ConvergeCtx) -> None:
     Provider identity is the legacy `lgtm-host` marker OR the declarative
     `observability-station` capability; both install the pinned binaries and
     render the configs and storage dirs of the selected backends. Starting them
-    belongs to `ava-root`.
+    belongs to `meiva-root`.
     """
     selected = ctx.services.intersection(BACKENDS)
     if not is_station_ctx(ctx) or not selected:
         return
     ensure_lgtm_native(
         ctx.repo,
-        ctx.ava_home,
+        ctx.meiva_home,
         services=selected,
         database_factory=ctx.database_factory,
         producer=ctx.producer,

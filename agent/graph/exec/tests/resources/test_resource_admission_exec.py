@@ -12,11 +12,11 @@ from unittest.mock import MagicMock, patch
 import psycopg
 import pytest
 
-from ava.tests.fixtures.pin_agent import exec_context
 from base.agents.incarnation.exec_owner_protocol import OwnerClosed, OwnerContext, OwnerReady
 from base.agents.incarnation.resources import IncarnationResources, decode_resources
 from base.agents.incarnation.tests.test_resources import _admitted
 from base.db import Database
+from meiva.tests.fixtures.pin_agent import exec_context
 
 
 @pytest.fixture(autouse=True)

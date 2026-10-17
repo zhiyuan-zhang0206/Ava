@@ -1,12 +1,12 @@
 {
   "version": 1,
-  "policy": "Built-in schedules ship with Ava. Product schedules (adversarial evaluation, self-evolution, memory) are created enabled by default; cluster-operator schedules are created but disabled. provision_builtin_schedules() (schedule-manager start + `ava schedules provision`) creates missing built-ins keyed by name and resyncs the script/command of existing ones to the template here; their enabled state and description are never modified.",
+  "policy": "Built-in schedules ship with Meiva. Product schedules (adversarial evaluation, self-evolution, memory) are created enabled by default; cluster-operator schedules are created but disabled. provision_builtin_schedules() (schedule-manager start + `meiva schedules provision`) creates missing built-ins keyed by name and resyncs the script/command of existing ones to the template here; their enabled state and description are never modified.",
   "builtin_schedules": [
     {
       "name": "c9-daily-report",
       "class": "product",
       "default_enabled": true,
-      "description": "Daily CI-minute reconciliation at 05:00 cluster time — appends the trailing 24h of CI runs to the attribution ledger (idempotent by run id) and emits the ci_usage_daily event; failures wake the Ava P0 lead.",
+      "description": "Daily CI-minute reconciliation at 05:00 cluster time — appends the trailing 24h of CI runs to the attribution ledger (idempotent by run id) and emits the ci_usage_daily event; failures wake the Meiva P0 lead.",
       "script": "c9-daily-report-schedule.py",
       "command": "python c9-daily-report-schedule.py"
     },
@@ -62,7 +62,7 @@
       "name": "dev-ci-metrics",
       "class": "product",
       "default_enabled": true,
-      "description": "Daily GitHub Actions run-observability collection at 06:20 cluster time — publishes absolute Dev/CI workflow, failure, per-PR, and white-run gauges; failures wake the Ava P0 lead.",
+      "description": "Daily GitHub Actions run-observability collection at 06:20 cluster time — publishes absolute Dev/CI workflow, failure, per-PR, and white-run gauges; failures wake the Meiva P0 lead.",
       "script": "dev-ci-metrics-schedule.py",
       "command": "python dev-ci-metrics-schedule.py"
     }

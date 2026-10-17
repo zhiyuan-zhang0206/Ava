@@ -84,7 +84,7 @@ def test_returns_full_messages_for_trace(
     tid = create_agent(db_conn)
     trace_id = "ab" * 16
     msgs = [
-        SystemMessage(content="You are Ava, an agent..."),
+        SystemMessage(content="You are Meiva, an agent..."),
         HumanMessage(content="hello"),
         AIMessage(content="hi!"),
     ]
@@ -96,7 +96,7 @@ def test_returns_full_messages_for_trace(
     assert body["pruned"] is False
     assert body["checkpoint_id"] == ckpt_id
     assert [m["type"] for m in body["messages"]] == ["system", "human", "ai"]
-    assert body["messages"][0]["content"] == "You are Ava, an agent..."
+    assert body["messages"][0]["content"] == "You are Meiva, an agent..."
     assert body["messages"][2]["content"] == "hi!"
 
 

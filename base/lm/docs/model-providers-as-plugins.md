@@ -1,7 +1,7 @@
 # Model providers as plugins
 
 > **Status: implemented.** Core registers no provider bindings or chat models.
-> The repository providers live under `ava_builtins/plugins/lm_*`, and
+> The repository providers live under `meiva_builtins/plugins/lm_*`, and
 > enabled provider plugins are the sole source of chat models, builders, API-key
 > declarations, effort vocabularies, vision fallbacks, stop vocabularies, and
 > current prices.
@@ -77,14 +77,14 @@ DeepSeek uses its Anthropic-compatible endpoint for ordinary chat and tools.
 `with_structured_output(method="json_schema")` uses the same configured model on its
 Responses endpoint, submitting a native schema with strict mode and retaining raw usage.
 This transport belongs to the provider; feature callers do not construct vendor clients
-or change model selection. See [reply-suggestion verification](../../../gateway/agents/docs/reply-suggestion/verification.ava.okf.md)
+or change model selection. See [reply-suggestion verification](../../../gateway/agents/docs/reply-suggestion/verification.meiva.okf.md)
 for the observed limits of the provider's schema-adherence guarantee.
 
 ## Loading and startup
 
 Discovery is keyed on a plugin directory's `plugin.py`; `provider.py` is the
 separately loaded base-layer module. It may import `base` and installed
-LangChain packages, never `ava` or `agent`, because gateway, labeler, and eval
+LangChain packages, never `meiva` or `agent`, because gateway, labeler, and eval
 processes load it without an agent runtime.
 
 `build_model_catalog()` reuses `discover_plugins()` and `load_for_runtime()`,
@@ -105,7 +105,7 @@ and traceback. No failed attempt publishes a partial catalog.
 `lm_typesafe` contributes no chat model: Jev is a decision model, so its plugin declares only
 `decision_providers`, and `lm_openai` adds the Decisions API beside its chat provider. Decision
 models are installed into parallel catalog tables and are unreachable from any chat path; see
-[decision-models.ava.okf.md](decision-models.ava.okf.md).
+[decision-models.meiva.okf.md](decision-models.meiva.okf.md).
 
 ## Provider contract
 
@@ -174,18 +174,18 @@ A binding's lifetime follows a vendor endpoint and the deployment's decision to
 enable it; the registry, loader, normalization, and fail-fast invariants remain
 useful regardless of which providers are installed.
 
-The provider module is separate from the agent-facing plugin SDK. `ava.extend`
+The provider module is separate from the agent-facing plugin SDK. `meiva.extend`
 and namespace registration operate above `base/lm` and load only in agent
 processes, so they cannot supply bindings to gateway validation, labeler, or
-eval consumers. `AVA_LLM_OVERRIDE` is likewise only a test-injection seam: it
+eval consumers. `MEIVA_LLM_OVERRIDE` is likewise only a test-injection seam: it
 replaces the factory and deliberately skips real-key validation rather than
 adding a provider.
 
 ## Resolved questions
 
-- **Dependencies:** repository provider dependencies remain pinned in Ava's
+- **Dependencies:** repository provider dependencies remain pinned in Meiva's
   `pyproject.toml`. An external provider can use only packages already present
-  in the Ava environment; provider plugins do not have an independent
+  in the Meiva environment; provider plugins do not have an independent
   dependency-install mechanism.
 - **Repository providers:** all eight current bindings are plugins. Core ships
   the contract and an all-enabled default set, not fallback providers.
@@ -205,6 +205,6 @@ adding a provider.
 - **A closed schema for builders:** vendor integrations contain unanticipated
   wire behavior; plain Python behind a narrow documented context preserves the
   boundary without pretending every client can be configured identically.
-- **`AVA_LLM_OVERRIDE` for real providers:** the override bypasses normal
+- **`MEIVA_LLM_OVERRIDE` for real providers:** the override bypasses normal
   provider registration and key validation, which is correct for fakes and
   incorrect for production access.

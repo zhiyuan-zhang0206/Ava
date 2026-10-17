@@ -1,6 +1,6 @@
 """What the data-plane commands read from configuration, as one immutable value.
 
-The composition roots are the process entries: the `ava start`, `ava stop` and `ava status`
+The composition roots are the process entries: the `meiva start`, `meiva stop` and `meiva status`
 steps in `cli/commands/lifecycle` and the pooler converge step. They read the process
 configuration once, through `data_plane_config_from_settings`, and everything below them receives
 the result as `config`, so a test hands a function the exact values it wants with

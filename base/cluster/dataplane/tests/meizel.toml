@@ -9,13 +9,13 @@
 "test_pg_tools.py#monkeypatch.setenv os.environ.LANG" = 1
 "test_pg_tools.py#monkeypatch.setenv os.environ.LC_ALL" = 2
 "test_pg_tools.py#monkeypatch.setenv os.environ.LC_CTYPE" = 1
-"test_pooler_layout.py#monkeypatch.setenv os.environ.AVA_HOME" = 1
-"test_vendored_binaries.py#monkeypatch.setenv os.environ.AVA_HOME" = 1
-"test_walg_binary.py#monkeypatch.setenv os.environ.AVA_HOME" = 1
+"test_pooler_layout.py#monkeypatch.setenv os.environ.MEIVA_HOME" = 1
+"test_vendored_binaries.py#monkeypatch.setenv os.environ.MEIVA_HOME" = 1
+"test_walg_binary.py#monkeypatch.setenv os.environ.MEIVA_HOME" = 1
 
 [debt.first-party-patch]
 "test_direct_url.py#monkeypatch.setattr base.cluster.dataplane.direct_url.get_record" = 1
-"test_direct_url.py#monkeypatch.setattr base.paths.ava_home" = 1
+"test_direct_url.py#monkeypatch.setattr base.paths.meiva_home" = 1
 "test_pg_fixture_log.py#monkeypatch.setattr base.cluster.dataplane.pg_throwaway_base.default_base" = 1
 "test_pg_fixture_log.py#monkeypatch.setattr base.cluster.dataplane.pg_throwaway_base.disk_fallback_base" = 1
 "test_pg_fixture_log.py#monkeypatch.setattr base.cluster.dataplane.pg_tools.fixture_log_artifact_dir" = 1

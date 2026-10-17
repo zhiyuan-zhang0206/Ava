@@ -8,7 +8,7 @@ from http.client import HTTPException
 from base.cluster.machine import MachineIdentity, MachineRoleMissing
 from base.config import settings
 from base.daemon.health import DaemonProbe
-from base.paths import ava_home
+from base.paths import meiva_home
 from base.telemetry.observability import collector_allowed_for_home, gateway_observability_home
 
 _QUEUE_SAMPLE = re.compile(
@@ -28,7 +28,7 @@ def collector_serves_this_home(*, machine: MachineIdentity) -> bool:
         return False
     if "gateway" not in roles:
         return True
-    home = ava_home()
+    home = meiva_home()
     return collector_allowed_for_home(
         gateway_observability_home(machine, home=home), machine=machine, unit_home=home
     )

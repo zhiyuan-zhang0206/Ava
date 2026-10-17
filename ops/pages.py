@@ -1,6 +1,6 @@
-"""ava.ui.show / .close panel registration, gateway-internal DB layer.
+"""meiva.ui.show / .close panel registration, gateway-internal DB layer.
 
-The agent calls `ava.ui.show(name)` to start an HTTP server inside its own
+The agent calls `meiva.ui.show(name)` to start an HTTP server inside its own
 process (bound on the runner's reachable host — loopback on a single box),
 self-reporting its reachable host; this module writes the registration into
 the agent_pages table. The page URL is the gateway's own
@@ -165,7 +165,7 @@ def register_page_in_transaction(
     and publishing the PageOpened event.
 
     `serve_dir` is the directory the page server serves, recorded by
-    ava.ui.serve() so the page-server service can admit its initial serving session; NULL for ava.ui.show() pages (the agent
+    meiva.ui.serve() so the page-server service can admit its initial serving session; NULL for meiva.ui.show() pages (the agent
     manages those servers itself).
     """
     lock_page_agent(db, agent_id)

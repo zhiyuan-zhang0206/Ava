@@ -88,7 +88,7 @@ def test_unit_dial_url_split_runner_is_reachable_ops(monkeypatch: pytest.MonkeyP
 
 
 def test_unit_dial_url_gateway_only_is_reachable_host(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(settings.gateway, "gateway_url", "https://ava.example:8000")
+    monkeypatch.setattr(settings.gateway, "gateway_url", "https://meiva.example:8000")
     assert (
         machines.unit_dial_url(
             frozenset({"gateway"}),

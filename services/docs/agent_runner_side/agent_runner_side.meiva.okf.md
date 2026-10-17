@@ -1,0 +1,96 @@
+---
+type: doc
+title: Agent-runner Side Services — background services run by agent-runner capability
+description: "A group of background daemons run on machines whose capabilities include agent-runner — services meaningful only alongside machines that run agents: inbound ops server, agent turn execution, shared headed browser, macOS desktop automation. Source of truth: ServiceSpec.capabilities in services/supervision/roster/spec.py."
+tags: []
+---
+
+# Agent-runner Side Services
+
+## What is it
+Background service group run on machines whose capabilities set includes `agent-runner` (single-machine `gateway,agent-runner` or pure agent-runner). The agent-runner capability owns daemons meaningful only alongside machines that run agents: the ops server dialed by gateway, the agent host that schedules local turns, the shared headed browser + MCP upstream, and macOS-specific desktop automation.
+
+`services/docs/agent_runner_side/` is a **capability grouping, not a directory of code** — there is no `services/agent_runner_side/` package, its nodes sit in `services/docs/agent_runner_side/`. Each daemon's code lives in a domain group under `services/<group>/<name>/` (`agent_runner`, `desktop`, ...); which side it runs on is a `ServiceSpec.capabilities` attribute that cuts across the filesystem. See [[gateway_side.meiva.okf.md]] for the same note on the mirror group.
+
+## Service List
+Source of truth = services in `services/supervision/roster/spec.py` `build_services()` whose `ServiceSpec.capabilities` includes `agent-runner` (`AGENT_RUNNER` / `BOTH` groups).
+
+| Service | Responsibility | File |
+|------|------|------|
+| agent-ops | agent-runner inbound HTTP ops (authenticated) | [[agent_ops.meiva.okf.md]] |
+| browser | headed Chrome reuse + shared MCP upstream | [[services/docs/agent_runner_side/browser/browser/browser.meiva.okf.md]] |
+| permissions-helper | macOS permission ancestor and desktop automation | [[permissions-helper/permissions-helper.meiva.okf.md]] |
+| computer-mcp | computer-use executor: desktop actions through the signed permissions helper, screen-coordinated (lease + FIFO) + audited (task #1101) | [[computer-mcp.meiva.okf.md]] |
+| agent-host | Executes local agents as isolated asyncio turns in one daemon; its background loops include the understanding-chunk consumer ([[base/agents/history/hierarchy/docs/chunks.meiva.okf.md]]) | `services/agent_runner/agent_host/` |
+
+## Also Under agent-runner Capability
+- **browser-mcp** — shared chrome-devtools-mcp upstream. Gate = browser's; see [[services/docs/agent_runner_side/browser/browser/browser.meiva.okf.md]]
+- **computer-mcp** — computer-use executor. Capability = permissions-helper; no code gate (governance removed 2026-08-10, peer trust model); see [[computer-mcp.meiva.okf.md]]
+
+## Notes
+The permissions helper is the macOS root ancestor and remains outside `build_services()`. Root diagnostics observes its protocol without repair authority; Linux has no helper ancestor.
+
+The hosted runner beats local liveness, renews database ownership, then publishes
+its 60-second Redis turn-progress snapshot. That best-effort `SET`
+has a three-second operation deadline: a stalled response is cancelled and logged
+at WARNING so subsequent ownership renewals continue. The shared Redis client's
+long-lived pub/sub reads remain unbounded; shutdown cancellation still propagates.
+
+A service-entered `TaskGroup` owns the ownership heartbeat from before boot
+settlement until after scheduler drain. Its completion retains an unknown error
+without cancelling boot or dispatch; the existing stop/join boundary raises the
+original error before ownership release and pool close. Every cleanup stage is
+attempted even if joining the heartbeat fails. Boot failures also close the
+heartbeat group, pools and pidfile. Postgres operational/pool/deadline failures
+and Redis transport/deadline/auth failures retain their existing next-beat
+recovery. Command, input and programming errors end the heartbeat and become
+visible at join. This changes neither the scheduler's drain budget nor the
+process's finite shutdown path.
+
+The agent-host main passes its captured stop exception to the shared
+`cancel_and_drain` owner. If an internal TaskGroup replays that same interrupt,
+the existing task join continues through asynchronous cleanup before hard exit;
+a distinct control event or unknown loop error still escapes. Ordinary cleanup
+failures remain reported errors with exit status 1.
+
+The durable host scan only wakes agents; it never cancels a running turn. A turn
+that stops making progress is aborted by the in-graph stall guard
+(`stall_guard.py`, driven by the monotonic turn-progress clock), not by the
+dispatcher. The wake subscription reconnects after a failure, and after ten
+consecutive failures without one completed read the dispatcher raises and the
+daemon exits, leaving the restart decision to the supervisor's bounded budget.
+The same scan rediscovers `running` agents owned by another host after their lease expires,
+even if they have only claimed messages or checkpoint work. It schedules the
+ordinary admission path, which retains exact process/resource and owner fences;
+the scan does not rewrite state or manufacture messages.
+
+Host replacement still respects the ownership lease even when a predecessor's
+exact process has exited. Normal cancellation also retains the shield around
+runtime initialization and cleanup because those paths contain side-effecting
+threads. A true stalled turn that cannot unwind retains its slot and requires
+supervisor recovery; backlog recovery does not weaken that resource boundary.
+
+## Key Dependencies
+- [[services/supervision/meiva_root_glue/docs/meiva_root_glue.meiva.okf.md]] — root probes and supervises the selected service manifest.
+- [[services/docs/services.meiva.okf.md|Background Services Overview]] — the upper-level index of grouping and capability distribution
+
+Guarded manual compact requires the actual host producer and cold application
+proof: [[base/agents/compaction/docs/manual-compact/manual-compact.meiva.okf.md]]. Legacy compaction
+and older runners do not acquire this capability from installed routes/schema.
+
+## Hosted failure regression boundaries
+
+`agent_host/tests/dispatch/test_failure_report_cutoff.py` runs synchronous
+inbound INSERTs off the event loop: they can wait for the same agent's
+inbound-owner lock held by settlement, whose task needs that loop to proceed.
+
+`agent_host/tests/lifecycle/test_hosted_ownership_agent_host.py` cancels the
+inner `_run_turn` task after admission commits and while Redis announcement is
+parked, isolating admission and settlement. The public `run_turn` additionally
+owns resource retention, cancellation forwarding and receipt cleanup; this
+focused test does not exercise that wrapper.
+
+Transcript rotation tests run `child_runtime_scenarios.py` in a fresh child with
+real fd 1: pytest's capture wrapper is not the `fstat`/`dup2` boundary. After
+rotation the child writes through both the descriptor and Python stdout/stderr,
+checking their new destination. This does not prove every Loguru sink path.

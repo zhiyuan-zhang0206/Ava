@@ -2,7 +2,7 @@
 
 Covers:
 - _dispatch routing for each op kind (kind, payload) -> (status, result)
-- wire-error proxying (AvaAgentError -> failed result carrying reason)
+- wire-error proxying (MeivaAgentError -> failed result carrying reason)
 - _ops_route: body parsing, {status, result} envelope, malformed-body 400,
   required semaphore binding
 - concurrency cap (Semaphore) across concurrent /ops requests
@@ -409,7 +409,7 @@ async def test_dispatch_shell_capture_calls_shell_capture_op(
         seen["agent_id"] = agent_id
         seen["session_id"] = session_id
         seen["lines"] = lines
-        return ShellCaptureResult(session_name="ava-agent-42-shell-3-build", lines=["a", "b"])
+        return ShellCaptureResult(session_name="meiva-agent-42-shell-3-build", lines=["a", "b"])
 
     monkeypatch.setattr(cluster_ops, "shell_capture_op", _fake_capture)
     status, result = await daemon._dispatch(
@@ -429,7 +429,7 @@ async def test_dispatch_shell_capture_calls_shell_capture_op(
     assert status == "completed"
     assert seen == {"agent_id": 42, "session_id": 3, "lines": 500}
     assert result == {
-        "session_name": "ava-agent-42-shell-3-build",
+        "session_name": "meiva-agent-42-shell-3-build",
         "lines": ["a", "b"],
         "created_at": None,
         "uptime_seconds": 0,

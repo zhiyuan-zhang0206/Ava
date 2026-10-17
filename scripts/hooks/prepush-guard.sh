@@ -36,33 +36,33 @@ case "$tool" in
 esac
 
 # 120s lets a normal ~108s pyright finish without an unbounded push wait.
-wait_seconds="${AVA_PREPUSH_LOCK_WAIT_SECONDS:-120}"
-[[ "$wait_seconds" =~ ^[0-9]+([.][0-9]+)?$ ]] || { echo "Invalid AVA_PREPUSH_LOCK_WAIT_SECONDS: $wait_seconds" >&2; exit 2; }
+wait_seconds="${MEIVA_PREPUSH_LOCK_WAIT_SECONDS:-120}"
+[[ "$wait_seconds" =~ ^[0-9]+([.][0-9]+)?$ ]] || { echo "Invalid MEIVA_PREPUSH_LOCK_WAIT_SECONDS: $wait_seconds" >&2; exit 2; }
 
 check_load() {
     local reason
     # 1.5 runnable tasks/core tolerates short bursts but avoids adding work to
     # a sustained CPU queue. Check again after waiting for a lock.
-    reason="$(python3 - "${AVA_PREPUSH_MAX_LOAD_PER_CORE:-1.5}" <<'PY'
+    reason="$(python3 - "${MEIVA_PREPUSH_MAX_LOAD_PER_CORE:-1.5}" <<'PY'
 import math
 import os
 import sys
 
 threshold = float(sys.argv[1])
 if not math.isfinite(threshold) or threshold < 0:
-    raise SystemExit("AVA_PREPUSH_MAX_LOAD_PER_CORE must be finite and nonnegative")
+    raise SystemExit("MEIVA_PREPUSH_MAX_LOAD_PER_CORE must be finite and nonnegative")
 per_core = os.getloadavg()[0] / (os.cpu_count() or 1)
 if per_core > threshold:
     print(f"1-minute load/core {per_core:.2f} exceeds threshold {threshold:g}")
 PY
-    )" || skip "load probe failed; check AVA_PREPUSH_MAX_LOAD_PER_CORE and host load support"
+    )" || skip "load probe failed; check MEIVA_PREPUSH_MAX_LOAD_PER_CORE and host load support"
     [[ -z "$reason" ]] || skip "$reason"
 }
 
 check_load
 # A fixed host path, independent of HOME, TMPDIR, git-dir, and checkout. Sticky
 # directory + non-truncating creation lets different users share the same locks.
-lock_dir="${AVA_PREPUSH_LOCK_DIR:-/tmp/ava-prepush-locks}"
+lock_dir="${MEIVA_PREPUSH_LOCK_DIR:-/tmp/meiva-prepush-locks}"
 [[ ! -L "$lock_dir" ]] || skip "lock directory is a symlink: $lock_dir"
 mkdir -m 1777 "$lock_dir" 2>/dev/null || [[ -d "$lock_dir" ]] || skip "cannot create lock directory $lock_dir"
 lock_file="$lock_dir/$tool.lock"

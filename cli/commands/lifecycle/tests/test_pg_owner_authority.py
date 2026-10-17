@@ -43,7 +43,7 @@ from base.cluster.dataplane.pg_tools import pg_tool
 from base.config import settings
 from base.deploy.schema.migrations import apply_pending_migrations, required_migration_set
 from base.host.db_authority.model import GATEWAY_GROUP, RUNNER_GROUP, Groups
-from base.paths.home import resolve_ava_home
+from base.paths.home import resolve_meiva_home
 from cli.commands.data_plane import cluster_instance as ci
 from cli.commands.data_plane.bringup import prepare_memory_vectors
 from cli.commands.data_plane.config import DataPlaneConfig
@@ -101,7 +101,7 @@ _SNAPSHOT: dict[str, sql.SQL] = {
         " CROSS JOIN unnest(ARRAY['SELECT', 'INSERT', 'UPDATE', 'DELETE', 'TRUNCATE',"
         " 'REFERENCES', 'TRIGGER']) AS p(privilege)"
         " WHERE n.nspname = 'public' AND c.relkind IN ('r', 'p', 'v', 'm')"
-        " AND has_table_privilege('ava_runner', c.oid, p.privilege) ORDER BY 1, 2"
+        " AND has_table_privilege('meiva_runner', c.oid, p.privilege) ORDER BY 1, 2"
     ),
 }
 
@@ -144,7 +144,7 @@ def owned_pg(
     cluster record `local_owner_authority` resolves; yields its port."""
     home = tmp_path / "home"
     home.mkdir()
-    monkeypatch.setenv("AVA_HOME", str(home))
+    monkeypatch.setenv("MEIVA_HOME", str(home))
     pg_port = _free_port()
     record = cluster.ClusterRecord(
         ports=cast("cluster.ClusterPorts", {"postgres": pg_port}),
@@ -171,7 +171,7 @@ def owned_pg(
         yield pg_port
     finally:
         # Re-pin the temp home: teardown must never resolve the operator's home.
-        monkeypatch.setenv("AVA_HOME", str(home))
+        monkeypatch.setenv("MEIVA_HOME", str(home))
         subprocess.run(
             [ci.pg_bin("pg_ctl"), "-D", str(home / "pg"), "-m", "immediate", "stop"],
             check=False,
@@ -182,7 +182,7 @@ def owned_pg(
 
 
 def _data_dir() -> Path:
-    return resolve_ava_home() / "pg"
+    return resolve_meiva_home() / "pg"
 
 
 def _admin_on(pg_port: int, database: str) -> str:
@@ -338,7 +338,7 @@ def test_authority_matches_owner_login_privileges_and_is_idempotent(
     """Same catalog, same application privileges, only the dial changed."""
     monkeypatch.setattr(settings.services, "memory_search_backend", "pgvector")
     pgvector_config = dataclasses.replace(data_plane_config, memory_search_backend="pgvector")
-    legacy, current = "ava_lgcy", "ava_auth"
+    legacy, current = "meiva_lgcy", "meiva_auth"
     _provision_by_owner_login(
         owned_pg, legacy, get_descriptor(settings.services.embedding_backend).dim
     )
@@ -395,7 +395,7 @@ def test_owner_without_login_keeps_every_admin_path(
     """The owner is born NOLOGIN; it still migrates, provisions and dumps."""
     monkeypatch.setattr(settings.services, "memory_search_backend", "pgvector")
     pgvector_config = dataclasses.replace(data_plane_config, memory_search_backend="pgvector")
-    identity = "ava_nolg"
+    identity = "meiva_nolg"
     _bind_cluster_url(monkeypatch, owned_pg, identity)
     admin = ci.pg_admin_url(owned_pg)
     created = provision_database(identity, base_admin_url=admin, expected_data_dir=_data_dir())
@@ -476,17 +476,17 @@ def test_owner_without_login_keeps_every_admin_path(
 
 def test_owner_conninfo_refuses_what_startup_options_cannot_carry() -> None:
     """The owner travels as `-c role=<owner>`; anything else is refused."""
-    admin = "postgresql://admin@/postgres?host=/sockets/ava-pg-x&port=5433"
+    admin = "postgresql://admin@/postgres?host=/sockets/meiva-pg-x&port=5433"
     with pytest.raises(ValueError, match="plain role identifier"):
-        owner_conninfo(admin, database="ava", owner="ava owner")
+        owner_conninfo(admin, database="meiva", owner="meiva owner")
     with pytest.raises(ValueError, match="startup options"):
-        owner_conninfo(f"{admin}&options=-c%20role%3Dother", database="ava", owner="ava")
-    assert conninfo_to_dict(owner_conninfo(admin, database="ava_main", owner="ava_main")) == {
+        owner_conninfo(f"{admin}&options=-c%20role%3Dother", database="meiva", owner="meiva")
+    assert conninfo_to_dict(owner_conninfo(admin, database="meiva_main", owner="meiva_main")) == {
         "user": "admin",
-        "dbname": "ava_main",
-        "host": "/sockets/ava-pg-x",
+        "dbname": "meiva_main",
+        "host": "/sockets/meiva-pg-x",
         "port": "5433",
-        "options": "-c role=ava_main",
+        "options": "-c role=meiva_main",
     }
 
 
@@ -496,7 +496,7 @@ def test_local_owner_authority_reads_record_and_url_as_data(
     """Socket port from the cluster record; owner and database from the URL's
     database name."""
     home = tmp_path / "home"
-    monkeypatch.setenv("AVA_HOME", str(home))
+    monkeypatch.setenv("MEIVA_HOME", str(home))
     record = cluster.ClusterRecord(
         ports=cast("cluster.ClusterPorts", {"postgres": 5999, "pgbouncer": 6999}),
         gateway_home=str(home),
@@ -511,10 +511,10 @@ def test_local_owner_authority_reads_record_and_url_as_data(
     # A delivered generation login replaces the URL's username; the owner is the
     # database's same-named identity.
     authority = local_owner_authority(
-        "postgresql://ava_g2_gateway:pw@127.0.0.1:6999/ava_db", remote_plane=False
+        "postgresql://meiva_g2_gateway:pw@127.0.0.1:6999/meiva_db", remote_plane=False
     )
 
-    assert (authority.database, authority.owner) == ("ava_db", "ava_db")
+    assert (authority.database, authority.owner) == ("meiva_db", "meiva_db")
     assert authority.data_dir == home / "pg"
     assert conninfo_to_dict(authority.admin_url)["port"] == "5999"
     assert "pw" not in authority.conninfo
@@ -522,4 +522,4 @@ def test_local_owner_authority_reads_record_and_url_as_data(
 
 def test_remote_plane_has_no_local_owner_authority() -> None:
     with pytest.raises(RuntimeError, match="remote-managed"):
-        local_owner_authority("postgresql://owner@db.example/ava", remote_plane=True)
+        local_owner_authority("postgresql://owner@db.example/meiva", remote_plane=True)

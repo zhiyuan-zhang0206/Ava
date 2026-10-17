@@ -166,7 +166,7 @@ def test_session_survives_agent_host_and_gateway_restarts(
     agent = spawned_agent
     chat_and_wait(agent, "create survivor session")
     sid = int((world.sandbox() / "survivor-id").read_text())
-    full_name = f"ava-agent-{agent}-shell-{sid}-e2e-survivor"
+    full_name = f"meiva-agent-{agent}-shell-{sid}-e2e-survivor"
     backend = PtySessionBackend(config=PtyClientConfig())
 
     def usable(stage: str) -> None:
@@ -199,7 +199,7 @@ def test_session_survives_agent_host_and_gateway_restarts(
 
     with _restarted_server("agent-host") as host_env:
         wait_for_port(
-            "127.0.0.1", int(host_env["AVA_AGENT_HOST_HEALTH_PORT"]), label="restarted agent host"
+            "127.0.0.1", int(host_env["MEIVA_AGENT_HOST_HEALTH_PORT"]), label="restarted agent host"
         )
         usable("host-restart")
         with _restarted_server("gateway", pass_gateway_fd=True):

@@ -16,7 +16,9 @@ from base.deploy.release import editable_install
 
 
 def _write_pth(source_root: Path, target: Path) -> Path:
-    pth = source_root / ".venv" / "lib" / "python3.12" / "site-packages" / "_editable_impl_ava.pth"
+    pth = (
+        source_root / ".venv" / "lib" / "python3.12" / "site-packages" / "_editable_impl_meiva.pth"
+    )
     pth.parent.mkdir(parents=True)
     pth.write_text(str(target))
     return pth
@@ -30,7 +32,7 @@ def _write_direct_url(source_root: Path, url: str, *, editable: bool = True) -> 
         / "lib"
         / "python3.12"
         / "site-packages"
-        / "ava-0.1.5.dist-info"
+        / "meiva-0.1.5.dist-info"
         / "direct_url.json"
     )
     du.parent.mkdir(parents=True)
@@ -41,7 +43,7 @@ def _write_direct_url(source_root: Path, url: str, *, editable: bool = True) -> 
 def test_worktree_below_allowlisted_dev_clone_is_a_violation(tmp_path: Path) -> None:
     """Allowlisting a clone root must not implicitly allow its disposable worktrees."""
     source_root = tmp_path / "prod" / "source"
-    dev_clone = tmp_path / "Ava"
+    dev_clone = tmp_path / "Meiva"
     worktree = dev_clone / ".worktrees" / "feature"
     worktree.mkdir(parents=True)
     pth = _write_pth(source_root, worktree)
@@ -153,7 +155,7 @@ def test_non_editable_direct_url_is_a_violation(tmp_path: Path) -> None:
 def test_exact_allowlisted_dev_clone_direct_url_is_clean(tmp_path: Path) -> None:
     """The exact-root allowlist applies to the direct_url record too."""
     source_root = tmp_path / "prod" / "source"
-    dev_clone = tmp_path / "Ava"
+    dev_clone = tmp_path / "Meiva"
     dev_clone.mkdir(parents=True)
     _write_pth(source_root, dev_clone)
     _write_direct_url(source_root, dev_clone.as_uri())
@@ -168,7 +170,7 @@ def test_editable_console_script_violations_follow_the_posix_venv_layout(tmp_pat
 
     source_root = tmp_path / "source"
     interpreter = source_root / ".venv" / "bin" / "python"
-    console_script = interpreter.with_name("ava")
+    console_script = interpreter.with_name("meiva")
     interpreter.parent.mkdir(parents=True)
     interpreter.touch()
     console_script.touch()
@@ -209,7 +211,7 @@ def test_editable_install_violations_allowlisted_clone_is_empty(tmp_path: Path) 
     """Exact-root allowlisting applies to the read-only report too."""
     source_root = tmp_path / "prod" / "source"
     source_root.mkdir(parents=True)
-    dev_clone = tmp_path / "Ava"
+    dev_clone = tmp_path / "Meiva"
     _write_pth(source_root, dev_clone)
     _write_direct_url(source_root, dev_clone.as_uri())
 
@@ -281,7 +283,7 @@ def test_uv_native_editable_records_are_legal_and_exec_guard_accepts_them(tmp_pa
     )
     assert install.returncode == 0, install.stderr
 
-    pth_paths = editable_install.editable_ava_pth_paths(uv_built_venv_root)
+    pth_paths = editable_install.editable_meiva_pth_paths(uv_built_venv_root)
     assert pth_paths
     before = {path: path.read_bytes() for path in pth_paths}
     assert (

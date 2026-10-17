@@ -22,8 +22,8 @@ from base.host.system.tests.fake_crontab import FakeCrontab
 _UID = 501
 
 
-def _ava(*, host: Host) -> str:
-    return "/work tree/.venv/bin/ava"
+def _meiva(*, host: Host) -> str:
+    return "/work tree/.venv/bin/meiva"
 
 
 def _path(*, host: Host) -> str:
@@ -46,8 +46,8 @@ def _linux(crontab: FakeCrontab) -> Host:
 @pytest.fixture(autouse=True)
 def _configure_job(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     monkeypatch.setenv("HOME", str(tmp_path))
-    monkeypatch.setattr(cron, "ava_binary_path", _ava)
-    monkeypatch.setattr(cron, "job_home", lambda: "/home/u/.ava")
+    monkeypatch.setattr(cron, "meiva_binary_path", _meiva)
+    monkeypatch.setattr(cron, "job_home", lambda: "/home/u/.meiva")
     monkeypatch.setattr(cron, "launchd_path_env", _path)
 
 
@@ -57,16 +57,16 @@ def test_launchd_plist_runs_rotate_then_retention_daily() -> None:
     values = [element.text for element in root.findall("./dict/array/string")]
     command = values[2]
 
-    assert "<string>com.ava.logs-maintenance</string>" in content
+    assert "<string>com.meiva.logs-maintenance</string>" in content
     assert values[0:2] == ["/bin/sh", "-c"]
     assert command is not None
-    assert "'/work tree/.venv/bin/ava' logs rotate" in command
-    assert "&& '/work tree/.venv/bin/ava' logs retention" in command
+    assert "'/work tree/.venv/bin/meiva' logs rotate" in command
+    assert "&& '/work tree/.venv/bin/meiva' logs retention" in command
     assert f"--family-days {job.FAMILY_DAYS}" in command
     assert "<key>Hour</key>\n            <integer>4</integer>" in content
     assert "<key>Minute</key>\n            <integer>40</integer>" in content
     assert "<key>RunAtLoad</key>\n    <false/>" in content
-    assert "/home/u/.ava/logs/logs-maintenance.out.log" in content
+    assert "/home/u/.meiva/logs/logs-maintenance.out.log" in content
 
 
 def test_macos_reregistration_rewrites_and_reloads_idempotently() -> None:
@@ -85,7 +85,7 @@ def test_macos_unregister_removes_only_its_own_job() -> None:
     target = job.launchd_plist_path()
     target.parent.mkdir(parents=True)
     target.write_text("<target-plist/>", encoding="utf-8")
-    other = target.parent / "com.ava.packages-refresh.plist"
+    other = target.parent / "com.meiva.packages-refresh.plist"
     other.write_text("<other-plist/>", encoding="utf-8")
     commands, host = _launchctl()
 
@@ -93,12 +93,12 @@ def test_macos_unregister_removes_only_its_own_job() -> None:
 
     assert not target.exists()
     assert other.read_bytes() == b"<other-plist/>"
-    assert commands.argvs == [("launchctl", "bootout", f"gui/{_UID}/com.ava.logs-maintenance")]
+    assert commands.argvs == [("launchctl", "bootout", f"gui/{_UID}/com.meiva.logs-maintenance")]
 
 
 def test_linux_registration_replaces_only_its_own_lines() -> None:
-    other = "*/15 * * * * /x/ava packages refresh --from-job  # ava-packages-refresh"
-    old = "35 4 * * * /old/ava logs retention  # ava-logs-maintenance"
+    other = "*/15 * * * * /x/meiva packages refresh --from-job  # meiva-packages-refresh"
+    old = "35 4 * * * /old/meiva logs retention  # meiva-logs-maintenance"
     crontab = FakeCrontab(f"{other}\n\n{old}\n{old}\n")
 
     assert job.register_linux(host=_linux(crontab)) == 0
@@ -106,7 +106,7 @@ def test_linux_registration_replaces_only_its_own_lines() -> None:
     assert other in body
     assert f"{other}\n\n" in body
     assert old not in body
-    assert body.count("# ava-logs-maintenance") == 1
+    assert body.count("# meiva-logs-maintenance") == 1
     assert "40 4 * * *" in body
     assert "logs rotate" in body and "logs retention" in body
 
@@ -134,7 +134,7 @@ def test_linux_crontab_failures_and_empty_table(capsys: pytest.CaptureFixture[st
     assert (
         len(crontab.writes),
         crontab.writes[0].startswith("40 4 * * * "),
-        crontab.writes[0].endswith("  # ava-logs-maintenance\n"),
+        crontab.writes[0].endswith("  # meiva-logs-maintenance\n"),
         crontab.writes[0].count("\n"),
     ) == (1, True, True, 1)
 
@@ -167,7 +167,7 @@ def test_macos_bootstrap_failure_and_repeated_unregister(
     assert job.register_macos(host=host) == 1
     assert [argv[1] for argv in commands.argvs] == ["bootout", "bootstrap"]
     assert errors == [
-        ("launchctl bootstrap failed for {}: {}", "com.ava.logs-maintenance", "denied")
+        ("launchctl bootstrap failed for {}: {}", "com.meiva.logs-maintenance", "denied")
     ]
 
     plist = job.launchd_plist_path()

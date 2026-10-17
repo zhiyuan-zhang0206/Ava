@@ -39,7 +39,7 @@ def test_a_journal_with_the_retired_driver_key_reads_and_loses_it_on_rewrite() -
     from base.deploy.maintenance.state import MaintenanceHold
 
     hold = MaintenanceHold(MaintenancePhase.DRAINING, {7: 100})
-    legacy_ref = {"pid": 4242, "birth": 1.5, "starttime": 77, "argv": "ava stop"}
+    legacy_ref = {"pid": 4242, "birth": 1.5, "starttime": 77, "argv": "meiva stop"}
     pause_owner.state_path().write_text(
         json.dumps(
             {
@@ -122,7 +122,7 @@ def test_journal_written_with_the_retired_repair_record_still_decodes() -> None:
                 "maintenance": {
                     **hold.encode(),
                     "repaired": {"7": "RuntimeError"},
-                    "repair_record": {"at": "2026-08-25T01:03:00+00:00", "by": "Ava #1"},
+                    "repair_record": {"at": "2026-08-25T01:03:00+00:00", "by": "Meiva #1"},
                 },
             }
         )

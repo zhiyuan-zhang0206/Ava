@@ -104,7 +104,7 @@ def test_limbo_timeout_remains_missing_evidence(probe: str) -> None:
 
 @pytest.mark.parametrize("probe", ["gh", "git"])
 def test_freshness_timeout_still_submits_the_green_pr(probe: str) -> None:
-    # ava:ref scripts/ci/pull_requests/docs/command-timeouts.ava.okf.md#queue-fixture-token
+    # meiva:ref scripts/ci/pull_requests/docs/command-timeouts.meiva.okf.md#queue-fixture-token
     runner = FakeCommands()
     error = subprocess.TimeoutExpired(probe, 30)
     runner.on(["gh", "api", "repos/o/r/issues/42/timeline"], Reply(stdout="null"))

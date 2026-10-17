@@ -9,13 +9,13 @@ exports = ["stop_support.py"]
 "test_stop_terminals.py" = ["stop_support.py"]
 
 [debt.env-patch]
-"stop_support.py#monkeypatch.setenv os.environ.AVA_HOME" = 1
+"stop_support.py#monkeypatch.setenv os.environ.MEIVA_HOME" = 1
 "stop_support.py#monkeypatch.setenv os.environ.HOME" = 2
-"stop_support.py#monkeypatch.setitem os.environ.AVA_HOME" = 1
+"stop_support.py#monkeypatch.setitem os.environ.MEIVA_HOME" = 1
 "test_stop.py#monkeypatch.setenv os.environ.HOME" = 4
-"test_stop.py#monkeypatch.setitem os.environ.AVA_HOME" = 4
-"test_stop_terminals.py#monkeypatch.setenv os.environ.AVA_HOME" = 4
-"test_stop_terminals.py#monkeypatch.setitem os.environ.AVA_HOME" = 2
+"test_stop.py#monkeypatch.setitem os.environ.MEIVA_HOME" = 4
+"test_stop_terminals.py#monkeypatch.setenv os.environ.MEIVA_HOME" = 4
+"test_stop_terminals.py#monkeypatch.setitem os.environ.MEIVA_HOME" = 2
 
 [debt.first-party-patch]
 "stop_support.py#monkeypatch.setattr base.deploy.state.host_deploy_state.set_posture" = 1
@@ -30,7 +30,7 @@ exports = ["stop_support.py"]
 "stop_support.py#monkeypatch.setattr cli.commands.lifecycle.root_driver.stop_root_service_tree" = 4
 "stop_support.py#monkeypatch.setattr cli.commands.lifecycle.service_stop.close_via_service" = 1
 "stop_support.py#monkeypatch.setattr ops.pty_close_notices.write_notices" = 1
-"test_data_plane_stop.py#monkeypatch.setattr base.cluster.dataplane.pooler.ava_home" = 1
+"test_data_plane_stop.py#monkeypatch.setattr base.cluster.dataplane.pooler.meiva_home" = 1
 "test_data_plane_stop.py#monkeypatch.setattr base.cluster.ownership.redis_data_dir" = 2
 "test_data_plane_stop.py#monkeypatch.setattr base.config.settings.data_plane.cluster_secret" = 1
 "test_data_plane_stop.py#monkeypatch.setattr base.config.settings.data_plane.db_url" = 1
@@ -75,7 +75,7 @@ exports = ["stop_support.py"]
 "test_stop_close_notices.py#monkeypatch.setattr cli.commands.lifecycle._temporary_stop.stop_data_plane" = 1
 "test_stop_close_notices.py#monkeypatch.setattr ops.pty_close_notices.write_notices" = 3
 "test_stop_extras.py#monkeypatch.setattr base.native_process.os_platform.is_macos" = 2
-"test_stop_extras.py#monkeypatch.setattr base.paths.ava_home" = 1
+"test_stop_extras.py#monkeypatch.setattr base.paths.meiva_home" = 1
 "test_stop_extras.py#monkeypatch.setattr services.desktop.permissions_helper.launchd_job.unregister_helper" = 2
 "test_stop_terminals.py#monkeypatch.setattr cli.commands.lifecycle._temporary_stop.close_terminals" = 1
 "test_stop_terminals.py#monkeypatch.setattr cli.commands.lifecycle._temporary_stop.pause_agents" = 2

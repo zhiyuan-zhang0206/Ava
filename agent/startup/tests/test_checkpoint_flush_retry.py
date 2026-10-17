@@ -26,7 +26,7 @@ class _FaultSaver(AsyncPostgresSaver):
 
     failure: Literal["before_save", "after_save"] | None = None
     attempts: list[str]
-    _ava_nstep_flush: Callable[[str], Awaitable[None]]
+    _meiva_nstep_flush: Callable[[str], Awaitable[None]]
 
     async def aput(
         self,
@@ -54,7 +54,7 @@ async def test_final_flush_retry_is_durable_and_idempotent(
     saver.attempts = []
     await saver.setup()
     wrap_saver_writes_with_nstep_interval(saver, 4)
-    flush = saver._ava_nstep_flush
+    flush = saver._meiva_nstep_flush
     entered, release = asyncio.Event(), asyncio.Event()
     effect_file = tmp_path / "synthetic-effects"
 

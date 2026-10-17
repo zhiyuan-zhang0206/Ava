@@ -39,9 +39,9 @@ def test_record_env_write_records_metadata_without_config_values(audit_home: Pat
     """Removing the JSONL append or leaking values makes this regression fail."""
     env_path = audit_home / ".env"
     written_value = "audit-test-value"
-    env_path.write_text(f"AVA_MODEL={written_value}\n")
+    env_path.write_text(f"MEIVA_MODEL={written_value}\n")
 
-    record_env_write(env_path, {"AVA_MODEL"}, set(), site="test")
+    record_env_write(env_path, {"MEIVA_MODEL"}, set(), site="test")
 
     audit_path = audit_home / ".env.audit.jsonl"
     armed_path = audit_home / ".env.audit.armed"
@@ -50,7 +50,7 @@ def test_record_env_write_records_metadata_without_config_values(audit_home: Pat
     assert audit_path.stat().st_mode & 0o777 == 0o600
     assert armed_path.stat().st_mode & 0o777 == 0o600
     assert record["site"] == "test"
-    assert record["keys_written"] == ["AVA_MODEL"]
+    assert record["keys_written"] == ["MEIVA_MODEL"]
     assert record["keys_removed"] == []
     assert record["digest_after"] == hashlib.sha256(env_path.read_bytes()).hexdigest()
     assert {"ts", "pid", "process", "cmdline"} <= set(record)
@@ -71,9 +71,9 @@ def test_record_env_write_redacts_command_arguments(
             return ["python", "-c", "cluster-secret-value"]
 
     monkeypatch.setattr(audit.psutil, "Process", Process)
-    (audit_home / ".env").write_text("AVA_MODEL=test-model\n")
+    (audit_home / ".env").write_text("MEIVA_MODEL=test-model\n")
 
-    record_env_write(audit_home / ".env", {"AVA_MODEL"}, set(), site="test")
+    record_env_write(audit_home / ".env", {"MEIVA_MODEL"}, set(), site="test")
 
     assert "cluster-secret-value" not in (audit_home / ".env.audit.jsonl").read_text()
 
@@ -98,7 +98,7 @@ def test_audited_runtime_write_records_env_aliases(audit_home: Path) -> None:
     record = last_env_write_record()
 
     assert record is not None
-    assert record["keys_written"] == ["AVA_MODEL"]
+    assert record["keys_written"] == ["MEIVA_MODEL"]
 
 
 def test_armed_guard_rebuilds_deleted_audit_history(
@@ -178,14 +178,14 @@ def test_integrity_guard_records_one_out_of_band_write(
         {"llm_model": "test-model"}, set(), audit=EnvWriteAudit(site="test")
     )
     env_path = audit_home / ".env"
-    env_path.write_text(env_path.read_text() + "AVA_EXEC_TIMEOUT_SECONDS=12\n")
+    env_path.write_text(env_path.read_text() + "MEIVA_EXEC_TIMEOUT_SECONDS=12\n")
 
     detection = check_env_integrity(machine_reader=machine_identity.name)
 
     assert detection is not None
     assert detection["kind"] == "unauthorized"
     assert detection["last_official_site"] == "test"
-    assert detection["keys"] == ["AVA_EXEC_TIMEOUT_SECONDS"]
+    assert detection["keys"] == ["MEIVA_EXEC_TIMEOUT_SECONDS"]
     assert check_env_integrity(machine_reader=machine_identity.name) is None
     records = [
         json.loads(line) for line in (audit_home / ".env.audit.jsonl").read_text().splitlines()
@@ -197,7 +197,7 @@ def test_integrity_guard_is_unarmed_without_an_audit_file(
     audit_home: Path, *, machine_identity: MachineIdentity
 ) -> None:
     """Creating an audit record for a fresh home must make this test fail."""
-    (audit_home / ".env").write_text("AVA_MODEL=test-model\n")
+    (audit_home / ".env").write_text("MEIVA_MODEL=test-model\n")
 
     assert check_env_integrity(machine_reader=machine_identity.name) is None
     assert not (audit_home / ".env.audit.jsonl").exists()
@@ -221,36 +221,36 @@ def test_empty_audited_runtime_write_keeps_audit_unarmed(audit_home: Path) -> No
 def test_record_env_write_tolerates_non_utf8_env_bytes(audit_home: Path) -> None:
     """A malformed non-value byte must not prevent the record from landing."""
     env_path = audit_home / ".env"
-    env_path.write_bytes(b"AVA_MODEL=test-model\n\xff\n")
+    env_path.write_bytes(b"MEIVA_MODEL=test-model\n\xff\n")
 
-    record_env_write(env_path, {"AVA_MODEL"}, set(), site="test")
+    record_env_write(env_path, {"MEIVA_MODEL"}, set(), site="test")
 
     record = last_env_write_record()
     assert record is not None
-    assert record["keys_after"] == ["AVA_MODEL"]
+    assert record["keys_after"] == ["MEIVA_MODEL"]
 
 
 def test_env_key_names_read_export_prefixed_assignments(audit_home: Path) -> None:
     """The audited key-name surface matches the settings parser: `export KEY=v`
     records KEY (never `export KEY`), and comments/bare keys stay out (#2981)."""
     env_path = audit_home / ".env"
-    env_path.write_text("export AVA_DB_URL=postgresql://x\n# export AVA_SKIP_ME=1\nBARE_KEY\n")
-    assert audit.env_key_names(env_path) == ["AVA_DB_URL"]
+    env_path.write_text("export MEIVA_DB_URL=postgresql://x\n# export MEIVA_SKIP_ME=1\nBARE_KEY\n")
+    assert audit.env_key_names(env_path) == ["MEIVA_DB_URL"]
 
 
 def test_record_env_write_redacts_sensitive_and_unregistered_changes(audit_home: Path) -> None:
     """The v2 `changed` diff keeps values only for `sensitive: false` fields."""
     env_path = audit_home / ".env"
-    env_path.write_text("AVA_MODEL=test-model\nANTHROPIC_API_KEY=sk-old\nEXTRA_UNKNOWN_KEY=x\n")
+    env_path.write_text("MEIVA_MODEL=test-model\nANTHROPIC_API_KEY=sk-old\nEXTRA_UNKNOWN_KEY=x\n")
     record_env_write(
         env_path,
-        {"AVA_MODEL", "ANTHROPIC_API_KEY", "EXTRA_UNKNOWN_KEY"},
+        {"MEIVA_MODEL", "ANTHROPIC_API_KEY", "EXTRA_UNKNOWN_KEY"},
         set(),
         site="test",
         actor="user_session:administrator",
         trace_id="trace-1",
         changes=[
-            {"alias": "AVA_MODEL", "old": "old-model", "new": "test-model"},
+            {"alias": "MEIVA_MODEL", "old": "old-model", "new": "test-model"},
             {"alias": "ANTHROPIC_API_KEY", "old": "sk-old", "new": "sk-SECRET-NEW"},
             {"alias": "EXTRA_UNKNOWN_KEY", "old": "x", "new": "y"},
         ],
@@ -263,8 +263,8 @@ def test_record_env_write_redacts_sensitive_and_unregistered_changes(audit_home:
     assert record["trace_id"] == "trace-1"
     entries = cast("list[dict[str, object]]", record["changed"])
     changed = {str(entry["alias"]): entry for entry in entries}
-    assert changed["AVA_MODEL"] == {
-        "alias": "AVA_MODEL",
+    assert changed["MEIVA_MODEL"] == {
+        "alias": "MEIVA_MODEL",
         "scope": "cluster-default",
         "sensitive": False,
         "old": "old-model",
@@ -293,7 +293,7 @@ def test_write_fields_records_old_to_new_values(audit_home: Path) -> None:
     assert records[-1]["actor"] == "cluster_bearer:administrator"
     assert records[-1]["changed"] == [
         {
-            "alias": "AVA_MODEL",
+            "alias": "MEIVA_MODEL",
             "scope": "cluster-default",
             "sensitive": False,
             "old": "m1",
@@ -308,38 +308,38 @@ def test_noop_upsert_leaves_no_record_and_a_real_change_still_records(
     """A repeated byte-identical upsert must not manufacture an audit record.
 
     This is the converge noise of task #3637: converge presents the same app
-    port on every `ava start`, and a boot-retry storm re-runs that start per
+    port on every `meiva start`, and a boot-retry storm re-runs that start per
     attempt. The change chain stays whole — a real change records its old→new
     diff, and the integrity guard sees a consistent file after both paths.
     """
     from base.host.env.dotenv_file import upsert_env
 
     env_path = audit_home / ".env"
-    env_path.write_text("AVA_MODEL=first-model\n")
+    env_path.write_text("MEIVA_MODEL=first-model\n")
     audit_path = audit_home / ".env.audit.jsonl"
 
-    upsert_env(env_path, {"AVA_MODEL": "second-model"}, audit=EnvWriteAudit(site="test"))
+    upsert_env(env_path, {"MEIVA_MODEL": "second-model"}, audit=EnvWriteAudit(site="test"))
     records_after_change = audit_path.read_text().splitlines()
     assert len(records_after_change) == 1
 
     upsert_env(
-        env_path, {"AVA_MODEL": "second-model"}, audit=EnvWriteAudit(site="converge_gateway_port")
+        env_path, {"MEIVA_MODEL": "second-model"}, audit=EnvWriteAudit(site="converge_gateway_port")
     )
 
     assert audit_path.read_text().splitlines() == records_after_change
-    assert env_path.read_text() == "AVA_MODEL=second-model\n"
+    assert env_path.read_text() == "MEIVA_MODEL=second-model\n"
     assert (
         check_env_integrity(machine_reader=machine_identity.name) is None
     )  # the skip left the recorded digest standing
 
-    upsert_env(env_path, {"AVA_MODEL": "first-model"}, audit=EnvWriteAudit(site="test"))
+    upsert_env(env_path, {"MEIVA_MODEL": "first-model"}, audit=EnvWriteAudit(site="test"))
 
     record = last_env_write_record()
     assert record is not None
-    assert record["keys_written"] == ["AVA_MODEL"]
+    assert record["keys_written"] == ["MEIVA_MODEL"]
     assert record["changed"] == [
         {
-            "alias": "AVA_MODEL",
+            "alias": "MEIVA_MODEL",
             "scope": "cluster-default",
             "sensitive": False,
             "old": "second-model",
@@ -358,17 +358,17 @@ def test_noop_upsert_does_not_arm_a_fresh_home(audit_home: Path) -> None:
     from base.host.env.dotenv_file import upsert_env
 
     env_path = audit_home / ".env"
-    env_path.write_text("AVA_MODEL=test-model\n")
+    env_path.write_text("MEIVA_MODEL=test-model\n")
 
     upsert_env(
-        env_path, {"AVA_MODEL": "test-model"}, audit=EnvWriteAudit(site="converge_gateway_port")
+        env_path, {"MEIVA_MODEL": "test-model"}, audit=EnvWriteAudit(site="converge_gateway_port")
     )
 
     assert not (audit_home / ".env.audit.jsonl").exists()
     assert not (audit_home / ".env.audit.armed").exists()
 
     upsert_env(
-        env_path, {"AVA_MODEL": "other-model"}, audit=EnvWriteAudit(site="converge_gateway_port")
+        env_path, {"MEIVA_MODEL": "other-model"}, audit=EnvWriteAudit(site="converge_gateway_port")
     )
 
     assert (audit_home / ".env.audit.armed").exists()
@@ -411,7 +411,7 @@ def test_record_env_write_rejects_invalid_metadata_before_audit_artifacts(
 ) -> None:
     """Direct recording cannot undo the caller's already-landed bytes."""
     env_path = audit_home / ".env"
-    env_path.write_text("AVA_MODEL=new-value\n")
+    env_path.write_text("MEIVA_MODEL=new-value\n")
 
     def invalid() -> dict[str, tuple[str, bool]]:
         raise RuntimeError("registry unavailable")
@@ -420,12 +420,12 @@ def test_record_env_write_rejects_invalid_metadata_before_audit_artifacts(
     with pytest.raises(RuntimeError, match="registry unavailable"):
         record_env_write(
             env_path,
-            {"AVA_MODEL"},
+            {"MEIVA_MODEL"},
             set(),
             site="test",
-            changes=[{"alias": "AVA_MODEL", "old": "old-value", "new": "new-value"}],
+            changes=[{"alias": "MEIVA_MODEL", "old": "old-value", "new": "new-value"}],
         )
-    assert env_path.read_text() == "AVA_MODEL=new-value\n"
+    assert env_path.read_text() == "MEIVA_MODEL=new-value\n"
     assert not (audit_home / ".env.audit.jsonl").exists()
     assert not (audit_home / ".env.audit.armed").exists()
 
@@ -445,8 +445,8 @@ def test_alias_metadata_projects_declarations_without_runtime_values(
     monkeypatch.setattr(base.config, "current_field_values", runtime_values)
     monkeypatch.setattr(metadata, "get_config_metadata", panel)
     projected = audit.load_alias_metadata()
-    assert projected["AVA_MODEL"] == ("cluster-default", False)
-    assert projected["AVA_DB_URL"][1] is True
+    assert projected["MEIVA_MODEL"] == ("cluster-default", False)
+    assert projected["MEIVA_DB_URL"][1] is True
 
 
 def test_alias_metadata_does_not_cache_a_separate_declaration_image(
@@ -460,9 +460,9 @@ def test_alias_metadata_does_not_cache_a_separate_declaration_image(
     info.json_schema_extra = extra
     monkeypatch.setattr(config_registry, "fields", lambda: declarations)
     extra["sensitive"] = False
-    assert audit.load_alias_metadata()["AVA_MODEL"][1] is False
+    assert audit.load_alias_metadata()["MEIVA_MODEL"][1] is False
     extra["sensitive"] = True
-    assert audit.load_alias_metadata()["AVA_MODEL"][1] is True
+    assert audit.load_alias_metadata()["MEIVA_MODEL"][1] is True
 
 
 @pytest.mark.parametrize("sensitive", [None, "false", 0])
@@ -485,7 +485,7 @@ def test_alias_metadata_rejects_ambiguous_declarations(
     from base.config import config_registry
 
     declarations = deepcopy(config_registry.fields())
-    declarations["gateway_url"].info.serialization_alias = "AVA_MODEL"
+    declarations["gateway_url"].info.serialization_alias = "MEIVA_MODEL"
     monkeypatch.setattr(config_registry, "fields", lambda: declarations)
     with pytest.raises(ValueError, match="duplicate env alias"):
         audit.load_alias_metadata()
@@ -500,10 +500,10 @@ def test_declaration_projection_works_without_a_runtime_settings_image(tmp_path:
         ],
         cwd=tmp_path,
         env={
-            **{key: value for key, value in os.environ.items() if key != "AVA_CONFIG_BOOT"},
-            "AVA_HOME": str(tmp_path / "absent-home"),
-            "AVA_CONFIG_FETCH": "skip",
-            "AVA_PROCESS_PROFILE": "runner",
+            **{key: value for key, value in os.environ.items() if key != "MEIVA_CONFIG_BOOT"},
+            "MEIVA_HOME": str(tmp_path / "absent-home"),
+            "MEIVA_CONFIG_FETCH": "skip",
+            "MEIVA_PROCESS_PROFILE": "runner",
         },
         capture_output=True,
         text=True,
@@ -519,7 +519,7 @@ def test_invalid_metadata_prevents_every_audited_file_write(
     from base.host.env import dotenv_file
 
     env_path = audit_home / ".env"
-    original = b"AVA_MODEL=before\nUNREGISTERED_SECRET=secret-before\n"
+    original = b"MEIVA_MODEL=before\nUNREGISTERED_SECRET=secret-before\n"
     env_path.write_bytes(original)
 
     def invalid() -> dict[str, tuple[str, bool]]:
@@ -535,10 +535,10 @@ def test_invalid_metadata_prevents_every_audited_file_write(
             runtime_config.write_fields({}, {"llm_model"}, audit=EnvWriteAudit(site="test"))
         elif writer == "upsert":
             dotenv_file.upsert_env(
-                env_path, {"AVA_MODEL": "after"}, audit=EnvWriteAudit(site="test")
+                env_path, {"MEIVA_MODEL": "after"}, audit=EnvWriteAudit(site="test")
             )
         else:
-            dotenv_file.remove_env(env_path, {"AVA_MODEL"}, audit=EnvWriteAudit(site="test"))
+            dotenv_file.remove_env(env_path, {"MEIVA_MODEL"}, audit=EnvWriteAudit(site="test"))
     assert env_path.read_bytes() == original
     assert not (audit_home / "backups").exists()
     assert not (audit_home / ".env.audit.jsonl").exists()
@@ -552,7 +552,7 @@ def test_noop_writer_does_not_require_audit_metadata(
     from base.host.env import dotenv_file
 
     path = audit_home / ".env"
-    original = b"AVA_MODEL=before\n"
+    original = b"MEIVA_MODEL=before\n"
     path.write_bytes(original)
 
     def unexpected() -> dict[str, tuple[str, bool]]:
@@ -562,7 +562,7 @@ def test_noop_writer_does_not_require_audit_metadata(
     if writer == "fields":
         runtime_config.write_fields({}, set(), audit=EnvWriteAudit(site="test"))
     elif writer == "upsert":
-        dotenv_file.upsert_env(path, {"AVA_MODEL": "before"}, audit=EnvWriteAudit(site="test"))
+        dotenv_file.upsert_env(path, {"MEIVA_MODEL": "before"}, audit=EnvWriteAudit(site="test"))
     else:
         dotenv_file.remove_env(path, {"ABSENT"}, audit=EnvWriteAudit(site="test"))
     assert path.read_bytes() == original
@@ -574,7 +574,7 @@ def test_stale_digest_fails_before_metadata_preparation(
     audit_home: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     path = audit_home / ".env"
-    original = b"AVA_MODEL=before\n"
+    original = b"MEIVA_MODEL=before\n"
     path.write_bytes(original)
 
     def unexpected() -> dict[str, tuple[str, bool]]:
@@ -597,28 +597,28 @@ def test_redaction_is_prepared_once_while_the_old_env_is_still_present(
     from base.host.env import dotenv_file
 
     env_path = audit_home / ".env"
-    original = "AVA_MODEL=before\n"
+    original = "MEIVA_MODEL=before\n"
     env_path.write_text(original)
     reads: list[str] = []
 
     def declared() -> dict[str, tuple[str, bool]]:
         assert env_path.read_text() == original
         reads.append("prepare")
-        return {"AVA_MODEL": ("cluster-default", False)}
+        return {"MEIVA_MODEL": ("cluster-default", False)}
 
     monkeypatch.setattr(audit, "load_alias_metadata", declared)
     if writer == "fields":
         runtime_config.write_fields({"llm_model": "after"}, set(), audit=EnvWriteAudit(site="test"))
     elif writer == "upsert":
-        dotenv_file.upsert_env(env_path, {"AVA_MODEL": "after"}, audit=EnvWriteAudit(site="test"))
+        dotenv_file.upsert_env(env_path, {"MEIVA_MODEL": "after"}, audit=EnvWriteAudit(site="test"))
     else:
-        dotenv_file.remove_env(env_path, {"AVA_MODEL"}, audit=EnvWriteAudit(site="test"))
+        dotenv_file.remove_env(env_path, {"MEIVA_MODEL"}, audit=EnvWriteAudit(site="test"))
     assert reads == ["prepare"]
     record = last_env_write_record(env_path)
     assert record is not None
     assert record["changed"] == [
         {
-            "alias": "AVA_MODEL",
+            "alias": "MEIVA_MODEL",
             "scope": "cluster-default",
             "sensitive": False,
             "old": "before",
@@ -629,9 +629,9 @@ def test_redaction_is_prepared_once_while_the_old_env_is_still_present(
 
 def test_read_env_write_records_returns_newest_first_with_limit(audit_home: Path) -> None:
     env_path = audit_home / ".env"
-    env_path.write_text("AVA_MODEL=m\n")
+    env_path.write_text("MEIVA_MODEL=m\n")
     for i in range(3):
-        record_env_write(env_path, {"AVA_MODEL"}, set(), site=f"test-{i}")
+        record_env_write(env_path, {"MEIVA_MODEL"}, set(), site=f"test-{i}")
 
     records = audit.read_env_write_records(2)
     assert [record["site"] for record in records] == ["test-2", "test-1"]
@@ -639,8 +639,8 @@ def test_read_env_write_records_returns_newest_first_with_limit(audit_home: Path
 
 def test_read_env_write_records_skips_corrupt_lines_and_missing_history(audit_home: Path) -> None:
     env_path = audit_home / ".env"
-    env_path.write_text("AVA_MODEL=m\n")
-    record_env_write(env_path, {"AVA_MODEL"}, set(), site="good")
+    env_path.write_text("MEIVA_MODEL=m\n")
+    record_env_write(env_path, {"MEIVA_MODEL"}, set(), site="good")
     with (audit_home / ".env.audit.jsonl").open("a") as fh:
         fh.write("{not json\n")
         fh.write("[1, 2]\n")

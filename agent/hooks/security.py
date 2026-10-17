@@ -1,7 +1,7 @@
 """Delivery of the prompt-injection findings an exec child raised.
 
-`ava.security.scan_content` runs inside the exec child, which has no messages to write to: it
-appends each finding to the turn's state update (`ava.state_update["security_findings"]`), the
+`meiva.security.scan_content` runs inside the exec child, which has no messages to write to: it
+appends each finding to the turn's state update (`meiva.state_update["security_findings"]`), the
 exec node commits the delta to `state.security_findings`, and this after_exec hook turns the
 entries into SECURITY system notes and resets the channel. The note lands right behind the
 exec-result ToolMessage(s) — the hook runs once every tool result of the AIMessage has committed,
@@ -23,7 +23,7 @@ from langgraph.types import Overwrite
 from agent import state as _state
 from agent.hooks._registry import Hook
 from agent.messages import security_note_message
-from base.agents.context import AvaContext
+from base.agents.context import MeivaContext
 from base.log import logger
 
 
@@ -37,7 +37,7 @@ class _DeliverSecurityFindingsHook(Hook):
     async def __call__(
         self,
         state: _state.AgentState,
-        _runtime: Runtime[AvaContext],
+        _runtime: Runtime[MeivaContext],
         _config: RunnableConfig,
         /,
     ) -> dict | None:

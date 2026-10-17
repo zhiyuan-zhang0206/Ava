@@ -20,7 +20,7 @@ def test_process_environment_keeps_its_home_and_data_plane_boundary(
     process_config: ConfigBoot,
     throwaway_config: ThrowawayConfig,
 ) -> None:
-    assert Path(os.environ["AVA_HOME"]) != Path.home() / ".ava"
+    assert Path(os.environ["MEIVA_HOME"]) != Path.home() / ".meiva"
     assert not os_jobs_enabled(enabled_reader=lambda: settings.general.os_jobs_enabled)
     if not static_mode(pytestconfig):
         request.getfixturevalue("postgres_access")

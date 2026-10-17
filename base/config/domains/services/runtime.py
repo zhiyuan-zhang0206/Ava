@@ -16,7 +16,7 @@ __all__ = [
 class ServiceRuntimeSettings(EnvSettings):
     browser_enabled: bool = Field(
         default=True,
-        alias="AVA_BROWSER_ENABLED",
+        alias="MEIVA_BROWSER_ENABLED",
         description="Run the shared headed Chrome on this agent-runner. Auto-skips when the host lacks display/Chrome.",
         json_schema_extra={
             "capability": "agent-runner",
@@ -30,7 +30,7 @@ class ServiceRuntimeSettings(EnvSettings):
 
     chrome_binary: str | None = Field(
         default=None,
-        alias="AVA_CHROME_BINARY",
+        alias="MEIVA_CHROME_BINARY",
         description="Override path to the Chrome binary. None = resolve the platform default.",
         json_schema_extra={
             "capability": "agent-runner",
@@ -44,7 +44,7 @@ class ServiceRuntimeSettings(EnvSettings):
 
     browser_cdp_port: int = Field(
         default=9222,
-        alias="AVA_BROWSER_CDP_PORT",
+        alias="MEIVA_BROWSER_CDP_PORT",
         description="Chrome remote-debugging (CDP) port the shared browser binds and chrome-devtools-mcp attaches to. Per-cluster so co-hosted clusters don't share one Chrome.",
         json_schema_extra={
             "capability": "agent-runner",
@@ -57,7 +57,7 @@ class ServiceRuntimeSettings(EnvSettings):
 
     browser_reach_probe_interval_s: int = Field(
         default=300,
-        alias="AVA_BROWSER_REACH_PROBE_INTERVAL_S",
+        alias="MEIVA_BROWSER_REACH_PROBE_INTERVAL_S",
         description="Interval for the browser-reach canary (seconds): each sample fetches the gateway health URL from a temporary hidden about:blank target in the shared browser context. 300s limits routine probe traffic; root diagnostics enforces a minimum interval of 60s.",
         json_schema_extra={
             "capability": "agent-runner",
@@ -71,7 +71,7 @@ class ServiceRuntimeSettings(EnvSettings):
 
     browser_reach_timeout_s: float = Field(
         default=6.0,
-        alias="AVA_BROWSER_REACH_TIMEOUT_S",
+        alias="MEIVA_BROWSER_REACH_TIMEOUT_S",
         description="Wall-clock budget for one browser-reach canary (seconds): bounds CDP target setup plus the in-page fetch. The 2026-09-18 hang left fetches pending for 9s+, so a smaller budget separates a quick network reject from a hang without stalling the watchdog round; the host-path control read uses the same budget.",
         json_schema_extra={
             "capability": "agent-runner",
@@ -85,7 +85,7 @@ class ServiceRuntimeSettings(EnvSettings):
 
     permissions_helper_enabled: bool = Field(
         default=True,
-        alias="AVA_PERMISSIONS_HELPER_ENABLED",
+        alias="MEIVA_PERMISSIONS_HELPER_ENABLED",
         description="Run the signed macOS permissions helper on this agent-runner. Auto-skips when the host isn't a capable macOS box.",
         json_schema_extra={
             "capability": "agent-runner",
@@ -102,7 +102,7 @@ class ServiceRuntimeSettings(EnvSettings):
     # after the helper nursery protocol is deployed and healthy on the host.
     permissions_helper_spawn: bool = Field(
         default=False,
-        alias="AVA_PERMISSIONS_HELPER_SPAWN",
+        alias="MEIVA_PERMISSIONS_HELPER_SPAWN",
         description="Spawn macOS service, agent, and pty-sessions service processes directly through the permissions helper so they inherit its stable TCC identity.",
         json_schema_extra={
             "capability": "agent-runner",
@@ -116,7 +116,7 @@ class ServiceRuntimeSettings(EnvSettings):
 
     permissions_helper_port: int = Field(
         default=9223,
-        alias="AVA_PERMISSIONS_HELPER_PORT",
+        alias="MEIVA_PERMISSIONS_HELPER_PORT",
         description="Port key for the macOS permissions helper's Unix socket. Per-cluster so co-hosted clusters get distinct sockets.",
         json_schema_extra={
             "capability": "agent-runner",
@@ -129,7 +129,7 @@ class ServiceRuntimeSettings(EnvSettings):
 
     permissions_helper_artifact_dir: Path | None = Field(
         default=None,
-        alias="AVA_PERMISSIONS_HELPER_ARTIFACT_DIR",
+        alias="MEIVA_PERMISSIONS_HELPER_ARTIFACT_DIR",
         description="Explicit isolated directory for a reviewed signed helper artifact; never replaces the installed helper bundle.",
         json_schema_extra={
             "capability": "agent-runner",
@@ -143,8 +143,8 @@ class ServiceRuntimeSettings(EnvSettings):
 
     permissions_helper_keychain: str | None = Field(
         default=None,
-        validation_alias=AliasChoices("AVA_PERMISSIONS_HELPER_KEYCHAIN"),
-        serialization_alias="AVA_PERMISSIONS_HELPER_KEYCHAIN",
+        validation_alias=AliasChoices("MEIVA_PERMISSIONS_HELPER_KEYCHAIN"),
+        serialization_alias="MEIVA_PERMISSIONS_HELPER_KEYCHAIN",
         description="Optional keychain path override for the permissions helper's signing identity. None = the user's login keychain; CI sets this to an isolated keychain it owns.",
         json_schema_extra={
             "capability": "agent-runner",
@@ -158,7 +158,7 @@ class ServiceRuntimeSettings(EnvSettings):
 
     project_root: Path | None = Field(
         default=None,
-        alias="AVA_PROJECT_ROOT",
+        alias="MEIVA_PROJECT_ROOT",
         description="Repo root directory — used as cwd when healthcheck restarts a service. None = derive from `__file__`.",
         json_schema_extra={
             "capability": "common",
@@ -172,8 +172,8 @@ class ServiceRuntimeSettings(EnvSettings):
 
     memory_root: Path = Field(
         default_factory=lambda: unit_home() / "memory",
-        alias="AVA_MEMORY_ROOT",
-        description="Root directory of the ava.memory pool's markdown files; the memory indexer watches this path.",
+        alias="MEIVA_MEMORY_ROOT",
+        description="Root directory of the meiva.memory pool's markdown files; the memory indexer watches this path.",
         json_schema_extra={
             "restart_required": "",
             "writable": False,
@@ -185,12 +185,12 @@ class ServiceRuntimeSettings(EnvSettings):
 
     memory_search_backend: str = Field(
         default="numpy",
-        alias="AVA_MEMORY_SEARCH_BACKEND",
+        alias="MEIVA_MEMORY_SEARCH_BACKEND",
         description=(
             "Storage backend for the memory embedding index — "
             "'numpy' (default; the local exact-search service) | 'pgvector' (the cluster "
             "Postgres as vector store — the vendored runtime injects the pinned "
-            "pgvector files and `ava start` pre-creates the extension, so it works "
+            "pgvector files and `meiva start` pre-creates the extension, so it works "
             "on the zero-manual-install path; a Postgres without the binaries "
             "still fails the startup preflight fast with the actionable fix). New "
             "backends land behind the same switch. The "
@@ -207,7 +207,7 @@ class ServiceRuntimeSettings(EnvSettings):
 
     memory_search_max_concurrency: int = Field(
         default=20,
-        alias="AVA_MEMORY_SEARCH_MAX_CONCURRENCY",
+        alias="MEIVA_MEMORY_SEARCH_MAX_CONCURRENCY",
         description=(
             "Max concurrent /api/memory/search requests the gateway runs at once "
             "(the query-embed phase concurrency gate). The historical default 2 "
@@ -227,7 +227,7 @@ class ServiceRuntimeSettings(EnvSettings):
 
     memory_search_deadline_seconds: float = Field(
         default=15.0,
-        alias="AVA_MEMORY_SEARCH_DEADLINE_SECONDS",
+        alias="MEIVA_MEMORY_SEARCH_DEADLINE_SECONDS",
         description=(
             "Wall-clock budget for one POST /api/memory/search, covering the embed, the "
             "memory-search service round-trip and the ranking. A request may carry a "
@@ -250,7 +250,7 @@ class ServiceRuntimeSettings(EnvSettings):
 
     memory_search_acquire_timeout_seconds: float = Field(
         default=1.0,
-        alias="AVA_MEMORY_SEARCH_ACQUIRE_TIMEOUT_SECONDS",
+        alias="MEIVA_MEMORY_SEARCH_ACQUIRE_TIMEOUT_SECONDS",
         description=(
             "How long one POST /api/memory/search may wait for a permit on the "
             "query-embed concurrency gate before failing fast (503 indexer_unavailable). "
@@ -273,7 +273,7 @@ class ServiceRuntimeSettings(EnvSettings):
 
     memory_rerank_model: str = Field(
         default="jev-1.13.0",
-        alias="AVA_MEMORY_RERANK_MODEL",
+        alias="MEIVA_MEMORY_RERANK_MODEL",
         description=(
             "Decision model that ranks memory search results. After vector search, the "
             "gateway makes one decision request per retrieved chunk ('is this note "
@@ -300,7 +300,7 @@ class ServiceRuntimeSettings(EnvSettings):
         default=30,
         ge=1,
         le=100,
-        alias="AVA_MEMORY_RERANK_CANDIDATES",
+        alias="MEIVA_MEMORY_RERANK_CANDIDATES",
         description=(
             "How many notes vector search hands to the decision model per memory search "
             "(each represented by its best-matching chunk), one decision request each. "
@@ -325,7 +325,7 @@ class ServiceRuntimeSettings(EnvSettings):
         default=5,
         ge=1,
         le=100,
-        alias="AVA_MEMORY_DEDUP_CANDIDATES",
+        alias="MEIVA_MEMORY_DEDUP_CANDIDATES",
         description=(
             "How many notes vector search hands to the decision model when the search checks "
             "a note an agent just wrote for duplicates (purpose 'dedup'), one decision request "
@@ -346,7 +346,7 @@ class ServiceRuntimeSettings(EnvSettings):
     memory_search_max_batch_rows: int = Field(
         default=65536,
         gt=0,
-        alias="AVA_MEMORY_SEARCH_MAX_BATCH_ROWS",
+        alias="MEIVA_MEMORY_SEARCH_MAX_BATCH_ROWS",
         description=(
             "Row-count cap on one memory-search batch request body (/upsert_batch, "
             "/delete_stale_batch), enforced by the wire models. Loopback-only is the "
@@ -366,7 +366,7 @@ class ServiceRuntimeSettings(EnvSettings):
 
     embedding_backend: str = Field(
         default="gemini",
-        alias="AVA_EMBEDDING_BACKEND",
+        alias="MEIVA_EMBEDDING_BACKEND",
         description=(
             "Embedding provider for the memory index — 'gemini' (default: "
             "the Gemini Embedding 2 REST adapter). Unknown values fail fast "
@@ -385,7 +385,7 @@ class ServiceRuntimeSettings(EnvSettings):
 
     memory_embed_timeout_seconds: float = Field(
         default=60.0,
-        alias="AVA_EMBED_TIMEOUT_SECONDS",
+        alias="MEIVA_EMBED_TIMEOUT_SECONDS",
         description=(
             "HTTP operation timeout and asyncio cancellation deadline (seconds) for each "
             "Gemini batchEmbedContents attempt, sync or async. The memory-indexer "
@@ -401,7 +401,7 @@ class ServiceRuntimeSettings(EnvSettings):
 
     memory_search_port: int = Field(
         default=19531,
-        alias="AVA_MEMORY_SEARCH_PORT",
+        alias="MEIVA_MEMORY_SEARCH_PORT",
         description="Memory search service HTTP port.",
         json_schema_extra={
             "restart_required": "",
@@ -413,7 +413,7 @@ class ServiceRuntimeSettings(EnvSettings):
 
     memory_search_uri: str = Field(
         default="http://127.0.0.1:19531",
-        alias="AVA_MEMORY_SEARCH_URI",
+        alias="MEIVA_MEMORY_SEARCH_URI",
         description="Memory search service base URI — indexer daemon / gateway dial it when the numpy backend is selected.",
         json_schema_extra={
             "restart_required": "",
@@ -425,7 +425,7 @@ class ServiceRuntimeSettings(EnvSettings):
 
     memory_search_data_dir: Path = Field(
         default_factory=lambda: unit_home() / "memory-search",
-        alias="AVA_MEMORY_SEARCH_DATA_DIR",
+        alias="MEIVA_MEMORY_SEARCH_DATA_DIR",
         description="Memory search on-disk data directory (vectors.npz).",
         json_schema_extra={
             "restart_required": "",
@@ -438,7 +438,7 @@ class ServiceRuntimeSettings(EnvSettings):
 
     memory_search_pidfile: Path = Field(
         default_factory=lambda: unit_home() / "run" / "memory_search.pid",
-        alias="AVA_MEMORY_SEARCH_PIDFILE",
+        alias="MEIVA_MEMORY_SEARCH_PIDFILE",
         description="Memory search daemon pidfile path.",
         json_schema_extra={
             "restart_required": "",

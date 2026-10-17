@@ -212,7 +212,7 @@ async def event_stream(
                         ignore_subscribe_messages=True,
                         # Client disconnect-detection polling window; deltas shorter
                         # than this are negligible compared to network RTT. env
-                        # override: `AVA_SSE_DISCONNECT_POLL_SECONDS`.
+                        # override: `MEIVA_SSE_DISCONNECT_POLL_SECONDS`.
                         timeout=settings.gateway.sse_disconnect_poll_seconds,
                     )
                 )

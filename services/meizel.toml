@@ -18,5 +18,5 @@ exports = ["agent_runner", "backup", "derived", "desktop", "entrypoints", "pidfi
 "tests/test_backup_process_composition.py -> backup/scheduler/daemon.py#_remove_pidfile" = 2
 
 [debt.undeclared-edge]
-"desktop/permissions_helper/tests/permissions_helper/test_root_keeper_method_requests_and_results.py -> supervision/ava_root/__init__.py" = 1
-"desktop/permissions_helper/tests/permissions_helper/test_root_keeper_method_requests_and_results.py -> supervision/ava_root/__main__.py" = 1
+"desktop/permissions_helper/tests/permissions_helper/test_root_keeper_method_requests_and_results.py -> supervision/meiva_root/__init__.py" = 1
+"desktop/permissions_helper/tests/permissions_helper/test_root_keeper_method_requests_and_results.py -> supervision/meiva_root/__main__.py" = 1

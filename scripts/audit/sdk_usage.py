@@ -17,7 +17,7 @@ from pydantic import AwareDatetime, BaseModel, Field
 
 
 class CallAttributes(BaseModel):
-    fn: str = Field(pattern=r"^(ava\.)?[A-Za-z_]\w*(\.\w+)*$")
+    fn: str = Field(pattern=r"^(meiva\.)?[A-Za-z_]\w*(\.\w+)*$")
     sample_rate: int = Field(default=1, strict=True, ge=1)
 
 
@@ -118,7 +118,7 @@ def report(
             continue
         observed += 1
         sampled += event.attributes.sample_rate > 1
-        fn = event.attributes.fn.removeprefix("ava.")
+        fn = event.attributes.fn.removeprefix("meiva.")
         counts[fn] += event.attributes.sample_rate
         if event.agent_id is not None:
             agents[fn].add(event.agent_id)
@@ -132,7 +132,7 @@ def report(
         "eligible_module_calls": eligible,
         "coverage_target_pct": coverage,
         "selected_sdk_modules": selected,
-        "suggested_ava_sdk_expand": ",".join(selected) if selected else None,
+        "suggested_meiva_sdk_expand": ",".join(selected) if selected else None,
         "modules": ranking,
         "methods": [
             {"method": fn, "weighted_calls": n}

@@ -2,10 +2,10 @@
 before it grades an outage.
 
 One signal: **any machine's `host_deploy_state` posture row not at `idle`.**
-`ava stop`, maintenance holds and `ava start` write the row outside the services
+`meiva stop`, maintenance holds and `meiva start` write the row outside the services
 they restart, so it survives the whole window; a machine with no row has never
 transitioned and reads as idle. A row left at `paused` by a host that never came
-back keeps the signal active until that host's `ava start` returns it to `idle`
+back keeps the signal active until that host's `meiva start` returns it to `idle`
 (conservative: its checkout may have moved).
 
 The signal reads the cohort, not every row that ever registered. A machine the

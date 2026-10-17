@@ -10,7 +10,7 @@ Dispatch is paced for fleet scale: rather than checking in on every due agent in
 one batch per idle window (which would wake 100-300 idle agents simultaneously —
 a decompression + LLM thundering herd, self-perpetuating because the check-in
 resets each agent's idle clock in lockstep), it polls on a fine cadence (min of
-`AVA_HEARTBEAT_INTERVAL_SECONDS` and `_DISPATCH_STEP_S`), de-phases due-times with a
+`MEIVA_HEARTBEAT_INTERVAL_SECONDS` and `_DISPATCH_STEP_S`), de-phases due-times with a
 deterministic per-agent jitter, and caps check-ins per step for a hard global
 wake-rate ceiling. See the "Wakeup-storm flattening" note below.
 
@@ -51,7 +51,7 @@ from base.events.live.bus import EventBus
 from base.host.exit_codes import hard_exit as _hard_exit
 from base.native_process.code_version import CodeVersion
 from base.native_process.loaded_commit import LoadedCommit
-from base.paths import ava_home
+from base.paths import meiva_home
 from base.telemetry.pipeline_build import build_pipeline
 from base.telemetry.process_logging import init_gateway_process
 from services.pidfile import acquire_pidfile, pidfile_holds_daemon, remove_pidfile
@@ -567,7 +567,7 @@ async def dispatch_loop(
 
     Idle agents that ignore the check-in keep getting one each cycle — it is the
     safety net; an agent that is truly waiting opts out with
-    `ava.self.pause_heartbeat()`, and one that is truly done terminates.
+    `meiva.self.pause_heartbeat()`, and one that is truly done terminates.
 
     Dispatch runs on a fine `step` cadence (min of the configured
     `heartbeat_interval_seconds` and `_DISPATCH_STEP_S`) so due agents drain in
@@ -724,7 +724,7 @@ def main() -> None:
     """Entry point: init logger + run asyncio loop.
 
     SIGTERM (the graceful stop the fleet update sends) and Ctrl-C converge on
-    the same `KeyboardInterrupt` unwind — see `base.daemon.shutdown`. `ava stop`
+    the same `KeyboardInterrupt` unwind — see `base.daemon.shutdown`. `meiva stop`
     default force-kill does not reach this.
     """
     from base.deploy.schema.migrations import assert_schema_current
@@ -733,7 +733,7 @@ def main() -> None:
     machine_config = ConfigBoot()
     machine_config.boot()
     machine = machine_from_boot(machine_config)
-    process_home = ava_home().resolve()
+    process_home = meiva_home().resolve()
     # Pre-startup sanity: schema version must match code; raises SchemaVersionMismatch if not.
     assert_schema_current(machine_config.view.data_plane.db_url)
     version = CodeVersion(image)

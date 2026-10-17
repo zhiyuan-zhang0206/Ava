@@ -1,4 +1,4 @@
-"""The daily WAL-G tick (`ava backup walg run`): back up, verify the chain, apply retention.
+"""The daily WAL-G tick (`meiva backup walg run`): back up, verify the chain, apply retention.
 
 One command, run once a day by the OS job and by hand. It is safe to run at any
 moment and any number of times:
@@ -123,7 +123,7 @@ def _now() -> datetime:
 def _preflight(*, path_reader: Callable[[], Path | None]) -> list[Backup]:
     problem = walg_binary.installed_problem()
     if problem is not None:
-        raise StepFailedError(STEP_PREFLIGHT, f"{problem} (ava converge installs it)")
+        raise StepFailedError(STEP_PREFLIGHT, f"{problem} (meiva converge installs it)")
     try:
         walg_config.load_walg_config(path_reader=path_reader)
     except walg_config.WalgConfigError as exc:
@@ -372,7 +372,7 @@ def run_tick(
 ) -> int:
     """Run one tick; the exit code is non-zero only when a step failed."""
     if not walg_config.enabled(path_reader=path_reader):
-        report("WAL-G is off (AVA_WALG_CONFIG_FILE is not set); nothing to do")
+        report("WAL-G is off (MEIVA_WALG_CONFIG_FILE is not set); nothing to do")
         return 0
     ensure_private_dir(state.walg_dir())
     try:
@@ -409,7 +409,7 @@ def _locked_drill(
         report(f"failed: {exc}")
         return 1
     if not backups:
-        report("failed: no backup exists yet; run `ava backup walg run` first")
+        report("failed: no backup exists yet; run `meiva backup walg run` first")
         return 1
     return (
         0
@@ -439,7 +439,7 @@ def run_drill_now(
     Takes the same lock as the tick, so the two never overlap. Exit 0 only when the drill passed.
     """
     if not walg_config.enabled(path_reader=path_reader):
-        report("WAL-G is off (AVA_WALG_CONFIG_FILE is not set); nothing to drill")
+        report("WAL-G is off (MEIVA_WALG_CONFIG_FILE is not set); nothing to drill")
         return 1
     ensure_private_dir(state.walg_dir())
     try:

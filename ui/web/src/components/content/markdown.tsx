@@ -1,4 +1,4 @@
-// ava:ref ui/web/src/docs/frontend-components/markdown-surfaces.ava.okf.md#markdown-lazy-loading
+// meiva:ref ui/web/src/docs/frontend-components/markdown-surfaces.meiva.okf.md#markdown-lazy-loading
 "use client";
 
 import { memo, useEffect, useState } from "react";

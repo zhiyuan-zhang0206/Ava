@@ -47,13 +47,13 @@ import { panelLayoutStorage } from "@/lib/layout/panel-layout-storage";
 // post-mount only (SSR renders the default; reading localStorage during render
 // would mismatch hydration). The Inbox deep link is the exception: it writes
 // the tab because it is the user's current surface choice.
-const LS_MOBILE_TAB = "ava.fleet.mobileTab";
+const LS_MOBILE_TAB = "meiva.fleet.mobileTab";
 // v4 stores the split as { <panelId>: percent }; panel ids are part of the
 // persisted state (the library also writes them to id/data-testid on the panel
 // node — keep them unique across the app).
 const PANEL_GRAPH = "panel-graph";
 const PANEL_QUEUE = "panel-queue";
-const FLEET_SPLIT_LAYOUT_ID = "ava.fleet.split";
+const FLEET_SPLIT_LAYOUT_ID = "meiva.fleet.split";
 const FLEET_SPLIT_STORAGE = panelLayoutStorage();
 // The desktop left-panel view (Graph vs Task Graph) and the collapsed-queue
 // choice ARE durable preferences — DB-backed (display.fleet_left_view /

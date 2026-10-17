@@ -7,31 +7,31 @@ exports = ["api_keys.py", "config_authority.py", "configuration.py", "served_gat
 
 [debt.env-patch]
 "configuration.py#patch.dict os.environ" = 1
-"test_config_authority.py#monkeypatch.setenv os.environ.AVA_HOME" = 3
+"test_config_authority.py#monkeypatch.setenv os.environ.MEIVA_HOME" = 3
 "test_config_authority.py#monkeypatch.setenv os.environ.HOME" = 2
-"test_config_authority.py#monkeypatch.setitem os.environ.AVA_IM_SEND_RETRY_DELAYS" = 1
-"test_config_authority.py#monkeypatch.setitem os.environ.AVA_PROCESS_PROFILE" = 2
-"test_config_boot_lite.py#monkeypatch.setenv os.environ.AVA_HOME" = 1
-"test_config_boot_owner.py#monkeypatch.delenv os.environ.AVA_CONFIG_BOOT" = 1
-"test_config_boot_owner.py#monkeypatch.delenv os.environ.AVA_CONFIG_FETCH" = 1
-"test_config_boot_owner.py#monkeypatch.delenv os.environ.AVA_PROCESS_PROFILE" = 1
-"test_config_boot_owner.py#monkeypatch.setenv os.environ.AVA_CONFIG_BOOT" = 2
-"test_config_boot_owner.py#monkeypatch.setenv os.environ.AVA_CONFIG_FETCH" = 3
-"test_config_boot_owner.py#monkeypatch.setenv os.environ.AVA_PROCESS_PROFILE" = 3
+"test_config_authority.py#monkeypatch.setitem os.environ.MEIVA_IM_SEND_RETRY_DELAYS" = 1
+"test_config_authority.py#monkeypatch.setitem os.environ.MEIVA_PROCESS_PROFILE" = 2
+"test_config_boot_lite.py#monkeypatch.setenv os.environ.MEIVA_HOME" = 1
+"test_config_boot_owner.py#monkeypatch.delenv os.environ.MEIVA_CONFIG_BOOT" = 1
+"test_config_boot_owner.py#monkeypatch.delenv os.environ.MEIVA_CONFIG_FETCH" = 1
+"test_config_boot_owner.py#monkeypatch.delenv os.environ.MEIVA_PROCESS_PROFILE" = 1
+"test_config_boot_owner.py#monkeypatch.setenv os.environ.MEIVA_CONFIG_BOOT" = 2
+"test_config_boot_owner.py#monkeypatch.setenv os.environ.MEIVA_CONFIG_FETCH" = 3
+"test_config_boot_owner.py#monkeypatch.setenv os.environ.MEIVA_PROCESS_PROFILE" = 3
 "test_config_boot_owner.py#patch.dict os.environ" = 1
 "test_env_example.py#monkeypatch.delenv os.environ" = 1
 "test_env_example.py#monkeypatch.setenv os.environ" = 1
-"test_unit_home.py#monkeypatch.delenv os.environ.AVA_HOME" = 1
-"test_unit_home.py#monkeypatch.setenv os.environ.AVA_HOME" = 2
+"test_unit_home.py#monkeypatch.delenv os.environ.MEIVA_HOME" = 1
+"test_unit_home.py#monkeypatch.setenv os.environ.MEIVA_HOME" = 2
 
 [debt.first-party-patch]
 "_boot_lite_child.py#assignment base.config._full.build" = 8
 "_boot_lite_child.py#assignment base.config._lite.BUILD_WAIT_TIMEOUT_SECONDS" = 2
 "api_keys.py#monkeypatch.setattr base.config.settings.lm" = 1
-"served_gateway_home.py#monkeypatch.setattr base.paths.ava_home" = 1
+"served_gateway_home.py#monkeypatch.setattr base.paths.meiva_home" = 1
 "test_config_boot_owner.py#monkeypatch.setattr base.config._full.build" = 2
 "test_config_boot_owner.py#monkeypatch.setattr base.config._lite.BUILD_WAIT_TIMEOUT_SECONDS" = 1
-"test_config_boot_owner.py#monkeypatch.setattr base.config._lite.load_ava_env" = 1
+"test_config_boot_owner.py#monkeypatch.setattr base.config._lite.load_meiva_env" = 1
 "test_config_boot_owner.py#monkeypatch.setattr base.config.settings" = 1
 "test_runtime_config.py#monkeypatch.setattr base.host.env.dotenv_file.unit_home" = 1
 

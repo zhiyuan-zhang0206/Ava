@@ -1,7 +1,7 @@
 """Local install registry — every package in the skills load dir and its state.
 
-A per-machine JSON file at `$AVA_HOME/installed.json` recording every package
-present in the single skills load dir (`$AVA_HOME/skills/`), whether converged
+A per-machine JSON file at `$MEIVA_HOME/installed.json` recording every package
+present in the single skills load dir (`$MEIVA_HOME/skills/`), whether converged
 from this repo / a plugin or installed from an external source (git URL /
 marketplace). File-based and machine-local by design: there is no
 cluster-shared row. `installed` means the package lives on disk; `enabled` is
@@ -9,7 +9,7 @@ a local on/off toggle the skill scanner honors — the two are orthogonal.
 
 Distinct from `base/packages/plugins/enable_config.py` (per-machine JSON plugin enable) and
 `base/config.py` (env-driven Settings): this is the decentralized-local
-target for install state. The skill scanner loads from `~/.ava/skills/` only
+target for install state. The skill scanner loads from `~/.meiva/skills/` only
 entries this registry tracks as enabled (see `enabled_skill_names`), which is
 what keeps stray copies from silently loading or shadowing converged skills.
 """
@@ -118,10 +118,10 @@ PackageType = Literal["skill", "plugin", "mcp"]
 TrustTier = Literal["builtin", "reviewed", "unreviewed"]
 """How much a package's *content* may be trusted, recorded where it enters:
 
-- "builtin" — the content came from this Ava checkout (`ava_builtins/`), so it
+- "builtin" — the content came from this Meiva checkout (`meiva_builtins/`), so it
   ships under the same review as the code. Written by converge.
 - "reviewed" — third-party content a human on this cluster read and approved
-  (`ava skill trust <name>`). Never inferred: a clean
+  (`meiva skill trust <name>`). Never inferred: a clean
   `base.packages.skills.scan` report is "no rule matched", not "someone looked".
 - "unreviewed" — the default for anything ingested from outside. Installed and
   usable by an agent that deliberately opens it, but any runtime layer that
@@ -133,11 +133,11 @@ field existed reads as third-party until the next converge re-stamps it.
 """
 
 PackageOrigin = Literal["repo", "plugin", "user"]
-"""Who owns a package's content in `~/.ava/skills/`:
+"""Who owns a package's content in `~/.meiva/skills/`:
 
 - "repo" / "plugin" — converge-managed derived state, synced from a source
-  tree (`<repo>/ava_builtins/skills/`, `<repo>/ava_builtins/plugins/<p>/skills/`, or an installed
-  plugin's `~/.ava/plugins/<p>/skills/`). Converge overwrites it when the
+  tree (`<repo>/meiva_builtins/skills/`, `<repo>/meiva_builtins/plugins/<p>/skills/`, or an installed
+  plugin's `~/.meiva/plugins/<p>/skills/`). Converge overwrites it when the
   source changes and removes it when the source disappears — unless the user
   hand-edited the copy (`content_hash` mismatch), which converge never
   clobbers.
@@ -167,7 +167,7 @@ class UpdateState(BaseModel):
     `mode` / `interval_seconds` / `channel` are None until the refresh pass
     resolves them from the source class at first sight (design §5.2: the
     resolved default is written into the row); a concrete value recorded here
-    is an operator decision (`ava packages policy`) that survives every pass.
+    is an operator decision (`meiva packages policy`) that survives every pass.
     """
 
     mode: UpdateMode | None = None
@@ -278,7 +278,7 @@ class DuplicatePackageName(InstallRegistryError):  # noqa: N818
     """Two registry rows fold to the same package key.
 
     Dash and underscore are one name (`base.packages.skills.names.match_key`), so
-    `ava-code` and `ava_code` as separate rows are the same package twice —
+    `meiva-code` and `meiva_code` as separate rows are the same package twice —
     the dual-row state that made the skill scanner crash fleet-wide (audit
     02 #4). One package must have exactly one row (design R2-B1), so the
     registry read refuses it rather than letting both rows load.
@@ -303,7 +303,7 @@ def _folding_duplicates(registry: Registry) -> list[tuple[str, str]]:
 
 
 def load() -> Registry:
-    """Read `$AVA_HOME/installed.json`; a missing or empty file is an empty registry.
+    """Read `$MEIVA_HOME/installed.json`; a missing or empty file is an empty registry.
 
     Raises:
         SchemaInvalid: file exists but JSON / schema is invalid (fail-fast —
@@ -312,7 +312,7 @@ def load() -> Registry:
             dual-row state that used to crash the skill scanner).
         OSError: filesystem read error.
     """
-    path = paths.install_registry_path(paths.ava_home())
+    path = paths.install_registry_path(paths.meiva_home())
     if not path.exists():
         return Registry()
     raw = path.read_text(encoding="utf-8")
@@ -339,7 +339,7 @@ def load() -> Registry:
 
 
 def save(registry: Registry) -> None:
-    """Full-replace `$AVA_HOME/installed.json` with pretty JSON, atomically.
+    """Full-replace `$MEIVA_HOME/installed.json` with pretty JSON, atomically.
 
     The body is written to a temp sibling and renamed over the real path, so a
     crash mid-write can never leave a truncated registry that reads as an empty
@@ -352,7 +352,7 @@ def save(registry: Registry) -> None:
     two savers running at once share it: the second overwrites the first's
     staged body, and whichever unlinks first leaves the other's rename raising
     FileNotFoundError. `mutate`'s lock is what keeps them from overlapping."""
-    path = paths.install_registry_path(paths.ava_home())
+    path = paths.install_registry_path(paths.meiva_home())
     body = json.dumps(json.loads(registry.model_dump_json()), indent=2) + "\n"
     tmp = path.with_name(f"{path.name}.tmp")
     try:
@@ -391,7 +391,7 @@ def registry_lock() -> Generator[None]:
 
     `mutate` is the way in and takes this for you.
     """
-    path = paths.install_registry_path(paths.ava_home())
+    path = paths.install_registry_path(paths.meiva_home())
     with file_lock(path.with_name(f"{path.name}.lock"), timeout_s=_REGISTRY_LOCK_TIMEOUT_S):
         yield
 
@@ -402,8 +402,8 @@ def mutate() -> Generator[Registry]:
     way to change `installed.json`.
 
     `save` is a full replace, so every change is a read-modify-write, and the
-    writers are separate PROCESSES: `ava skill install` in an agent's shell,
-    `ava converge` on a restart, and the gateway's skills-toggle handler. Two of
+    writers are separate PROCESSES: `meiva skill install` in an agent's shell,
+    `meiva converge` on a restart, and the gateway's skills-toggle handler. Two of
     them racing lose one side's rows outright — whoever saves last wins with a registry it read
     before the others' rows existed. The package stops being tracked while its
     directory is still on disk, which is the state the skill scanner refuses to
@@ -455,9 +455,9 @@ def copy_changed(
     skip_subtrees: frozenset[tuple[str, ...]] = frozenset(),
 ) -> bool:
     """True when the on-disk tree at `dest` differs from the recorded
-    `content_hash` — the "local edits" signal `ava skill upgrade` /
-    `ava plugins upgrade` / `ava mcp upgrade` report before replacing the
-    copy, and `ava packages rollback` reports before restoring the previous
+    `content_hash` — the "local edits" signal `meiva skill upgrade` /
+    `meiva plugins upgrade` / `meiva mcp upgrade` report before replacing the
+    copy, and `meiva packages rollback` reports before restoring the previous
     tree.
 
     A missing recorded hash counts as changed (None never equals a digest):
@@ -476,11 +476,11 @@ def copy_changed(
 def enabled_skill_names() -> set[str]:
     """Names of enabled packages that may contribute skills.
 
-    The skill scanner loads a top-level directory under `~/.ava/skills/` only
+    The skill scanner loads a top-level directory under `~/.meiva/skills/` only
     when its name is in this set (untracked, or tracked but disabled, is not
     surfaced). Covers `type="skill"` entries (converged repo/plugin skills and
     user installs) and `type="plugin"` entries — an installed plugin's
-    converged skills namespace (`~/.ava/skills/<plugin>/`) gates on the
+    converged skills namespace (`~/.meiva/skills/<plugin>/`) gates on the
     plugin's own registry entry rather than a duplicate skill entry.
     """
     return {p.name for p in load().packages if p.type in ("skill", "plugin") and p.enabled}
@@ -502,7 +502,7 @@ def host_contract_reason(pkg_dir: Path) -> str | None:
     """Why the package at `pkg_dir` is NOT loadable on this host, or None when
     it is. Thin wrapper over `base.packages.plugins.manifest.host_contract_errors_dir`
     — the runtime half of the §5.5 version gate, shared by the skill scan and
-    `ava packages status`."""
+    `meiva packages status`."""
     from base.packages.plugins import manifest
 
     errors = manifest.host_contract_errors_dir(pkg_dir)
@@ -513,12 +513,12 @@ def loadable_skill_names() -> set[str]:
     """`enabled_skill_names()` minus packages whose manifest excludes this host.
 
     The runtime side of the version gate (design §5.5): a skill package whose
-    `engines.ava` / `requires_commit` no longer permits the running host is
-    dropped from the catalog/index; `ava packages status` carries the reason.
+    `engines.meiva` / `requires_commit` no longer permits the running host is
+    dropped from the catalog/index; `meiva packages status` carries the reason.
     Packages without a manifest pass unchanged, so the check costs one stat per
     enabled name unless a manifest is actually present.
     """
-    skills_root = paths.skills_dir(paths.ava_home())
+    skills_root = paths.skills_dir(paths.meiva_home())
     return {
         name for name in enabled_skill_names() if host_contract_reason(skills_root / name) is None
     }
@@ -527,11 +527,11 @@ def loadable_skill_names() -> set[str]:
 def installed_mcp_names() -> set[str]:
     """Names of `type="mcp"` packages tracked in the registry.
 
-    The MCP config loader loads a top-level directory under `~/.ava/mcps/` only
+    The MCP config loader loads a top-level directory under `~/.meiva/mcps/` only
     when its name is in this set — so a stray dir under the load dir does not
     silently contribute a server (mirrors `enabled_skill_names`). Presence, not
     the `enabled` flag, is the gate here: runtime on/off for MCP servers lives
-    in the separate per-machine `mcp_enabled.json` overlay (`ava mcp
+    in the separate per-machine `mcp_enabled.json` overlay (`meiva mcp
     enable/disable`), which the loader applies uniformly to built-in, installed,
     and machine servers — so this stays a pure "is it installed" check.
     """

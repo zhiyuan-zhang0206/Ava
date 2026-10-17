@@ -9,14 +9,14 @@ _USAGE = {"input_tokens": 10, "output_tokens": 5, "total_tokens": 15}
 REPLY_TEXT = "context ok"
 
 CODE = """\
-import ava
+import meiva
 
-who = ava.context.identity
-with ava.context.sql.cursor() as cur:
+who = meiva.context.identity
+with meiva.context.sql.cursor() as cur:
     cur.execute("SELECT id FROM agents_meta WHERE id = %s", (who.agent_id,))
     row = cur.fetchone()
-status = ava.agents.get_status(who.agent_id)
-reply = ava.context.gateway.get(f"/api/agents/{who.agent_id}")
+status = meiva.agents.get_status(who.agent_id)
+reply = meiva.context.gateway.get(f"/api/agents/{who.agent_id}")
 print(f"CTX agent_id={who.agent_id} owns_loop={who.owns_loop} actor={who.actor} db_row={row[0]} status={status.value} gateway={reply.status_code}")
 """
 

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Build graph_data.json from an Ava OKF bundle (.ava.okf.md files).
+"""Build graph_data.json from an Meiva OKF bundle (.meiva.okf.md files).
 
 CLI wrapper over `base/packages/docs/okf_graph.py`'s `build_graph_data()` — writes the
 result to disk and prints build stats + unresolved-wikilink diagnostics.
@@ -19,7 +19,7 @@ from typing import Any
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
 
-# Re-exported: scripts/content_lint/lint_ava_okf.py does `from build_okf_data import resolve_wikilink`.
+# Re-exported: scripts/content_lint/lint_meiva_okf.py does `from build_okf_data import resolve_wikilink`.
 from base.packages.docs.okf_graph import build_graph_data
 from base.packages.docs.okf_graph import resolve_wikilink as resolve_wikilink
 
@@ -49,7 +49,9 @@ def _print_stats(
 
 def main():
     parser = argparse.ArgumentParser(description="Build OKF graph data for D3 viz")
-    parser.add_argument("bundle_dir", help="Path to bundle directory containing .ava.okf.md files")
+    parser.add_argument(
+        "bundle_dir", help="Path to bundle directory containing .meiva.okf.md files"
+    )
     parser.add_argument("out_file", nargs="?", default="tmp/graph_data.json")
     parser.add_argument("--name", default="OKF", help="Bundle name")
     args = parser.parse_args()

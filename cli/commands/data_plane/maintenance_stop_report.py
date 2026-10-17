@@ -139,7 +139,7 @@ class SurvivorInventory:
         else:
             lines.append(
                 "  recovery: retry the command to reconverge recorded groups, or escalate "
-                "explicitly with `ava stop --force` if the listed process(es) are expendable."
+                "explicitly with `meiva stop --force` if the listed process(es) are expendable."
             )
         return "\n".join(lines)
 

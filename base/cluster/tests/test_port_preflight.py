@@ -302,7 +302,7 @@ def test_bind_addrs_includes_the_declared_reachable_address(
     *,
     machine_identity: MachineIdentity,
 ) -> None:
-    """A declared private-network address (`AVA_MACHINE_HOST`) joins loopback: the
+    """A declared private-network address (`MEIVA_MACHINE_HOST`) joins loopback: the
     posture a secret-bearing cluster has always had when its operator declared one."""
     monkeypatch.setattr(settings.data_plane, "cluster_secret", "s3cret")
     machine_identity.set(host="10.0.0.5")

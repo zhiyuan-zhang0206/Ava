@@ -1,8 +1,8 @@
 """refresh_data_plane_settings rebuilds the in-memory data-plane config in
 place after the unit's `.env` was rewritten under the process.
 
-The 2026-08-25 rollout incident: the local leg's `ava start` ran a
-data-plane credential rotation (secret split) that rewrote `$AVA_HOME/.env`,
+The 2026-08-25 rollout incident: the local leg's `meiva start` ran a
+data-plane credential rotation (secret split) that rewrote `$MEIVA_HOME/.env`,
 while the orchestrating rollout process kept its startup-built Settings
 singleton — every later data-plane write then failed authentication. These
 tests pin the refresh contract with the one credential `.env` still carries,
@@ -22,10 +22,10 @@ from base import config
 from base.host.env.tests.env_files import use_env_files
 
 _IDENTITY_LINES = [
-    f"AVA_DB_URL={os.environ['AVA_DB_URL']}",
-    f"AVA_REDIS_URL={os.environ['AVA_REDIS_URL']}",
-    f"AVA_CLUSTER_SECRET={os.environ['AVA_CLUSTER_SECRET']}",
-    f"AVA_GATEWAY_URL={os.environ['AVA_GATEWAY_URL']}",
+    f"MEIVA_DB_URL={os.environ['MEIVA_DB_URL']}",
+    f"MEIVA_REDIS_URL={os.environ['MEIVA_REDIS_URL']}",
+    f"MEIVA_CLUSTER_SECRET={os.environ['MEIVA_CLUSTER_SECRET']}",
+    f"MEIVA_GATEWAY_URL={os.environ['MEIVA_GATEWAY_URL']}",
 ]
 
 
@@ -88,8 +88,8 @@ def _point_env_at(monkeypatch: pytest.MonkeyPatch, env_text: str, tmp_path: Path
 
 def _env_text(runtime_password: str) -> str:
     return (
-        "AVA_CLUSTER_SECRET=sekret\n"
-        f"AVA_REDIS_URL=redis://ava:{runtime_password}@127.0.0.1:6380/0\n"
+        "MEIVA_CLUSTER_SECRET=sekret\n"
+        f"MEIVA_REDIS_URL=redis://meiva:{runtime_password}@127.0.0.1:6380/0\n"
     )
 
 

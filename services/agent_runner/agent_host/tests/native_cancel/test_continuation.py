@@ -15,7 +15,7 @@ from agent.graph.claim.node import claim_node
 from agent.startup import wrap_saver_writes_with_nstep_interval
 from agent.state import AgentState, BaseAgentState
 from agent.tests.claim.test_inbound_ownership import insert
-from base.agents.context import AvaContext
+from base.agents.context import MeivaContext
 from base.agents.history.delta_read_compat import wrap_saver_reads_with_delta_reconstruction
 from base.agents.inbox.native_cancel import accept_native_cancel, observe_native_work
 from base.cluster.machine import MachineIdentity
@@ -121,7 +121,7 @@ async def test_original_invocation_stops_once_after_database_fault(
         await saver.setup()
         wrap_saver_writes_with_nstep_interval(saver, 100)
         wrap_saver_reads_with_delta_reconstruction(saver)
-        builder: Any = StateGraph(AgentState, context_schema=AvaContext)
+        builder: Any = StateGraph(AgentState, context_schema=MeivaContext)
         builder.add_node("claim", claim_node, destinations=("before_llm", "claim", "__end__"))
         builder.add_node("before_llm", model, destinations=("claim",))
         builder.add_edge(START, "claim")
@@ -137,7 +137,7 @@ async def test_original_invocation_stops_once_after_database_fault(
             catalog=model_catalog,
             commands=CommandCatalog(skills=list),
         )
-        ctx = AvaContext(
+        ctx = MeivaContext(
             ops_pool=aops_pool,
             event_publisher=MagicMock(),
             agent=AgentSlices.resolve(default_reader=configured_policy().default_reader),

@@ -24,6 +24,6 @@
     "test_model_interrupt_owner.py",
     "test_node_log.py",
 ]
-"ava.tests.fixtures.sdk" = [
+"meiva.tests.fixtures.sdk" = [
     "."
 ]

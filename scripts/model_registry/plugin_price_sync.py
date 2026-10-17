@@ -686,7 +686,7 @@ def sync_plugin_rates(
     archive = _regular_file(archive_path, root, label="pricing archive")
     raw = cast(dict[str, Any], json.loads(archive.read_text(encoding="utf-8")))
     archive_models = cast(dict[str, dict[str, Any]], raw["models"])
-    provider_paths = sorted((root / "ava_builtins/plugins").glob("lm_*/provider.py"))
+    provider_paths = sorted((root / "meiva_builtins/plugins").glob("lm_*/provider.py"))
     if not provider_paths:
         raise RuntimeError(f"no built-in provider.py files found under {root}")
 

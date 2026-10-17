@@ -41,7 +41,7 @@ def test_coerce_effort_rejects_unknown_values() -> None:
 
 
 def test_coerce_effort_message_names_the_calling_api() -> None:
-    with pytest.raises(ValueError, match=r"ava\.web\.fetch\(targets, effort='high'\)"):
-        coerce_effort("ultra", example="ava.web.fetch(targets, effort='high')")
-    with pytest.raises(TypeError, match=r"ava\.understand\(targets, effort='low'\)"):
-        coerce_effort(3, example="ava.understand(targets, effort='low')")  # type: ignore[arg-type]
+    with pytest.raises(ValueError, match=r"meiva\.web\.fetch\(targets, effort='high'\)"):
+        coerce_effort("ultra", example="meiva.web.fetch(targets, effort='high')")
+    with pytest.raises(TypeError, match=r"meiva\.understand\(targets, effort='low'\)"):
+        coerce_effort(3, example="meiva.understand(targets, effort='low')")  # type: ignore[arg-type]

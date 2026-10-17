@@ -28,12 +28,12 @@ def test_defaults() -> None:
 @pytest.mark.parametrize("threshold", [-0.1, 1.1])
 def test_the_threshold_must_be_a_probability(threshold: float) -> None:
     with pytest.raises(ValidationError):
-        LmSettings.model_validate({"AVA_REPLY_SUGGESTION_GATE_THRESHOLD": threshold})
+        LmSettings.model_validate({"MEIVA_REPLY_SUGGESTION_GATE_THRESHOLD": threshold})
 
 
 def test_the_input_budget_must_be_positive() -> None:
     with pytest.raises(ValidationError):
-        LmSettings.model_validate({"AVA_REPLY_SUGGESTION_MAX_INPUT_TOKENS": 0})
+        LmSettings.model_validate({"MEIVA_REPLY_SUGGESTION_MAX_INPUT_TOKENS": 0})
 
 
 def test_the_default_models_belong_to_their_catalogs(model_catalog: ModelCatalog) -> None:

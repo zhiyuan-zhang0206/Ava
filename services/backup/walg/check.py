@@ -1,4 +1,4 @@
-"""`ava backup walg check`: prove, before archiving is switched on, that it can work.
+"""`meiva backup walg check`: prove, before archiving is switched on, that it can work.
 
 The failures this exists to surface early: a missing or edited binary, an unusable
 configuration or key, and a storage credential that can write but not read or
@@ -28,7 +28,7 @@ from services.backup.walg.archive import expected_archive
 from services.backup.walg.runner import WalgCommandError, run_walg
 
 _STORAGE_CALL_TIMEOUT_S = 120
-_CHECK_DIR = "ava-check"
+_CHECK_DIR = "meiva-check"
 
 
 @dataclass(frozen=True)
@@ -42,12 +42,12 @@ def _storage_round_trip(*, path_reader: Callable[[], Path | None]) -> str:
     token = uuid.uuid4().hex
     remote = f"{_CHECK_DIR}/{token}.txt"
     stored = f"{remote}.lz4"
-    payload = f"ava walg check {token}\n".encode()
+    payload = f"meiva walg check {token}\n".encode()
 
     def call(*args: str) -> str:
         return str(run_walg(list(args), timeout_s=_STORAGE_CALL_TIMEOUT_S, path_reader=path_reader))
 
-    with tempfile.TemporaryDirectory(prefix="ava-walg-check-") as scratch:
+    with tempfile.TemporaryDirectory(prefix="meiva-walg-check-") as scratch:
         source, fetched = Path(scratch, "put"), Path(scratch, "get")
         source.write_bytes(payload)
         try:
@@ -81,7 +81,7 @@ def _postgres_facts(*, path_reader: Callable[[], Path | None]) -> str:
     except Exception as exc:
         return f"not read ({type(exc).__name__}); the health probe judges it once Postgres is up"
     if expected is not None and probe.settings_differ(state, expected):
-        verdict = "differs from the configuration (ava stop, then ava start, to apply)"
+        verdict = "differs from the configuration (meiva stop, then meiva start, to apply)"
     else:
         verdict = "matches the configuration"
     return (
@@ -94,12 +94,12 @@ def run_check(*, path_reader: Callable[[], Path | None]) -> list[Step]:
     """Run the checks in order, stopping at the first failure; the last step is the verdict."""
     path = walg_config.configured_path(path_reader=path_reader)
     if path is None:
-        return [Step("configured", "AVA_WALG_CONFIG_FILE is not set", ok=False)]
+        return [Step("configured", "MEIVA_WALG_CONFIG_FILE is not set", ok=False)]
     steps = [Step("configured", str(path))]
 
     binary_problem = walg_binary.installed_problem()
     if binary_problem is not None:
-        return [*steps, Step("binary", f"{binary_problem} (ava converge installs it)", ok=False)]
+        return [*steps, Step("binary", f"{binary_problem} (meiva converge installs it)", ok=False)]
     steps.append(Step("binary", f"pinned wal-g {walg_binary.WALG_VERSION}"))
 
     try:

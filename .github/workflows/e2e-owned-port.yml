@@ -23,7 +23,7 @@ jobs:
       # No top-level UV_FROZEN here: it conflicts with the `uv sync --locked` above.
       - run: uv run --frozen pytest --confcutdir=tests/ci tests/ci/test_owned_gateway_port.py -q
         env:
-          AVA_PORT_PROOF_OUTPUT: ${{ runner.temp }}/owned-port.json
+          MEIVA_PORT_PROOF_OUTPUT: ${{ runner.temp }}/owned-port.json
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
         if: always()
         with:

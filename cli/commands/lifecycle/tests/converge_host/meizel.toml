@@ -9,15 +9,15 @@ exports = ["context_inputs.py"]
 [debt.env-patch]
 "context_inputs.py#monkeypatch.setenv os.environ.HOME" = 1
 "context_inputs.py#monkeypatch.setenv os.environ.SHELL" = 1
-"test_bare_ava.py#monkeypatch.setenv os.environ.HOME" = 1
-"test_converge.py#monkeypatch.setenv os.environ.AVA_HOME" = 1
+"test_bare_meiva.py#monkeypatch.setenv os.environ.HOME" = 1
+"test_converge.py#monkeypatch.setenv os.environ.MEIVA_HOME" = 1
 "test_converge.py#patch.dict os.environ" = 1
 
 [debt.first-party-patch]
 "context_inputs.py#monkeypatch.setattr base.cluster.get_record" = 1
 "context_inputs.py#monkeypatch.setattr base.config.settings.data_plane.pgbouncer_enabled" = 1
-"context_inputs.py#monkeypatch.setattr base.host.converge.accessibility.ava_home" = 1
-"context_inputs.py#monkeypatch.setattr base.host.converge.screen_capture.ava_home" = 1
+"context_inputs.py#monkeypatch.setattr base.host.converge.accessibility.meiva_home" = 1
+"context_inputs.py#monkeypatch.setattr base.host.converge.screen_capture.meiva_home" = 1
 "context_inputs.py#monkeypatch.setattr base.host.system.probes.permissions_helper_incapability" = 3
 "test_converge.py#monkeypatch.setattr base.config.settings.data_plane.db_url" = 1
 "test_converge.py#monkeypatch.setattr base.config.settings.data_plane.redis_url" = 1
@@ -59,7 +59,7 @@ exports = ["context_inputs.py"]
 "test_migration_warning.py#monkeypatch.setattr base.deploy.schema.migrations.untracked_migration_files" = 2
 "test_os_jobs_config.py#monkeypatch.setattr base.config.ConfigBoot.prepare" = 1
 "test_os_jobs_config.py#monkeypatch.setattr base.host.system.autostart.register_autostart" = 1
-"test_os_jobs_config.py#monkeypatch.setattr base.host.system.cron.ava_binary_path" = 1
+"test_os_jobs_config.py#monkeypatch.setattr base.host.system.cron.meiva_binary_path" = 1
 "test_os_jobs_config.py#monkeypatch.setattr base.host.system.cron.launchd_path_env" = 1
 "test_os_jobs_config.py#monkeypatch.setattr base.host.system.cron.register_os_cron" = 1
 "test_os_jobs_config.py#monkeypatch.setattr base.host.system.logs_job.register_logs_job" = 1

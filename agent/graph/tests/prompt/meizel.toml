@@ -1,6 +1,6 @@
 [debt.env-patch]
-"test_agent_id_note.py#monkeypatch.delenv os.environ.AVA_AGENT_ID" = 2
-"test_timezone_note.py#monkeypatch.delenv os.environ.AVA_AGENT_ID" = 2
+"test_agent_id_note.py#monkeypatch.delenv os.environ.MEIVA_AGENT_ID" = 2
+"test_timezone_note.py#monkeypatch.delenv os.environ.MEIVA_AGENT_ID" = 2
 "test_timezone_note.py#patch.dict os.environ" = 1
 
 [debt.first-party-patch]
@@ -8,11 +8,11 @@
 "test_agent_id_note.py#monkeypatch.setattr agent.graph.prompt.context_notes.own_label" = 5
 "test_agent_id_note.py#monkeypatch.setattr agent.graph.prompt.context_notes.workspace_dir" = 2
 "test_agent_id_note.py#monkeypatch.setattr base.config.settings.agent.workspace_in_system_prompt" = 3
-"test_capabilities_index.py#monkeypatch.delattr ava.agents.get_last_message" = 1
-"test_capabilities_index.py#monkeypatch.delattr ava.mcps" = 1
-"test_capabilities_index.py#monkeypatch.setattr ava.mcps.servers" = 3
-"test_capabilities_index.py#monkeypatch.setattr ava.sdk_surface.agent_identity.require_agent_id" = 1
-"test_capabilities_index.py#monkeypatch.setattr ava.sdk_surface.sdk_disable.applied_entries" = 2
+"test_capabilities_index.py#monkeypatch.delattr meiva.agents.get_last_message" = 1
+"test_capabilities_index.py#monkeypatch.delattr meiva.mcps" = 1
+"test_capabilities_index.py#monkeypatch.setattr meiva.mcps.servers" = 3
+"test_capabilities_index.py#monkeypatch.setattr meiva.sdk_surface.agent_identity.require_agent_id" = 1
+"test_capabilities_index.py#monkeypatch.setattr meiva.sdk_surface.sdk_disable.applied_entries" = 2
 "test_capabilities_index.py#monkeypatch.setattr base.packages.extensions.install_registry.loadable_skill_names" = 1
 "test_capabilities_index.py#monkeypatch.setattr base.telemetry.audit_events.record_audit_reported" = 1
 "test_conversation_prompt.py#monkeypatch.setattr base.config.settings.agent.agent_communication_style" = 3
@@ -26,7 +26,7 @@
 "test_preloaded_skills.py#monkeypatch.setattr base.config.settings.agent.sdk_disable" = 1
 "test_preloaded_skills.py#monkeypatch.setattr base.config.settings.agent.skills_to_expand_at_start" = 1
 "test_preloaded_skills.py#monkeypatch.setattr base.packages.extensions.install_registry.loadable_skill_names" = 1
-"test_system_prompt.py#monkeypatch.setattr ava.sdk_surface.sdk_disable.applied_entries" = 1
+"test_system_prompt.py#monkeypatch.setattr meiva.sdk_surface.sdk_disable.applied_entries" = 1
 "test_system_prompt.py#monkeypatch.setattr base.config.settings.agent.sdk_disable" = 3
 "test_system_prompt.py#monkeypatch.setattr base.config.settings.agent.sdk_expand_in_system_prompt" = 16
 "test_system_prompt.py#monkeypatch.setattr base.config.settings.lm.llm_model" = 2

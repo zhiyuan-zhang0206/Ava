@@ -137,7 +137,7 @@ def _init_and_start_settings_free() -> None:
 
     scenario = sys.argv[1]
     authority = scenario != "init_and_start_settings_free"
-    home = Path(os.environ["AVA_HOME"])
+    home = Path(os.environ["MEIVA_HOME"])
     checkout = Path(sys.argv[2]) if authority else home.parent / "checkout"
     if not authority:
         checkout.mkdir()
@@ -232,9 +232,9 @@ def _inherit_foreign_delivery(home: Any) -> None:
     foreign = home.parent / "foreign"
     foreign.mkdir()
     seed_active_generation(foreign)
-    own = os.environ["AVA_DB_URL"]
+    own = os.environ["MEIVA_DB_URL"]
     os.environ.update(write_grant(foreign, "gateway").environment(own))
-    assert os.environ["AVA_DB_URL"] != own
+    assert os.environ["MEIVA_DB_URL"] != own
 
 
 def _verify_start_delivery(scenario: str, home: Any, kwargs: Any, expected: Any) -> None:
@@ -299,7 +299,7 @@ def _help_admission() -> None:
 
     def open_database(config: object, gate: ProcessDbGate, direct_url: ClusterDirectUrl) -> object:
         assert direct_url.local_host == command.machine.host
-        assert gate.application_name() == "ava:cli"
+        assert gate.application_name() == "meiva:cli"
         assert gate.min_read_due() is False
         seen.append(gate)
         return object()

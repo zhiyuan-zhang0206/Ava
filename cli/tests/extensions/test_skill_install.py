@@ -1,14 +1,14 @@
-"""`ava skill install` — Agent Skills standard packages install unmodified.
+"""`meiva skill install` — Agent Skills standard packages install unmodified.
 
 Every fixture here is written to the published standard (agentskills.io): a
 `name`/`description` frontmatter plus the optional `license` / `compatibility` /
 `metadata` / `allowed-tools` fields, in the directory layouts the ecosystem
-ships (bare skill, `skills/`, `.claude/skills/`). Nothing is Ava-specific, and
+ships (bare skill, `skills/`, `.claude/skills/`). Nothing is Meiva-specific, and
 the assertions run all the way to the namespace mount — installed *and*
-reachable as `ava.skills.<name>`.
+reachable as `meiva.skills.<name>`.
 
 Local-path sources are used in place; git sources go through a local `file://`
-fixture repo, so no test touches the network. `unit_home` isolates `~/.ava`.
+fixture repo, so no test touches the network. `unit_home` isolates `~/.meiva`.
 """
 
 import subprocess
@@ -18,7 +18,7 @@ from typing import Any
 
 import pytest
 
-import ava.skills as skills_mod
+import meiva.skills as skills_mod
 from base.packages.extensions import install_registry as reg
 from cli.commands.extensions.skill import cmd_skill_install
 from cli.database.runtime import CommandRuntime
@@ -31,7 +31,7 @@ from tests.path_scoped.cli_tests import operator_database as operator_database
 pytestmark = pytest.mark.usefixtures("_installed_machine_identity")
 
 # A skill carrying every optional field the standard defines — the compatibility
-# claim in one fixture. Ava honors name + description and preserves the rest on
+# claim in one fixture. Meiva honors name + description and preserves the rest on
 # disk without tripping over it.
 _STANDARD_SKILL = """\
 ---
@@ -126,7 +126,7 @@ def test_optional_standard_fields_do_not_block_the_mount(
     command_runtime: CommandRuntime,
 ) -> None:
     """`allowed-tools` / `license` / `compatibility` / `metadata` are valid
-    standard fields Ava does not act on — they must not keep the skill from
+    standard fields Meiva does not act on — they must not keep the skill from
     loading, and the file must reach the agent verbatim."""
     _write_skill(tmp_path / "code-review", "code-review")
     assert (
@@ -183,7 +183,7 @@ def test_skills_collection_keeps_nested_subskills(
     command_runtime: CommandRuntime,
 ) -> None:
     """A `skills/` collection installs each top-level skill whole, so a skill
-    with sub-skills keeps its namespace shape (`ava.skills.<pkg>.<child>`)."""
+    with sub-skills keeps its namespace shape (`meiva.skills.<pkg>.<child>`)."""
     repo = tmp_path / "superpowers"
     _write_skill(repo / "skills" / "workflows", "workflows")
     _write_skill(repo / "skills" / "workflows" / "brainstorming", "brainstorming")

@@ -1,0 +1,313 @@
+from __future__ import annotations
+
+import json as _json
+from pathlib import Path
+from typing import NamedTuple, NoReturn
+
+from base.agents.lifecycle import AgentRestart, AgentTermination, SystemHalt
+from meiva import boot, files
+from meiva.sdk_surface import attachment_transport, process_context
+from meiva.sdk_surface import settings as _settings
+from meiva.sdk_surface.validation import coerce_str, coerce_typed
+
+# Deliberately NOT in __all_for_meiva__ (importable, but out of the rendered SDK
+# docs): AgentRestart / AgentTermination are framework control-flow exceptions
+# raised on the success path of restart() / terminate() — the agent never
+# catches them; InvalidConfigOverlay is a rare outcome whose traceback
+# explains itself when one fires.
+__all_for_meiva__ = [
+    "AGENT_ID",
+    "MACHINE_SPEC",
+    "MachineSpec",
+    "attach",
+    "compact",
+    "pause_heartbeat",
+    "restart",
+    "terminate",
+]
+
+# AGENT_ID is the agent-facing read of this process's identity. The canonical
+# slot lives framework-internally in `meiva.sdk_surface.agent_identity` (set once by the bootstrap at
+# process startup); this is a re-export served by the module `__getattr__`
+# below, NOT a stored attribute — so the kernel never reaches through this
+# disable-able `meiva.self` module to learn who it is, and `MEIVA_SDK_DISABLE` can
+# remove the whole `self` namespace without stripping the identity.
+#
+# Annotation-only (no value binding) keeps the name out of the module dict so
+# every `meiva.self.AGENT_ID` access routes to `__getattr__`.
+AGENT_ID: int
+
+
+class MachineSpec(NamedTuple):
+    """Identity of a machine.
+
+    Fields:
+        name: the machine's name.
+        description: free prose about what the machine is for; empty if unset.
+    """
+
+    name: str
+    description: str
+
+
+MACHINE_SPEC: MachineSpec
+"""The machine from the bound context; no context is an error."""
+
+
+def __getattr__(name: str) -> object:
+    if name == "AGENT_ID":
+        # Re-export the framework-internal identity as a plain int (the None
+        # placeholder before bootstrap). `meiva.help(meiva.self)` still documents
+        # the name from the AnnAssign + PEP 224 docstring above — a bare value
+        # routes through the doc-carrying constant renderer there.
+        import meiva.sdk_surface.agent_identity
+
+        return meiva.sdk_surface.agent_identity.agent_id()
+    if name == "MACHINE_SPEC":
+        machine = process_context.current_context().require_machine()
+        return MachineSpec(machine.name(), machine.description() or "")
+    if name == "InvalidConfigOverlay":
+        from base.packages.plugins.plugin_errors import InvalidConfigOverlay
+
+        return InvalidConfigOverlay
+    # Plugin members land on meiva.self via a declared `SdkMember` (meiva_fleet
+    # adds set_label). In an agent-launched persistent-shell
+    # child they are absent until plugins load, and this module already exists so
+    # meiva.__getattr__ never fires — trigger the shared lazy load here, then retry.
+    import sys as _sys
+
+    if boot.maybe_load_plugins_for_missing(name):
+        return getattr(_sys.modules[__name__], name)
+    raise AttributeError(f"module 'meiva.self' has no attribute {name!r}")
+
+
+# `InvalidConfigOverlay` is lazily bound via module __getattr__ —
+# any eager `from base.packages.plugins.config_registration import ...` in meiva.self triggers
+# agent.__init__ → agent.graph.prompt._base_prompt calling `meiva.help(...)`
+# which reverse-accesses an meiva attribute, while meiva.__init__ is still
+# running line 91 `import meiva.self` and meiva.help isn't registered yet →
+# AttributeError. Lazy makes this import chain only resolve when the
+# caller actually accesses InvalidConfigOverlay.
+
+
+def attach(path: str | Path, *, label: str | None = None) -> None:
+    """Register a local media file for your next turn.
+
+    Use this when your next response needs to inspect a file generated during
+    this turn. The file is read when this turn ends, so keep it available until
+    then. Your model receives supported media natively; a file whose modality
+    your model cannot receive (e.g. video on an image-only model) is rejected
+    with an error naming the allowed set. Attach at most 8 files and 48 MiB per
+    turn, with a 20 MiB limit per file. Raises an error outside an agent turn.
+    """
+    attachment_transport.register(path, label=label, resolve=files.resolve)
+
+
+def _publish_self_inbound_wake() -> None:
+    """Best-effort wake for a self-inserted inbound (restart / terminate / compact), over
+    the agent's own SDK redis handle (`meiva.context.redis`); see `meiva.self.wake`."""
+    from meiva.sdk_surface import agent_identity
+    from meiva.self import wake
+
+    wake.publish_inbound_wake(
+        process_context.current_context().redis, agent_identity.require_agent_id()
+    )
+
+
+def restart(config_overlay: dict[str, object] | None = None) -> NoReturn:
+    """Restart yourself under the same identity, preserving your conversation.
+
+    This call ends the current execution; finish required work before calling it.
+    `config_overlay` is a flat `{field_name: value}` mapping merged into your
+    persistent per-agent settings."""
+    config_overlay = coerce_typed(config_overlay, "config_overlay", dict, allow_none=True)
+    from meiva.sdk_surface import agent_identity
+
+    agent_identity.assert_self_action("restart")
+    payload_json: str | None = None
+    if config_overlay:
+        from base.packages.plugins.config_registration import validate_config_overlay
+        from meiva.sdk_surface.installation import installed
+
+        installation = installed()
+        catalog = _settings.model_catalog()
+        validate_config_overlay(
+            config_overlay,
+            None if installation is None else installation.configs,
+            models=catalog.models,
+            decision_models=catalog.decision_models,
+        )
+        # Settle a withdrawn llm_model before it is stored (task #4306): the
+        # rewrite is reported in this agent's own log — the spawner-visible
+        # receipt for the self-restart path.
+        from base.lm.registry import normalize_overlay_llm_model
+
+        config_overlay = dict(config_overlay)
+        model_receipt = normalize_overlay_llm_model(
+            config_overlay, models=_settings.model_catalog().models
+        )
+        if model_receipt is not None:
+            from base.log import logger
+
+            logger.warning(
+                "restart config_overlay llm_model {requested!r} is withdrawn; "
+                "storing the registered fallback {resolved!r} — update the "
+                "template (task #4306)",
+                event="restart_config_normalized",
+                requested=model_receipt[0],
+                resolved=model_receipt[1],
+            )
+        payload_json = _json.dumps({"config_overlay": dict(config_overlay)}, sort_keys=True)
+
+    with process_context.current_context().sql.cursor() as cur, cur.connection.transaction():
+        cur.execute("SET TRANSACTION READ WRITE")
+        if config_overlay:
+            from base.agents.model.model_config import validate_restart_model_config
+
+            validate_restart_model_config(
+                cur,
+                agent_identity.require_agent_id(),
+                config_overlay,
+                catalog=_settings.model_catalog(),
+                llm_override=_settings.settings.lm.llm_override,
+                default_model=_settings.agent_setting("llm_model"),
+            )
+            cur.execute(
+                "UPDATE agents_meta "
+                "SET config_overlay = COALESCE(config_overlay, '{}'::jsonb) || %s::jsonb "
+                "WHERE id = %s",
+                (_json.dumps(dict(config_overlay)), agent_identity.agent_id()),
+            )
+        cur.execute(
+            "INSERT INTO inbound_messages (agent_id, content, kind, source, payload) "
+            "VALUES (%s, '', 'restart', 'self', %s::jsonb)",
+            (agent_identity.agent_id(), payload_json),
+        )
+    _publish_self_inbound_wake()
+    raise AgentRestart
+
+
+def terminate() -> NoReturn:
+    """Stop yourself and end the current execution; your conversation is preserved.
+
+    A new message, including one from background work, can wake you again. Stop
+    background work that should no longer wake you before calling this."""
+    from meiva.sdk_surface import agent_identity
+
+    agent_identity.assert_self_action("terminate")
+    with process_context.current_context().sql.cursor() as cur:
+        cur.execute(
+            "INSERT INTO inbound_messages (agent_id, content, kind, source) "
+            "VALUES (%s, '', 'terminate', 'self')",
+            (agent_identity.agent_id(),),
+        )
+    _publish_self_inbound_wake()
+    raise AgentTermination
+
+
+def pause_heartbeat(duration: float) -> None:
+    """Suppress idle heartbeat check-ins for the next `duration` seconds.
+
+    Only the heartbeat is suppressed; real wake-ups still reach you. A later
+    call replaces the window. For a known wait, prefer the longest window that
+    fits it.
+
+    Args:
+        duration: seconds, at most the configured heartbeat pause limit (default
+            86400 = 24 hours; per-agent override via
+            meiva.self.restart(config_overlay=...)).
+    """
+    duration = coerce_typed(duration, "duration", (int, float))
+    from meiva.sdk_surface import agent_identity
+
+    if not duration > 0:
+        raise ValueError(f"duration must be greater than 0 seconds, got {duration!r}")
+    limit = _settings.agent_setting("heartbeat_pause_max_seconds")
+    if duration > limit:
+        raise ValueError(
+            f"duration must be at most {limit:.0f} seconds (heartbeat pause limit; "
+            "per-agent override via meiva.self.restart("
+            "config_overlay={'heartbeat_pause_max_seconds': ...}), cluster default via "
+            "MEIVA_HEARTBEAT_PAUSE_MAX_SECONDS), "
+            f"got {duration!r}"
+        )
+    with process_context.current_context().sql.cursor() as cur:
+        cur.execute(
+            "INSERT INTO heartbeat_pause_log (agent_id, duration_s) VALUES (%s, %s)",
+            (agent_identity.agent_id(), float(duration)),
+        )
+        cur.execute(
+            "UPDATE agents_meta "
+            "SET heartbeat_paused_until = now() + make_interval(secs => %s) "
+            "WHERE id = %s",
+            (float(duration), agent_identity.agent_id()),
+        )
+        from base import telemetry
+
+        telemetry.emit(
+            "telemetry",
+            "heartbeat_paused",
+            level="info",
+            agent_id=agent_identity.agent_id(),
+            # int cast stabilizes the emitted metric kind (task #4011).
+            attributes={"duration_s": round(duration)},
+        )
+
+
+def compact(summary: str) -> NoReturn:
+    """Replace the messages in your current context with `summary` and end execution.
+    The summary becomes your working record of the earlier conversation. If an
+    archived-history note is provided, use its file to recover omitted details.
+
+    First persist durable state: your personal memory (`memory/` in your
+    workspace) and the shared pool (`meiva.memory`; facts other agents need). Then
+    write `summary`: a first-person record of this conversation round, every
+    section filled, "(none)" only when empty.
+
+    Sections: Requests / Progress / In flight / Dead ends / Pitfalls /
+    Verbatim tail (exclude the compaction request that triggered this).
+    """
+    summary = coerce_str(summary, "summary")
+    from meiva.sdk_surface import agent_identity
+
+    agent_identity.assert_self_action("compact")
+    from base import telemetry
+    from base.telemetry.audit_events import prepare_event_log, record_audit
+
+    # The inbound and its audit fact commit together.
+    db = process_context.current_context().sql
+    with db.transaction(), db.cursor() as cur:
+        cur.execute(
+            "INSERT INTO inbound_messages (agent_id, content, kind) "
+            "VALUES (%s, %s, 'compact_summary')",
+            (agent_identity.agent_id(), summary),
+        )
+        compact_event = record_audit(
+            cur.connection,
+            prepare_event_log(
+                event_type="compact",
+                agent_id=agent_identity.agent_id(),
+                source="self",
+                payload={"compact_kind": "summary", "length": len(summary)},
+            ),
+        )
+    telemetry.emit_prepared(compact_event)
+    # Best-effort: a publish failure must not stop the wake + SystemHalt below.
+    # The durable compact_summary inbound is already committed; if this live-UI
+    # event is lost the frontend recovers on its next fetch. Routed through the
+    # never-raise primitive so redis can never interrupt this lifecycle exit.
+    # Imported here, not at module scope: `import meiva` must not pull the redis /
+    # live-events stacks into every exec child (startup-path laziness, task #3816).
+    from base.events.live.projection import CompactRequest
+
+    _settings.bus().publish_best_effort_sync(
+        CompactRequest(
+            agent_id=agent_identity.require_agent_id(),
+            content=f"[compact requested, {len(summary)} chars]",
+        ).model_dump_json(),
+        context="compact_request",
+    )
+    # Also wake the claim node via Redis pub/sub (redundant for same-process
+    # but ensures cross-process scenarios also receive the wake).
+    _publish_self_inbound_wake()
+    raise SystemHalt

@@ -11,7 +11,7 @@ The 2026-08-22 runner hardening sets `PYTHONSAFEPATH=1`: Python no longer
 prepends the script's own directory to sys.path. A script-mode file
 (`python path/to/script.py`) that imports a same-directory sibling therefore
 breaks with ModuleNotFoundError — the 2026-08-23 `daily_scan.py` crash
-(`import collect`) was exactly this, and `lint_ava_okf.py` had hit the same
+(`import collect`) was exactly this, and `lint_meiva_okf.py` had hit the same
 wall the day before.
 
 The fix is a guard that restores the script's directory before the sibling
@@ -244,13 +244,13 @@ def scan_file(path: Path) -> list[str]:
 def _fix_hint(rel: str) -> str:
     """How to fix an unguarded sibling import at ``rel``.
 
-    Under ava_builtins/ the structure gate refuses path imports (Rule 6), so a
+    Under meiva_builtins/ the structure gate refuses path imports (Rule 6), so a
     guard there would only trade one failure for another: the shared code moves
     into a governed package instead.
     """
-    if rel.startswith("ava_builtins/"):
+    if rel.startswith("meiva_builtins/"):
         return (
-            "Under ava_builtins/ a sys.path guard is itself refused (structure Rule 6): "
+            "Under meiva_builtins/ a sys.path guard is itself refused (structure Rule 6): "
             "move the shared code into a governed package and import it normally."
         )
     return (

@@ -2,7 +2,7 @@
 
 // LanguageProvider — the settings→next-intl bridge.
 //
-// Ava's UI language is a DB-backed user setting (display.language, see
+// Meiva's UI language is a DB-backed user setting (display.language, see
 // USER_SETTING_DEFAULTS in lib/types.ts), NOT a URL prefix or a cookie: it
 // syncs across devices through user_settings and switches instantly, without
 // a router refresh. next-intl runs in its "without i18n routing" mode — the

@@ -17,7 +17,7 @@ Two tables are checked, both by set equality in both directions:
    - a service registered in `build_services()` but missing from the roster
      -> "added a daemon, forgot to document it".
 
-2. the healthcheck roster (`services/supervision/healthchecks/docs/check-roster/check-roster.ava.okf.md`)
+2. the healthcheck roster (`services/supervision/healthchecks/docs/check-roster/check-roster.meiva.okf.md`)
    against the healthcheck module directory plus the ServiceSpec
    `healthcheck_module` fields and root diagnostic adapter imports — the
    2026-08-21 audit (issue #192) found the table documenting a phantom module
@@ -148,7 +148,7 @@ def check() -> int:
 
 # ── healthcheck roster (issue #192) ─────────────────────────────────────────
 # The same failure class as the service roster, found in the 2026-08-21
-# healthcheck audit: `check-roster.ava.okf.md` documented a phantom module
+# healthcheck audit: `check-roster.meiva.okf.md` documented a phantom module
 # (`task_maintenance.py`) and missed seven real ones. The three sources of
 # truth are all structured data — the module directory, the ServiceSpec
 # roster, and root diagnostic adapter imports — so set equality pins all
@@ -160,10 +160,10 @@ _HEALTHCHECK_SENTINEL = "<!-- lint:healthcheck-roster-table -->"
 # healthchecks overview — 2026-08-30 split); the modules it lists live
 # directly in `services/supervision/healthchecks/`.
 _HEALTHCHECK_DIR = _REPO_ROOT / "services" / "supervision" / "healthchecks"
-HEALTHCHECK_ROSTER = _HEALTHCHECK_DIR / "docs" / "check-roster" / "check-roster.ava.okf.md"
+HEALTHCHECK_ROSTER = _HEALTHCHECK_DIR / "docs" / "check-roster" / "check-roster.meiva.okf.md"
 
 DIAGNOSTIC_PROBES = (
-    _REPO_ROOT / "services" / "supervision" / "ava_root_glue" / "diagnostic_probes.py"
+    _REPO_ROOT / "services" / "supervision" / "meiva_root_glue" / "diagnostic_probes.py"
 )
 
 

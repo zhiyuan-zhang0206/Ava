@@ -9,7 +9,7 @@ _REPO = Path(__file__).resolve().parents[4]
 _AMBIENT = "base/cluster/machine/ambient.py"
 
 CALLERS: dict[str, tuple[str, int]] = {
-    "ava_builtins/skills/platform/ava-self-evolution/scripts/collect.py": ("O", 1),
+    "meiva_builtins/skills/platform/meiva-self-evolution/scripts/collect.py": ("O", 1),
     "base/agents/upload_delivery/paths.py": ("B2", 1),
     "base/deploy/git/memory_repo.py": ("B2", 1),
     "base/telemetry/alerts/native.py": ("B2", 1),

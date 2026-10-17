@@ -15,7 +15,6 @@ import psutil
 import pytest
 
 from agent.graph.exec.protocol import read_result, write_request
-from ava.tests.fixtures.pin_agent import exec_context
 from base.agents.incarnation.exec_owner_protocol import (
     OwnerClosed,
     OwnerContext,
@@ -26,6 +25,7 @@ from base.agents.incarnation.exec_owner_protocol import (
     validate_native_ready,
 )
 from base.agents.incarnation.resources import ExecAllocation, ResourceProcess
+from meiva.tests.fixtures.pin_agent import exec_context
 
 
 def exec_owner_context(tmp_path: Path, agent_id: int = 1) -> OwnerContext:
@@ -59,8 +59,8 @@ def _start(tmp_path: Path, context: OwnerContext) -> subprocess.Popen[bytes]:
     publish_owner_message(path, context)
     env = dict(
         os.environ,
-        AVA_EXEC_REQUEST_FILE=str(context.request_path),
-        AVA_EXEC_RESULT_FILE=str(context.result_path),
+        MEIVA_EXEC_REQUEST_FILE=str(context.request_path),
+        MEIVA_EXEC_RESULT_FILE=str(context.result_path),
     )
     return subprocess.Popen(  # noqa: S603 -- fixed isolated owner entry in a disposable fixture.
         [
@@ -327,7 +327,7 @@ def test_owner_import_does_not_boot_graph_sdk_or_settings(tmp_path: Path) -> Non
             str(Path(__file__).with_name("_owner_import_child.py")),
         ],
         cwd=tmp_path,
-        env=dict(os.environ, AVA_AGENT_ID="1", AVA_PROCESS_PROFILE="agent"),
+        env=dict(os.environ, MEIVA_AGENT_ID="1", MEIVA_PROCESS_PROFILE="agent"),
         capture_output=True,
         text=True,
         timeout=10,
@@ -375,8 +375,8 @@ def test_real_host_death_closes_active_managed_child(
         cwd=tmp_path,
         env=dict(
             os.environ,
-            AVA_EXEC_REQUEST_FILE=str(context.request_path),
-            AVA_EXEC_RESULT_FILE=str(context.result_path),
+            MEIVA_EXEC_REQUEST_FILE=str(context.request_path),
+            MEIVA_EXEC_RESULT_FILE=str(context.result_path),
         ),
         stdout=subprocess.DEVNULL,
         stderr=subprocess.PIPE,

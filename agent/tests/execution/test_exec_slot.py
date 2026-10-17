@@ -4,7 +4,7 @@ from typing import Annotated, Any
 import pytest
 from pydantic import BaseModel, Field
 
-import ava
+import meiva
 from agent.state import (
     BaseAgentState,
     CompactState,
@@ -12,8 +12,8 @@ from agent.state import (
     build_agent_state,
     compact_version,
 )
-from ava.sdk_surface import process_context
 from base.packages.plugins.extensions import ExtensionRegistry, PluginContributions
+from meiva.sdk_surface import process_context
 
 
 @pytest.fixture(autouse=True)
@@ -29,7 +29,7 @@ def _set_union(current: set[str], new: set[str]) -> set[str]:
 
 def test_in_exec_turn_follows_the_bound_slot():
     assert process_context.in_exec_turn() is False
-    ava.state = BaseAgentState()
+    meiva.state = BaseAgentState()
     assert process_context.in_exec_turn() is True
     process_context.unbind_exec_turn()
     assert process_context.in_exec_turn() is False
@@ -40,32 +40,32 @@ def test_state_slots_do_not_exist_outside_an_exec_turn():
         with pytest.raises(
             process_context.PluginStateOutsideTurnError, match="only inside execute_code"
         ):
-            getattr(ava, name)
+            getattr(meiva, name)
     assert isinstance(process_context.PluginStateOutsideTurnError("x"), AttributeError)
-    assert not hasattr(ava, "state")
-    assert not hasattr(ava, "state_update")
+    assert not hasattr(meiva, "state")
+    assert not hasattr(meiva, "state_update")
 
 
 def test_state_slots_are_readable_once_bound_and_gone_after_unbind():
-    ava.state = BaseAgentState()
-    ava.state_update = {}
-    assert ava.state_update == {}
+    meiva.state = BaseAgentState()
+    meiva.state_update = {}
+    assert meiva.state_update == {}
     process_context.unbind_exec_turn()
     with pytest.raises(process_context.PluginStateOutsideTurnError):
-        _ = ava.state
+        _ = meiva.state
     with pytest.raises(process_context.PluginStateOutsideTurnError):
-        _ = ava.state_update
+        _ = meiva.state_update
 
 
 def test_state_cannot_be_assigned_none():
     with pytest.raises(TypeError, match="unbind_exec_turn"):
-        ava.state = None
+        meiva.state = None
 
 
 def test_compact_version_reads_the_bound_snapshot_and_refuses_outside_a_turn():
     with pytest.raises(process_context.PluginStateOutsideTurnError):
         compact_version()
-    ava.state = BaseAgentState(compact=CompactState(version=3))
+    meiva.state = BaseAgentState(compact=CompactState(version=3))
     assert compact_version() == 3
 
 
@@ -104,7 +104,7 @@ def test_child_clients_are_lazy_and_released_when_the_process_ends(tmp_path: Pat
 
     marker = tmp_path / "closed"
     code = f"""
-import ava
+import meiva
 from base.agents.context.clients import ClientSet
 from pathlib import Path
 
@@ -115,9 +115,9 @@ class Conn:
         Path({str(marker)!r}).write_text("closed")
 
 ClientSet._connect_sql = lambda self: Conn()
-print("before:", repr(ava.context.sql))
-ava.DB.closed
-print("after:", ava.DB.__class__.__name__)
+print("before:", repr(meiva.context.sql))
+meiva.DB.closed
+print("after:", meiva.DB.__class__.__name__)
 print("marker before exit:", Path({str(marker)!r}).exists())
 """
     proc, _request, result = spawn_real_child(tmp_path, code)

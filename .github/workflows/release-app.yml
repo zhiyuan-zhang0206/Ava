@@ -1,4 +1,4 @@
-# Build and publish the Ava App (`ui/app`) for an `app-v*` tag.
+# Build and publish the Meiva App (`ui/app`) for an `app-v*` tag.
 #
 # App versions move independently of the cluster, so the app has its own tag
 # namespace and its own release.
@@ -232,7 +232,7 @@ jobs:
         run: |
           TAG="${GITHUB_REF#refs/tags/}"
           if ! gh release view "$TAG" >/dev/null 2>&1; then
-            gh release create "$TAG" --title "Ava App $TAG" --generate-notes
+            gh release create "$TAG" --title "Meiva App $TAG" --generate-notes
           fi
           gh release upload "$TAG" artifacts/* --clobber
 
@@ -241,7 +241,7 @@ jobs:
           # prerelease asset endpoint stable and replace only latest.json.
           if ! gh release view app-latest >/dev/null 2>&1; then
             gh release create app-latest --target "$GITHUB_SHA" --prerelease \
-              --title "Ava App updater feed" \
+              --title "Meiva App updater feed" \
               --notes "Mutable feed asset for the desktop app updater."
           fi
           gh release upload app-latest artifacts/latest.json --clobber

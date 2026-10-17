@@ -163,8 +163,8 @@ CASES = [
     ),
     Case(
         no_plugin_wrap,
-        "ava_builtins/plugins/demo/plugin.py",
-        "ava.files.read = my_read\n",
+        "meiva_builtins/plugins/demo/plugin.py",
+        "meiva.files.read = my_read\n",
     ),
     Case(
         pool_keepalives,
@@ -174,7 +174,7 @@ CASES = [
     Case(
         fixture_scope,
         "tests/sub/conftest.py",
-        '@pytest.fixture(scope="session")\ndef _unset():\n    os.environ.pop("AVA_HOME", None)\n    yield\n',
+        '@pytest.fixture(scope="session")\ndef _unset():\n    os.environ.pop("MEIVA_HOME", None)\n    yield\n',
         extra={"pyproject.toml": '[tool.pytest.ini_options]\ntestpaths = ["tests"]\n'},
     ),
     Case(
@@ -224,7 +224,7 @@ def fake_repo(tmp_path: Path) -> Path:
         "meizel",
         "tests",
         "base/lm",
-        "ava_builtins/plugins",
+        "meiva_builtins/plugins",
     ):
         (root / rel).mkdir(parents=True, exist_ok=True)
     return root

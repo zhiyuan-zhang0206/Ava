@@ -33,9 +33,9 @@ ways, one per side of the exec process boundary, both through its `PluginStateHa
 - host side (graph hooks, in the agent process): `handle.view(state)` builds the typed
   snapshot from the graph `state` argument, and `handle.delta({...})` turns a plugin-local
   update into the prefixed update dict the hook returns for LangGraph's reducer. Pure
-  functions of the class and the state — no SDK slot, no `ava`.
+  functions of the class and the state — no SDK slot, no `meiva`.
 - exec side (SDK functions running in the exec child): `handle.read()` / `handle.update()`
-  work on the exec turn's slot (`ava.state` / `ava.state_update`, framework-internal).
+  work on the exec turn's slot (`meiva.state` / `meiva.state_update`, framework-internal).
 
 Usage (in a plugin's agent_runtime.py):
 
@@ -138,12 +138,12 @@ class BaseAgentState(BaseModel):
     security_findings: Annotated[list[SecurityFindingEntry], operator.add] = Field(
         default_factory=list
     )
-    """Prompt-injection findings the exec child raised, awaiting delivery: `ava.security` appends
-    through `ava.state_update`; the after_exec hook (`agent/hooks/security.py`) turns them into
+    """Prompt-injection findings the exec child raised, awaiting delivery: `meiva.security` appends
+    through `meiva.state_update`; the after_exec hook (`agent/hooks/security.py`) turns them into
     SECURITY notes and resets the channel with `Overwrite([])`."""
     skill_reads: Annotated[list[str], operator.add] = Field(default_factory=list)
     """Identifiers of the skills whose body an exec child loaded this context window:
-    `ava.skills` appends through `ava.state_update`; the skill-recall hook resets it on a compaction."""
+    `meiva.skills` appends through `meiva.state_update`; the skill-recall hook resets it on a compaction."""
     halted: bool = False
     native_work: NativeWorkTarget | None = None
     native_cancel: NativeCancelMarker | None = None
@@ -161,8 +161,8 @@ class BaseAgentState(BaseModel):
     turn_idle: bool = False
     """Claim found no work; the host ends the turn task. Reset per invocation."""
     update_initiated: bool = False
-    """Set by self-initiated restarts (`ava.self.restart()`); the historical
-    `ava.self.update()` initiator path that introduced it is removed, but
+    """Set by self-initiated restarts (`meiva.self.restart()`); the historical
+    `meiva.self.update()` initiator path that introduced it is removed, but
     self-sourced restarts still set it (claim's restart handler), and it feeds
     the idle-restart gate — a stale True is cleared by the system:update
     restart_completed marker (2026-08-08 audit, P3-6: comment said the field
@@ -228,20 +228,20 @@ class PluginStateSchema:
 # Core keys a plugin may declare/write: only `messages` (its add_messages reducer defines the merge
 # contract; exec._notes.merge_exec_notes puts the tool result first and notes after it, per the
 # Anthropic adjacency constraint). Every other BaseAgentState field is framework-managed: declaring
-# one is rejected by `plugin_state_schema`, and writing one through ava.state_update is rejected
+# one is rejected by `plugin_state_schema`, and writing one through meiva.state_update is rejected
 # by validate_plugin_state_keys (except `SDK_WRITTEN_BASE_FIELDS`, which the SDK itself writes).
 _PLUGIN_WRITABLE_BASE_FIELDS: frozenset[str] = PLUGIN_WRITABLE_BASE_FIELDS
 
 # BaseAgentState built-in fields. `messages` is the one a plugin may modify (only when it declares
 # it with the exact BaseAgentState annotation; `PluginStateSchema.base_declared` tracks the set). A
 # direct write to any other base channel is a missing-prefix typo ("compact" for
-# "ava_myplugin__compact") that would clobber this turn's ToolMessage / lifecycle / compaction
+# "meiva_myplugin__compact") that would clobber this turn's ToolMessage / lifecycle / compaction
 # state, so it must blow up. Derived from `model_fields` so the guard tracks the base (I-8).
 _BASE_STATE_FIELDS: frozenset[str] = _BASE_FIELDS
 
 
 def validate_plugin_state_keys(update: dict[str, Any], state_cls: type[Any]) -> dict[str, Any]:
-    """fail-fast: plugin writing to ava.state_update with illegal keys must raise.
+    """fail-fast: plugin writing to meiva.state_update with illegal keys must raise.
 
     Two classes of abuse raise — AGENTS.md "fail-fast / no silent fallback":
     1. Base field written but the plugin did not explicitly declare it in
@@ -262,7 +262,7 @@ def validate_plugin_state_keys(update: dict[str, Any], state_cls: type[Any]) -> 
     illegal_base = base_clash - base_declared - SDK_WRITTEN_BASE_FIELDS
     if illegal_base:
         raise ValueError(
-            f"plugin wrote undeclared base field to ava.state_update: {sorted(illegal_base)} — "
+            f"plugin wrote undeclared base field to meiva.state_update: {sorted(illegal_base)} — "
             f"framework core keys are managed by the framework every turn; only "
             f"{sorted(_PLUGIN_WRITABLE_BASE_FIELDS)} is plugin-writable, and only when declared "
             f"in the plugin's own BaseModel with the exact BaseAgentState annotation. "
@@ -275,7 +275,7 @@ def validate_plugin_state_keys(update: dict[str, Any], state_cls: type[Any]) -> 
     unknown = set(update) - known
     if unknown:
         raise ValueError(
-            f"plugin wrote unregistered key to ava.state_update: {sorted(unknown)} — "
+            f"plugin wrote unregistered key to meiva.state_update: {sorted(unknown)} — "
             f"fields not declared in a plugin's `state` contribution are silently dropped by the "
             f"LangGraph reducer in Command(update=). Known plugin fields: "
             f"{sorted(known) or '<empty>'}"
@@ -396,15 +396,15 @@ class PluginStateHandle[T: BaseModel]:
 
     Both are pure; LangGraph's reducer applies the returned dict.
 
-    Exec side — SDK functions running inside the exec child (`ava.cwd.set`, the read wrap)
+    Exec side — SDK functions running inside the exec child (`meiva.cwd.set`, the read wrap)
     work on the turn's slot. API shape matches LangGraph Command(update=dict):
 
         handle.read() -> T                          (typed snapshot)
         handle.update({"field": delta_value})       (validated + reducer-merged)
 
     Within the same turn, update() is immediately visible: handle
-    simultaneously mutates the `ava.state` working copy + accumulates the
-    raw delta into `ava.state_update`. At turn end, exec_node merges
+    simultaneously mutates the `meiva.state` working copy + accumulates the
+    raw delta into `meiva.state_update`. At turn end, exec_node merges
     state_update into Command(update=...), and the LangGraph reducer runs
     again on the commit side (with the accumulated delta as reducer input,
     producing the same result as the working copy — reducers must be
@@ -475,14 +475,14 @@ class PluginStateHandle[T: BaseModel]:
         """Current exec-turn snapshot. Reflects all `update()` calls in same turn.
 
         Raises:
-            PluginStateOutsideTurnError: not inside an exec turn (`ava.state` is unbound).
+            PluginStateOutsideTurnError: not inside an exec turn (`meiva.state` is unbound).
         """
-        import ava  # lazy import: avoid circular (ava imports agent.state via plugin loading)
-        from ava.sdk_surface.agent_identity import validate_external_identity
+        import meiva  # lazy import: avoid circular (meiva imports agent.state via plugin loading)
+        from meiva.sdk_surface.agent_identity import validate_external_identity
 
         validate_external_identity()
 
-        slot = ava.state
+        slot = meiva.state
         return self._cls.model_validate(
             {f: getattr(slot, self._channel_keys[f]) for f in self._cls.model_fields}
         )
@@ -491,8 +491,8 @@ class PluginStateHandle[T: BaseModel]:
         """Apply field updates inside an exec turn. Same API shape as LangGraph Command(update=dict).
 
         Each field's reducer merges `current ⊕ delta`; the result is written
-        to the `ava.state` working copy (immediately visible to `read()`
-        within this turn) + raw delta accumulated into `ava.state_update`
+        to the `meiva.state` working copy (immediately visible to `read()`
+        within this turn) + raw delta accumulated into `meiva.state_update`
         (at turn end, LangGraph commits and the reducer runs again to get
         the final value).
 
@@ -500,20 +500,20 @@ class PluginStateHandle[T: BaseModel]:
         dispatches base/plugin to the correct channel.
 
         Raises:
-            PluginStateOutsideTurnError: not inside an exec turn (`ava.state` is unbound).
-            TypeError: the exec code replaced `ava.state_update` with a non-dict.
+            PluginStateOutsideTurnError: not inside an exec turn (`meiva.state` is unbound).
+            TypeError: the exec code replaced `meiva.state_update` with a non-dict.
             ValueError: delta contains a key outside the BaseModel schema (plugin author typo).
         """
-        import ava
-        from ava.sdk_surface.agent_identity import validate_external_identity
+        import meiva
+        from meiva.sdk_surface.agent_identity import validate_external_identity
 
         validate_external_identity()
 
-        slot = ava.state
-        accumulated = ava.state_update
+        slot = meiva.state
+        accumulated = meiva.state_update
         if not isinstance(accumulated, dict):
             raise TypeError(
-                f"ava.state_update must stay a dict, got {type(accumulated).__name__} "
+                f"meiva.state_update must stay a dict, got {type(accumulated).__name__} "
                 f"(PluginStateHandle[{self._cls.__name__}].update)"
             )
         for field, new in delta.items():
@@ -526,7 +526,7 @@ class PluginStateHandle[T: BaseModel]:
             current = getattr(slot, channel_key)
             merged = self._reducers[field](current, new)
             setattr(slot, channel_key, merged)  # working copy synchronously visible
-            # Accumulate the raw delta into ava.state_update: overwriting it dropped every
+            # Accumulate the raw delta into meiva.state_update: overwriting it dropped every
             # earlier delta to a reducer field in one turn (two `update({"seen": ...})` calls
             # committed only the last while read() saw both). A last-value field's reducer is
             # overwrite, so it still collapses to the latest delta (see `accumulate_delta`).
@@ -543,17 +543,17 @@ def compact_version() -> int:
 
     A built-in channel no plugin declares, so it is not reachable through a
     `PluginStateHandle`; exec-side code that resets per-compaction bookkeeping (injection
-    dedup) reads it here instead of reaching into `ava.state`.
+    dedup) reads it here instead of reaching into `meiva.state`.
 
     Raises:
-        PluginStateOutsideTurnError: not inside an exec turn (`ava.state` is unbound).
+        PluginStateOutsideTurnError: not inside an exec turn (`meiva.state` is unbound).
     """
-    import ava
-    from ava.sdk_surface.agent_identity import validate_external_identity
+    import meiva
+    from meiva.sdk_surface.agent_identity import validate_external_identity
 
     validate_external_identity()
 
-    return ava.state.compact.version
+    return meiva.state.compact.version
 
 
 def _annotation_text(annotation: Any) -> str:
@@ -664,10 +664,10 @@ def _plugin_namespace_view(state: BaseAgentState, plugin: str) -> SimpleNamespac
     if fields is None:
         # Plugin declares no state → list known plugin names so typos
         # are immediately visible. Base fields (messages/halted) don't
-        # belong to any plugin; read directly via ava.state.messages.
+        # belong to any plugin; read directly via meiva.state.messages.
         known = sorted(namespaces)
         raise AttributeError(
-            f"ava.state.{plugin} does not exist — plugin {plugin!r} declares no state, "
+            f"meiva.state.{plugin} does not exist — plugin {plugin!r} declares no state, "
             f"or plugin name typo. Known plugins: {known or '<empty>'}"
         )
     prefix = f"{plugin}__"
@@ -690,7 +690,7 @@ def build_agent_state(extensions: ExtensionRegistry) -> type[BaseAgentState]:
 
     The AgentState class has `__getattr__`: `state.<plugin_name>` returns a
     SimpleNamespace view (auto-strips `<plugin>__` prefix). Lets agents
-    write `ava.state.ava_code.cwd` rather than `ava.state.ava_code__cwd`;
+    write `meiva.state.meiva_code.cwd` rather than `meiva.state.meiva_code__cwd`;
     plugin-private namespaces also isolated cross-plugin.
     """
     schema = plugin_state_schema(extensions)

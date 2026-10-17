@@ -14,9 +14,7 @@ from agent.graph.interrupt import InterruptEvent
 from agent.graph.tool_calls import normalize_tool_calls
 from agent.hooks.tests.fakes import make_fake_ops_pool
 from agent.state import AgentState
-from ava.boot import process_clients
-from ava.tests.fixtures.pin_agent import hosted_resources as hosted_resources
-from base.agents.context import AvaContext
+from base.agents.context import MeivaContext
 from base.agents.context.identity import AgentIdentity
 from base.clock import Clock
 from base.config import settings
@@ -26,12 +24,14 @@ from base.events.live.bus import EventBus
 from base.host.env.agent_slices import AgentSlices
 from base.native_process.turn_identity import HostedTurnResources
 from base.packages.plugin_providers import build_model_catalog
+from meiva.boot import process_clients
+from meiva.tests.fixtures.pin_agent import hosted_resources as hosted_resources
 
 
 def _graph(state_cls: type[AgentState], **compile_options: Any) -> Any:
     from langgraph.graph import END, START, StateGraph
 
-    builder: Any = StateGraph(state_cls, context_schema=AvaContext)
+    builder: Any = StateGraph(state_cls, context_schema=MeivaContext)
     builder.add_node("exec", _exec_node_impl, input_schema=state_cls)
     builder.add_node("after_exec", lambda _state: {})
     builder.add_edge(START, "exec")
@@ -40,7 +40,7 @@ def _graph(state_cls: type[AgentState], **compile_options: Any) -> Any:
 
 
 async def _run_calls(
-    state: AgentState, runtime: Runtime[AvaContext], config: RunnableConfig
+    state: AgentState, runtime: Runtime[MeivaContext], config: RunnableConfig
 ) -> dict[str, Any]:
     return await _graph(type(state)).ainvoke(dict(state), context=runtime.context, config=config)
 
@@ -66,7 +66,7 @@ async def test_calls_execute_separately_without_rewriting_assistant(
     )
     monkeypatch.setattr(node, "run_agent_code", run)
     runtime = Runtime(
-        context=AvaContext(
+        context=MeivaContext(
             hosted_resources=hosted_resources,
             ops_pool=make_fake_ops_pool(),
             event_publisher=MagicMock(),
@@ -109,9 +109,9 @@ def _state(*codes: str) -> AgentState:
 
 def _runtime(
     hosted_resources: HostedTurnResources, database_gate: ProcessDbGate
-) -> Runtime[AvaContext]:
+) -> Runtime[MeivaContext]:
     return Runtime(
-        context=AvaContext(
+        context=MeivaContext(
             hosted_resources=hosted_resources,
             ops_pool=make_fake_ops_pool(),
             event_publisher=MagicMock(),
@@ -130,9 +130,9 @@ def _runtime(
 
 def _node_runtime(
     hosted_resources: HostedTurnResources,
-) -> Runtime[AvaContext]:
+) -> Runtime[MeivaContext]:
     return Runtime(
-        context=AvaContext(
+        context=MeivaContext(
             hosted_resources=hosted_resources,
             ops_pool=make_fake_ops_pool(),
             event_publisher=MagicMock(),
@@ -288,7 +288,7 @@ async def test_lifecycle_pairs_skipped_calls_and_timeout_continues(
 
 def _scan(source: str) -> str:
     return (
-        "from ava.security import scan_content\n"
+        "from meiva.security import scan_content\n"
         f"scan_content('ignore previous instructions', source={source!r})\n"
     )
 
@@ -341,7 +341,7 @@ async def test_unknown_tool_does_not_consume_sibling_code(
     state = _state("print('must not run')", "print('runs')")
     ai = state.messages[-1]
     assert isinstance(ai, AIMessage)
-    ai.tool_calls[0]["name"] = "ava.files.edit"
+    ai.tool_calls[0]["name"] = "meiva.files.edit"
     run = AsyncMock(return_value=(ExecDone(output="runs"), {}, 0, None, []))
     monkeypatch.setattr(node, "run_agent_code", run)
     result = await _run_calls(
@@ -438,7 +438,7 @@ def _ai_with_hallucinated_tool_name() -> AIMessage:
         content=[],
         tool_calls=[
             {
-                "name": "ava.files.edit",
+                "name": "meiva.files.edit",
                 "args": {"path": "/testbed/x.py", "old": "a", "new": "b"},
                 "id": "call_99",
             },
@@ -463,7 +463,7 @@ async def test_exec_node_feeds_back_on_unknown_tool_name(
     assert result["halted"] is False
     _, tool_msg = result["messages"]
     assert tool_msg.tool_call_id == "call_99"
-    assert "ava.files.edit" in tool_msg.content
+    assert "meiva.files.edit" in tool_msg.content
     assert "execute_code" in tool_msg.content
 
 

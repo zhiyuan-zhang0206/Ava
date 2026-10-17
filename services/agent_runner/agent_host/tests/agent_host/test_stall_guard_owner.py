@@ -3,7 +3,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from base.agents.context import AvaContext
+from base.agents.context import MeivaContext
 from base.agents.context.identity import AgentIdentity
 from base.native_process.turn_identity import HostedServiceResources
 from services.agent_runner.agent_host.stall_guard import run_invocation_with_stall_guard
@@ -12,7 +12,7 @@ from services.agent_runner.agent_host.stall_guard import run_invocation_with_sta
 async def test_guard_registers_the_actual_invocation_and_preserves_its_result() -> None:
     service = HostedServiceResources()
     scope = await service.turn()
-    ctx = AvaContext(identity=AgentIdentity(7, True), hosted_resources=scope)
+    ctx = MeivaContext(identity=AgentIdentity(7, True), hosted_resources=scope)
     entered, release = asyncio.Event(), asyncio.Event()
     actual: asyncio.Task[object] | None = None
     result: dict[str, object] = {"completed": True}
@@ -43,7 +43,7 @@ async def test_guard_registers_the_actual_invocation_and_preserves_its_result() 
 async def test_external_cancel_retains_the_same_unknown_invocation_error() -> None:
     service = HostedServiceResources()
     scope = await service.turn()
-    ctx = AvaContext(identity=AgentIdentity(7, True), hosted_resources=scope)
+    ctx = MeivaContext(identity=AgentIdentity(7, True), hosted_resources=scope)
     entered = asyncio.Event()
     error = ValueError("original invocation cancellation failure")
     actual: asyncio.Task[object] | None = None
@@ -80,5 +80,5 @@ async def test_external_cancel_retains_the_same_unknown_invocation_error() -> No
 async def test_guard_requires_an_explicit_service_before_starting_invocation() -> None:
     graph = MagicMock()
     with pytest.raises(RuntimeError, match="original resource scope"):
-        await run_invocation_with_stall_guard(graph, 7, AvaContext(), {}, {})
+        await run_invocation_with_stall_guard(graph, 7, MeivaContext(), {}, {})
     graph.ainvoke.assert_not_called()

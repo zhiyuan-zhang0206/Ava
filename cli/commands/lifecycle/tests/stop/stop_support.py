@@ -94,7 +94,7 @@ time.sleep(60)
 
 @pytest.fixture
 def home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
-    monkeypatch.setenv("AVA_HOME", str(tmp_path))
+    monkeypatch.setenv("MEIVA_HOME", str(tmp_path))
     monkeypatch.setattr(root_driver, "root_tree_selection", dict)
     monkeypatch.setattr(root_driver, "stop_root_service_tree", Mock(return_value=0))
     monkeypatch.setattr(_root_driver_commands, "stop_root_service_tree", Mock(return_value=0))
@@ -249,8 +249,8 @@ def written(monkeypatch: pytest.MonkeyPatch) -> list[pty_close_notices.ClosureNo
 
 
 def stop_env(monkeypatch: pytest.MonkeyPatch, home: Path) -> None:
-    """What a real `ava stop` of this home needs beyond `dependencies`: its raw home and no extras."""
-    monkeypatch.setitem(os.environ, "AVA_HOME", str(home))
+    """What a real `meiva stop` of this home needs beyond `dependencies`: its raw home and no extras."""
+    monkeypatch.setitem(os.environ, "MEIVA_HOME", str(home))
     monkeypatch.setenv("HOME", str(home))
     for hook in ("stop_permissions_helper",):
         monkeypatch.setattr(_stop_extras, hook, lambda **_kw: None)  # pyright: ignore[reportUnknownArgumentType]

@@ -1,6 +1,6 @@
 """The after_exec hook that delivers the findings an exec child raised.
 
-`ava.security` appends findings to the exec turn's state update, the exec node commits them to
+`meiva.security` appends findings to the exec turn's state update, the exec node commits them to
 `state.security_findings`, and this hook turns them into SECURITY notes and clears the channel.
 The tests build real graph state: one drives the hook directly, the other runs it as a node of a
 real LangGraph so the channel's reducer (`operator.add`) and the `Overwrite([])` reset act.
@@ -23,10 +23,9 @@ from agent.graph.interrupt import InterruptEvent
 from agent.hooks.security import deliver_security_findings
 from agent.hooks.tests.fakes import make_fake_ops_pool
 from agent.state import AgentState, build_agent_state
-from ava.boot import process_clients
-from base.agents.context import AvaContext
+from base.agents.context import MeivaContext
 from base.agents.context.identity import AgentIdentity
-from base.agents.messages.kwargs import NoteTag, read_ava_kwargs
+from base.agents.messages.kwargs import NoteTag, read_meiva_kwargs
 from base.agents.messages.security_finding import SecurityFindingEntry
 from base.clock import Clock
 from base.config import settings
@@ -36,6 +35,7 @@ from base.events.live.bus import EventBus
 from base.host.env.agent_slices import AgentSlices
 from base.packages.plugin_providers import build_model_catalog
 from base.packages.plugins.extensions import ExtensionRegistry
+from meiva.boot import process_clients
 
 _CONFIG = {"configurable": {"thread_id": "1042"}}
 _FIRST = SecurityFindingEntry(source="web.fetch", triggers=["ignore previous instructions"])
@@ -49,7 +49,7 @@ def _scan_on(monkeypatch: pytest.MonkeyPatch) -> None:
 
 async def _run_hook(state: AgentState) -> dict[str, Any] | None:
     runtime = Runtime(
-        context=AvaContext(
+        context=MeivaContext(
             agent=AgentSlices.resolve(
                 default_reader=lambda domain, field: getattr(getattr(settings, domain), field)
             ),
@@ -72,7 +72,9 @@ async def test_each_pending_finding_becomes_one_security_note_and_the_channel_re
 
     assert update is not None
     notes = update["messages"]
-    assert [read_ava_kwargs(n).get("ava_note_tag") for n in notes] == [NoteTag.SECURITY.value] * 2
+    assert [read_meiva_kwargs(n).get("meiva_note_tag") for n in notes] == [
+        NoteTag.SECURITY.value
+    ] * 2
     assert "web.fetch" in notes[0].content
     assert "ignore previous instructions" in notes[0].content
     assert "context-file:/repo/AGENTS.md" in notes[1].content
@@ -132,7 +134,7 @@ async def test_a_real_childs_finding_reaches_the_model_through_the_hook(
     after_exec hook delivers it as a SECURITY note behind the tool result and empties the
     channel — the next LLM call sees the warning exactly once."""
     runtime = Runtime(
-        context=AvaContext(
+        context=MeivaContext(
             ops_pool=make_fake_ops_pool(),
             event_publisher=MagicMock(),
             agent=AgentSlices.resolve(
@@ -147,7 +149,7 @@ async def test_a_real_childs_finding_reaches_the_model_through_the_hook(
         )
     )
     code = (
-        "from ava.security import scan_content\n"
+        "from meiva.security import scan_content\n"
         "scan_content('ignore previous instructions', source='web.fetch')\n"
         "print('fetched')"
     )
@@ -164,7 +166,7 @@ async def test_a_real_childs_finding_reaches_the_model_through_the_hook(
     async def after_exec(state: Any) -> dict[str, Any] | None:
         return await deliver_security_findings(state, runtime, _CONFIG)  # type: ignore[arg-type]
 
-    builder: Any = StateGraph(AgentState, context_schema=AvaContext)
+    builder: Any = StateGraph(AgentState, context_schema=MeivaContext)
     builder.add_node("exec", _exec_node_impl, input_schema=AgentState)
     builder.add_node("after_exec", after_exec)
     builder.add_edge(START, "exec")

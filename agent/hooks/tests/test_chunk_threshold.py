@@ -68,12 +68,12 @@ def test_an_unknown_model_fails_loudly(*, model_catalog: ModelCatalog) -> None:
 @pytest.mark.parametrize("ratio", [0, -0.1, 1.01])
 def test_the_ratio_setting_is_bounded_to_zero_exclusive_one_inclusive(ratio: float) -> None:
     field = type(settings.agent).model_fields[
-        "AVA_UNDERSTANDING_CHUNK_RATIO" and "understanding_chunk_ratio"
+        "MEIVA_UNDERSTANDING_CHUNK_RATIO" and "understanding_chunk_ratio"
     ]
     assert field.default == 0.5
     with pytest.raises(ValueError):
-        type(settings.agent).model_validate({"AVA_UNDERSTANDING_CHUNK_RATIO": ratio})
-    type(settings.agent).model_validate({"AVA_UNDERSTANDING_CHUNK_RATIO": 1})
+        type(settings.agent).model_validate({"MEIVA_UNDERSTANDING_CHUNK_RATIO": ratio})
+    type(settings.agent).model_validate({"MEIVA_UNDERSTANDING_CHUNK_RATIO": 1})
 
 
 async def test_the_hook_and_the_build_cut_the_same_chunks(

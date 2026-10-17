@@ -8,7 +8,7 @@ silent no-op). Also run automatically via pre-commit hook before commit.
 ## Why
 
 `base.config.settings` (the `Settings` aggregate in `base/config/`) is the single
-source of truth for runtime config. Scattered `os.environ.get("AVA_X")` causes:
+source of truth for runtime config. Scattered `os.environ.get("MEIVA_X")` causes:
 - defaults drift from Settings
 - types (bool/int/float) are unvalidated; ValueError surfaces only at use, not at startup
 - the frontend Control page does not see newly-added vars
@@ -19,7 +19,7 @@ source of truth for runtime config. Scattered `os.environ.get("AVA_X")` causes:
 ### Rule 1: Non-test code
 
 Scan all non-test .py files under `agent/`, `base/`,
-`gateway/`, `services/`, `ava/`, `scripts/` (test_*.py / *_test.py /
+`gateway/`, `services/`, `meiva/`, `scripts/` (test_*.py / *_test.py /
 any `tests/` directory excluded). Any reference to `os.environ` or `os.getenv` is an error,
 unless the file is in _ALLOWED_FILES (Settings itself + .env loader +
 bootstrap that cannot depend on Settings).
@@ -36,7 +36,7 @@ Scan all `monkeypatch.setenv("X", ...)` / `monkeypatch.delenv("X")` /
 `os.environ["X"] = ...` calls in `tests/`, `test_*.py`, `*_test.py`; if
 X is in Settings's **model_fields alias set**, error — the `Settings`
 singleton is built once and its fields hold the environment as it stood then
-(the pytest conftest builds it eagerly at import, `AVA_CONFIG_BOOT=eager`; a
+(the pytest conftest builds it eagerly at import, `MEIVA_CONFIG_BOOT=eager`; a
 production process builds it at the first config read beyond the boot-lite
 surface, see `base/config/__init__.py`), so later setenv/delenv cannot reach
 `settings.x`, and the test silently no-ops.
@@ -48,7 +48,7 @@ environment live by design, so setenv is the real seam.
 The alias set is dynamically read from `the config field registry` — adding a
 new field to Settings auto-syncs the ban list; no manual maintenance.
 Historical bugs: PR #327 hit this pattern twice (test_loop_main's
-AVA_MCP_SOCKET, base/daemon/tests/test_health.py's AVA_SCHEDULER_HEALTH_PORT).
+MEIVA_MCP_SOCKET, base/daemon/tests/test_health.py's MEIVA_SCHEDULER_HEALTH_PORT).
 
 Error format `file:line: <line content>` + non-zero exit.
 """
@@ -70,7 +70,7 @@ _REPO_ROOT = Path(__file__).resolve().parents[2]
 # Framework dirs Rule 1 does not scan. A test file under them (a package's own
 # `<pkg>/**/tests/`) is still read for Rule 2, so the default scan visits their
 # test files only.
-_TEST_ONLY_DIRS = ("ava_builtins", "cli", "ops")
+_TEST_ONLY_DIRS = ("meiva_builtins", "cli", "ops")
 
 # Scan directories — only OUR code, do not scan .venv / vendor / node_modules.
 _SCAN_DIRS = (
@@ -116,7 +116,7 @@ _TEST_SETENV_PATTERN = re.compile(
     r"\bmonkeypatch\.(?:setenv|delenv)\s*\(\s*['\"]([A-Z_][A-Z0-9_]*)['\"]"
 )
 
-# Triple-quoted docstring literals like `monkeypatch.setenv("AVA_X"...)`
+# Triple-quoted docstring literals like `monkeypatch.setenv("MEIVA_X"...)`
 # (e.g. a fixture's docstring describing the call) are not violations —
 # track triple-quote state line-by-line and skip inside docstring ranges.
 _TRIPLE_QUOTE_PATTERN = re.compile(r'"""|\'\'\'')

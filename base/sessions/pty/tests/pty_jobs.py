@@ -93,7 +93,7 @@ def setsid_child(pidfile: Path, *, escape: bool) -> str:
 def create(name: str, home: Path, source: str, *, args: str = "") -> psutil.Process:
     script = home / f"{name}.job.py"
     script.write_text(source, encoding="utf-8")
-    assert support.new(name, home, {"AVA_HOME": str(home)}, f"python3 -u {script} {args}".strip())
+    assert support.new(name, home, {"MEIVA_HOME": str(home)}, f"python3 -u {script} {args}".strip())
     return support.shell_process(name)
 
 

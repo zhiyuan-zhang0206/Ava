@@ -23,11 +23,11 @@ _INIT = (
     "services/desktop/browser/__init__.py",
     "services/supervision/__init__.py",
     "services/supervision/healthchecks/__init__.py",
-    "ava/__init__.py",
-    "ava/mcps/__init__.py",
-    "ava_builtins/__init__.py",
-    "ava_builtins/mcps/__init__.py",
-    "ava_builtins/mcps/chrome/__init__.py",
+    "meiva/__init__.py",
+    "meiva/mcps/__init__.py",
+    "meiva_builtins/__init__.py",
+    "meiva_builtins/mcps/__init__.py",
+    "meiva_builtins/mcps/chrome/__init__.py",
 )
 _FILES = {
     "base/host/atomic_io.py": "LEAF = 1\n",
@@ -35,7 +35,7 @@ _FILES = {
     "services/agent_runner/pty_sessions/daemon.py": "from base.sessions.pty.protocol import LEAF\n",
     "base/events/bus.py": "BUS = 1\n",
     "services/desktop/browser/daemon.py": "from base.events.bus import BUS\n",
-    "ava/mcps/_browser.py": "WATCH = 1\n",
+    "meiva/mcps/_browser.py": "WATCH = 1\n",
     "services/supervision/healthchecks/protocol_probe.py": "PROBE = 1\n",
     "services/supervision/healthchecks/browser.py": "BPROBE = 1\n",
     "services/supervision/healthchecks/browser_mcp.py": "MPROBE = 1\n",
@@ -138,7 +138,7 @@ def test_a_browser_dependency_restarts_the_browser(
 @pytest.mark.parametrize(
     ("watched", "component"),
     [
-        ("ava/mcps/_browser.py", "browser"),
+        ("meiva/mcps/_browser.py", "browser"),
         ("services/supervision/healthchecks/browser.py", "browser"),
         ("services/supervision/healthchecks/browser_mcp.py", "browser"),
         ("services/supervision/healthchecks/protocol_probe.py", "pty-sessions"),
@@ -230,7 +230,7 @@ def test_a_watch_file_absent_at_both_revisions_restarts_conservatively(
     for name in _INIT:
         (root / name).parent.mkdir(parents=True, exist_ok=True)
         (root / name).write_text("")
-    _write(root, {name: text for name, text in _FILES.items() if name != "ava/mcps/_browser.py"})
+    _write(root, {name: text for name, text in _FILES.items() if name != "meiva/mcps/_browser.py"})
     _git(root, "add", "-A")
     _git(root, "commit", "-qm", "base")
     base = _git(root, "rev-parse", "HEAD")
@@ -239,7 +239,7 @@ def test_a_watch_file_absent_at_both_revisions_restarts_conservatively(
     browser = _verdict(payload, "browser")
     assert not browser["keep"]
     assert browser["reason"] == (
-        "watch files absent at both revisions: ava/mcps/_browser.py; restarting"
+        "watch files absent at both revisions: meiva/mcps/_browser.py; restarting"
     )
     assert _verdict(payload, "pty-sessions")["keep"]
 

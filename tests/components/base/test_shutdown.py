@@ -13,8 +13,8 @@ from base.daemon import shutdown
 from base.host import exit_codes as hard_exit_module
 from base.log.tests.log_records import LogRecords
 from base.sessions.tests.poll_until import poll_until
-from services.supervision.ava_root.manifest import RestartPolicy, UnitManifest, UnitRegistry
-from services.supervision.ava_root.supervisor import Supervisor, SupervisorConfig
+from services.supervision.meiva_root.manifest import RestartPolicy, UnitManifest, UnitRegistry
+from services.supervision.meiva_root.supervisor import Supervisor, SupervisorConfig
 
 
 def test_cancel_and_drain_runs_cleanup_and_returns_only_ordinary_failures() -> None:
@@ -133,10 +133,10 @@ _CHILD = (
 async def test_root_graceful_stop_runs_the_product_handlers_cleanup(
     unit_home: Path, mode: str
 ) -> None:
-    """ava-root owns service stop: its graceful `down` (what a normal stop
+    """meiva-root owns service stop: its graceful `down` (what a normal stop
     requests) must reach the product handler, whose cleanup then runs."""
     started, marker = (unit_home / name for name in ("started", "clean"))
-    env = (("AVA_HOME", str(unit_home)), ("AVA_CONFIG_FETCH", "skip"))
+    env = (("MEIVA_HOME", str(unit_home)), ("MEIVA_CONFIG_FETCH", "skip"))
     command = (sys.executable, str(_CHILD), str(started), str(marker), mode)
     unit = UnitManifest("svc", command, RestartPolicy.NEVER, "root", env)
     owner = Supervisor(
@@ -157,7 +157,7 @@ def test_plugin_restart_runs_the_product_handlers_cleanup(unit_home: Path) -> No
     repo = Path(__file__).resolve().parents[3]
     marker = unit_home / "plugin-clean"
     env = dict(os.environ)
-    env.update(AVA_HOME=str(unit_home), AVA_CONFIG_FETCH="skip")
+    env.update(MEIVA_HOME=str(unit_home), MEIVA_CONFIG_FETCH="skip")
     result = subprocess.run(  # noqa: S603 — fixed test-owned Python script
         [sys.executable, str(Path(__file__).with_name("plugin_restart_probe.py")), str(marker)],
         cwd=repo,

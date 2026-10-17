@@ -53,7 +53,7 @@ from psycopg_pool import AsyncConnectionPool
 from base import telemetry
 from base.agents.history.checkpoint import FullHistory
 from base.agents.history.hierarchy.store import SCHEMA_VERSION
-from base.agents.messages.kwargs import AvaMsgType, read_ava_kwargs
+from base.agents.messages.kwargs import MeivaMsgType, read_meiva_kwargs
 from base.db.transaction import async_write_transaction
 from base.host.env.agent_slices import ModelOverrides
 from base.lm.catalog import ModelCatalog
@@ -107,9 +107,9 @@ class Chunk:
 
 _FRAMEWORK_TYPES = frozenset(
     {
-        AvaMsgType.SYSTEM_NOTE.value,
-        AvaMsgType.COMPACT_SUMMARY.value,
-        AvaMsgType.COMPACT_REQUEST.value,
+        MeivaMsgType.SYSTEM_NOTE.value,
+        MeivaMsgType.COMPACT_SUMMARY.value,
+        MeivaMsgType.COMPACT_REQUEST.value,
     }
 )
 
@@ -117,7 +117,7 @@ _FRAMEWORK_TYPES = frozenset(
 def _is_framework_injected(msg: BaseMessage) -> bool:
     return (
         isinstance(msg, SystemMessage)
-        or read_ava_kwargs(msg).get("ava_msg_type") in _FRAMEWORK_TYPES
+        or read_meiva_kwargs(msg).get("meiva_msg_type") in _FRAMEWORK_TYPES
     )
 
 
@@ -517,9 +517,9 @@ def _in_segment(
 
 
 def message_time(messages: Sequence[BaseMessage], *, last: bool) -> datetime | None:
-    """The first (or last) `ava_created_at` among `messages`, or None."""
+    """The first (or last) `meiva_created_at` among `messages`, or None."""
     for msg in reversed(messages) if last else messages:
-        stamp: Any = read_ava_kwargs(msg).get("ava_created_at")
+        stamp: Any = read_meiva_kwargs(msg).get("meiva_created_at")
         if isinstance(stamp, str) and stamp:
             return datetime.fromisoformat(stamp)
     return None
@@ -618,7 +618,7 @@ async def write_group_nodes(
 ) -> None:
     """Upsert the depth-1 rows of a chunk's groups in one transaction.
 
-    A row's times are the group's first and last `ava_created_at` (NULL when no message carries
+    A row's times are the group's first and last `meiva_created_at` (NULL when no message carries
     one, which keeps the row stored but unservable, like every untimed node).
     """
     async with async_write_transaction(pool) as conn, conn.cursor() as cur:

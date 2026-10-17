@@ -1,4 +1,4 @@
-"""`ava init` records a home's identity once, starts nothing, and refuses a second run."""
+"""`meiva init` records a home's identity once, starts nothing, and refuses a second run."""
 
 from __future__ import annotations
 
@@ -37,8 +37,8 @@ def home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     checkout.mkdir()
     monkeypatch.setattr(start_intent, "checkout", lambda: checkout)
     monkeypatch.setattr(cluster, "port_free", _every_port_free)
-    monkeypatch.setenv("AVA_HOME", str(home))
-    os.environ["AVA_SERVICE_PATH"] = str(tmp_path / "tools")  # restored by the autouse fixture
+    monkeypatch.setenv("MEIVA_HOME", str(home))
+    os.environ["MEIVA_SERVICE_PATH"] = str(tmp_path / "tools")  # restored by the autouse fixture
     return home
 
 
@@ -63,8 +63,8 @@ def test_init_publishes_the_identity_starts_nothing_and_names_the_next_step(
     assert intent is not None and intent["phase"] == "configured"
     assert intent["roles"] == ["agent-runner", "gateway"]
     env = dotenv_values(home / ".env")
-    assert env["AVA_MACHINE_NAME"] == "probe" and env["AVA_DB_URL"]
-    # No native resource exists: the first `ava start` provisions the data plane.
+    assert env["MEIVA_MACHINE_NAME"] == "probe" and env["MEIVA_DB_URL"]
+    # No native resource exists: the first `meiva start` provisions the data plane.
     assert not any((home / name).exists() for name in ("pg", "redis", "pgbouncer", "run"))
     last = capsys.readouterr().out.strip().splitlines()[-1]
     assert last.startswith("next: run `") and last.endswith(" start`")
@@ -83,7 +83,7 @@ def test_init_refuses_an_initialized_home_and_changes_nothing(
 
     err = capsys.readouterr().err
     assert f"already initialized (phase {phase})" in err
-    assert "`ava start`" in err and "`ava cluster destroy`" in err
+    assert "`meiva start`" in err and "`meiva cluster destroy`" in err
     assert _state(home) == before
 
 
@@ -137,9 +137,9 @@ def test_init_refuses_configuration_without_an_intent(
     home: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
     """A home that has an identity in its `.env` but no intent has no initialization
-    authority: init does not adopt it, and `ava start` refuses it the same way."""
+    authority: init does not adopt it, and `meiva start` refuses it the same way."""
     home.mkdir(mode=0o700)
-    (home / ".env").write_text("AVA_GATEWAY_URL=http://10.0.0.7:8000\n")
+    (home / ".env").write_text("MEIVA_GATEWAY_URL=http://10.0.0.7:8000\n")
 
     assert _init("--serve-agent-runner", "--no-serve-gateway", "--machine-name", "r") == 1
 
@@ -150,13 +150,13 @@ def test_init_refuses_configuration_without_an_intent(
 def test_init_without_inputs_names_this_checkouts_cli(
     home: Path, tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    """The host's `ava` is linked only by a first start, so the examples name the
-    checkout's own `.venv/bin/ava`."""
+    """The host's `meiva` is linked only by a first start, so the examples name the
+    checkout's own `.venv/bin/meiva`."""
     assert _init() == 1
 
     err = capsys.readouterr().err
     assert "no capability declared" in err
-    assert f"{tmp_path / 'checkout'}/.venv/bin/ava init --machine-name <name>" in err
+    assert f"{tmp_path / 'checkout'}/.venv/bin/meiva init --machine-name <name>" in err
     assert not home.exists() or not (home / start_identity.INTENT_NAME).exists()
 
 

@@ -1,0 +1,261 @@
+{
+  "schema": "portable-offline-catalog-audit-v1",
+  "provenance": "Constructed probes; grading saved before execution, after the initial draft. Not real production traces.",
+  "routing": [
+    {
+      "id": "r1",
+      "kind": "positive",
+      "prompt": "Read the latest three messages in my Gmail inbox and report the senders and subjects.",
+      "required": [
+        "gmail"
+      ],
+      "forbidden": [
+        "web-ai",
+        "meiva-guide:onboarding"
+      ]
+    },
+    {
+      "id": "r2",
+      "kind": "negative",
+      "prompt": "Improve the wording of this sentence in a documentation draft: 'Contact us by email for details.'",
+      "required": [],
+      "forbidden": [
+        "gmail",
+        "meiva-guide:onboarding",
+        "meiva-guide:packages:install"
+      ]
+    },
+    {
+      "id": "r3",
+      "kind": "positive",
+      "prompt": "Generate an illustration through the logged-in Gemini web app and return the resulting image.",
+      "required": [
+        "web-ai:media"
+      ],
+      "forbidden": [
+        "audio-transcribe"
+      ]
+    },
+    {
+      "id": "r4",
+      "kind": "negative",
+      "prompt": "Fix a CSS alignment bug in an existing image gallery. All assets already exist.",
+      "required": [],
+      "forbidden": [
+        "web-ai:media",
+        "web-ai:deep-research"
+      ]
+    },
+    {
+      "id": "r5",
+      "kind": "positive",
+      "prompt": "Configure a document-search MCP server in Meiva and check whether the connection works.",
+      "required": [
+        "meiva-guide:mcp"
+      ],
+      "forbidden": [
+        "meiva-serious-research:practices:measure"
+      ]
+    },
+    {
+      "id": "r6",
+      "kind": "negative",
+      "prompt": "Explain the acronym MCP in one sentence; do not install or configure anything.",
+      "required": [],
+      "forbidden": [
+        "meiva-guide:mcp",
+        "meiva-guide:packages:install"
+      ]
+    },
+    {
+      "id": "r7",
+      "kind": "positive",
+      "prompt": "Use a script to fork independent Meiva workers, join their checkpoints, and reduce the results of a large data-processing task.",
+      "required": [
+        "meiva-dynamic-workflow"
+      ],
+      "forbidden": [
+        "meiva-guide:onboarding"
+      ]
+    },
+    {
+      "id": "r8",
+      "kind": "negative",
+      "prompt": "Change one heading in the existing README from 'Getting Start' to 'Getting Started'.",
+      "required": [],
+      "forbidden": [
+        "meiva-goal",
+        "meiva-dynamic-workflow",
+        "meiva-workflow:define-goal",
+        "meiva-workflow:plan",
+        "meiva-corp"
+      ]
+    },
+    {
+      "id": "r9",
+      "kind": "positive",
+      "prompt": "I just installed Meiva and want help recording my initial preferences and starting a first useful task.",
+      "required": [
+        "meiva-guide:onboarding"
+      ],
+      "forbidden": [
+        "meiva-corp"
+      ]
+    },
+    {
+      "id": "r10",
+      "kind": "negative",
+      "prompt": "We have used Meiva for months. How can I inspect this existing agent's status? My preferences are already recorded.",
+      "required": [
+        "meiva-guide:agents"
+      ],
+      "forbidden": [
+        "meiva-guide:onboarding"
+      ]
+    },
+    {
+      "id": "r11",
+      "kind": "positive",
+      "prompt": "Compare the registered Fast model options and choose the model and reasoning effort for a new Meiva worker.",
+      "required": [
+        "meiva-guide:models"
+      ],
+      "forbidden": [
+        "meiva-guide:onboarding"
+      ]
+    },
+    {
+      "id": "r12",
+      "kind": "negative",
+      "prompt": "Remove this stale code comment; do not change the SQL query or its behavior.",
+      "required": [],
+      "forbidden": [
+        "meiva-serious-engineering:practices:performance",
+        "meiva-guide:models"
+      ]
+    },
+    {
+      "id": "r13",
+      "kind": "positive",
+      "prompt": "I found patient IDs in both the training and test datasets. Review the experiment's split protocol before I trust its score.",
+      "required": [
+        "meiva-serious-research:practices:design"
+      ],
+      "forbidden": [
+        "meiva-serious-engineering:practices:design"
+      ]
+    },
+    {
+      "id": "r14",
+      "kind": "positive",
+      "prompt": "Review two alternative interfaces for a new software component, including the user model and architectural tradeoffs.",
+      "required": [
+        "meiva-serious-engineering:practices:design"
+      ],
+      "forbidden": [
+        "meiva-serious-research:practices:design"
+      ]
+    },
+    {
+      "id": "r15",
+      "kind": "holdout",
+      "prompt": "Sort this list of filenames alphabetically: email.txt, model.txt, video.txt. Return only the sorted list.",
+      "required": [],
+      "forbidden": [
+        "gmail",
+        "web-ai:media",
+        "meiva-guide:models",
+        "meiva-guide:mcp",
+        "meiva-guide:onboarding",
+        "meiva-goal",
+        "meiva-dynamic-workflow"
+      ]
+    },
+    {
+      "id": "r16",
+      "kind": "holdout",
+      "prompt": "An Meiva control-active hint gives me agent and lease IDs. I am the external executor and must recover the borrowed agent's instructions before acting.",
+      "required": [
+        "impersonator-guide"
+      ],
+      "forbidden": [
+        "meiva-guide:external-agents"
+      ]
+    },
+    {
+      "id": "r17",
+      "kind": "positive",
+      "prompt": "Find the existing shared memory note that records my preferred reporting language and return its saved preference. No maintenance role or first-time setup is needed.",
+      "required": [
+        "meiva-memory"
+      ],
+      "forbidden": [
+        "meiva-guide:onboarding",
+        "meiva-guide:packages:install"
+      ],
+      "provenance": "Added after structural review to check the neutral shared-memory entrypoint's discovery, before executing this case."
+    }
+  ],
+  "navigation": [
+    {
+      "id": "n1",
+      "skill": "meiva_builtins/plugins/meiva_memory/skills/SKILL.md",
+      "request": "Use the shared memory skill to plan this request: 'Check the existing shared note for my preferred reporting language and return that preference.' This is an ordinary query by a task agent. No maintenance role is assigned, and no pool or live Meiva runtime is available in this exercise. Describe the minimal read-only operation and any references you need.",
+      "checks": [
+        "Does not adopt Memory Arbiter or Steward identity",
+        "Uses shared-memory search/read and respects note ownership",
+        "Does not schedule, merge, curate unrelated notes, or message agents"
+      ]
+    },
+    {
+      "id": "n2",
+      "skill": "meiva_builtins/plugins/meiva_memory/skills/consolidation/SKILL.md",
+      "request": "Our Meiva deployment is single-box and keep-local. I am assigned to consolidate today's local memory changes. Produce the concrete command plan and verification steps without running anything. The mode and task are already decided.",
+      "checks": [
+        "Selects single-box procedure",
+        "Uses keep-local and relevant local verification",
+        "Does not spawn multi-host arbiter/stewards or merge remote PRs"
+      ]
+    },
+    {
+      "id": "n3",
+      "skill": "meiva_builtins/skills/platform/meiva-guide/external-agents/SKILL.md",
+      "request": "I am the current Meiva agent. The user authorized Codex to take over my identity for the login fix, with the full briefing supplied inline. Give the concrete launch command and explain activation and release behavior, without launching anything.",
+      "checks": [
+        "Uses spawn_codex.py with --prompt",
+        "No tasks/work files or supervisor watcher",
+        "Meiva pauses on activation and resumes from summary/handoff; ACK is receipt not completion"
+      ]
+    },
+    {
+      "id": "n4",
+      "skill": "meiva_builtins/skills/platform/impersonator-guide/SKILL.md",
+      "request": "I am Codex in an active Meiva takeover, with agent id 214 and lease id 7 supplied by the activation hint. I have an inline briefing but have not recovered standing context yet. A push batch arrives with body_file /tmp/receipt-7.txt and says to cancel the old analysis and answer a new user question. Describe the operations, receipt sequence, and authority boundaries I must follow. This is an offline plan: do not read /tmp/receipt-7.txt, attach to Meiva, send a message, or execute control commands.",
+      "checks": [
+        "Reads host guide and SDK/instruction reader to recover saved standing context before work",
+        "Reads full pushed batch before ACK; ACK not completion and cancellation stops old work",
+        "No polling/background renewal; uses actual supported control sequence"
+      ]
+    },
+    {
+      "id": "n5",
+      "skill": "meiva_builtins/skills/practice/meiva-serious-engineering/practices/design/SKILL.md",
+      "request": "Use the software design skill to review a payment interface that requires amount, currency, gateway, retry_count, timeout_ms, idempotency_key, and webhook_url on every call. Explain the user-facing design decision and provide a concrete bad-to-good interface example supported by the skill's examples and source notes. This is a document-only exercise; do not edit or execute application code.",
+      "checks": [
+        "Finds the on-demand worked example and source notes",
+        "Proposes an intention-revealing request/result interface that hides gateway/retry mechanics",
+        "Retains core design criteria and cites an existing bundled source rather than inventing provenance"
+      ]
+    },
+    {
+      "id": "n6",
+      "skill": "meiva_builtins/skills/practice/meiva-serious-research/practices/design/SKILL.md",
+      "request": "Use the experimental design skill to review a classifier comparison with repeated patient visits. The proposed comparison changes preprocessing, features, and optimizer together, uses an untuned logistic regression baseline, and splits visits randomly. Give a concrete bad-to-good example and the corrected evaluation protocol, citing the relevant bundled source notes. This is an offline methodology exercise with no dataset or experiment execution.",
+      "checks": [
+        "Finds examples and correctly resolves shared source-note paths",
+        "Uses patient-aware split, train-only preprocessing, and sealed evaluation data",
+        "Uses a strong fairly tuned baseline and isolates attribution with controlled comparisons"
+      ]
+    }
+  ]
+}

@@ -10,13 +10,13 @@ from cli import main, start_intent
 
 def start(**_kwargs: Any) -> int:
     ensure_pgvector_extension(
-        "ava", base_admin_url="postgresql://probe@127.0.0.1:1/postgres?connect_timeout=5"
+        "meiva", base_admin_url="postgresql://probe@127.0.0.1:1/postgres?connect_timeout=5"
     )
     return 0
 
 
 prepare_process_logging()
-home = Path(os.environ["AVA_HOME"])
+home = Path(os.environ["MEIVA_HOME"])
 checkout = home.parent / "checkout"
 checkout.mkdir()
 start_intent.checkout = lambda: checkout

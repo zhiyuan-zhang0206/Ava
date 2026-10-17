@@ -1,0 +1,135 @@
+---
+type: doc
+title: Machine Identity & Capabilities
+description: '`base.cluster.machine` — this host''s name and capability SET (`gateway` / `agent-runner` / `observability-station`, any subset). A host runs the union of its capabilities'' services; the `machines` table is the cluster view of both labels.'
+tags:
+- base
+- library
+- cluster
+---
+
+# Machine Identity & Capabilities
+
+## What it is
+
+Two labels define a host in a multi-machine deployment, both resolved by
+`base.cluster.machine`:
+
+- **`MachineIdentity.name()`** — the stable identifier. The memory git branch
+  (`machine-<name>`), `agents_meta.machine`, and the `machines` table PK all read
+  from it. Deliberately **not** `socket.gethostname()`, which drifts on macOS
+  when switching wifi.
+- **`MachineIdentity.role()`** — a **frozenset** of capabilities, not a single role.
+  Test the required capability with membership in this owner's set.
+
+Source for both: the composition root's `ConfigBoot`, supplied by
+`base.cluster.machine.boot.machine_from_boot(config)`, else fail loud
+(`MachineNameMissing` / `MachineRoleMissing`); there is no second channel. The role comes from three
+*independent* booleans — `MEIVA_MACHINE_SERVE_GATEWAY` /
+`MEIVA_MACHINE_SERVE_AGENT_RUNNER` / `MEIVA_MACHINE_SERVE_OBSERVABILITY_STATION` —
+so a single box is not a third role, just the relevant flags true.
+
+There is **no TTY prompt**: `meiva init` records these from its flags, and a
+missing value prints an actionable error and exits 1. An agent calling `meiva`
+(e.g. `meiva cluster status`) has no TTY and would hang on a prompt.
+
+## The capabilities
+
+`MachineIdentity` accepts four explicit lazy readers for name, capabilities,
+reachable host, and description. Construction performs no configuration reads.
+Its value module is settings-free; only the explicit startup factory imports
+`ConfigBoot`, so importing a machine or pipeline type does not admit a home.
+Each field has its own cache; resolving capabilities does not require a machine
+name, and an absent description is cached too. `reset()` invalidates only that
+owner, so a configuration repair can take effect without touching another
+process context. `roles_from_flags` owns capability validation for roots that
+provide configuration readers.
+
+
+`MeivaContext.machine` carries the exact root-owned identity. SDK machine reads use
+`meiva.context.require_machine()` and reject an absent context or a partial context
+without a machine. An explicit context may carry a machine without an agent;
+reading its name/description constructs no plugins, database or execution state.
+Graph turns borrow the host's owner. The execution child reconstructs its own
+owner from its delivered configuration, rather than serializing live caches.
+
+An independent external attachment captures configuration once and owns a fresh
+machine; a borrowed attachment uses the prior context's exact owner. Lease
+validation happens before binding, and detach restores the prior context without
+resetting its caches. Each CLI invocation owns a fresh command identity; a
+successful configuration repair resets that command's owner before the start
+identity check. Durable names and cluster role tokens remain unchanged.
+
+| Capability | Owns | Data plane it uses |
+|---|---|---|
+| `gateway` | the HTTP gateway + this cluster's Postgres / Redis + the gateway-side daemons | its own local instances |
+| `agent-runner` | the agent host + the ops server | its own local instances when the host is also `gateway`; otherwise a gateway node's, via `MEIVA_DB_URL` / `MEIVA_REDIS_URL` in its `.env` |
+| `observability-station` | the native LGTM observability backends (Loki / Prometheus / Grafana) — the declarative form of the `$MEIVA_HOME/lgtm-host` marker | none of its own — native processes on this host; Grafana dials Loki / Prometheus / Postgres over the host loopback |
+
+A host runs the **union** of its capabilities' services — the per-service
+capability declaration is `ServiceSpec.capabilities` in `services/supervision/roster/spec.py`, and the
+resulting roster is documented in [[services/docs/services.meiva.okf.md]]. A **single box**
+(`gateway,agent-runner`) is therefore not a special case in the code, just the
+host with several non-empty capability sets and the loopback reachable address.
+
+**Only one gateway per cluster.** The labeler / heartbeat / report /
+memory-indexer daemons would race on the same DB rows if two ran, and one
+frontend is sufficient.
+
+## The `machines` table
+
+The cluster-wide roster. `gateway_url` holds whatever address the cluster dials
+this host at, resolved once by `base.cluster.machines.unit_dial_url(roles)`: an
+**agent-runner-capable row carries its ops server URL** (`http://localhost:<ops_port>`
+co-located, `http://<reachable-host>:<ops_port>` split) — that is the dial target
+spawn/lifecycle forwarding POSTs to; a gateway-only row carries its own gateway URL,
+informational.
+
+Two processes write that row, both through `register_self()`: `meiva start` at the
+tail of a supervised bring-up, and the unit's **ops daemon at its own boot**. The
+second is what makes `stopped_at` and `up_since_at` mean what their readers assume
+— a host brought back by an autostart or a watchdog respawn un-stops itself instead
+of serving ops under a stale `stopped` marker. `up_since_at` is a boot/announce
+stamp, not a heartbeat — the name it earned in #981, after `last_seen_at` had spent
+its life promising a heartbeat these tables have never had; liveness is the live
+`status_probe`
+([why](../../../../docs/decisions/runtime/processes/health/2026-07-29-liveness-is-written-by-the-live-process.md)).
+
+Cross-machine spawn is a direct dial, not a queue: after committing the row and
+first prompt, the gateway POSTs a `spawn-launch` op to the target runner's ops
+server (address read from this table), which calls
+`ops/lifecycle/__init__.py:launch_agent_op` in-process and returns the result in
+the same response. Runners run **no** local gateway process — an agent's SDK
+reaches the gateway over HTTP via `gateway_api_base(gateway_url)`.
+
+**Spawn-target invariant**: `POST /api/keyed/v1/agents` returns **HTTP 400** when the
+resolved `machine` lacks the `agent-runner` capability (`'agent-runner' =
+ANY(role)` is false) — typically a pure gateway node. A single box satisfies it,
+so a local spawn there is allowed. The guard exists to catch "the UI booted an
+agent onto a gateway-only node where only the scheduling/DB layer lives".
+
+## Notes
+
+- Any endpoint returning or fanning out per-machine data must declare its
+  role scope; the classification rule is in
+  `docs/conventions/python-conventions.md`.
+- Enrolling a split runner (`meiva start`) does not birth a cluster — its cluster
+  identity **is** the gateway URL + the capability bundle it installed.
+- `gateway_auth_headers(access)` presents `gateway_bearer(access)`: this process's delivered machine
+  API token (`MEIVA_API_TOKEN`), else the human secret of an operator or gateway-profile
+  process; a process launched with the agent or runner profile, a set secret and no token raises
+  `GatewayApiTokenMissing` (a remote-managed plane delivers none, so it is exempt);
+  empty when open.
+
+## Key Dependencies
+
+- [[services/docs/services.meiva.okf.md]] — which services each capability contributes
+- [[base/cluster/docs/paths.meiva.okf.md]] — where the home's `.env` lives
+- [[cli/docs/cli.meiva.okf.md]] — `meiva start`, which persists these labels
+
+Gateway access is a value, `GatewayAccess(gateway_url, cluster_secret, remote_plane)`, built by a root
+from its configuration (`base/cluster/machine/boot.py:gateway_access_from_boot`).
+`gateway_api_base(gateway_url)`, `gateway_bearer(access)`, `gateway_auth_headers(access)` and
+`daemon_acceptance(access)` read no settings; `resolve_gateway_bearer` keeps token-first admission.
+A caller with no root yet calls `base/cluster/machine/ambient.py:gateway_access_from_settings` and labels it
+`# ambient: <batch>`; the list only shrinks and the module goes with the last call.

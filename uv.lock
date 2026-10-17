@@ -218,7 +218,7 @@ wheels = [
 ]
 
 [[package]]
-name = "ava"
+name = "meiva"
 version = "0.1.5"
 source = { editable = "." }
 dependencies = [

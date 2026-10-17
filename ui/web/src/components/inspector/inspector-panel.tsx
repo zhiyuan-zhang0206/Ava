@@ -131,7 +131,7 @@ export function InspectorPanel({ agentId, embedded = false }: { agentId: number;
     (windowedQuery.error !== null && windowedData !== undefined) ||
     (widgetsQuery.error !== null && widgetsQuery.data !== undefined);
 
-  // ava:ref ui/web/src/docs/frontend-components/inspector/queries-and-refresh.ava.okf.md#cost-activity-controls
+  // meiva:ref ui/web/src/docs/frontend-components/inspector/queries-and-refresh.meiva.okf.md#cost-activity-controls
   const refreshCostActivity = useCallback(() => {
     void windowedQuery.refetch();
   }, [windowedQuery]);
@@ -176,7 +176,7 @@ export function InspectorPanel({ agentId, embedded = false }: { agentId: number;
 
   if (!open) return null;
 
-  // ava:ref ui/web/src/docs/frontend-components/inspector/inspector.ava.okf.md#section-order
+  // meiva:ref ui/web/src/docs/frontend-components/inspector/inspector.meiva.okf.md#section-order
   const sections: { order: number; tie: number; key: string; node: ReactNode }[] = [];
   const runLinkNode = (
     <div className={cn("items-center gap-2", FLEX)}>

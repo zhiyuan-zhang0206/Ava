@@ -1,4 +1,4 @@
-"""ava-ops boot helpers — the leaf lookups `serve_ops_daemon` needs before it can serve.
+"""meiva-ops boot helpers — the leaf lookups `serve_ops_daemon` needs before it can serve.
 
 This definition owner holds registration, singleton resources and invocation
 executor/pool operations. It receives the root's config, runtime, authority and
@@ -62,9 +62,9 @@ def register_boot(
     """Re-announce this unit as up, now that the ops daemon is actually serving.
 
     The `machine_units` row is a liveness record, and until this call the only
-    writer was `ava start`. A host can come back up without one completing — an
+    writer was `meiva start`. A host can come back up without one completing — an
     OS-scheduled autostart, a watchdog respawn, the restart leg of a rollout — and
-    the row then kept the `stopped_at` latch `ava stop` set, so the roster reported
+    the row then kept the `stopped_at` latch `meiva stop` set, so the roster reported
     the host stopped while this daemon answered every op (the 2026-07-28
     a runner reading). `register_self()` clears that latch and stamps a fresh
     `up_since_at`, which is why it belongs in the process whose liveness the row
@@ -119,7 +119,7 @@ def ops_bind_host(*, machine: MachineIdentity) -> str:
     /ops is always authenticated: every POST must carry a machine API token
     (reachability is not trust; a single box's gateway self-dials its own /ops the
     same authenticated way over loopback). A box that declares no private-network
-    address (`AVA_MACHINE_HOST` unset: single box) has no remote gateway to serve,
+    address (`MEIVA_MACHINE_HOST` unset: single box) has no remote gateway to serve,
     so /ops binds 127.0.0.1, like its data plane and gateway. /healthz (watchdog) is
     served on the same port and stays reachable via localhost (unauthenticated —
     it leaks no secret).
@@ -160,7 +160,7 @@ def open_db_pool(
 
     Built by `Database.pool()` so the borrows carry `prepare_threshold=None` and
     `PG_KEEPALIVE_KWARGS` from the one place that defines them. The keepalives are
-    not incidental for this daemon in particular: it is the longest-lived ava
+    not incidental for this daemon in particular: it is the longest-lived meiva
     process on an agent-runner, which is typically a laptop-grade box that sleeps
     and changes networks, so its pooled connections are exactly the ones that come
     back on a dead TCP flow. Unbounded, a borrow taken on such a socket parks the
@@ -243,7 +243,7 @@ def op_thread_pool(*, authority: ConfigAuthority) -> ThreadPoolExecutor:
     """Create one invocation's executor; workers still start on first submission."""
     return ThreadPoolExecutor(
         max_workers=max(1, authority.service_field_value("ops_concurrency")),
-        thread_name_prefix="ava-ops-arm",
+        thread_name_prefix="meiva-ops-arm",
     )
 
 

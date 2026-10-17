@@ -1,4 +1,4 @@
-// One-time login link: `<ui>/#ticket=<ticket>`, printed by `ava start`.
+// One-time login link: `<ui>/#ticket=<ticket>`, printed by `meiva start`.
 //
 // The ticket rides in the URL fragment so it never reaches a server log or a
 // Referer. It is removed from the address bar *before* it is sent anywhere, so

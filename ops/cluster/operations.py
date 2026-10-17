@@ -41,11 +41,11 @@ from ops.rpc_schemas import (
 def cluster_stopping_op(db: Database, machine: str, home: str) -> dict[str, str]:
     """Record an intentional shutdown announced by the (machine, home) unit.
 
-    `ava stop` calls this (best-effort) just before tearing the local stack
+    `meiva stop` calls this (best-effort) just before tearing the local stack
     down, so the cluster view shows the host as "stopped" rather than "offline"
     (a live probe cannot tell an intentional stop from a crash). Stamps the
-    unit's `stopped_at` and recomputes the composed `machines` row; `ava start`
-    clears it. `home` is the stopping unit's $AVA_HOME, sent on the wire so a
+    unit's `stopped_at` and recomputes the composed `machines` row; `meiva start`
+    clears it. `home` is the stopping unit's $MEIVA_HOME, sent on the wire so a
     co-located peer's caps are not retracted along with this unit's.
     """
     mark_stopping(db, machine, home)
@@ -86,7 +86,7 @@ def agent_skill_view_inputs(pool: Any, agent_id: int) -> tuple[Path | None, list
     """The persisted cwd and effective skill-index narrowing for one agent.
 
     The daemon's shared pool keeps this read on the agent's machine.  ``cwd`` is
-    the ava-code plugin's private channel key, following ``PluginStateHandle``'s
+    the meiva-code plugin's private channel key, following ``PluginStateHandle``'s
     ``<plugin>__<field>`` convention in ``agent/state.py``.  An old agent with
     no checkpoint has no project-local roots; an old row with no frozen/overlay
     value falls through to the normal unfiltered (``["*"]``) command view.
@@ -113,7 +113,7 @@ def agent_skill_view_inputs(pool: Any, agent_id: int) -> tuple[Path | None, list
         )
         checkpoint = saver.get({"configurable": {"thread_id": str(agent_id)}})
 
-    cwd = checkpoint["channel_values"].get("ava_code__cwd") if checkpoint else None
+    cwd = checkpoint["channel_values"].get("meiva_code__cwd") if checkpoint else None
     narrowed = cast(list[str], wanted) if isinstance(wanted, list) else None
     return (Path(cwd) if isinstance(cwd, str) else None), narrowed
 
@@ -135,9 +135,9 @@ def _narrow_commands(commands: list[Any], wanted: list[str] | None) -> list[Any]
     if wanted is None or "*" in wanted:
         return commands
 
-    from ava import skills
     from base.packages.skills.names import match_key
     from base.packages.skills.tree import identifier, target
+    from meiva import skills
 
     loaded = skills.names()
     by_ident = {match_key(identifier(skill)): skill for skill in loaded}
@@ -163,11 +163,11 @@ def agent_skill_view_op(agent_id: int, pool: Any) -> AgentSkillViewResult:
     project skills into a later agent's result.  The
     result also carries this runner's enabled MCP names as phase-2 groundwork.
     """
-    from ava import skills
-    from ava.mcps.config import load_mcp_config
-    from ava.sdk_surface import skill_sources
     from base.packages.composer_commands import CommandCatalog
     from base.packages.plugins.mcp_enabled import read_enabled
+    from meiva import skills
+    from meiva.mcps.config import load_mcp_config
+    from meiva.sdk_surface import skill_sources
 
     cwd, wanted = agent_skill_view_inputs(pool, agent_id)
     with skill_sources.scoped(lambda: _project_skill_roots(cwd)):

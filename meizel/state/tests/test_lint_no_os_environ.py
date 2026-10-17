@@ -30,25 +30,29 @@ def test_directory_with_dangling_symlink_member_is_skipped(tmp_path: Path) -> No
     assert gate.main([str(tmp_path)], managed_aliases=_none) == 0
 
 
-@pytest.mark.parametrize("host", ["cli", "ops", "ava_builtins/plugins/p"])
+@pytest.mark.parametrize("host", ["cli", "ops", "meiva_builtins/plugins/p"])
 def test_no_os_environ_default_scan_reaches_tests_in_dirs_it_never_scanned(
     tmp_path: Path, host: str
 ) -> None:
     body = """
         def test_x(monkeypatch) -> None:
-            monkeypatch.setenv("AVA_DB_URL", "x")
+            monkeypatch.setenv("MEIVA_DB_URL", "x")
     """
     for name in (*lint_common.FRAMEWORK_DIRS, "tests"):
         (tmp_path / name).mkdir(exist_ok=True)
     _write(tmp_path, f"{host}/tests/test_x.py", body)
-    assert gate.main([], managed_aliases=lambda: frozenset({"AVA_DB_URL"}), repo_root=tmp_path) == 1
+    assert (
+        gate.main([], managed_aliases=lambda: frozenset({"MEIVA_DB_URL"}), repo_root=tmp_path) == 1
+    )
 
 
 def test_no_os_environ_default_scan_still_reads_only_tests_in_those_dirs(tmp_path: Path) -> None:
     for name in (*lint_common.FRAMEWORK_DIRS, "tests"):
         (tmp_path / name).mkdir(exist_ok=True)
     _write(tmp_path, "cli/pkg/mod.py", 'import os\n\nHOME = os.environ["HOME"]\n')
-    assert gate.main([], managed_aliases=lambda: frozenset({"AVA_DB_URL"}), repo_root=tmp_path) == 0
+    assert (
+        gate.main([], managed_aliases=lambda: frozenset({"MEIVA_DB_URL"}), repo_root=tmp_path) == 0
+    )
 
 
 def _write(root: Path, rel: str, body: str) -> None:

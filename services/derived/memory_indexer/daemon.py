@@ -28,7 +28,7 @@ from base.log import prepare_process_logging
 from base.native_process.code_version import CodeVersion
 from base.native_process.loaded_commit import LoadedCommit
 from base.packages.plugin_providers import build_model_catalog
-from base.paths import ava_home, gateway_memory_dir
+from base.paths import gateway_memory_dir, meiva_home
 from base.telemetry.delivery.receipts import DrainStatus
 from base.telemetry.pipeline_build import build_pipeline
 from base.telemetry.process_logging import init_gateway_process
@@ -443,7 +443,7 @@ async def connect_backend_with_retry(
     uri_reader: Callable[[], str],
     probe_message: str | None = None,
 ) -> MemorySearchBackend:
-    """Connect to the configured backend at daemon startup — `ava start`
+    """Connect to the configured backend at daemon startup — `meiva start`
     spawns the storage service (the memory-search session) and the
     memory_indexer session in order; server initialization takes a few
     seconds, and within that race window connect may hit connection
@@ -514,7 +514,7 @@ async def run(
     _log.info("[indexer] pidfile written: %s", _pidfile(config, runtime=runtime))
 
     # Fail fast before deriving liveness or binding healthz: an unknown
-    # AVA_EMBEDDING_BACKEND must produce the clean configuration FATAL.
+    # MEIVA_EMBEDDING_BACKEND must produce the clean configuration FATAL.
     try:
         catalog = build_model_catalog()
         provider = get_provider(
@@ -604,7 +604,7 @@ def main() -> None:
     config = ConfigBoot()
     config.boot()
     machine = machine_from_boot(config)
-    process_home = ava_home().resolve()
+    process_home = meiva_home().resolve()
     image = LoadedCommit.capture()
     version = CodeVersion(image)
     gate = ProcessDbGate(version=version.get, process="memory_indexer")

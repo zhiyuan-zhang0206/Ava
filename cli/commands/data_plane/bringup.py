@@ -1,12 +1,12 @@
 """Gateway data-plane bring-up and remote reachability probes.
 
-The gateway's `ava start` data-plane step lives here rather than in
+The gateway's `meiva start` data-plane step lives here rather than in
 `cli/commands/lifecycle/start.py`: bring-up chooses between a LOCAL instance
 (`ensure_cluster_storage` — initdb / pg / redis / ACL under
-`$AVA_HOME`) and a REMOTE-managed plane (Task #1752) whose URLs name another
+`$MEIVA_HOME`) and a REMOTE-managed plane (Task #1752) whose URLs name another
 host, where startup degrades to a reachability probe of the URLs themselves
-and fail-fasts with the dial detail. The probes are also used by `ava status`
-and `ava stop` — both must never touch a foreign service.
+and fail-fasts with the dial detail. The probes are also used by `meiva status`
+and `meiva stop` — both must never touch a foreign service.
 """
 
 from __future__ import annotations
@@ -31,7 +31,7 @@ from base.cluster.record import ClusterRecord
 from base.host.db_authority.model import Generation
 from base.host.net.url_secret import url_host
 from base.log import logger
-from base.paths import ava_home
+from base.paths import meiva_home
 from base.telemetry import EventPipeline
 from cli.commands.data_plane import cluster_instance as instance
 from cli.commands.data_plane import pgbouncer
@@ -61,18 +61,18 @@ def ensure_gateway_data_plane(
     )
     from base.host.db_authority.api import publish_telemetry_token
 
-    rec = get_record(ava_home())
+    rec = get_record(meiva_home())
     if rec is None:
         print(
-            f"  ✗ no registry record for home {ava_home()} — cannot bring up its "
-            "data plane. Run `ava init` for this home first.",
+            f"  ✗ no registry record for home {meiva_home()} — cannot bring up its "
+            "data plane. Run `meiva init` for this home first.",
             file=sys.stderr,
         )
         return 1
 
     # The root holding the human secret derives the telemetry token and keeps it where the
     # gateway-side services that probe the observability station can read it.
-    publish_telemetry_token(ava_home().resolve(), config.cluster_secret)
+    publish_telemetry_token(meiva_home().resolve(), config.cluster_secret)
 
     if config.is_remote:
         # Remote-managed data plane (Task #1752): the URLs name another host,
@@ -87,7 +87,7 @@ def ensure_gateway_data_plane(
         if not pg_ok:
             print(
                 f"  ✗ remote data plane unreachable: {pg_line}\n"
-                "    Check AVA_DB_URL / AVA_REDIS_URL and their credentials, and the "
+                "    Check MEIVA_DB_URL / MEIVA_REDIS_URL and their credentials, and the "
                 "network path to the provider. A local cluster switching to a remote "
                 "plane must first migrate its data (pg_dump / restore) and apply "
                 "pending migrations here.",
@@ -104,10 +104,10 @@ def ensure_gateway_data_plane(
     from base.host.db_authority.ledger import load_ledger
     from cli.start_identity import needs_provision
 
-    if not needs_provision(ava_home()) and load_ledger(ava_home().resolve()) is None:
+    if not needs_provision(meiva_home()) and load_ledger(meiva_home().resolve()) is None:
         # A home born before the data plane always authenticated: refuse before
         # any native effect (hba rewrite, migrations). Never converted here.
-        print(f"  ✗ {legacy_home_refusal(ava_home().resolve())}", file=sys.stderr)
+        print(f"  ✗ {legacy_home_refusal(meiva_home().resolve())}", file=sys.stderr)
         return 1
     return instance.ensure_cluster_storage(
         config,
@@ -128,7 +128,7 @@ def remote_plane_host(config: DataPlaneConfig) -> str:
 def remote_pg_reachable(
     config: DataPlaneConfig, *, database_factory: DatabaseFactory
 ) -> tuple[bool, str]:
-    """Probe a remote-managed Postgres through its own AVA_DB_URL.
+    """Probe a remote-managed Postgres through its own MEIVA_DB_URL.
 
     The two-stage shape of the local probe, minus the local machinery:
     `base.db.connect()` dials the URL as every consumer does (auth included),
@@ -150,7 +150,7 @@ def remote_pg_reachable(
 
 
 def remote_redis_reachable(config: DataPlaneConfig) -> tuple[bool, str]:
-    """Probe a remote-managed Redis through its own AVA_REDIS_URL.
+    """Probe a remote-managed Redis through its own MEIVA_REDIS_URL.
 
     PINGs with the URL's own credentials (redis-py `from_url`), unlike the
     local probe's admin-password dial — on a remote/SaaS plane the URL userinfo
@@ -189,14 +189,14 @@ def warn_orphaned_local_instance() -> None:
     """Best-effort warning when a local instance still runs under this home.
 
     After a local→remote data-plane switch (Task #1752), the old local pg/redis
-    are no longer managed by this cluster — `ava stop` skips them, so if they are still running they keep consuming the home's
+    are no longer managed by this cluster — `meiva stop` skips them, so if they are still running they keep consuming the home's
     ports and data dir. Print a manual-teardown hint instead of silently
     leaving them. Never raises: this is a hint on an already-successful path.
     """
     try:
         from base.cluster import get_record
 
-        rec = get_record(ava_home())
+        rec = get_record(meiva_home())
         if rec is None:
             return
         leftovers: list[str] = []
@@ -213,9 +213,9 @@ def warn_orphaned_local_instance() -> None:
             print(
                 "  ⚠ local " + " + ".join(leftovers) + " from before the switch is still "
                 "running on this home's data dir and is no longer managed (the data "
-                "plane is remote). Tear it down by hand — `pg_ctl -D $AVA_HOME/pg "
+                "plane is remote). Tear it down by hand — `pg_ctl -D $MEIVA_HOME/pg "
                 "-m fast stop` and `redis-cli -p <port> shutdown nosave` — or switch "
-                "the URLs back to local and run `ava stop`.",
+                "the URLs back to local and run `meiva stop`.",
                 file=sys.stderr,
             )
     except Exception:
@@ -229,9 +229,9 @@ def prepare_gateway_schema(config: DataPlaneConfig) -> None:
     from base import cluster
     from cli.start_identity import needs_provision
 
-    if config.is_remote or not needs_provision(ava_home()):
+    if config.is_remote or not needs_provision(meiva_home()):
         return
-    rec = cluster.get_record(ava_home())
+    rec = cluster.get_record(meiva_home())
     if rec is None:
         raise RuntimeError("initialization lost its port reservation")
     admin_url = instance.pg_admin_url(rec.ports["postgres"])
@@ -240,17 +240,17 @@ def prepare_gateway_schema(config: DataPlaneConfig) -> None:
         identity,
         base_admin_url=admin_url,
         resume_initialization=True,
-        expected_data_dir=ava_home() / "pg",
+        expected_data_dir=meiva_home() / "pg",
     )
     cluster.ensure_pgvector_extension(
-        identity, base_admin_url=admin_url, expected_data_dir=ava_home() / "pg"
+        identity, base_admin_url=admin_url, expected_data_dir=meiva_home() / "pg"
     )
     cluster.ensure_checkpoint_schema(
         identity,
         base_admin_url=admin_url,
         database_created=created,
         resume_partial=True,
-        expected_data_dir=ava_home() / "pg",
+        expected_data_dir=meiva_home() / "pg",
     )
 
 
@@ -302,7 +302,7 @@ def admin_session(rec: ClusterRecord, database: str) -> Generator[psycopg.Connec
     from base.cluster.dataplane import pg_admin
 
     url = make_conninfo(instance.pg_admin_url(rec.ports["postgres"]), dbname=database)
-    with pg_admin.connect(url, expected_data_dir=ava_home() / "pg", autocommit=True) as conn:
+    with pg_admin.connect(url, expected_data_dir=meiva_home() / "pg", autocommit=True) as conn:
         yield conn
 
 
@@ -310,9 +310,9 @@ def db_endpoint() -> str:
     """The home's credential-free database endpoint, as its `.env` records it."""
     from dotenv import dotenv_values
 
-    endpoint = dotenv_values(ava_home() / ".env").get("AVA_DB_URL")
+    endpoint = dotenv_values(meiva_home() / ".env").get("MEIVA_DB_URL")
     if not endpoint:
-        raise RuntimeError("AVA_DB_URL is missing from the gateway configuration")
+        raise RuntimeError("MEIVA_DB_URL is missing from the gateway configuration")
     return endpoint
 
 
@@ -335,11 +335,11 @@ def db_delivery(cls: DbAccess, *, remote_data_plane: bool) -> dict[str, str]:
 
         if cls != "runner":
             raise RuntimeError(f"a pure agent-runner cannot launch a {cls}-class database service")
-        return unit_delivery(ava_home().resolve())
+        return unit_delivery(meiva_home().resolve())
     if remote_data_plane:
         return {}
-    grant = write_grant(ava_home().resolve(), cls)
-    return {"AVA_DB_URL": grant.dsn(db_endpoint()), GENERATION_ENV: str(grant.number)}
+    grant = write_grant(meiva_home().resolve(), cls)
+    return {"MEIVA_DB_URL": grant.dsn(db_endpoint()), GENERATION_ENV: str(grant.number)}
 
 
 def api_delivery(cls: DbAccess, *, remote_data_plane: bool) -> dict[str, str]:
@@ -359,10 +359,10 @@ def api_delivery(cls: DbAccess, *, remote_data_plane: bool) -> dict[str, str]:
 
         if cls != "runner":
             raise RuntimeError(f"a pure agent-runner cannot launch a {cls}-class service")
-        return unit_api_delivery(ava_home().resolve())
+        return unit_api_delivery(meiva_home().resolve())
     if remote_data_plane:
         return {}
-    return {API_TOKEN_ENV: api_token(ava_home().resolve(), cls)}
+    return {API_TOKEN_ENV: api_token(meiva_home().resolve(), cls)}
 
 
 def ensure_pooler(
@@ -419,9 +419,9 @@ def adopt_gateway_login(
     from base.host.db_authority.delivery import GENERATION_ENV, write_grant
 
     grant = write_grant(home, "gateway")
-    os.environ["AVA_DB_URL"] = grant.dsn(endpoint)
+    os.environ["MEIVA_DB_URL"] = grant.dsn(endpoint)
     os.environ[GENERATION_ENV] = str(grant.number)
-    database_factory.adopt_login(os.environ["AVA_DB_URL"])
+    database_factory.adopt_login(os.environ["MEIVA_DB_URL"])
 
 
 def _birth_generation(conn: psycopg.Connection[Any], home: Path, database: str) -> Generation:
@@ -457,7 +457,7 @@ def _admitted_generation(
         raise RuntimeError(legacy_home_refusal(home))
     if ledger.owner != database:
         raise RuntimeError(
-            f"the database authority ledger records owner {ledger.owner!r}, but AVA_DB_URL "
+            f"the database authority ledger records owner {ledger.owner!r}, but MEIVA_DB_URL "
             f"names database {database!r}"
         )
     if ledger.active is None:
@@ -508,8 +508,8 @@ def complete_gateway_data_plane(
         from base.cluster import authority
         from base.host.db_authority import ledger
 
-        home = ava_home().resolve()
-        rec = cluster.get_record(ava_home())
+        home = meiva_home().resolve()
+        rec = cluster.get_record(meiva_home())
         if rec is None:
             raise RuntimeError("start lost its port reservation")
         database = cluster.db_identity(config.db_url)
@@ -518,10 +518,10 @@ def complete_gateway_data_plane(
             cluster.ensure_pgvector_extension(
                 database,
                 base_admin_url=instance.pg_admin_url(rec.ports["postgres"]),
-                expected_data_dir=ava_home() / "pg",
+                expected_data_dir=meiva_home() / "pg",
             )
             prepare_memory_vectors(config, database_factory=database_factory)
-        birth = needs_provision(ava_home())
+        birth = needs_provision(meiva_home())
         if not birth and ledger.load_ledger(home) is None:
             raise RuntimeError(legacy_home_refusal(home))
         with admin_session(rec, database) as conn:
@@ -538,11 +538,11 @@ def complete_gateway_data_plane(
         print(f"  ✓ database write generation {generation.number} admitted")
     if error := probe_redis(config.redis_url):
         raise RuntimeError(f"consumer Redis readiness failed: {error}")
-    mark_phase(ava_home(), "provisioned")
+    mark_phase(meiva_home(), "provisioned")
 
 
 def print_data_plane_status(config: DataPlaneConfig, *, database_factory: DatabaseFactory) -> None:
-    """Print this cluster's own pg/redis reachability for `ava status`.
+    """Print this cluster's own pg/redis reachability for `meiva status`.
 
     Postgres is probed in two stages: `pg_isready` (the server accepts connections)
     then an authenticated `SELECT 1` over the cluster's POOLED front door
@@ -604,13 +604,13 @@ def _print_pooler_status() -> None:
     from base.host.db_authority.delivery import read_pooler_admin
     from base.host.db_authority.model import AuthorityRefusedError
 
-    rec = get_record(ava_home())
+    rec = get_record(meiva_home())
     if rec is None:
         print("  - pgbouncer: no registry record — cannot resolve its port")
         return
     port = rec.ports["pgbouncer"]
     try:
-        ok = pooler.pgbouncer_listener_reachable(port, read_pooler_admin(ava_home()).password)
+        ok = pooler.pgbouncer_listener_reachable(port, read_pooler_admin(meiva_home()).password)
     except AuthorityRefusedError as exc:
         print(f"  ✗ pgbouncer (127.0.0.1:{port}): {exc}")
         return
@@ -624,7 +624,7 @@ def stop_cluster_instance(
     producer: Callable[[], EventPipeline],
 ) -> int:
     """Stop this cluster's own Postgres + Redis (data preserved on disk). The
-    counterpart of ensure_cluster_storage for `ava stop` of a cluster running its
+    counterpart of ensure_cluster_storage for `meiva stop` of a cluster running its
     own instance. Best-effort: a not-running instance is a
     no-op success only after native custody closes."""
     if config.is_remote:

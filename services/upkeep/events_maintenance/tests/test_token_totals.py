@@ -165,7 +165,7 @@ def test_the_command_line_rebuilds_the_totals_only_when_its_range_reaches_the_wa
     ) -> _Database:
         assert isinstance(config, ConfigBoot)
         assert isinstance(gate, ProcessDbGate)
-        assert gate.application_name() == "ava:rollup-operator:v7"
+        assert gate.application_name() == "meiva:rollup-operator:v7"
         return _Database()
 
     monkeypatch.setattr(rollup, "events_maintenance_db", database)

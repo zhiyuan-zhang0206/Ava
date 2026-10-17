@@ -3,11 +3,11 @@
 Split out of test_dotenv_boot.py to stay under the structure-lint's per-file
 line budget.
 
-cli.main's entry pops AVA_PROCESS_PROFILE (settings-full by design) and
-records the popped value as AVA_LAUNCHER_PROFILE; the authority pass reads
+cli.main's entry pops MEIVA_PROCESS_PROFILE (settings-full by design) and
+records the popped value as MEIVA_LAUNCHER_PROFILE; the authority pass reads
 the live-or-recorded context (`launcher_context`). With only the live
 marker consulted, both launcher-projection exemptions were unreachable on
-every CLI path: `ava cluster health-probe` run from an agent child on a pure
+every CLI path: `meiva cluster health-probe` run from an agent child on a pure
 agent-runner dropped the launcher's runner URLs and fell back to the
 sentinel (env-class red).
 """
@@ -26,11 +26,11 @@ from base.host.env.tests.test_dotenv_boot import (
     point_env_at_without_db_url,
     restore_authority_env,  # noqa: F401 — shared fixture  # pyright: ignore[reportUnusedImport] — pytest fixture import
 )
-from base.paths.home import resolve_ava_home
+from base.paths.home import resolve_meiva_home
 
 _NO_DATA_PLANE_IDENTITY_LINES = (
-    f"AVA_CLUSTER_SECRET={os.environ['AVA_CLUSTER_SECRET']}",
-    f"AVA_GATEWAY_URL={os.environ['AVA_GATEWAY_URL']}",
+    f"MEIVA_CLUSTER_SECRET={os.environ['MEIVA_CLUSTER_SECRET']}",
+    f"MEIVA_GATEWAY_URL={os.environ['MEIVA_GATEWAY_URL']}",
 )
 
 
@@ -46,10 +46,10 @@ def _restore_environ() -> Iterator[None]:
 
 def _point_env_at_without_data_plane_urls(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     """An env file that declares neither data-plane URL — the pure agent-runner
-    shape for AVA_DB_URL and AVA_REDIS_URL together (#4334)."""
+    shape for MEIVA_DB_URL and MEIVA_REDIS_URL together (#4334)."""
     env_file = tmp_path / "no-data-plane.env"
     env_file.write_text(
-        "AVA_AGENT_HOST_HEALTH_PORT=18035\n" + "\n".join(_NO_DATA_PLANE_IDENTITY_LINES) + "\n"
+        "MEIVA_AGENT_HOST_HEALTH_PORT=18035\n" + "\n".join(_NO_DATA_PLANE_IDENTITY_LINES) + "\n"
     )
     use_env_files(monkeypatch, env_file)
 
@@ -60,16 +60,16 @@ def test_recorded_launcher_profile_drops_undeclared_owner_url(
     """The recorded context keeps the live one's runner-shape gate: an
     inherited OWNER url on an undeclared unit still drops — recording the
     profile must not widen the exemption."""
-    monkeypatch.delitem(os.environ, "AVA_PROCESS_PROFILE", raising=False)
+    monkeypatch.delitem(os.environ, "MEIVA_PROCESS_PROFILE", raising=False)
     monkeypatch.setitem(os.environ, dotenv_boot.LAUNCHER_PROFILE_ENV_KEY, "agent")
     point_env_at_without_db_url(monkeypatch, tmp_path)
     monkeypatch.setitem(
-        os.environ, "AVA_DB_URL", "postgresql://ava_main:owner-password@127.0.0.1:5433/ava"
+        os.environ, "MEIVA_DB_URL", "postgresql://meiva_main:owner-password@127.0.0.1:5433/meiva"
     )
 
-    dotenv_boot.enforce_cluster_env_authority(resolve_ava_home())
+    dotenv_boot.enforce_cluster_env_authority(resolve_meiva_home())
 
-    assert "AVA_DB_URL" not in os.environ
+    assert "MEIVA_DB_URL" not in os.environ
 
 
 def test_recorded_launcher_profile_drops_malformed_db_url(
@@ -77,14 +77,14 @@ def test_recorded_launcher_profile_drops_malformed_db_url(
 ) -> None:
     """The parse gate holds for the recorded context too: `urlsplit` itself
     rejects the value (invalid IPv6), so it drops instead of raising."""
-    monkeypatch.delitem(os.environ, "AVA_PROCESS_PROFILE", raising=False)
+    monkeypatch.delitem(os.environ, "MEIVA_PROCESS_PROFILE", raising=False)
     monkeypatch.setitem(os.environ, dotenv_boot.LAUNCHER_PROFILE_ENV_KEY, "agent")
     point_env_at_without_db_url(monkeypatch, tmp_path)
-    monkeypatch.setitem(os.environ, "AVA_DB_URL", "postgresql://[::1")
+    monkeypatch.setitem(os.environ, "MEIVA_DB_URL", "postgresql://[::1")
 
-    dotenv_boot.enforce_cluster_env_authority(resolve_ava_home())
+    dotenv_boot.enforce_cluster_env_authority(resolve_meiva_home())
 
-    assert "AVA_DB_URL" not in os.environ
+    assert "MEIVA_DB_URL" not in os.environ
 
 
 @pytest.mark.parametrize("value", ["redis://[::1", "redis://"])
@@ -94,11 +94,11 @@ def test_recorded_launcher_profile_drops_unparseable_redis_url(
     """The redis exemption's parse gate: a `urlsplit` failure (invalid IPv6)
     and a parse with no host both drop — never raise, never keep a value that
     cannot dial."""
-    monkeypatch.delitem(os.environ, "AVA_PROCESS_PROFILE", raising=False)
+    monkeypatch.delitem(os.environ, "MEIVA_PROCESS_PROFILE", raising=False)
     monkeypatch.setitem(os.environ, dotenv_boot.LAUNCHER_PROFILE_ENV_KEY, "agent")
     _point_env_at_without_data_plane_urls(monkeypatch, tmp_path)
-    monkeypatch.setitem(os.environ, "AVA_REDIS_URL", value)
+    monkeypatch.setitem(os.environ, "MEIVA_REDIS_URL", value)
 
-    dotenv_boot.enforce_cluster_env_authority(resolve_ava_home())
+    dotenv_boot.enforce_cluster_env_authority(resolve_meiva_home())
 
-    assert "AVA_REDIS_URL" not in os.environ
+    assert "MEIVA_REDIS_URL" not in os.environ

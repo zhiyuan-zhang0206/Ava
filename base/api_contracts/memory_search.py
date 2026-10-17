@@ -6,7 +6,7 @@ from typing import Literal
 
 MemorySearchPurpose = Literal["recall", "search", "dedup"]
 """Why the query was issued. `recall`: passive recall, the query is the recent conversation.
-`search`: an agent's own `ava.memory.search` call, the query is what the agent is looking for.
+`search`: an agent's own `meiva.memory.search` call, the query is what the agent is looking for.
 `dedup`: the check on a note an agent just wrote, the query is the new note and the score is
 the probability that a result records essentially the same knowledge.
 The ranker asks a different question for each."""

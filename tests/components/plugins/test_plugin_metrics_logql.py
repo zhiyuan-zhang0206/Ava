@@ -31,8 +31,8 @@ def test_shipped_plugin_metrics_are_logql() -> None:
     assert len(specs) == 11
     names = {spec.name for spec in specs}
     assert {
-        "ava_memory_recall_search_latency_ms",
-        "ava_memory_recall_injected_notes",
+        "meiva_memory_recall_search_latency_ms",
+        "meiva_memory_recall_injected_notes",
     } <= names
     for spec in specs:
         assert spec.query_type == "logql", f"{spec.name} must read the Loki event stream"
@@ -65,7 +65,7 @@ def test_agent_placeholder_renders_per_agent() -> None:
 
 def test_dashboard_json_matches_registrations() -> None:
     specs = [s for s in registered_metrics() if "grafana" in s.output]
-    path = _REPO_ROOT / "deploy/lgtm/config/grafana/provisioning/dashboards/ava-ops-main.json"
+    path = _REPO_ROOT / "deploy/lgtm/config/grafana/provisioning/dashboards/meiva-ops-main.json"
     data = json.loads(path.read_text())
     by_title = {p.get("title"): p for p in data["panels"]}
     for spec in specs:
@@ -79,7 +79,7 @@ def test_dashboard_json_matches_registrations() -> None:
 
 def test_plugin_panels_live_under_their_plugin_rows() -> None:
     specs = [s for s in registered_metrics() if "grafana" in s.output]
-    path = _REPO_ROOT / "deploy/lgtm/config/grafana/provisioning/dashboards/ava-ops-main.json"
+    path = _REPO_ROOT / "deploy/lgtm/config/grafana/provisioning/dashboards/meiva-ops-main.json"
     data = json.loads(path.read_text())
     rows = sorted((p["gridPos"]["y"], p["title"]) for p in data["panels"] if p.get("type") == "row")
     by_title = {p.get("title"): p for p in data["panels"]}
@@ -158,7 +158,7 @@ def _assert_dashboard_panel_matches_spec(panel: dict[str, Any], spec: MetricSpec
 
 def test_dashboard_json_matches_core_registrations() -> None:
     specs = [spec for spec in _load_core() if "grafana" in spec.output]
-    path = _REPO_ROOT / "deploy/lgtm/config/grafana/provisioning/dashboards/ava-ops-main.json"
+    path = _REPO_ROOT / "deploy/lgtm/config/grafana/provisioning/dashboards/meiva-ops-main.json"
     data = json.loads(path.read_text())
     panels_by_title = {panel.get("title"): panel for panel in data["panels"]}
 
@@ -169,7 +169,7 @@ def test_dashboard_json_matches_core_registrations() -> None:
 
 
 def test_dashboard_has_103_loki_targets() -> None:
-    path = _REPO_ROOT / "deploy/lgtm/config/grafana/provisioning/dashboards/ava-ops-main.json"
+    path = _REPO_ROOT / "deploy/lgtm/config/grafana/provisioning/dashboards/meiva-ops-main.json"
     panels = json.loads(path.read_text())["panels"]
     loki_targets = [
         target
@@ -192,7 +192,7 @@ def test_unresolved_gauge_names_match_the_otlp_contract() -> None:
         ("dismissed_errors", "core_dismissed_error"),
     ):
         assert METRIC_DISPOSITION[("resolution_status", field)] == "gauge"
-        assert specs[name].query == f"ava_resolution_status_{strip_unit_suffix(field)}_ratio"
+        assert specs[name].query == f"meiva_resolution_status_{strip_unit_suffix(field)}_ratio"
         assert specs[name].query_type == "promql"
         assert specs[name].panel == "stat"
 
@@ -203,7 +203,7 @@ def test_agent_max_id_gauge_names_match_the_otlp_contract() -> None:
 
     specs = {spec.name: spec for spec in _load_core()}
     assert METRIC_DISPOSITION[("agent_registry", "max_id")] == "gauge"
-    gauge = f"ava_agent_registry_{strip_unit_suffix('max_id')}_ratio"
+    gauge = f"meiva_agent_registry_{strip_unit_suffix('max_id')}_ratio"
     assert specs["core_agent_max_id"].query == f"max({gauge})"
     assert specs["core_agent_max_id"].query_type == "promql"
     assert specs["core_agent_max_id"].panel == "timeseries"
@@ -214,7 +214,7 @@ def test_agent_max_id_gauge_names_match_the_otlp_contract() -> None:
 def _pr_flow_daily_query(field: str, unit: str) -> str:
     from base.telemetry.otlp.telemetry_otlp import strip_unit_suffix
 
-    name = f"ava_pr_flow_daily_{strip_unit_suffix(field)}_{unit}"
+    name = f"meiva_pr_flow_daily_{strip_unit_suffix(field)}_{unit}"
     return f"max by (day) (last_over_time({name}[26h]))"
 
 
@@ -248,7 +248,7 @@ def _assert_pr_flow_specs_match_the_export_job(
     queue = specs["core_pr_flow_queue_depth"]
     assert queue.query_type == "promql"
     assert queue.panel == "timeseries"
-    assert queue.query == f"ava_pr_flow_run_{strip_unit_suffix('queue_depth')}_ratio"
+    assert queue.query == f"meiva_pr_flow_run_{strip_unit_suffix('queue_depth')}_ratio"
 
     flakes = specs["core_pr_flow_flakes"]
     assert flakes.query == _pr_flow_daily_query("flake_new_quarantines", "ratio")
@@ -275,7 +275,7 @@ def _assert_pr_flow_tiles_mirror_specs(
 
 def test_pr_flow_panels_match_the_otlp_contract() -> None:
     specs = {spec.name: spec for spec in _load_core()}
-    path = _REPO_ROOT / "deploy/lgtm/config/grafana/provisioning/dashboards/ava-ops-main.json"
+    path = _REPO_ROOT / "deploy/lgtm/config/grafana/provisioning/dashboards/meiva-ops-main.json"
     by_title = {panel.get("title"): panel for panel in json.loads(path.read_text())["panels"]}
 
     _assert_pr_flow_payload_fields_are_gauges()
@@ -284,7 +284,7 @@ def test_pr_flow_panels_match_the_otlp_contract() -> None:
 
 
 def test_dashboard_legends_and_time_ranges_are_explicit() -> None:
-    path = _REPO_ROOT / "deploy/lgtm/config/grafana/provisioning/dashboards/ava-ops-main.json"
+    path = _REPO_ROOT / "deploy/lgtm/config/grafana/provisioning/dashboards/meiva-ops-main.json"
     panels = json.loads(path.read_text())["panels"]
     for panel in panels:
         for target in panel.get("targets", []):
@@ -325,7 +325,7 @@ def _assert_llm_usage_panels_filter_telemetry(panels: list[dict[str, Any]]) -> N
 
 
 def test_cost_dashboard_windows_and_telemetry_contract() -> None:
-    path = _REPO_ROOT / "deploy/lgtm/config/grafana/provisioning/dashboards/ava-ops-main.json"
+    path = _REPO_ROOT / "deploy/lgtm/config/grafana/provisioning/dashboards/meiva-ops-main.json"
     data = json.loads(path.read_text())
     by_title = {panel.get("title"): panel for panel in data["panels"]}
 

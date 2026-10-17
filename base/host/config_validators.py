@@ -120,7 +120,7 @@ def validate(
     free-text fields like ``machine_description``), not a fail-fast violation.
 
     Seam 4 (runner handler) calls this before writing a field. ``chrome_binary`` is the
-    host's configured ``AVA_CHROME_BINARY`` override: the caller reads Settings, this module never does. ``host`` is the machine the value is judged against.
+    host's configured ``MEIVA_CHROME_BINARY`` override: the caller reads Settings, this module never does. ``host`` is the machine the value is judged against.
     """
     validator = VALIDATORS.get(field_name)
     if validator is None:

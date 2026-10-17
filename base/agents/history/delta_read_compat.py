@@ -119,19 +119,19 @@ class RecoveryReconstructionScope:
 
 
 def _invalidate_recovery_scopes(saver: AsyncPostgresSaver, thread_id: str) -> None:
-    scopes = cast("dict[str, set[RecoveryReconstructionScope]]", saver._ava_recovery_scopes)  # type: ignore[attr-defined]
+    scopes = cast("dict[str, set[RecoveryReconstructionScope]]", saver._meiva_recovery_scopes)  # type: ignore[attr-defined]
     for scope in scopes.get(thread_id, ()):
         scope.invalidate()
 
 
 def _install_recovery_invalidation(saver: AsyncPostgresSaver) -> None:
-    if getattr(saver, "_ava_recovery_invalidation", False):
+    if getattr(saver, "_meiva_recovery_invalidation", False):
         return
-    saver._ava_recovery_invalidation = True  # type: ignore[attr-defined]
-    saver._ava_recovery_scopes = {}  # type: ignore[attr-defined]
+    saver._meiva_recovery_invalidation = True  # type: ignore[attr-defined]
+    saver._meiva_recovery_scopes = {}  # type: ignore[attr-defined]
     orig_aput = saver.aput
     orig_aput_writes = saver.aput_writes
-    orig_flush = getattr(saver, "_ava_nstep_flush", None)
+    orig_flush = getattr(saver, "_meiva_nstep_flush", None)
 
     async def aput(config: RunnableConfig, *args: Any, **kwargs: Any) -> Any:
         thread_id = str(config["configurable"]["thread_id"])  # pyright: ignore[reportTypedDictNotRequiredAccess]
@@ -160,7 +160,7 @@ def _install_recovery_invalidation(saver: AsyncPostgresSaver) -> None:
             finally:
                 _invalidate_recovery_scopes(saver, thread_id)
 
-        saver._ava_nstep_flush = flush  # type: ignore[attr-defined]
+        saver._meiva_nstep_flush = flush  # type: ignore[attr-defined]
 
 
 @contextmanager
@@ -174,7 +174,7 @@ def recovery_reconstruction_scope(
     Callers bind the yielded scope via reader(); unbound reads stay uncached.
     An unwrapped saver has no reconstruction to cache.
     """
-    if getattr(saver, "_ava_delta_read_compat", False) is not True:
+    if getattr(saver, "_meiva_delta_read_compat", False) is not True:
         # A saver without delta reads has no reconstruction to cache.
         yield None
         return
@@ -186,7 +186,7 @@ def recovery_reconstruction_scope(
         return
     _install_recovery_invalidation(saver)
     scope = RecoveryReconstructionScope(saver=saver, thread_id=thread_id)
-    scopes = cast("dict[str, set[RecoveryReconstructionScope]]", saver._ava_recovery_scopes)  # type: ignore[attr-defined]
+    scopes = cast("dict[str, set[RecoveryReconstructionScope]]", saver._meiva_recovery_scopes)  # type: ignore[attr-defined]
     if scopes.get(thread_id):
         raise RuntimeError(f"concurrent checkpoint recovery for thread {thread_id}")
     scopes.setdefault(thread_id, set()).add(scope)
@@ -489,9 +489,9 @@ def wrap_saver_reads_with_delta_reconstruction(saver: AsyncPostgresSaver) -> Non
     `get_delta_channel_history` path (an exact-checkpoint-id config), so it
     never re-enters the patched reads.
     """
-    if getattr(saver, "_ava_delta_read_compat", False):
+    if getattr(saver, "_meiva_delta_read_compat", False):
         return
-    saver._ava_delta_read_compat = True  # type: ignore[attr-defined]
+    saver._meiva_delta_read_compat = True  # type: ignore[attr-defined]
     orig_get_tuple = saver.get_tuple
     orig_aget_tuple = saver.aget_tuple
 

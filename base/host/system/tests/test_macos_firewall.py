@@ -53,7 +53,7 @@ _LISTAPPS_OUTPUT = """Total number of apps = 4
              (Allow incoming connections)
 2 : /usr/sbin/smbd
              (Allow incoming connections)
-3 : /opt/ava/bin/postgres
+3 : /opt/meiva/bin/postgres
              (Block incoming connections)
 4 : /usr/libexec/sharingd
              (Allow incoming connections)
@@ -98,7 +98,7 @@ def test_listapps_parses_allow_and_block_states() -> None:
     assert fw.allowlisted_paths(host=host) == {
         "/usr/bin/python3": True,
         "/usr/sbin/smbd": True,
-        "/opt/ava/bin/postgres": False,
+        "/opt/meiva/bin/postgres": False,
         "/usr/libexec/sharingd": True,
     }
 
@@ -109,7 +109,7 @@ def test_listapps_drops_an_entry_with_no_state_line() -> None:
     Membership with an unknown state is the exact ambiguity `--getappblocked` was
     rejected for, so it is dropped and reported as missing rather than assumed OK.
     """
-    truncated = "Total number of apps = 1\n1 : /opt/ava/bin/postgres\n"
+    truncated = "Total number of apps = 1\n1 : /opt/meiva/bin/postgres\n"
     assert fw.allowlisted_paths(host=_alf("State = 1", truncated)) == {}
 
 
@@ -242,7 +242,7 @@ def test_a_rule_on_the_symlink_path_also_counts_as_covered(tmp_path: Path) -> No
     stable `/opt/homebrew/opt/pgbouncer/…` symlink onto a versioned Cellar path, and
     that symlink form is exactly what this repo's own older runbook told operators
     to `--add`. Flagging a host whose rule was added that way would print a scary
-    block on every `ava start` of a host that is fine — and a step operators learn
+    block on every `meiva start` of a host that is fine — and a step operators learn
     to ignore cannot report the real occurrence either.
     """
     real = _existing(tmp_path, "redis-server-8.8.0")
@@ -332,15 +332,15 @@ def test_observability_manifest_entries_resolve_installed_globs(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
-    """A Grafana/Loki/otelcol install under the stable Ava paths is discovered.
+    """A Grafana/Loki/otelcol install under the stable Meiva paths is discovered.
 
     Removing any of the three manifest entries would let that binary's next bind
     recreate the ALF prompt storm after an upgrade.
     """
     paths = (
-        tmp_path / ".ava/lgtm/native/grafana-home/bin/grafana",
-        tmp_path / ".ava/lgtm/native/bin/loki",
-        tmp_path / ".ava/otel-collector/otelcol-contrib",
+        tmp_path / ".meiva/lgtm/native/grafana-home/bin/grafana",
+        tmp_path / ".meiva/lgtm/native/bin/loki",
+        tmp_path / ".meiva/otel-collector/otelcol-contrib",
     )
     for path in paths:
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -612,8 +612,8 @@ def test_sudo_grant_probe_sees_the_alias() -> None:
     commands.on(
         ["sudo", "-n", "-l"],
         Reply(
-            "User ava may run the following commands on this host:\n"
-            "    (root) NOPASSWD: AVA_FIREWALL\n"
+            "User meiva may run the following commands on this host:\n"
+            "    (root) NOPASSWD: MEIVA_FIREWALL\n"
         ),
     )
     assert fw.sudo_grant_installed(host=fake_host(commands)) is True

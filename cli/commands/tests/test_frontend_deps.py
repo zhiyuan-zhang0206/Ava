@@ -57,13 +57,13 @@ def test_installs_when_node_modules_missing(tmp_path: Path, fake_npm_ci: list[Pa
     _repo.ensure_frontend_deps(repo)
     assert fake_npm_ci == [repo / "ui" / "web"]
     # stamp written so the next call is a noop
-    assert (repo / "ui" / "web" / "node_modules" / ".ava-lock-hash").is_file()
+    assert (repo / "ui" / "web" / "node_modules" / ".meiva-lock-hash").is_file()
 
 
 def test_npm_ci_injects_toolchain_path_from_a_minimal_non_login_shell(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """`ava start` must find npm without a shell profile adding Homebrew's bin."""
+    """`meiva start` must find npm without a shell profile adding Homebrew's bin."""
     from base.sessions import env_forwarding
 
     repo = _make_repo(tmp_path, '{"lock": 1}')
@@ -119,7 +119,7 @@ def test_reinstalls_when_node_modules_exists_without_stamp(
     """Legacy install (node_modules from before this stamp existed) → reinstall
     once so the stamp gets written; a bare node_modules is no longer trusted."""
     repo = _make_repo(tmp_path, '{"lock": 1}')
-    (repo / "ui" / "web" / "node_modules").mkdir()  # exists, but no .ava-lock-hash
+    (repo / "ui" / "web" / "node_modules").mkdir()  # exists, but no .meiva-lock-hash
     _repo.ensure_frontend_deps(repo)
     assert fake_npm_ci == [repo / "ui" / "web"]
 

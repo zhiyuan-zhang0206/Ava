@@ -1,0 +1,6 @@
+[loads]
+"test_minimal_dispatch.py" = ["meiva_builtins/skills"]
+
+[debt.unresolved-patch]
+"test_minimal_dispatch.py#monkeypatch.setattr module._save" = 1
+"test_minimal_dispatch.py#monkeypatch.setattr module.meiva" = 1

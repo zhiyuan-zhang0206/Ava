@@ -13,8 +13,8 @@ import time
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
-import ava
-from ava.agents import AgentStatus as S
+import meiva
+from meiva.agents import AgentStatus as S
 from schedules.agent_status_guard import ensure_agent_status_members
 from schedules.catchup import cluster_timezone, fire_slot_once
 from base.daemon.schedules.watcher import next_fire
@@ -25,7 +25,7 @@ from schedules.entry import fresh_schedule_entry, schedule_entry
 # ── Configuration ──────────────────────────────────────────────────────────
 
 LABEL = "self-evolution"
-PROMPT = "Read and run $AVA_HOME/skills/ava-self-evolution/SKILL.md for this week."
+PROMPT = "Read and run $MEIVA_HOME/skills/meiva-self-evolution/SKILL.md for this week."
 
 # Main weekly check: Tuesday 00:00 cluster time
 MONDAY_CRON = "0 0 * * 2"
@@ -51,18 +51,18 @@ def count_events(since: datetime) -> int:
 
     import httpx
 
-    from base.paths import ava_home
+    from base.paths import meiva_home
 
     from base.host.net.auth import delivered_token
 
-    env_file = Path(ava_home()) / ".env"
+    env_file = Path(meiva_home()) / ".env"
     secret = delivered_token() or ""
     if not secret and env_file.exists():
         for line in env_file.read_text().splitlines():
-            if line.startswith("AVA_CLUSTER_SECRET="):
+            if line.startswith("MEIVA_CLUSTER_SECRET="):
                 secret = line.split("=", 1)[1].strip().strip("\"'")
     headers = {"Authorization": f"Bearer {secret}"} if secret else {}
-    base = os.environ.get("AVA_GATEWAY_URL", "http://localhost:8000")
+    base = os.environ.get("MEIVA_GATEWAY_URL", "http://localhost:8000")
     params = {
         "from": since.isoformat(),
         "to": datetime.now(UTC).isoformat(),
@@ -89,20 +89,20 @@ def ensure_agent(label: str, prompt: str) -> int:
     terminated one or spawning a fresh one if none exists."""
     before_id = None
     while True:
-        page = ava.agents.list_agents(scope="all", query=label, before_id=before_id)
+        page = meiva.agents.list_agents(scope="all", query=label, before_id=before_id)
         # Directory pages are newest first; substring search still needs an exact label match.
         for agent in page.agents:
             if agent.label != label:
                 continue
             if agent.status == S.TERMINATED:
-                ava.agents.resurrect(agent.agent_id, prompt)
+                meiva.agents.resurrect(agent.agent_id, prompt)
             else:
-                ava.agents.send_message(agent.agent_id, prompt)
+                meiva.agents.send_message(agent.agent_id, prompt)
             return agent.agent_id
         if page.next_cursor is None:
             break
         before_id = page.next_cursor
-    return ava.agents.spawn(prompt=prompt, label=label, idempotency_key=str(uuid4()))  # pyright: ignore[reportCallIssue] — fleet plugin wraps spawn with label
+    return meiva.agents.spawn(prompt=prompt, label=label, idempotency_key=str(uuid4()))  # pyright: ignore[reportCallIssue] — fleet plugin wraps spawn with label
 
 
 def fire(prompt: str) -> None:
@@ -231,7 +231,7 @@ if __name__ == "__main__":
         {"TERMINATED"},
         schedule_name="self-evolution-weekly",
     )
-    entry_inputs = globals().get("AVA_SCHEDULE_INPUTS")
+    entry_inputs = globals().get("MEIVA_SCHEDULE_INPUTS")
     if entry_inputs is None:
         from base.log import prepare_process_logging
 

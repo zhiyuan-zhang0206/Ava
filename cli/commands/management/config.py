@@ -1,4 +1,4 @@
-"""`ava config` — read / set / unset cluster + host config from the terminal.
+"""`meiva config` — read / set / unset cluster + host config from the terminal.
 
 Thin client over the gateway's `GET/PUT /api/config` (the same endpoint the
 settings panel uses). A value lives in exactly one `.env` (cluster fields in the
@@ -35,13 +35,13 @@ from ops.env_audit import EnvWriteAudit, read_env_write_records
 _HTTP_TIMEOUT_S = 15.0
 
 
-_GATEWAY_URL_KEYS = ("AVA_GATEWAY_URL",)
+_GATEWAY_URL_KEYS = ("MEIVA_GATEWAY_URL",)
 
 
 def _home_gateway_base() -> str | None:
     """This process's home gateway identity: the home `.env` aliases
-    (`AVA_GATEWAY_URL`, recorded by `ava init`). None when the home carries no
-    identity yet (before `ava init`)."""
+    (`MEIVA_GATEWAY_URL`, recorded by `meiva init`). None when the home carries no
+    identity yet (before `meiva init`)."""
     from base.host.env import dotenv_file
 
     aliases = dotenv_file.read_env_aliases()
@@ -67,8 +67,8 @@ def gateway_base() -> str:
         return home_base
     raise ConfigError(
         "gateway_url unset — this home carries no gateway identity yet: "
-        "run `ava init` for it, or "
-        "`export AVA_GATEWAY_URL=<gateway url>` to target one explicitly."
+        "run `meiva init` for it, or "
+        "`export MEIVA_GATEWAY_URL=<gateway url>` to target one explicitly."
     )
 
 
@@ -85,7 +85,7 @@ def _guard_gateway_write(target: str) -> None:
     if home_base is None:
         raise ConfigError(
             "refusing to write gateway config: this home carries no gateway "
-            "identity yet. Run `ava start` for it first."
+            "identity yet. Run `meiva start` for it first."
         )
     if target != home_base:
         raise ConfigError(
@@ -106,9 +106,9 @@ def _auth_headers() -> dict[str, str]:
     from base.host.env import dotenv_file
     from base.host.net.auth import bearer_header, delivered_token
 
-    bearer = delivered_token() or os.environ.get("AVA_CLUSTER_SECRET")
+    bearer = delivered_token() or os.environ.get("MEIVA_CLUSTER_SECRET")
     if bearer is None:
-        bearer = dotenv_file.read_env_aliases().get("AVA_CLUSTER_SECRET", "")
+        bearer = dotenv_file.read_env_aliases().get("MEIVA_CLUSTER_SECRET", "")
     home = dotenv_file.env_file_path().parent
     if not bearer and (home / "db-authority" / "unit.json").exists():
         from base.host.db_authority.unit import consume_unit
@@ -231,7 +231,7 @@ def _resolve_local_field(key: str, index: dict[str, _LocalConfigField]) -> _Loca
     field = index.get(key)
     if field is None:
         raise ConfigError(
-            f"unknown config key: {key!r} (use the env-var name like AVA_MODEL or the field name)"
+            f"unknown config key: {key!r} (use the env-var name like MEIVA_MODEL or the field name)"
         )
     return field
 
@@ -252,7 +252,7 @@ def _check_local_writable(field: _LocalConfigField) -> None:
             return
         raise ConfigError(
             f"{field.env_var} is cluster config fetched from the gateway on this unit; "
-            "use `ava config set` without `--local` to edit it there"
+            "use `meiva config set` without `--local` to edit it there"
         )
     raise ConfigError(f"{field.env_var} is not writable on this unit")
 
@@ -267,7 +267,7 @@ def _local_shown_value(field: _LocalConfigField, aliases: dict[str, str]) -> obj
 def _reject_local_machine(machine: str | None, verb: str) -> int | None:
     if machine is None:
         return None
-    print(f"[ava config {verb}] --local cannot be combined with --machine", file=sys.stderr)
+    print(f"[meiva config {verb}] --local cannot be combined with --machine", file=sys.stderr)
     return 1
 
 
@@ -280,7 +280,7 @@ def _local_get(key: str | None) -> int:
         try:
             field = _resolve_local_field(key, _index_local_fields(fields))
         except ConfigError as e:
-            print(f"[ava config get] {e}", file=sys.stderr)
+            print(f"[meiva config get] {e}", file=sys.stderr)
             return 1
         print(f"{field.env_var} ({field.name}) = {_local_shown_value(field, aliases)}")
         print(f"  scope={field.scope}  restart_required={field.restart_required or '(none)'}")
@@ -307,7 +307,7 @@ def _resolve_field(key: str, index: dict[str, ConfigFieldView]) -> ConfigFieldVi
     field = index.get(key)
     if field is None:
         raise ConfigError(
-            f"unknown config key: {key!r} (use the env-var name like AVA_MODEL or the field name)"
+            f"unknown config key: {key!r} (use the env-var name like MEIVA_MODEL or the field name)"
         )
     return field
 
@@ -401,7 +401,7 @@ def _print_audit_record(record: dict[str, object]) -> None:
 def cmd_config_audit(
     last: int, key: str | None, machine: str | None, *, identity: MachineIdentity
 ) -> int:
-    """`ava config audit [--last N] [--key K] [--machine M]` — the `.env` write trail.
+    """`meiva config audit [--last N] [--key K] [--machine M]` — the `.env` write trail.
 
     Reads this unit's own audit history by default (no gateway round-trip);
     `--machine <name|all>` fetches through the gateway (that machine's records, or
@@ -410,7 +410,7 @@ def cmd_config_audit(
     path reports the same clean error the API's 422 gives, never a traceback.
     """
     if not 1 <= last <= 200:
-        print("[ava config audit] --last must be between 1 and 200", file=sys.stderr)
+        print("[meiva config audit] --last must be between 1 and 200", file=sys.stderr)
         return 1
     if machine is None:
         records = [
@@ -422,10 +422,10 @@ def cmd_config_audit(
         try:
             records = get_config_audit(machine, last).records
         except ConfigError as e:
-            print(f"[ava config audit] {e}", file=sys.stderr)
+            print(f"[meiva config audit] {e}", file=sys.stderr)
             return 1
         except httpx.HTTPError as e:
-            print(f"[ava config audit] gateway request failed: {e}", file=sys.stderr)
+            print(f"[meiva config audit] gateway request failed: {e}", file=sys.stderr)
             return 1
     if key is not None:
         records = [record for record in records if _audit_touches_key(record, key)]
@@ -438,7 +438,7 @@ def cmd_config_audit(
 
 
 def cmd_config_get(key: str | None, machine: str | None, *, local: bool = False) -> int:
-    """`ava config get [KEY] [--machine M] [--local]` — print config values."""
+    """`meiva config get [KEY] [--machine M] [--local]` — print config values."""
     if local:
         rejected = _reject_local_machine(machine, "get")
         return rejected if rejected is not None else _local_get(key)
@@ -447,10 +447,10 @@ def cmd_config_get(key: str | None, machine: str | None, *, local: bool = False)
     try:
         view = get_config(machine)
     except ConfigError as e:
-        print(f"[ava config get] {e}", file=sys.stderr)
+        print(f"[meiva config get] {e}", file=sys.stderr)
         return 1
     except httpx.HTTPError as e:
-        print(f"[ava config get] gateway request failed: {e}", file=sys.stderr)
+        print(f"[meiva config get] gateway request failed: {e}", file=sys.stderr)
         return 1
 
     if key is not None:
@@ -458,7 +458,7 @@ def cmd_config_get(key: str | None, machine: str | None, *, local: bool = False)
         try:
             field = _resolve_field(key, index)
         except ConfigError as e:
-            print(f"[ava config get] {e}", file=sys.stderr)
+            print(f"[meiva config get] {e}", file=sys.stderr)
             return 1
         value = field.current_value
         shown = "(empty)" if value in (None, "") else value
@@ -545,13 +545,13 @@ def _edit_local_config(
     try:
         writes, removals, changed = _build_local_patch(pairs, unset_keys)
     except ConfigError as e:
-        print(f"[ava config {verb}] {e}", file=sys.stderr)
+        print(f"[meiva config {verb}] {e}", file=sys.stderr)
         return 1
 
     candidate = validate_env_patch_for_write(writes, removals)
     if candidate.errors:
         for error in candidate.errors:
-            print(f"[ava config {verb}] {error}", file=sys.stderr)
+            print(f"[meiva config {verb}] {error}", file=sys.stderr)
         return 1
 
     try:
@@ -562,12 +562,12 @@ def _edit_local_config(
             audit=EnvWriteAudit(site="cli_config_local", actor=f"cli:{getpass.getuser()}"),
         )
     except RuntimeError as e:
-        print(f"[ava config {verb}] {e}; retry against the current .env", file=sys.stderr)
+        print(f"[meiva config {verb}] {e}; retry against the current .env", file=sys.stderr)
         return 1
     restart_required = sorted(
         {field.restart_required for field in changed if field.restart_required}
     )
-    print(f"[ava config {verb}] applied.")
+    print(f"[meiva config {verb}] applied.")
     _print_restart_hint(
         ConfigWriteResult(applied=True, results={}, restart_required=restart_required), machine=None
     )
@@ -587,45 +587,45 @@ def _edit_config(
     try:
         view = get_config(machine)
     except ConfigError as e:
-        print(f"[ava config {verb}] {e}", file=sys.stderr)
+        print(f"[meiva config {verb}] {e}", file=sys.stderr)
         return 1
     except httpx.HTTPError as e:
-        print(f"[ava config {verb}] gateway request failed: {e}", file=sys.stderr)
+        print(f"[meiva config {verb}] gateway request failed: {e}", file=sys.stderr)
         return 1
 
     try:
         body = _build_delta(view, pairs, unset_keys, machine=machine)
     except ConfigError as e:
-        print(f"[ava config {verb}] {e}", file=sys.stderr)
+        print(f"[meiva config {verb}] {e}", file=sys.stderr)
         return 1
 
     try:
         result = put_config(body, machine)
     except ConfigError as e:
-        print(f"[ava config {verb}] {e}", file=sys.stderr)
+        print(f"[meiva config {verb}] {e}", file=sys.stderr)
         return 1
     except httpx.HTTPError as e:
-        print(f"[ava config {verb}] gateway request failed: {e}", file=sys.stderr)
+        print(f"[meiva config {verb}] gateway request failed: {e}", file=sys.stderr)
         return 1
 
     if not result.applied:
-        print(f"[ava config {verb}] rejected:", file=sys.stderr)
+        print(f"[meiva config {verb}] rejected:", file=sys.stderr)
         for name, r in result.results.items():
             if not r.ok:
                 print(f"  {name}: {r.reason}", file=sys.stderr)
         return 1
 
-    print(f"[ava config {verb}] applied.")
+    print(f"[meiva config {verb}] applied.")
     _print_restart_hint(result, machine)
     return 0
 
 
 def cmd_config_set(assignments: list[str], machine: str | None, *, local: bool = False) -> int:
-    """`ava config set KEY=VALUE [KEY=VALUE ...] [--machine M] [--local]`."""
+    """`meiva config set KEY=VALUE [KEY=VALUE ...] [--machine M] [--local]`."""
     pairs: dict[str, str] = {}
     for item in assignments:
         if "=" not in item:
-            print(f"[ava config set] expected KEY=VALUE, got {item!r}", file=sys.stderr)
+            print(f"[meiva config set] expected KEY=VALUE, got {item!r}", file=sys.stderr)
             return 1
         key, value = item.split("=", 1)
         pairs[key.strip()] = value
@@ -636,7 +636,7 @@ def cmd_config_set(assignments: list[str], machine: str | None, *, local: bool =
 
 
 def cmd_config_unset(keys: list[str], machine: str | None, *, local: bool = False) -> int:
-    """`ava config unset KEY [KEY ...] [--machine M] [--local]` — revert fields."""
+    """`meiva config unset KEY [KEY ...] [--machine M] [--local]` — revert fields."""
     if local:
         rejected = _reject_local_machine(machine, "unset")
         return rejected if rejected is not None else _edit_local_config(None, keys, "unset")

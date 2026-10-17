@@ -1,6 +1,6 @@
 """Generation-owned admission freeze for new PTY sessions.
 
-The host runs one cluster, so the marker and its lock live in its ``$AVA_HOME``
+The host runs one cluster, so the marker and its lock live in its ``$MEIVA_HOME``
 (``pty-allocation-freeze.json`` and ``pty-allocation.lock``). The allocation gate
 affects only absent session -> new PTY session; desired-state reconcilers reap
 existing exact sessions that belong to an earlier generation.
@@ -60,15 +60,15 @@ def _invalid(message: str) -> Never:
 
 
 def state_path() -> Path:
-    from base.paths import ava_home
+    from base.paths import meiva_home
 
-    return ava_home() / _STATE_FILENAME
+    return meiva_home() / _STATE_FILENAME
 
 
 def lock_path() -> Path:
-    from base.paths import ava_home
+    from base.paths import meiva_home
 
-    return ava_home() / _LOCK_FILENAME
+    return meiva_home() / _LOCK_FILENAME
 
 
 def _timestamp(value: object) -> dt.datetime:

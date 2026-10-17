@@ -32,7 +32,7 @@ from base.agents.incarnation.tests.test_runner_role import (
 
 
 def test_runner_grant_matrix(runner_db: str) -> None:  # noqa: PLR0915 -- one grant-matrix litany; each line is one exercised surface
-    """The design's grant matrix, exercised as ava_runner over the wire."""
+    """The design's grant matrix, exercised as meiva_runner over the wire."""
     grant_runner(runner_db)
 
     # Seed rows as the admin (the gateway side): an agent + its meta + an inbound.
@@ -54,7 +54,7 @@ def test_runner_grant_matrix(runner_db: str) -> None:  # noqa: PLR0915 -- one gr
         assert inbound_row is not None
         inbound_id: int = inbound_row[0]
         # An open page row (the runner only UPDATEs pages — INSERT stays with
-        # the gateway API's ava.ui.serve/show path)
+        # the gateway API's meiva.ui.serve/show path)
         conn.execute(
             "INSERT INTO agent_pages (agent_id, name, port) VALUES (%s, 'p', 8000)",
             (agent_id,),
@@ -66,7 +66,7 @@ def test_runner_grant_matrix(runner_db: str) -> None:  # noqa: PLR0915 -- one gr
         assert conn.execute("SELECT * FROM agents").fetchone() is not None
         granted_row = conn.execute(
             "SELECT count(*) FROM information_schema.table_privileges"
-            " WHERE grantee = 'ava_runner' AND privilege_type = 'SELECT'"
+            " WHERE grantee = 'meiva_runner' AND privilege_type = 'SELECT'"
         ).fetchone()
         assert granted_row is not None
         granted: int = granted_row[0]
@@ -74,7 +74,7 @@ def test_runner_grant_matrix(runner_db: str) -> None:  # noqa: PLR0915 -- one gr
 
         # inbound claim (SELECT + UPDATE) ...
         conn.execute("UPDATE inbound_messages SET status = 'claimed' WHERE id = %s", (inbound_id,))
-        # ... and self-lifecycle inbounds: ava.self.terminate / restart / compact
+        # ... and self-lifecycle inbounds: meiva.self.terminate / restart / compact
         # insert their OWN rows from the runner process (NOT via the gateway API)
         # — e2e caught the missing INSERT: a self-terminate whose inbound could
         # not land left the agent 'running' forever.
@@ -89,7 +89,7 @@ def test_runner_grant_matrix(runner_db: str) -> None:  # noqa: PLR0915 -- one gr
         with pytest.raises(psycopg.errors.InsufficientPrivilege):
             conn.execute("UPDATE agents SET label = 'me' WHERE id = %s", (agent_id,))
         # SDK write surfaces the runner process uses directly:
-        # ava.tasks (INSERT + UPDATE) ...
+        # meiva.tasks (INSERT + UPDATE) ...
         conn.execute(
             "INSERT INTO agent_tasks (title, description, created_by) VALUES ('t1', 'd', '123')"
         )
@@ -101,7 +101,7 @@ def test_runner_grant_matrix(runner_db: str) -> None:  # noqa: PLR0915 -- one gr
         # ... and the show-page close at exit (agent_pages UPDATE; the row
         # itself was seeded by the gateway side above)
         conn.execute("UPDATE agent_pages SET closed_at = now() WHERE agent_id = %s", (agent_id,))
-        # ava.self.pause_heartbeat: the pause trail (SELECT the previous
+        # meiva.self.pause_heartbeat: the pause trail (SELECT the previous
         # window + INSERT the new row — regression for task #1932, where the
         # table shipped without a runner grant and every pause_heartbeat
         # INSERT failed with InsufficientPrivilege)
@@ -112,7 +112,7 @@ def test_runner_grant_matrix(runner_db: str) -> None:  # noqa: PLR0915 -- one gr
         # creation failed with InsufficientPrivilege on
         # agent_impersonation_entries)
         exercise_impersonation_entry_grants(conn, agent_id)
-        # the task-receipt tombstones ava.tasks.update/log/create append in
+        # the task-receipt tombstones meiva.tasks.update/log/create append in
         # their own transaction (operation-key admission and replay) —
         # regression for the 2026-10-10 task-write outage, where the tables
         # shipped without a runner grant and every receipt INSERT failed with
@@ -130,7 +130,7 @@ def test_runner_grant_matrix(runner_db: str) -> None:  # noqa: PLR0915 -- one gr
         conn.execute("INSERT INTO machine_units (machine_name, home) VALUES ('m1', '/h1')")
         conn.execute("UPDATE machine_units SET url = 'http://m1' WHERE machine_name = 'm1'")
         # the runner service chain (prod-deploy finding, #2599 follow-up):
-        # `ava start` register_self recomputes the machines row (INSERT ON
+        # `meiva start` register_self recomputes the machines row (INSERT ON
         # CONFLICT DO UPDATE) and writes the deploy posture ...
         conn.execute(
             "INSERT INTO machines (name, gateway_url, role, up_since_at)"
@@ -176,7 +176,7 @@ def test_runner_grant_matrix(runner_db: str) -> None:  # noqa: PLR0915 -- one gr
         # Agent-boot DDL: PostgresSaver.setup() issues CREATE TABLE IF NOT EXISTS,
         # which Postgres refuses for a role without CREATE on the schema — even on
         # existing tables (verified on PG 17). That refusal is the DESIGNED
-        # behavior (any DDL must fail under ava_runner); install + gateway start
+        # behavior (any DDL must fail under meiva_runner); install + gateway start
         # own setup(), while agent boot and checkpoint reads only use CRUD.
         with (
             pytest.raises(psycopg.errors.InsufficientPrivilege),
@@ -212,7 +212,7 @@ def test_read_grant_reaches_a_table_created_after_provisioning(runner_db: str) -
     The live order is the reverse — install grants once, then migrations keep
     creating tables, and `GRANT SELECT ON ALL TABLES` is a point-in-time loop:
     without the `ALTER DEFAULT PRIVILEGES` beside it every later table stayed
-    invisible to `ava_runner` (found on `20260820T175737`, the first
+    invisible to `meiva_runner` (found on `20260820T175737`, the first
     post-baseline migration to CREATE a table).
     """
     grant_runner(runner_db)
@@ -366,7 +366,7 @@ def test_understanding_queue_insert_grant_reaches_a_cluster_born_before_the_entr
     re-runs the grant layer."""
     grant_runner(runner_db)
     with psycopg.connect(runner_db, autocommit=True) as conn:
-        conn.execute("REVOKE INSERT ON understanding_chunk_jobs FROM ava_runner")
+        conn.execute("REVOKE INSERT ON understanding_chunk_jobs FROM meiva_runner")
 
     with (
         psycopg.connect(runner_url(runner_db), autocommit=True) as conn,
@@ -426,7 +426,7 @@ def test_runner_accepts_and_projects_original_restart_receipt_without_delete_gra
         )
     if refresh:
         with psycopg.connect(runner_db, autocommit=True) as conn:
-            conn.execute("REVOKE UPDATE ON native_restart_commands FROM ava_runner")
+            conn.execute("REVOKE UPDATE ON native_restart_commands FROM meiva_runner")
     if refresh:
         with (
             psycopg.connect(runner_url(runner_db), autocommit=True) as conn,
@@ -480,7 +480,7 @@ def test_runner_writes_native_work_copy_and_cancel_ack_with_domain_limits(runner
         )
         conn.execute(
             "INSERT INTO upload_delivery_copies(batch_id,unit_home,agent_id,request,manifest,storage_machine,storage_directory) "
-            "VALUES('fixed-batch','/unit',1,'{}','{}','runner-test','/Downloads/AvaAgent-1')"
+            "VALUES('fixed-batch','/unit',1,'{}','{}','runner-test','/Downloads/MeivaAgent-1')"
         )
         conn.execute(
             "UPDATE upload_delivery_copies SET ready_at=now() WHERE batch_id='fixed-batch'"

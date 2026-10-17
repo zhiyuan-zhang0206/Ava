@@ -52,7 +52,7 @@ def _install_fake_gateway_login(monkeypatch: pytest.MonkeyPatch) -> None:
     async def fake_login(gateway_url: str, secret: str) -> tuple[str, str, int]:
         assert gateway_url == GATEWAY
         assert secret == SECRET
-        return "ava_session", "opaque-session", 1_800_000_000
+        return "meiva_session", "opaque-session", 1_800_000_000
 
     monkeypatch.setattr(sess, "gateway_session_login", fake_login)
 
@@ -85,7 +85,7 @@ def _install_login_response(
     monkeypatch: pytest.MonkeyPatch,
     *,
     status_code: int = 200,
-    set_cookie: str | None = "ava_session=opaque-session; HttpOnly; Max-Age=86400; Path=/",
+    set_cookie: str | None = "meiva_session=opaque-session; HttpOnly; Max-Age=86400; Path=/",
 ) -> list[tuple[str, dict[str, str], dict[str, str]]]:
     calls: list[tuple[str, dict[str, str], dict[str, str]]] = []
 
@@ -118,7 +118,7 @@ async def test_gateway_session_login_returns_server_cookie(
 
     result = await sess.gateway_session_login(GATEWAY, SECRET)
 
-    assert result == ("ava_session", "opaque-session", 1_700_086_400)
+    assert result == ("meiva_session", "opaque-session", 1_700_086_400)
     url, body, headers = calls[0]
     assert (url, body) == (f"{GATEWAY}/api/auth/login", {"password": SECRET})
     # the managed-browser marker lets the sessions list label this row
@@ -139,8 +139,8 @@ async def test_gateway_session_login_rejects_non_200(
     [
         None,
         "other=value; Max-Age=86400",
-        "ava_session=opaque-session; Path=/",
-        "ava_session=opaque-session; Max-Age=invalid",
+        "meiva_session=opaque-session; Path=/",
+        "meiva_session=opaque-session; Max-Age=invalid",
     ],
 )
 async def test_gateway_session_login_rejects_malformed_cookie(
@@ -166,7 +166,7 @@ async def test_inject_sets_cookie_with_login_flags(monkeypatch: pytest.MonkeyPat
     set_cookie = ws["page"].sent[0]
     assert set_cookie["method"] == "Network.setCookie"
     params = set_cookie["params"]
-    assert params["name"] == "ava_session"
+    assert params["name"] == "meiva_session"
     assert params["url"] == GATEWAY + "/"  # host-only, trailing slash normalized
     assert params["path"] == "/"
     assert params["httpOnly"] is True
@@ -261,8 +261,8 @@ def test_session_params_present_the_delivered_runner_token(
 ) -> None:
     monkeypatch.setattr(gateway_session, "gateway_api_base", gateway_api_base_stub(GATEWAY))
     monkeypatch.setattr(gateway_session.settings.data_plane, "cluster_secret", SECRET)
-    monkeypatch.setenv("AVA_PROCESS_PROFILE", "runner")
-    monkeypatch.setenv("AVA_API_TOKEN", "delivered-runner-token")
+    monkeypatch.setenv("MEIVA_PROCESS_PROFILE", "runner")
+    monkeypatch.setenv("MEIVA_API_TOKEN", "delivered-runner-token")
     assert gateway_session.gateway_session_params() == (GATEWAY, "delivered-runner-token")
 
 
@@ -273,14 +273,14 @@ def test_session_params_without_a_token_log_the_defect_instead_of_using_the_secr
     that delivered no token is an error, and the human secret never stands in."""
     monkeypatch.setattr(gateway_session, "gateway_api_base", gateway_api_base_stub(GATEWAY))
     monkeypatch.setattr(gateway_session.settings.data_plane, "cluster_secret", SECRET)
-    monkeypatch.setenv("AVA_PROCESS_PROFILE", "runner")
-    monkeypatch.delenv("AVA_API_TOKEN", raising=False)
+    monkeypatch.setenv("MEIVA_PROCESS_PROFILE", "runner")
+    monkeypatch.delenv("MEIVA_API_TOKEN", raising=False)
 
     assert gateway_session.gateway_session_params() is None
 
     errors = loguru_records.messages("ERROR")
     assert len(errors) == 1
-    assert "AVA_API_TOKEN" in errors[0]
+    assert "MEIVA_API_TOKEN" in errors[0]
     assert SECRET not in errors[0]
 
 

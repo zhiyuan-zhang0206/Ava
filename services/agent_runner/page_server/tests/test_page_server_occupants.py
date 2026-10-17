@@ -31,7 +31,7 @@ def test_occupants_skips_a_process_whose_cmdline_read_fails(
             return list(self._cmdline)
 
         def environ(self) -> dict[str, str]:
-            return {"AVA_HOME": self._home}
+            return {"MEIVA_HOME": self._home}
 
     procs: list[object] = [
         _ReadFails(),

@@ -10,19 +10,19 @@
 
 [debt.env-patch]
 "test_context_binding.py#patch.dict os.environ" = 3
-"test_exec_child.py#monkeypatch.delenv os.environ.AVA_CONFIG_BOOT" = 1
-"test_exec_child.py#monkeypatch.delenv os.environ.AVA_CONFIG_FETCH" = 2
-"test_exec_child.py#monkeypatch.setenv os.environ.AVA_AGENT_BIRTH_CONFIG" = 1
-"test_exec_child.py#monkeypatch.setenv os.environ.AVA_AGENT_CONFIG_OVERLAY" = 1
-"test_exec_child.py#monkeypatch.setenv os.environ.AVA_CONFIG_BOOT" = 1
-"test_exec_child.py#monkeypatch.setenv os.environ.AVA_EXEC_REQUEST_FILE" = 1
-"test_exec_child.py#monkeypatch.setenv os.environ.AVA_EXEC_RESULT_FILE" = 1
+"test_exec_child.py#monkeypatch.delenv os.environ.MEIVA_CONFIG_BOOT" = 1
+"test_exec_child.py#monkeypatch.delenv os.environ.MEIVA_CONFIG_FETCH" = 2
+"test_exec_child.py#monkeypatch.setenv os.environ.MEIVA_AGENT_BIRTH_CONFIG" = 1
+"test_exec_child.py#monkeypatch.setenv os.environ.MEIVA_AGENT_CONFIG_OVERLAY" = 1
+"test_exec_child.py#monkeypatch.setenv os.environ.MEIVA_CONFIG_BOOT" = 1
+"test_exec_child.py#monkeypatch.setenv os.environ.MEIVA_EXEC_REQUEST_FILE" = 1
+"test_exec_child.py#monkeypatch.setenv os.environ.MEIVA_EXEC_RESULT_FILE" = 1
 "test_exec_child.py#patch.dict os.environ" = 1
 "test_resource_admission.py#patch.dict os.environ" = 1
 
 [debt.first-party-patch]
 "child_external_cli.py#assignment agent.extensions.plugin_state_codec.load_snapshot" = 1
-"child_external_cli.py#assignment ava.impersonation.attachment.control.require_active" = 1
+"child_external_cli.py#assignment meiva.impersonation.attachment.control.require_active" = 1
 "test_exec_child.py#monkeypatch.setattr agent.execution.child.apply_overlay_scope" = 1
 "test_exec_child.py#monkeypatch.setattr agent.execution.child.build_state_slot" = 1
 "test_exec_child.py#monkeypatch.setattr agent.execution.child.init_logger" = 1
@@ -32,8 +32,8 @@
 "test_exec_child.py#monkeypatch.setattr agent.graph.exec.protocol.write_result" = 2
 "test_exec_child.py#monkeypatch.setattr agent.process_boot.apply_per_agent_eval_isolation" = 1
 "test_exec_child.py#monkeypatch.setattr agent.process_boot.apply_per_agent_sdk_disable" = 1
-"test_exec_child.py#monkeypatch.setattr ava.__plugin_installation__" = 1
-"test_exec_child.py#monkeypatch.setattr ava.boot.ensure_plugins_loaded" = 1
+"test_exec_child.py#monkeypatch.setattr meiva.__plugin_installation__" = 1
+"test_exec_child.py#monkeypatch.setattr meiva.boot.ensure_plugins_loaded" = 1
 "test_exec_child_signals.py#monkeypatch.setattr agent.execution.child.apply_overlay_scope" = 1
 "test_exec_child_signals.py#monkeypatch.setattr agent.execution.child.build_state_slot" = 1
 "test_exec_child_signals.py#monkeypatch.setattr agent.execution.child.line_buffered_output" = 1
@@ -41,10 +41,10 @@
 "test_exec_child_signals.py#monkeypatch.setattr agent.execution.child.run_code" = 1
 "test_exec_child_signals.py#monkeypatch.setattr agent.graph.exec.protocol.read_request" = 1
 "test_exec_child_signals.py#monkeypatch.setattr agent.graph.exec.protocol.write_result" = 1
-"test_exec_child_signals.py#monkeypatch.setattr ava.__plugin_installation__" = 1
-"test_exec_child_signals.py#monkeypatch.setattr ava.ensure_plugins_loaded" = 1
-"test_exec_slot.py#assignment ava.state" = 4
-"test_exec_slot.py#assignment ava.state_update" = 1
+"test_exec_child_signals.py#monkeypatch.setattr meiva.__plugin_installation__" = 1
+"test_exec_child_signals.py#monkeypatch.setattr meiva.ensure_plugins_loaded" = 1
+"test_exec_slot.py#assignment meiva.state" = 4
+"test_exec_slot.py#assignment meiva.state_update" = 1
 
 [debt.private-name]
 "test_resource_admission.py -> test_exec_owner_entry.py#_start" = 1

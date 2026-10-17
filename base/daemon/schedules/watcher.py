@@ -1,12 +1,12 @@
 """Watcher shared helpers — cron validation / next-fire, `when` normalization,
 and watcher-script generation.
 
-Used by the `ava.watcher` SDK. A time watcher is just a normal session running a
+Used by the `meiva.watcher` SDK. A time watcher is just a normal session running a
 generated Python script that sleeps until its target time(s) and delivers its
 message back to the launching agent (a `watcher:N`-tagged chat inbound via the
 gateway client); the builders here produce those scripts. The cron math
 (`validate_cron` / `next_fire`) and the `when` normalization were previously in
-`base/schedule.py` / `ava/schedule.py`, relocated here when the central
+`base/schedule.py` / `meiva/schedule.py`, relocated here when the central
 scheduler was removed.
 """
 
@@ -42,9 +42,9 @@ __all__ = [
 
 # Standing cron cap (user ruling 2026-09-09, task #2617): a cron registered
 # without an explicit end_time lives at most this long, counted from
-# registration — `ava.watcher.cron` defaults `end_time` to now + this. A longer
+# registration — `meiva.watcher.cron` defaults `end_time` to now + this. A longer
 # schedule must pass an explicit end_time. Calling `cron()` again with the same
-# expression starts another, independent session (see ava/watcher/__init__.py::cron) —
+# expression starts another, independent session (see meiva/watcher/__init__.py::cron) —
 # it does not renew or replace the earlier one.
 DEFAULT_STANDING_CRON_MAX_SECONDS = 7 * 24 * 3600
 
@@ -95,7 +95,7 @@ def next_fire(
     The UTC default is the primitive staying neutral: it has no opinion about
     which wall clock a caller means, and UTC is the only reading that cannot
     silently pick up the host's OS timezone. Callers that mean "the cluster's
-    wall clock" — the built-in schedules, ``ava.watcher.cron`` — pass
+    wall clock" — the built-in schedules, ``meiva.watcher.cron`` — pass
     ``settings.general.timezone`` explicitly; nothing here reaches for config.
 
     ``tolerance`` widens the match window for resumable sleep loops. croniter's
@@ -198,7 +198,7 @@ def parse_timeout(timeout: float | _dt.timedelta | str) -> float:
 
     Accepts a number of seconds, a `timedelta`, or a `"<n>{s,m,h,d}"` duration
     string (e.g. `"30m"`, `"2h"`). Lives here (not in the SDK) so both the
-    SDK's `ava.watcher.launch` and any system-side caller parse one grammar.
+    SDK's `meiva.watcher.launch` and any system-side caller parse one grammar.
     """
     if isinstance(timeout, _dt.timedelta):
         secs = timeout.total_seconds()
@@ -236,7 +236,7 @@ def session_deadline(
     """The moment a watcher's session must be reclaimed — its target deadline.
 
     One derivation for the lifecycle (user ruling 2026-09-14, task #3411: a
-    watcher session's shell TTL IS its target deadline). `ava.watcher.spawn.run`
+    watcher session's shell TTL IS its target deadline). `meiva.watcher.spawn.run`
     calls this once, at spawn, to fold the deadline into the session's shell
     TTL — the only place it is derived any more: the TTL reaper
     (`services/upkeep/ttl_reaper/shells.py`) reclaims every session, watcher or not, purely
@@ -268,7 +268,7 @@ def session_deadline(
 
 # Shared preamble for both generated scripts: `_wake(message)` delivers a
 # `watcher:N`-tagged chat inbound to the launching agent (identity comes from
-# the bootstrap's inlined AVA_AGENT_ID — `agent_identity.agent_id()` reads it lazily;
+# the bootstrap's inlined MEIVA_AGENT_ID — `agent_identity.agent_id()` reads it lazily;
 # N from the session-id env var the run command sets). Inlined into the
 # generated script — the SDK deliberately has no public remind primitive, and
 # a generated script may use internal plumbing. Delivery retries 3x with
@@ -281,8 +281,8 @@ import os as _os
 import sys as _sys
 import time as _time
 
-from ava.sdk_surface import agent_identity
-from ava import gateway_client
+from meiva.sdk_surface import agent_identity
+from meiva import gateway_client
 
 # A wake must survive a gateway restart: until 2026-09-15 the bare
 # send_message call raised GatewayUnavailable out of this helper and killed
@@ -300,7 +300,7 @@ def _wake(message):
             gateway_client.send_message(
                 agent_identity.agent_id(),
                 content=message,
-                source="watcher:" + _os.environ["AVA_WATCHER_SESSION_ID"],
+                source="watcher:" + _os.environ["MEIVA_WATCHER_SESSION_ID"],
             )
             return True
         except Exception as _exc:

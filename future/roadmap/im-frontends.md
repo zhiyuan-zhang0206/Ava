@@ -1,7 +1,7 @@
 # IM frontends (im_bridge)
 
-An IM app is Ava's **frontend**, not a message channel — the opposite of
-OpenClaw's channel abstraction: Ava is a fleet of 21+ agents whose surface
+An IM app is Meiva's **frontend**, not a message channel — the opposite of
+OpenClaw's channel abstraction: Meiva is a fleet of 21+ agents whose surface
 far exceeds conversation (FleetView / task tree / stats), and IM can only
 carry "remote control / query / notify" operations. Following Hermes Agent's
 layering: the Messaging Gateway belongs in the User Interface Layer (the UI
@@ -10,7 +10,7 @@ logic).
 
 ## Architecture (decided, aligned with the user 2026-08-02)
 
-> **Status note (2026-08-08)**: the v1 command set and channel table below lag the shipped implementation — see [services/docs/gateway_side/im_bridge/im_bridge.ava.okf.md](../../services/docs/gateway_side/im_bridge/im_bridge.ava.okf.md) for the current reality. Telegram + Feishu are the live channels (Feishu was re-enabled 2026-09); the WeChat (iLink) adapter stays **production-disabled since 2026-08-06** (`AVA_IM_DISABLED_ADAPTERS=weixin`).
+> **Status note (2026-08-08)**: the v1 command set and channel table below lag the shipped implementation — see [services/docs/gateway_side/im_bridge/im_bridge.meiva.okf.md](../../services/docs/gateway_side/im_bridge/im_bridge.meiva.okf.md) for the current reality. Telegram + Feishu are the live channels (Feishu was re-enabled 2026-09); the WeChat (iLink) adapter stays **production-disabled since 2026-08-06** (`MEIVA_IM_DISABLED_ADAPTERS=weixin`).
 
 - **IM Bridge = a gateway-hosted service** (`services/entrypoints/im_bridge/`, ServiceSpec
   `im-bridge`): one adapter (service) per IM, sharing a core (message envelope,
@@ -35,7 +35,7 @@ logic).
 |---|---|---|---|
 | Telegram | Bot API (getUpdates long polling) | reuses the existing bot (settings.telegram) | **live** |
 | WeChat | iLink (ilinkai.weixin.qq.com, HTTP/JSON + QR login) | QR binding (one-time) | implemented, **production-disabled (2026-08-06)** |
-| Feishu | self-built app + WS long connection (lark-oapi) | app_id/app_secret (Ava Corp. enterprise) | implemented, **live (re-enabled 2026-09)** |
+| Feishu | self-built app + WS long connection (lark-oapi) | app_id/app_secret (Meiva Corp. enterprise) | implemented, **live (re-enabled 2026-09)** |
 
 ## Future extensions (GitHub issue #971)
 

@@ -35,7 +35,7 @@ def isolated_host_home(unit_home: Path, monkeypatch: pytest.MonkeyPatch) -> Path
 
     Tests that read/write this machine's .env pin `dotenv_file.unit_home`
     directly, so the `.env` they touch is this tmp dir's whatever else the test
-    does with `AVA_HOME`.
+    does with `MEIVA_HOME`.
     """
     monkeypatch.setattr(dotenv_file, "unit_home", lambda: unit_home)
     return unit_home
@@ -87,7 +87,7 @@ def _inject_sensitive_host_field(
         restart_required="none",
         writable=True,
         sensitive=True,
-        env_var="AVA_TEST_SENSITIVE_HOST",
+        env_var="MEIVA_TEST_SENSITIVE_HOST",
         scope="host",
         capability="common",
         remote_writable=True,
@@ -489,7 +489,7 @@ def test_config_write_op_all_good_writes_file(
     )
     assert result.applied is True
     assert runtime_config.env_set_field_names() == {"ops_concurrency", "machine_description"}
-    assert dotenv_file.read_env_aliases()["AVA_OPS_CONCURRENCY"] == "4"
+    assert dotenv_file.read_env_aliases()["MEIVA_OPS_CONCURRENCY"] == "4"
 
 
 def test_config_write_op_none_unsets_field(
@@ -522,7 +522,7 @@ def test_config_write_op_none_unsets_field(
     )
     assert result.applied is True
     assert runtime_config.env_set_field_names() == {"ops_concurrency"}
-    assert dotenv_file.read_env_aliases()["AVA_OPS_CONCURRENCY"] == "4"
+    assert dotenv_file.read_env_aliases()["MEIVA_OPS_CONCURRENCY"] == "4"
 
 
 def test_config_write_op_absent_key_left_untouched(
@@ -556,7 +556,7 @@ def test_config_write_op_absent_key_left_untouched(
     )
     assert result.applied is True
     assert runtime_config.env_set_field_names() == {"ops_concurrency", "machine_description"}
-    assert dotenv_file.read_env_aliases()["AVA_OPS_CONCURRENCY"] == "5"
+    assert dotenv_file.read_env_aliases()["MEIVA_OPS_CONCURRENCY"] == "5"
 
 
 def test_config_write_op_empty_patch_is_noop(
@@ -594,7 +594,7 @@ def test_config_write_op_does_not_disturb_non_managed_env(
     machine_identity: MachineIdentity,
 ) -> None:
     """A write touches only the fields named in the patch — a connection value
-    the first start wrote into .env (e.g. AVA_DB_URL) is left alone even when a
+    the first start wrote into .env (e.g. MEIVA_DB_URL) is left alone even when a
     managed field is explicitly unset."""
     machine_identity.set(name="test-machine")
     monkeypatch.setattr(
@@ -602,7 +602,7 @@ def test_config_write_op_does_not_disturb_non_managed_env(
         "validate",
         lambda _field, _val, **_kwargs: config_validators.ValidationResult(ok=True),  # pyright: ignore[reportUnknownArgumentType]
     )
-    isolated_host_home.joinpath(".env").write_text("AVA_DB_URL=postgresql://x@127.0.0.1:1/x\n")
+    isolated_host_home.joinpath(".env").write_text("MEIVA_DB_URL=postgresql://x@127.0.0.1:1/x\n")
     config_write_op(
         {"ops_concurrency": 4},
         authority=config_authority,
@@ -614,9 +614,9 @@ def test_config_write_op_does_not_disturb_non_managed_env(
         authority=config_authority,
         local_machine=machine_identity.name(),
         host=fake_host(),
-    )  # explicit unset must not touch AVA_DB_URL
-    assert dotenv_file.read_env_aliases()["AVA_DB_URL"] == "postgresql://x@127.0.0.1:1/x"
-    assert "AVA_OPS_CONCURRENCY" not in dotenv_file.read_env_aliases()
+    )  # explicit unset must not touch MEIVA_DB_URL
+    assert dotenv_file.read_env_aliases()["MEIVA_DB_URL"] == "postgresql://x@127.0.0.1:1/x"
+    assert "MEIVA_OPS_CONCURRENCY" not in dotenv_file.read_env_aliases()
 
 
 def test_config_write_op_restart_required_union(
@@ -677,7 +677,7 @@ def test_config_write_op_rejects_an_invalid_candidate_without_writing(
     machine_identity: MachineIdentity,
 ) -> None:
     """A value the settings model would refuse at startup is never persisted."""
-    runtime_config.write_fields({"db_url": "postgresql://ava@127.0.0.1:5432/ava"}, set())
+    runtime_config.write_fields({"db_url": "postgresql://meiva@127.0.0.1:5432/meiva"}, set())
     env_path = isolated_host_home / ".env"
     before = env_path.read_bytes()
 
@@ -728,9 +728,9 @@ def test_config_audit_read_op_returns_this_hosts_newest_records(
 
     machine_identity.set(name="test-machine")
     env_path = isolated_host_home / ".env"
-    env_path.write_text("AVA_MODEL=m\n")
-    record_env_write(env_path, {"AVA_MODEL"}, set(), site="one")
-    record_env_write(env_path, {"AVA_MODEL"}, set(), site="two")
+    env_path.write_text("MEIVA_MODEL=m\n")
+    record_env_write(env_path, {"MEIVA_MODEL"}, set(), site="one")
+    record_env_write(env_path, {"MEIVA_MODEL"}, set(), site="two")
 
     result = config_audit_read_op(1, local_machine=machine_identity.name())
     assert result.machine == "test-machine"

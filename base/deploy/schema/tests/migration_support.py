@@ -50,7 +50,7 @@ def schema_sql_stamped_migration_names() -> list[str]:
 def throwaway_database(prefix: str) -> Generator[str, None, None]:
     base_url, _ = settings.data_plane.db_url.rsplit("/", 1)
     admin_url = f"{base_url}/postgres"
-    name = f"ava_test_{prefix}_{os.getpid()}_{int(time.time() * 1_000_000)}"
+    name = f"meiva_test_{prefix}_{os.getpid()}_{int(time.time() * 1_000_000)}"
     url = f"{base_url}/{name}"
     with psycopg.connect(admin_url, autocommit=True) as admin, admin.cursor() as cur:
         cur.execute(sql.SQL("CREATE DATABASE {}").format(sql.Identifier(name)))

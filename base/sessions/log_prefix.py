@@ -13,7 +13,7 @@ def session_log_header(name: str, *, pid: int | None = None) -> bytes:
     """Return a UTF-8 session identity line with a UTC start timestamp."""
     start = datetime.now(timezone.utc).isoformat()  # noqa: UP017 - task specifies timezone.utc
     process = f" pid={pid}" if pid is not None else ""
-    return f"--- ava session {name} start={start}{process} ---\n".encode()
+    return f"--- meiva session {name} start={start}{process} ---\n".encode()
 
 
 def open_session_log(path: Path, name: str, *, pid: int | None = None) -> tuple[int, bool]:

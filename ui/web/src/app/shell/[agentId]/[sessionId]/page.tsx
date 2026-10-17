@@ -92,7 +92,7 @@ export default function ShellMonitorPage() {
   const validParams = Number.isFinite(agentId) && Number.isFinite(sessionId);
 
   const configuredDefaultLines = useDisplayLimit(
-    "AVA_SHELL_CAPTURE_DEFAULT_LINES",
+    "MEIVA_SHELL_CAPTURE_DEFAULT_LINES",
     DEFAULT_LINES,
   );
   const [lines, setLines] = useState(configuredDefaultLines);

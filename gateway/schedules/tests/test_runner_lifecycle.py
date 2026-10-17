@@ -10,7 +10,6 @@ from unittest.mock import Mock
 import psycopg
 import pytest
 
-from ava.sdk_surface import process_context
 from base.cluster.machine import MachineIdentity
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from base.config import settings
@@ -18,6 +17,7 @@ from base.daemon.schedules.inputs import ScheduleInputs
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
 from gateway.schedules.tests.runner_inputs import run_schedule as run
+from meiva.sdk_surface import process_context
 from services.wake.schedule_manager import engine as sr
 
 
@@ -176,16 +176,16 @@ def test_script_failure_stays_primary_when_guard_close_fails(
     monkeypatch.setattr(sr.StallGuard, "_sample", sample)
     monkeypatch.setattr(sr, "StallGuard", start)
     monkeypatch.setattr(runpy, "run_path", script)
-    import ava
+    import meiva
 
-    monkeypatch.setattr(ava, "ensure_plugins_loaded", lambda: None)
+    monkeypatch.setattr(meiva, "ensure_plugins_loaded", lambda: None)
     with pytest.raises(type(primary)) as caught:
         sr.run_python_script(
             Database.from_settings(gate=database_gate),
             1,
             None,
             tmp_path / "script.py",
-            load_plugins=ava.ensure_plugins_loaded,
+            load_plugins=meiva.ensure_plugins_loaded,
             inputs=ScheduleInputs(
                 lambda: Database.from_settings(gate=database_gate),
                 Mock(),
@@ -345,9 +345,9 @@ def test_successful_script_exit_cannot_complete_after_guard_close_failure(
     monkeypatch.setattr(sr.StallGuard, "_sample", sample)
     monkeypatch.setattr(sr, "StallGuard", start)
     monkeypatch.setattr(runpy, "run_path", script)
-    import ava
+    import meiva
 
-    monkeypatch.setattr(ava, "ensure_plugins_loaded", lambda: None)
+    monkeypatch.setattr(meiva, "ensure_plugins_loaded", lambda: None)
     try:
         if blocked:
             assert run(row[0], machine=machine_identity) == 1

@@ -6,10 +6,6 @@ import psycopg
 import pytest
 from fastapi.testclient import TestClient
 
-from ava.gateway_client import use_client
-from ava.tests.fixtures.pin_agent import pin_agent
-from ava_builtins.plugins.ava_fleet import task_registry
-from ava_builtins.plugins.ava_fleet.task_registry import TaskAssignment
 from base.agents.context.identity import ExternalLease
 from base.api_contracts.agent_contract import GatewayUnavailable
 from base.api_contracts.idempotency import keyed_headers
@@ -19,6 +15,10 @@ from base.host.net.tests.retry_waits import retry_waits as retry_waits
 from gateway.tests.lifecycle.test_task_assignments import HEADERS, PATH, SECRET
 from gateway.tests.lifecycle.test_task_assignments import body as body
 from gateway.tests.lifecycle.test_task_assignments import client as client
+from meiva.gateway_client import use_client
+from meiva.tests.fixtures.pin_agent import pin_agent
+from meiva_builtins.plugins.meiva_fleet import task_registry
+from meiva_builtins.plugins.meiva_fleet.task_registry import TaskAssignment
 from tests.fixtures.gateway_config import gateway_test_client
 
 

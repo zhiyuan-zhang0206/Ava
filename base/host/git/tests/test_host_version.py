@@ -85,7 +85,7 @@ def test_fallback_to_pyproject_without_git(tmp_path: Path) -> None:
     d = tmp_path / "wheel"
     d.mkdir()
     (d / "pyproject.toml").write_text(
-        '[project]\nname = "ava"\nversion = "0.1.5"\n', encoding="utf-8"
+        '[project]\nname = "meiva"\nversion = "0.1.5"\n', encoding="utf-8"
     )
     assert hv.host_version(d) == "0.1.5"
     assert hv.host_version_display(d) == "0.1.5"
@@ -100,9 +100,9 @@ def test_neither_source_raises(tmp_path: Path) -> None:
 
 def test_host_version_from_repo(tmp_path: Path) -> None:
     (tmp_path / "pyproject.toml").write_text(
-        '[project]\nname = "ava"\nversion = "0.1.5"\n', encoding="utf-8"
+        '[project]\nname = "meiva"\nversion = "0.1.5"\n', encoding="utf-8"
     )
     assert hv.host_version_from_repo(tmp_path) == "0.1.5"
-    (tmp_path / "pyproject.toml").write_text('[project]\nname = "ava"\n', encoding="utf-8")
+    (tmp_path / "pyproject.toml").write_text('[project]\nname = "meiva"\n', encoding="utf-8")
     with pytest.raises(hv.HostVersionError):
         hv.host_version_from_repo(tmp_path)

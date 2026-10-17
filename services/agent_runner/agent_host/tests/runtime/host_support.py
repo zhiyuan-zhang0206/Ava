@@ -14,7 +14,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 import services.agent_runner.agent_host.host as agent_host_host
 from agent.ownership.hosted import TurnFatalStamp, TurnSettlement
-from base.agents.context import AvaContext
+from base.agents.context import MeivaContext
 from base.agents.incarnation import hosted_force
 from base.agents.incarnation.resource_admission import DRAINED_RESOURCES
 from base.cluster.machine import MachineIdentity
@@ -250,7 +250,7 @@ class _FakeGraph:
     def arrival(self, agent_id: int) -> asyncio.Event:
         return self.arrived.setdefault(agent_id, asyncio.Event())
 
-    async def _observe(self, _agent_id: int, context: AvaContext) -> HostTurnObservation:
+    async def _observe(self, _agent_id: int, context: MeivaContext) -> HostTurnObservation:
         agent = context.require_agent()
         plugin_cfg = cast(_HostPluginConfig, agent.plugin_config("hostplug"))
         return HostTurnObservation(
@@ -264,7 +264,7 @@ class _FakeGraph:
         )
 
     async def ainvoke(
-        self, _input: dict[str, Any], *, config: dict[str, Any], context: AvaContext
+        self, _input: dict[str, Any], *, config: dict[str, Any], context: MeivaContext
     ) -> dict[str, Any]:
         agent_id = int(config["configurable"]["thread_id"])
         self.observations.append(await asyncio.create_task(self._observe(agent_id, context)))
@@ -289,10 +289,10 @@ class GatedGraph:
         self.release = asyncio.Event()
         self.refuse_cancel = refuse_cancel
         self.cancel_seen = False
-        self.contexts: list[AvaContext] = []
+        self.contexts: list[MeivaContext] = []
 
     async def ainvoke(
-        self, _input: dict[str, Any], *, config: dict[str, Any], context: AvaContext
+        self, _input: dict[str, Any], *, config: dict[str, Any], context: MeivaContext
     ) -> dict[str, Any]:
         self.contexts.append(context)
         self.entered.set()

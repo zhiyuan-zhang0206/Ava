@@ -62,7 +62,7 @@ _MessageContent = (
 
 class AgentMessageIn(BaseModel):
     """POST /api/agents/{id}/messages request body — for SDK send_message and
-    the `ava agents send` CLI (which the generated background-run / watcher
+    the `meiva agents send` CLI (which the generated background-run / watcher
     completion notices invoke).
 
     Pure INSERT + return — the caller does not inspect status.

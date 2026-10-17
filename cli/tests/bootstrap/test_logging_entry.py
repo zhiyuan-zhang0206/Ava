@@ -17,8 +17,8 @@ _CHILD = Path(__file__).with_name("_logging_entry_child.py")
 
 
 def run_probe(scenario: str, home: Path, *extra: str) -> dict[str, object]:
-    env = {key: value for key, value in os.environ.items() if not key.startswith("AVA_")}
-    env["AVA_HOME"] = str(home)
+    env = {key: value for key, value in os.environ.items() if not key.startswith("MEIVA_")}
+    env["MEIVA_HOME"] = str(home)
     child = subprocess.run(  # noqa: S603 — this interpreter, fixed child script, private home
         [sys.executable, "-I", "-B", str(_CHILD), scenario, str(_ROOT), *extra],
         env=env,
@@ -53,11 +53,11 @@ def test_role_initialization_keeps_caller_sink_and_first_attribution(
 
 @pytest.mark.parametrize("executable", ["console", "cli", "cli.main"])
 def test_fresh_cli_executables_stay_quiet(executable: str, tmp_path: Path) -> None:
-    env = {key: value for key, value in os.environ.items() if not key.startswith("AVA_")}
+    env = {key: value for key, value in os.environ.items() if not key.startswith("MEIVA_")}
     home = tmp_path / "home"
-    env["AVA_HOME"] = str(home)
+    env["MEIVA_HOME"] = str(home)
     argv = (
-        [str(_ROOT / ".venv/bin/ava")]
+        [str(_ROOT / ".venv/bin/meiva")]
         if executable == "console"
         else [sys.executable, "-m", executable]
     )

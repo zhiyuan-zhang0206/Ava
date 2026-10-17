@@ -75,7 +75,7 @@ def _assert_gitleaks_policy_allowlists() -> None:
     allowlists = policy["allowlists"]
     fixture_allowlist = allowlists[0]
     allowlisted_regexes = "\n".join(fixture_allowlist["regexes"])
-    for fixture in ("ava_dev_only", "pw123", "s3cr3t", "new-db", "new-runner-db"):
+    for fixture in ("meiva_dev_only", "pw123", "s3cr3t", "new-db", "new-runner-db"):
         assert fixture in allowlisted_regexes
     assert set(fixture_allowlist["commits"]) == {
         "e0270b05d28524401b6caf5b0a300ab91a4d1c6a",
@@ -87,7 +87,7 @@ def _assert_gitleaks_policy_allowlists() -> None:
         "condition": "AND",
         "paths": [r"^\.env\.example$"],
         "regexTarget": "match",
-        "regexes": [r"(?s)AVA_TELEGRAM_BOT_TOKEN=\nAVA_TELEGRAM_OWNER_ID=0"],
+        "regexes": [r"(?s)MEIVA_TELEGRAM_BOT_TOKEN=\nMEIVA_TELEGRAM_OWNER_ID=0"],
     }
     assert allowlists[2] == {
         "description": "Weekly planner demo localStorage key",

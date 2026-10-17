@@ -6,7 +6,7 @@ from scripts.content_lint.code_comments.check import check
 from scripts.content_lint.code_comments.tests.cases import files, repository
 from scripts.content_lint.lint_quiesced_loops import violations_in_source
 
-REF = "# ava:ref pkg/docs/core.ava.okf.md#positive-budget"
+REF = "# meiva:ref pkg/docs/core.meiva.okf.md#positive-budget"
 
 
 @pytest.mark.parametrize(
@@ -127,7 +127,7 @@ def test_quiesce_marker_is_an_exact_bound_reference(tmp_path: Path) -> None:
     source = files()
     source["pkg/core.py"] = (
         "def budget():\n"
-        "    # quiesce-exempt: ava:ref pkg/docs/core.ava.okf.md#positive-budget\n"
+        "    # quiesce-exempt: meiva:ref pkg/docs/core.meiva.okf.md#positive-budget\n"
         "    while True:\n"
         "        sleep(1)\n"
     )
@@ -141,7 +141,7 @@ def test_quiesce_reference_is_validated_even_outside_strict_scope(
 ) -> None:
     source = files()
     source["pkg/core.py"] = (
-        f"def budget():\n    # quiesce-exempt: ava:ref pkg/docs/core.ava.okf.md#positive-budget{suffix}\n    while True:\n        sleep(1)\n"
+        f"def budget():\n    # quiesce-exempt: meiva:ref pkg/docs/core.meiva.okf.md#positive-budget{suffix}\n    while True:\n        sleep(1)\n"
     )
     assert check(repository(tmp_path, source)).findings
 
@@ -164,7 +164,7 @@ def test_ambient_marker_cannot_include_prose(tmp_path: Path) -> None:
 
 
 def test_quiesce_consumer_keeps_loop_and_stale_marker_checks() -> None:
-    marker = "    # quiesce-exempt: ava:ref pkg/docs/core.ava.okf.md#positive-budget\n"
+    marker = "    # quiesce-exempt: meiva:ref pkg/docs/core.meiva.okf.md#positive-budget\n"
     loop = "    while True:\n        sleep(1)\n"
     source = "def budget():\n" + marker + loop
     assert not violations_in_source(source)

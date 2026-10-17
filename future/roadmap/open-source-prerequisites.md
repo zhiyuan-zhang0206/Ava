@@ -1,6 +1,6 @@
 # Open-source / scale-out prerequisites
 
-A holding bucket for items that are **not** built today purely because Ava is
+A holding bucket for items that are **not** built today purely because Meiva is
 single-user / single-host, and that become **required** the moment the project
 is open-sourced and grown for adoption. The distinction matters: these are not
 architectural noes (they don't violate the small-core / fail-fast charter) —

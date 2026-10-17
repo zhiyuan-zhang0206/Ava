@@ -5,7 +5,7 @@ from typing import Literal, NotRequired, TypedDict
 from base.events.vocabulary import EventSpec, telemetry_event
 
 
-# ava:ref base/events/docs/maintenance-payloads.ava.okf.md#ci-usage-reconciliation
+# meiva:ref base/events/docs/maintenance-payloads.meiva.okf.md#ci-usage-reconciliation
 class CiUsageDaily(TypedDict):
     day: str
     window_start: str
@@ -28,7 +28,7 @@ class DebtSweepDaily(TypedDict):
     worker_agent_id: int
 
 
-# ava:ref base/events/docs/maintenance-payloads.ava.okf.md#pr-flow-daily-gauge
+# meiva:ref base/events/docs/maintenance-payloads.meiva.okf.md#pr-flow-daily-gauge
 class PrFlowDaily(TypedDict):
     day: str
     merged_count: int
@@ -41,7 +41,7 @@ class PrFlowRun(TypedDict):
     queue_depth: NotRequired[int]
 
 
-# ava:ref base/events/docs/maintenance-payloads.ava.okf.md#ci-runs-daily-dedup
+# meiva:ref base/events/docs/maintenance-payloads.meiva.okf.md#ci-runs-daily-dedup
 class CiRunsDaily(TypedDict):
     repo: str
     day: str
@@ -70,7 +70,7 @@ class CiRunsDaily(TypedDict):
     first_pass_pr_share: NotRequired[float]
 
 
-# ava:ref base/events/docs/maintenance-payloads.ava.okf.md#ci-workflow-window
+# meiva:ref base/events/docs/maintenance-payloads.meiva.okf.md#ci-workflow-window
 class CiWorkflowWindow(TypedDict):
     repo: str
     workflow: str
@@ -122,7 +122,7 @@ class UnderstandingChunkFailed(TypedDict):
     error: str
 
 
-# ava:ref base/events/docs/maintenance-payloads.ava.okf.md#understanding-chunk-gap
+# meiva:ref base/events/docs/maintenance-payloads.meiva.okf.md#understanding-chunk-gap
 class UnderstandingChunkGap(TypedDict):
     agent_id: int
     job_id: int
@@ -153,7 +153,7 @@ class UnderstandingCallRecordFailed(TypedDict):
     error: str
 
 
-# ava:ref base/events/docs/maintenance-payloads.ava.okf.md#understanding-rebuild-failure
+# meiva:ref base/events/docs/maintenance-payloads.meiva.okf.md#understanding-rebuild-failure
 class UnderstandingRebuildFailed(TypedDict):
     agent_id: int
     rebuild_id: int
@@ -161,14 +161,14 @@ class UnderstandingRebuildFailed(TypedDict):
     error: str
 
 
-# ava:ref base/events/docs/maintenance-payloads.ava.okf.md#understanding-leaf-out-of-order
+# meiva:ref base/events/docs/maintenance-payloads.meiva.okf.md#understanding-leaf-out-of-order
 class UnderstandingLeafOutOfOrder(TypedDict):
     agent_id: int
     job_id: int
     span_end: int
 
 
-# ava:ref base/events/docs/maintenance-payloads.ava.okf.md#understanding-backlog
+# meiva:ref base/events/docs/maintenance-payloads.meiva.okf.md#understanding-backlog
 class UnderstandingBacklog(TypedDict):
     pending: int
     running: int

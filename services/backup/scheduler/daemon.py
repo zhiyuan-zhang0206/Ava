@@ -1,4 +1,4 @@
-# ava:ref services/backup/scheduler/docs/timing-and-exit.ava.okf.md#daily-dump-policy
+# meiva:ref services/backup/scheduler/docs/timing-and-exit.meiva.okf.md#daily-dump-policy
 
 from __future__ import annotations
 
@@ -28,7 +28,7 @@ from base.db.config import db_config_from_boot
 from base.host.exit_codes import hard_exit as _hard_exit
 from base.native_process.code_version import CodeVersion
 from base.native_process.loaded_commit import LoadedCommit
-from base.paths import ava_home
+from base.paths import meiva_home
 from base.telemetry.pipeline_build import build_pipeline
 from base.telemetry.process_logging import init_gateway_process
 from services.backup.dump import cluster_tz, is_due
@@ -228,14 +228,14 @@ async def run(*, config: ConfigBoot, image: LoadedCommit, runtime: Path, clock: 
         _log.info("[pg-backup] daemon stopped")
 
 
-# ava:ref services/backup/scheduler/docs/timing-and-exit.ava.okf.md#bounded-backup-exit
+# meiva:ref services/backup/scheduler/docs/timing-and-exit.meiva.okf.md#bounded-backup-exit
 def main() -> None:
     from base.deploy.schema.migrations import assert_schema_current
 
     config = ConfigBoot()
     config.boot()
     machine = machine_from_boot(config)
-    process_home = ava_home().resolve()
+    process_home = meiva_home().resolve()
     image = LoadedCommit.capture()
     assert_schema_current(config.view.data_plane.db_url)
     version = CodeVersion(image)

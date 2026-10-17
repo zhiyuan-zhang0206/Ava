@@ -20,7 +20,7 @@ class TerminateAgentRequest(BaseModel):
     detached process and force-updates status when the agent cannot reach claim.
 
     `kill_all_shell_sessions` also kills every shell session the agent owns on
-    its home machine (watchers included; `ava.ui.serve` page servers keep their
+    its home machine (watchers included; `meiva.ui.serve` page servers keep their
     own lifecycle), with no per-session notice. A graceful terminate of a live
     agent records the request on its terminate command and the home runtime
     attempts older sessions after the termination commits and the agent's last

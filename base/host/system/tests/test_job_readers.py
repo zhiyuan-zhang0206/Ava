@@ -16,8 +16,8 @@ from base.host.system.tests.fake_commands import (
 from base.host.system.tests.fake_crontab import FakeCrontab
 
 
-def _isolated_ava(*, host: Host) -> str:
-    return "/isolated/.venv/bin/ava"
+def _isolated_meiva(*, host: Host) -> str:
+    return "/isolated/.venv/bin/meiva"
 
 
 def _usr_bin(*, host: Host) -> str:
@@ -83,8 +83,8 @@ def test_packages_refresh_gate_follows_home_and_precedes_platform(
 
 def _isolate_jobs(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     monkeypatch.setenv("HOME", str(tmp_path))
-    monkeypatch.setattr(cron, "job_home", lambda: str(tmp_path / ".ava"))
-    monkeypatch.setattr(cron, "ava_binary_path", _isolated_ava)
+    monkeypatch.setattr(cron, "job_home", lambda: str(tmp_path / ".meiva"))
+    monkeypatch.setattr(cron, "meiva_binary_path", _isolated_meiva)
     monkeypatch.setattr(cron, "launchd_path_env", _usr_bin)
 
     def owns(_kind: str) -> bool:
@@ -154,7 +154,7 @@ def test_real_platform_job_keeps_reader_live_at_each_definition(
         if platform == "linux":
             return crontab.writes[-1]
         label = "packages-refresh" if kind == "packages" else "walg"
-        return (tmp_path / "Library" / "LaunchAgents" / f"com.ava.{label}.plist").read_text()
+        return (tmp_path / "Library" / "LaunchAgents" / f"com.meiva.{label}.plist").read_text()
 
     first = register("first")
     second = register("second")

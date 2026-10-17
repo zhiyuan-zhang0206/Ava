@@ -1,0 +1,90 @@
+---
+type: doc
+title: Gateway
+description: Meiva cluster HTTP API, request admission and orchestration shared by frontend, CLI and SDK.
+tags: []
+---
+
+# Gateway
+
+Meiva cluster HTTP API gateway—FastAPI service running on **port 8000** (needs a cluster secret; loopback unless `MEIVA_MACHINE_HOST` is declared, which needs declared transport encryption — `gateway/cluster/server.py:main`). Pure JSON API, no HTML rendering — with a small enumerated set of exceptions: `GET /api/okf/graph` (D3 knowledge-graph page), uploads `FileResponse`, the agents' page-server reverse proxy, and the grafana reverse proxy. Frontend, CLI, agent SDK (`meiva.agents.*`) and bootstrap scripts use the same `/api/*` endpoints.
+
+## Terminology
+
+Authoritative vocabulary: [[gateway/docs/terminology.meiva.okf.md|Gateway terminology]].
+
+## Core Responsibilities
+
+`http/` groups authentication and middleware. Agent history lives in
+`agents/history/`; the OKF graph viewer lives in `inspect/` and upload intake in
+`routers/upload/`. Wire endpoints and lifecycle ownership are unchanged.
+
+HTTP admission reads the home's durable maintenance journal on each business
+request. `stopping` and `stopped` block it; drain phases
+keep SDK dependencies available to the remaining fleet. Atomic resume releases
+this same authority immediately, without a cached database posture delaying it.
+Unreadable or incomplete paused records block business requests. Control-plane
+routes bypass the admission read so health and repair remain reachable. The
+database posture is a status projection, not this gate's authority.
+
+- **Agent lifecycle management**: unified handling of spawn, send_message, terminate, resurrect, restart via `/api/agents/*`
+- **Eval result boundary**: artifact-read endpoints reject eval-isolated callers from their stored per-agent configuration, so bypassing the SDK cannot expose another run's transcript, activity, events, memory search, or task results
+- **SSE event push**: Redis pub/sub → SSE bridge, pushing agent events to the browser in real time
+- **Runtime observability**: CPU/RSS/FD, loop lag/slow ticks and SSE metrics use OTLP. Lifespan joins its telemetry flushers before pool closure; emit failures stay best effort.
+- **Alert truth reconciliation**: the events-maintenance service's startup + five-minute reads of Grafana's active Alertmanager instances repair stored alert resolutions whose one-shot webhook was lost
+- **Failure feedback delivery**: authenticated CI, QA, and merge failure events are deduplicated durably, then delivered to the author through chat auto-resurrection, the nearest live birth ancestor, or a task-registry alert
+- **Schedule keep-alive**: built-in ScheduleManager, keeping schedule resident processes alive in their own sessions (not a timer trigger — timing logic is inside the script, the manager only ensures stay-up)
+- **Cluster ops API**: cluster, config, inventory, metrics, system and other management endpoints
+- **MCP control plane**: revocable scoped tokens guard default-off `/mcp`; human-credential-only `/api/mcp/clients` manages them
+- **Per-agent command views**: `GET /api/commands?agent_id=` resolves the agent's runner then asks its `agent_skill_view` op for the command catalog that runner discovers from its own converged load dir plus the agent's persisted cwd; an unavailable, unknown, or version-skewed runner falls back to the gateway-local catalog
+- **Authentication and browser-origin policy**: server-side `web_sessions` + bearer-secret auth, exact-origin CORS checks, and the Secure cookie policy — [[gateway/http/auth/docs/web-sessions.meiva.okf.md]].
+- **Inbound provenance**: gateway-created inbounds persist the server-verified credential kind, ingress transport, exact-content SHA-256, and a nullable agent source/token comparison. These are audit facts only and never reject delivery — [[inbound-provenance.meiva.okf.md]].
+
+## Architecture
+
+```
+Browser (frontend:3000) ──HTTP──▶ Gateway (:8000) ──▶ Postgres / Redis
+                                      │
+       agents ─────────────────────┐ │ ┌───────────────── schedules
+   Gateway ──POST /ops──▶ agent-ops  │   Gateway ──▶ session backend (direct)
+   daemon ──▶ detached process (runner) │   ScheduleManager._launch
+```
+- **agents**: spawn / lifecycle uniformly goes through `forward_to_home_machine` → `cluster_rpc` POST `/ops` to the agent-ops daemon, the runner commits durable work and publishes a wake to its agent host — **even if the target is the local machine, there is no in-process shortcut** (`gateway/agents/forward.py:forward_to_home_machine()`)
+- **schedules**: the gateway only queues sync requests and reads log captures (`gateway/schedules/session_control.py`); the `schedule-manager` service launches schedule sessions
+
+- Gateway connects to Postgres via one `base.db.pool()` per process, borrowing one connection per request. Going through the factory rather than constructing a `ConnectionPool` is what gives the borrows `prepare_threshold=None` (never prepare; transaction-pooling-safe under PgBouncer) and `PG_KEEPALIVE_KWARGS` (a request-serving pool outlives host sleeps; without keepalives a borrow on a half-dead socket stalls on the OS TCP-retransmit timeout). Rule 5 (`postgres-dial`) enforces it
+- Event publishing uses a process-level shared `aredis.Redis` instance
+- SSE subscribers open a separate Redis connection per request
+
+## Key Dependencies
+
+Feature packages (routes + helpers + wire models):
+[[gateway/agents/docs/agents.meiva.okf.md|agents]],
+[[ops-surfaces.meiva.okf.md|cluster]],
+[[gateway/events/docs/sse.meiva.okf.md|events]],
+[[gateway/alerts/docs/alerts.meiva.okf.md|alerts]],
+[[services/derived/insights/run_timeline/docs/run_timeline.meiva.okf.md|run_timeline]] (proxied),
+[[gateway/inspect/docs/inspect.meiva.okf.md|inspect]],
+[[gateway/schedules/docs/schedules.meiva.okf.md|schedules]],
+[[gateway/mcp_server/docs/mcp-endpoint/mcp-endpoint.meiva.okf.md|mcp_server]], `auth`, `lgtm`,
+`middleware`, `extensions`. [[routers.meiva.okf.md]]:
+single-module routers. [[agent/db/docs/db.meiva.okf.md]]: Postgres pool.
+
+## Entry Points
+
+- Inventories: [[entry-points.meiva.okf.md]], [[idempotency/idempotency.meiva.okf.md]].
+
+## Notes
+
+- **Stateless design**: Gateway does not hold agent process state. Restarting Gateway does not affect running agents (they are detached processes, double fork reparented to init, not hanging off the gateway/ops process tree)
+- **Endpoint contract**: `/docs` / `/redoc` / `/openapi.json` all `None` in `create_app` (to prevent route schema leakage) — no OpenAPI pages; `openapi_schema()` mounts routes onto a bare `FastAPI` for codegen, which generates frontend / SDK types from the code
+- **Concurrency model**: async/await full chain (FastAPI + psycopg_pool + aredis)
+
+
+## Model capability failures
+
+[[gateway/docs/model-capability-failures.meiva.okf.md|Model capability failures]] — which requests fail explicitly while management stays up.
+
+## Error responses and middleware order
+
+[[gateway/docs/error-responses-and-middleware-order.meiva.okf.md|Error responses and middleware order]] — the typed 500 envelope, CORS placement and middleware order.

@@ -2,7 +2,7 @@
 
 A root supervisor owns exactly one tree per (machine x home); the instance
 lock makes a second launch refuse instead of racing the first. The lock is a
-`flock` on `<run_dir>/ava-root.lock`: the kernel ties it to the owning file
+`flock` on `<run_dir>/meiva-root.lock`: the kernel ties it to the owning file
 description, so it is released automatically when the owning process dies —
 no stale-lock reclaim loop and no pid-identity heuristics.
 
@@ -19,7 +19,7 @@ import logging
 import os
 from pathlib import Path
 
-_LOCK_NAME = "ava-root.lock"
+_LOCK_NAME = "meiva-root.lock"
 
 _log = logging.getLogger(__name__)
 

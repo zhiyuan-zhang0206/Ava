@@ -7,14 +7,14 @@ import pytest
 
 from base import cluster
 from base.config.tests.configuration import snapshot_process_config
-from base.paths.home import resolve_ava_home
+from base.paths.home import resolve_meiva_home
 from cli.commands.data_plane.config import DataPlaneConfig, data_plane_config_from_boot
 
 
 def cluster_record(ports: dict[str, int], *, created_at: str) -> cluster.ClusterRecord:
     return cluster.ClusterRecord(
         ports=cast("cluster.ClusterPorts", ports),
-        gateway_home=str(resolve_ava_home()),
+        gateway_home=str(resolve_meiva_home()),
         created_at=created_at,
     )
 
@@ -45,8 +45,8 @@ def remote_cluster_record() -> cluster.ClusterRecord:
     )
 
 
-FOREIGN_DB = "postgresql://ava:pw@10.9.8.7:5432/ava"
-FOREIGN_REDIS = "rediss://ava:pw@10.9.8.7:6380/0"
+FOREIGN_DB = "postgresql://meiva:pw@10.9.8.7:5432/meiva"
+FOREIGN_REDIS = "rediss://meiva:pw@10.9.8.7:6380/0"
 
 
 @pytest.fixture

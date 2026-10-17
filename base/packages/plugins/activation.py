@@ -7,7 +7,7 @@ from base.telemetry import report_sink_failure
 PLUGIN_ACTIVATION_EVENT = "plugin_activation"
 
 
-# ava:ref base/packages/plugins/docs/runtime-contributions.ava.okf.md#activation-attribution
+# meiva:ref base/packages/plugins/docs/runtime-contributions.meiva.okf.md#activation-attribution
 def record(
     plugin: str | None,
     surface: SurfaceId,

@@ -262,7 +262,7 @@ async def test_provided_ops_url_bypasses_machines_lookup(monkeypatch: pytest.Mon
 async def test_default_timeout_comes_from_settings(
     monkeypatch: pytest.MonkeyPatch, *, database_gate: ProcessDbGate
 ) -> None:
-    """Omitting timeout_s uses AVA_CLUSTER_RPC_TIMEOUT_SECONDS (task #698 G8)
+    """Omitting timeout_s uses MEIVA_CLUSTER_RPC_TIMEOUT_SECONDS (task #698 G8)
     — the default is config, not a module literal."""
     from base.config import settings
 
@@ -673,7 +673,7 @@ async def test_malformed_response_is_not_retried(
 async def test_retries_default_from_settings(
     monkeypatch: pytest.MonkeyPatch, *, database_gate: ProcessDbGate
 ) -> None:
-    """Omitting `retries` uses AVA_CLUSTER_RPC_MAX_RETRIES — the retry budget is
+    """Omitting `retries` uses MEIVA_CLUSTER_RPC_MAX_RETRIES — the retry budget is
     config, not a module literal."""
     from base.config import settings
 

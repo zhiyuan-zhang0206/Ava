@@ -373,7 +373,7 @@ class RedisInboundListener:
         """Log a redis subscribe rejection once per episode (until it recovers).
 
         Almost always `NoPermissionError`: the cluster's redis ACL user
-        (`ava_<cluster>`, scoped to `&<prefix>:*`) is not granted this agent's
+        (`meiva_<cluster>`, scoped to `&<prefix>:*`) is not granted this agent's
         inbound channel — a misconfigured / drifted ACL, or (the bug this
         replaced) a channel name missing the cluster prefix. Wake degrades to the
         SELECT recheck rather than crashing, but instant pub/sub wake stays off
@@ -387,7 +387,7 @@ class RedisInboundListener:
             "RedisInboundListener[agent={a}]: subscribe to {ch!r} rejected by redis "
             "({exc!r}) — the cluster redis ACL user is not granted this channel. "
             "Falling back to the SELECT recheck for wake (instant pub/sub wake off "
-            "until the ACL grants &{ch}); re-run `ava start` / check "
+            "until the ACL grants &{ch}); re-run `meiva start` / check "
             "ensure_cluster_redis_acl.",
             a=self._agent_id,
             ch=self._channel,

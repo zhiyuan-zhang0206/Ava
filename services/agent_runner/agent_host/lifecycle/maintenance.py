@@ -50,8 +50,8 @@ async def record_failure(pool: AsyncConnectionPool, agent_id: int, exc: BaseExce
     The command is settled `done` with a `failed` result (an existing terminal
     shape; nothing new is latched), ERROR is logged and `agent_continuation_lost`
     is raised once, and the pending-wake scan stops driving that agent. The agent
-    stays in the hold: `ava stop` ends at its drain deadline with the stall
-    report, and a person takes it from there (`ava start` releases the hold).
+    stays in the hold: `meiva stop` ends at its drain deadline with the stall
+    report, and a person takes it from there (`meiva start` releases the hold).
     A restart whose effect had already started is not rewritten; its failure is
     reported and the normal completion path stays.
 

@@ -241,7 +241,7 @@ def test_demo_target_is_confined_to_the_loopback_preview_port_range() -> None:
 
 def test_cookie_file_requires_a_regular_0600_file(tmp_path: Path) -> None:
     cookie = tmp_path / "cookie.txt"
-    cookie.write_text("ava_session=value")
+    cookie.write_text("meiva_session=value")
     with pytest.raises(PermissionError, match="0600"):
         resolved_cookie_file(cookie)
 
@@ -274,7 +274,7 @@ def test_host_run_requires_the_cookie_env_var(
         demo_defect=False,
         base_url="http://gate.example:3000",
     )
-    with pytest.raises(ValueError, match="AVA_VISUAL_GATE_COOKIE_FILE"):
+    with pytest.raises(ValueError, match="MEIVA_VISUAL_GATE_COOKIE_FILE"):
         run_host(args, open_url=lambda *_args: pytest.fail("Unexpected HTTP call"))
 
 
@@ -426,7 +426,7 @@ def test_session_precheck_probes_the_gateway_with_the_raw_cookie(tmp_path: Path)
     full text as the Cookie header — the file already carries name=value, so
     no prefix may be added."""
     cookie_file = tmp_path / "cookies.txt"
-    cookie_file.write_text("ava_session=abc123\n")
+    cookie_file.write_text("meiva_session=abc123\n")
     seen: dict[str, str] = {}
 
     def fake_urlopen(request: str | urllib.request.Request, timeout: float) -> _AuthPayloadResponse:
@@ -438,12 +438,12 @@ def test_session_precheck_probes_the_gateway_with_the_raw_cookie(tmp_path: Path)
     session_precheck("http://gateway.example:8000/", cookie_file, open_url=fake_urlopen)
 
     assert seen["url"] == "http://gateway.example:8000/api/auth/check"
-    assert seen["cookie"] == "ava_session=abc123"
+    assert seen["cookie"] == "meiva_session=abc123"
 
 
 def test_session_precheck_rejects_a_dead_session(tmp_path: Path) -> None:
     cookie_file = tmp_path / "cookies.txt"
-    cookie_file.write_text("ava_session=dead\n")
+    cookie_file.write_text("meiva_session=dead\n")
 
     with pytest.raises(RuntimeError, match="session cookie"):
         session_precheck(
@@ -455,7 +455,7 @@ def test_session_precheck_rejects_a_dead_session(tmp_path: Path) -> None:
 
 def test_session_precheck_rejects_an_unauthorized_probe(tmp_path: Path) -> None:
     cookie_file = tmp_path / "cookies.txt"
-    cookie_file.write_text("ava_session=dead\n")
+    cookie_file.write_text("meiva_session=dead\n")
 
     def unauthorized(request: str | urllib.request.Request, timeout: float) -> Never:
         assert isinstance(request, urllib.request.Request)
@@ -470,7 +470,7 @@ def test_session_precheck_warns_and_continues_on_network_trouble(
 ) -> None:
     """A connection failure is not an auth verdict — the pass proceeds."""
     cookie_file = tmp_path / "cookies.txt"
-    cookie_file.write_text("ava_session=abc\n")
+    cookie_file.write_text("meiva_session=abc\n")
 
     def unreachable(_request: str | urllib.request.Request, timeout: float) -> Never:
         raise OSError("connection refused")
@@ -484,7 +484,7 @@ def test_session_precheck_warns_and_continues_on_a_non_json_answer(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
     cookie_file = tmp_path / "cookies.txt"
-    cookie_file.write_text("ava_session=abc\n")
+    cookie_file.write_text("meiva_session=abc\n")
 
     class HtmlResponse:
         def __enter__(self) -> HtmlResponse:

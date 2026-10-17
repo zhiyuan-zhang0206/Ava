@@ -1,0 +1,26 @@
+# Fixture modules (tests/path_scoped/) that govern this directory's tests: "." is the
+# directory itself, otherwise the test files named here (tests/fixtures/path_scopes.py).
+"agent.tests.agent_tests" = [
+    "test_meiva_fleet_plugin.py",
+    "test_task_registry.py",
+]
+"meiva.tests.fixtures.meiva_tests" = [
+    "test_lazy_plugin_import.py",
+    "test_retry_contracts.py",
+]
+"meiva.tests.fixtures.sdk" = [
+    "task_registry/test_create_unique_title_no_conflict.py",
+    "task_registry/test_creation_receipt_identity.py",
+    "task_registry/test_creation_receipts.py",
+    "task_registry/test_notification_fences.py",
+    "task_registry/test_notification_recovery.py",
+    "task_registry/test_update_non_owner_notifies_owner.py",
+    "task_registry/test_update_receipt_identity.py",
+    "task_registry/test_update_receipts.py",
+    "test_meiva_fleet_plugin.py",
+    "test_fleet_audit.py",
+    "test_lazy_plugin_import.py",
+    "test_task_maintenance_daemon_part2.py",
+    "test_task_registry.py",
+    "test_validation_meiva_fleet.py"
+]

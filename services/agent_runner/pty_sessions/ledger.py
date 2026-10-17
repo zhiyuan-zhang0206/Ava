@@ -1,6 +1,6 @@
 """The service's ledger of live shell identities, and the sweep of a crashed service's leftovers.
 
-The service is the only writer of ``$AVA_HOME/run/pty-sessions.json``: every
+The service is the only writer of ``$MEIVA_HOME/run/pty-sessions.json``: every
 live session's shell identity and any foreground leader explicitly captured at
 close or kill, rewritten atomically as sessions come and go. It
 exists for one reader, the next service start (or a stop that finds the service

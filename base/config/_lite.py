@@ -19,7 +19,7 @@ from typing import Any, cast
 
 from base.config.config_registry import DOMAIN_ATTRS
 from base.config.profiles import (
-    AVA_PROCESS_PROFILE_ENV,
+    MEIVA_PROCESS_PROFILE_ENV,
     PROCESS_PROFILES,
     ProcessProfile,
     profile_domain_error,
@@ -41,12 +41,12 @@ from base.host.env.dotenv_boot import (
     PLACEHOLDER_DB_URL,
     EnvBootResult,
     apply_process_timezone,
-    load_ava_env,
+    load_meiva_env,
     read_database_delivery,
 )
 
-# `AVA_CONFIG_BOOT=eager` — the operator's instant rollback to the eager boot.
-BOOT_MODE_ENV = "AVA_CONFIG_BOOT"
+# `MEIVA_CONFIG_BOOT=eager` — the operator's instant rollback to the eager boot.
+BOOT_MODE_ENV = "MEIVA_CONFIG_BOOT"
 BOOT_MODE_EAGER = "eager"
 
 _LITE = "lite"
@@ -325,7 +325,7 @@ def _require_local_fields() -> None:
         raise ValueError(
             f"required config missing for this local-source unit: {named} — its .env is the "
             f"config source (config_source_is_local()) and no value is present in the "
-            f"environment. Set it in $AVA_HOME/.env or the process environment."
+            f"environment. Set it in $MEIVA_HOME/.env or the process environment."
         )
 
 
@@ -333,8 +333,8 @@ def _plant_placeholders() -> None:
     """Plant never-dialed placeholders for the required data-plane URLs so a
     construction succeeds without a gateway fetch. A value already in env/.env
     is left alone — the placeholder only fills the nothing-at-all case."""
-    os.environ.setdefault("AVA_DB_URL", PLACEHOLDER_DB_URL)
-    os.environ.setdefault("AVA_REDIS_URL", _LITE_REDIS_URL)
+    os.environ.setdefault("MEIVA_DB_URL", PLACEHOLDER_DB_URL)
+    os.environ.setdefault("MEIVA_REDIS_URL", _LITE_REDIS_URL)
 
 
 def _log_upgrade(reason: str) -> None:
@@ -408,7 +408,7 @@ class ConfigBoot:
                     return
                 raise RuntimeError("configuration owner was already prepared")
             environment = dict(os.environ)
-            profile = environment.get(AVA_PROCESS_PROFILE_ENV)
+            profile = environment.get(MEIVA_PROCESS_PROFILE_ENV)
             if profile is not None and profile not in PROCESS_PROFILES:
                 raise profile_unknown_error(profile)
             for _name, row in LITE_FIELDS.items():
@@ -517,7 +517,7 @@ class ConfigBoot:
         settings-lite maintenance verbs keep their deferred load) and at the first
         config read for a skip process. Mirrors the eager boot's env work exactly:
 
-        1. `load_ava_env()` — the `.env` load + the env-authority force/drop pass;
+        1. `load_meiva_env()` — the `.env` load + the env-authority force/drop pass;
         2. the config-source decision: a local unit must hold its required
            data-plane values (W1 check), a configured pure runner fetches
            `GET /api/bootstrap` (the same import-time fetch, and the same
@@ -535,8 +535,8 @@ class ConfigBoot:
             # Latched first: a re-entrant read during step 4 (cluster_tz_name reads
             # through the view) must not prepare again.
             self.prepared = True
-            self.env_boot = load_ava_env()
-            profile = os.environ.get(AVA_PROCESS_PROFILE_ENV)
+            self.env_boot = load_meiva_env()
+            profile = os.environ.get(MEIVA_PROCESS_PROFILE_ENV)
             if profile is not None and profile not in PROCESS_PROFILES:
                 raise profile_unknown_error(profile)
             self.profile = cast(ProcessProfile, profile)
@@ -656,11 +656,11 @@ class ConfigBoot:
     def boot(self) -> None:
         """The `base.config` import tail: prepare, or go eager now.
 
-        `AVA_CONFIG_BOOT=eager` is the operator's instant rollback to the eager
+        `MEIVA_CONFIG_BOOT=eager` is the operator's instant rollback to the eager
         boot; any other explicit value is a typo and fails fast rather than
         silently booting lite.
 
-        Precedence when both `AVA_CONFIG_FETCH=skip` and `AVA_CONFIG_BOOT=eager`
+        Precedence when both `MEIVA_CONFIG_FETCH=skip` and `MEIVA_CONFIG_BOOT=eager`
         are set: skip wins and the process stays boot-lite. This is deliberate.
         `cli.main` sets skip for the settings-lite maintenance verbs (stop, status,
         the config verbs) so they stay usable while the gateway is down or the

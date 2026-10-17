@@ -1,4 +1,4 @@
-# ava:ref gateway/agents/history/docs/configuration.ava.okf.md#live-history-owner
+# meiva:ref gateway/agents/history/docs/configuration.meiva.okf.md#live-history-owner
 
 from base.agents.history.timeline_inputs import TimelineReadInputs
 from base.clock import SYSTEM_TIMERS, Clock
@@ -25,7 +25,7 @@ def timeline_policy(config: ConfigBoot) -> TimelineReadPolicy:
 def _chunk_ratio(config: ConfigBoot, authority: ConfigAuthority) -> float:
     if config.view.has_domain("agent"):
         return config.view.agent.understanding_chunk_ratio
-    raw = authority.read_env_aliases().get("AVA_UNDERSTANDING_CHUNK_RATIO")
+    raw = authority.read_env_aliases().get("MEIVA_UNDERSTANDING_CHUNK_RATIO")
     if raw:
         return float(raw)
     return AgentRuntimeSettings.model_fields["understanding_chunk_ratio"].default
@@ -34,7 +34,7 @@ def _chunk_ratio(config: ConfigBoot, authority: ConfigAuthority) -> float:
 def _enabled(config: ConfigBoot, authority: ConfigAuthority) -> bool:
     if config.view.has_domain("agent"):
         return config.view.agent.understanding_enabled
-    raw = authority.read_env_aliases().get("AVA_UNDERSTANDING_ENABLED")
+    raw = authority.read_env_aliases().get("MEIVA_UNDERSTANDING_ENABLED")
     if raw is None:
         return AgentRuntimeSettings.model_fields["understanding_enabled"].default
     return raw.strip().lower() in {"1", "true", "yes", "on"}

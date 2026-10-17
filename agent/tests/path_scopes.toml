@@ -5,6 +5,6 @@
     "test_exec_subprocess.py",
     "test_state_slot.py",
 ]
-"ava.tests.fixtures.ava_tests" = [
+"meiva.tests.fixtures.meiva_tests" = [
 ]
 "agent.graph.exec.tests.admission_fixture" = ["test_resource_admission.py"]

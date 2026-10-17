@@ -20,7 +20,7 @@ from base.daemon.tests._health_helpers import find_free_port, http_get, probe_ur
 from base.daemon.tests.health_support import unknown_image
 from base.host.env.health_ports import health_port
 from base.native_process import loaded_commit
-from base.paths import ava_home
+from base.paths import meiva_home
 
 # ─── probe_daemon: a 200 is believed only from a verified identity ───────────
 #
@@ -54,7 +54,7 @@ async def test_healthz_body_carries_home(tmp_path: Path) -> None:
     server = await health.start_health_server("agent_host", port=port, image=unknown_image())
     try:
         _status, body = await http_get(port, "/healthz")
-        assert json.loads(body)["home"] == str(ava_home())
+        assert json.loads(body)["home"] == str(meiva_home())
     finally:
         await health.stop_health_server(server)
 
@@ -184,7 +184,7 @@ async def test_probe_rejects_200_from_a_process_that_is_not_ours(tmp_path: Path)
 
     Verdict DOWN, not terminal: name and home already matched, so the stray belongs
     to THIS cluster and this daemon kind — `respawn_service` kills our own
-    `ava-agent-host` session first, which does free the port."""
+    `meiva-agent-host` session first, which does free the port."""
     port = find_free_port()
     pidfile = tmp_path / "agent_host.pid"
     pidfile.write_text(str(os.getpid() + 1))  # our daemon's pid, not the responder's
@@ -202,7 +202,7 @@ async def test_probe_rejects_200_from_a_process_that_is_not_ours(tmp_path: Path)
 async def test_probe_rejects_daemon_from_another_home(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """A daemon of another UNIT (different `$AVA_HOME`) holding our port is not
+    """A daemon of another UNIT (different `$MEIVA_HOME`) holding our port is not
     our daemon, even with a matching name and a pid we would accept.
 
     Verdict PORT_TAKEN — terminal. This is the shared-loopback case: the foreign daemon
@@ -218,7 +218,7 @@ async def test_probe_rejects_daemon_from_another_home(
     try:
         # The server answered with the real home; make the PROBE side believe it
         # belongs to a different unit — the same asymmetry a foreign daemon has.
-        monkeypatch.setattr(health, "ava_home", lambda: tmp_path / "other-home")
+        monkeypatch.setattr(health, "meiva_home", lambda: tmp_path / "other-home")
         probe = await _probe("agent_host", port, pidfile)
         assert probe.verdict is health.ProbeVerdict.PORT_TAKEN
         assert probe.terminal is True
@@ -231,7 +231,7 @@ async def test_probe_rejects_daemon_from_another_home(
 @pytest.mark.asyncio
 async def test_probe_rejects_a_different_daemon_kind(tmp_path: Path) -> None:
     """A labeler squatting on the agent host's port is not a live agent host — and
-    terminal, because killing `ava-agent-host` does not free a port `ava-labeler`
+    terminal, because killing `meiva-agent-host` does not free a port `meiva-labeler`
     holds."""
     port = find_free_port()
     pidfile = tmp_path / "agent_host.pid"
@@ -266,7 +266,7 @@ async def test_probe_rejects_200_when_no_pidfile_exists(tmp_path: Path) -> None:
 @pytest.mark.asyncio
 async def test_probe_rejects_non_json_responder(tmp_path: Path) -> None:
     """An unrelated HTTP server on the port (no JSON identity) → dead, and
-    terminal: it is not an Ava daemon at all, so nothing this unit supervises can
+    terminal: it is not an Meiva daemon at all, so nothing this unit supervises can
     be restarted to take the port back."""
 
     async def _handle(_reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
@@ -342,7 +342,7 @@ def test_health_port_env_override(monkeypatch: pytest.MonkeyPatch) -> None:
     # Settings is a one-shot BaseSettings loaded at module import; monkeypatch.setenv
     # cannot change the already-imported settings.services.agent_host_health_port — use
     # monkeypatch.setattr directly on the Settings instance field, consistent with other
-    # tests that migrated to Settings (see ava/tests/namespaces/web/test_web.py, test_vision.py for the same pattern).
+    # tests that migrated to Settings (see meiva/tests/namespaces/web/test_web.py, test_vision.py for the same pattern).
     from base.config import settings
 
     monkeypatch.setattr(settings.services, "agent_host_health_port", 9999)
@@ -443,8 +443,8 @@ def test_probe_daemon_passes_through_a_normal_verdict(
 # answers with a pid its own pidfile never recorded, and not yet `name`, which
 # the payload now carries but no probe may read until it has rolled out
 # fleet-wide (#1038). `probe_home` is that weaker check, shared by the gateway
-# healthcheck and (through `ServiceSpec.identity_probe`) by `ava status` and
-# `ava cluster health-probe`, so the watchdog and the operator cannot be told
+# healthcheck and (through `ServiceSpec.identity_probe`) by `meiva status` and
+# `meiva cluster health-probe`, so the watchdog and the operator cannot be told
 # different things about the same port.
 
 
@@ -473,7 +473,7 @@ def test_probe_home_alive_when_home_matches(monkeypatch: pytest.MonkeyPatch) -> 
     code probes exactly such a gateway. A `name` mismatch is PORT_TAKEN, which is
     terminal, so the moment this stops reading ALIVE every not-yet-updated
     gateway in the fleet is terminal-failed by its own watchdog."""
-    _answer(monkeypatch, 200, json.dumps({"status": "ok", "home": str(ava_home())}).encode())
+    _answer(monkeypatch, 200, json.dumps({"status": "ok", "home": str(meiva_home())}).encode())
     probe = health.probe_home("http://127.0.0.1:9/api/health")
     assert probe.verdict is health.ProbeVerdict.ALIVE
 
@@ -485,7 +485,7 @@ def test_probe_home_alive_on_a_payload_carrying_name(monkeypatch: pytest.MonkeyP
     _answer(
         monkeypatch,
         200,
-        json.dumps({"status": "ok", "name": "gateway", "home": str(ava_home())}).encode(),
+        json.dumps({"status": "ok", "name": "gateway", "home": str(meiva_home())}).encode(),
     )
     probe = health.probe_home("http://127.0.0.1:9/api/health")
     assert probe.verdict is health.ProbeVerdict.ALIVE
@@ -493,17 +493,17 @@ def test_probe_home_alive_on_a_payload_carrying_name(monkeypatch: pytest.MonkeyP
 
 def test_probe_home_rejects_another_units_home(monkeypatch: pytest.MonkeyPatch) -> None:
     """The impostor case, and it is TERMINAL: this unit cannot kill a session on
-    another UNIT's socket — the socket lives under `$AVA_HOME`, so a foreign
+    another UNIT's socket — the socket lives under `$MEIVA_HOME`, so a foreign
     unit is exactly as unkillable as a foreign cluster — and respawning into the
     bound port is a loop.
 
     The emitted sentence is pinned here, not just the home it names: `home` is the
     unit identity, and calling it a cluster is what sent #977's first diagnosis
     hunting an allocation bug that did not exist."""
-    _answer(monkeypatch, 200, json.dumps({"home": "/home/ava/.ava"}).encode())
+    _answer(monkeypatch, 200, json.dumps({"home": "/home/meiva/.meiva"}).encode())
     probe = health.probe_home("http://127.0.0.1:9/api/health")
     assert probe.verdict is health.ProbeVerdict.PORT_TAKEN
-    assert "/home/ava/.ava" in probe.detail
+    assert "/home/meiva/.meiva" in probe.detail
     assert "another unit's daemon holds this port" in probe.detail
 
 

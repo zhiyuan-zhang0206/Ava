@@ -26,4 +26,4 @@ exports = ["test_guarded_creation.py"]
 "test_sdk_creation_birth.py#monkeypatch.setattr base.config.settings.data_plane.cluster_secret" = 1
 "test_sdk_creation_birth.py#monkeypatch.setattr gateway.agents.creation.forward_spawn_to_remote" = 1
 "test_sdk_creation_birth.py#monkeypatch.setattr ops.cluster.rpc.dispatch_to_machine" = 1
-"test_sdk_strong_creation.py#monkeypatch.setattr ava.sdk_surface.agent_identity.require_actor" = 1
+"test_sdk_strong_creation.py#monkeypatch.setattr meiva.sdk_surface.agent_identity.require_actor" = 1

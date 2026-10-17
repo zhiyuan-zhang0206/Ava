@@ -55,7 +55,7 @@ def test_generate_config_bakes_settings(
     repo = tmp_path / "repo"
     (repo / "deploy/otel-collector").mkdir(parents=True)
     (repo / "deploy/otel-collector/otel-collector.yaml").write_text(
-        "ava_home: $AVA_HOME\ntempo: $TEMPO_ENDPOINT\nloki: $LOKI_BASE\nprom: $PROM_BASE\nret: $RETENTION_DAYS\n",
+        "meiva_home: $MEIVA_HOME\ntempo: $TEMPO_ENDPOINT\nloki: $LOKI_BASE\nprom: $PROM_BASE\nret: $RETENTION_DAYS\n",
         encoding="utf-8",
     )
     monkeypatch.setattr(
@@ -71,12 +71,12 @@ def test_generate_config_bakes_settings(
 
     out = oc.generate_config(
         repo,
-        Path("/home/u/.ava"),
+        Path("/home/u/.meiva"),
         roles=None,
         database_factory=operator_database,
         machine=command_runtime.machine,
     )
-    assert "ava_home: /home/u/.ava" in out
+    assert "meiva_home: /home/u/.meiva" in out
     assert "tempo: http://10.0.0.2:14318" in out
     assert "loki: http://10.0.0.2:3100/otlp" in out
     assert "prom: http://10.0.0.2:9090/api/v1/otlp" in out
@@ -92,13 +92,13 @@ def test_generate_config_two_state_observability_url(
     *,
     command_runtime: CommandRuntime,
 ) -> None:
-    """AVA_OBSERVABILITY_URL set -> the gateway collector's LGTM fan-out points
+    """MEIVA_OBSERVABILITY_URL set -> the gateway collector's LGTM fan-out points
     at the observatory station; unset -> the per-service settings URLs (loopback
     defaults, locked by test_generate_config_bakes_settings)."""
     repo = tmp_path / "repo"
     (repo / "deploy/otel-collector").mkdir(parents=True)
     (repo / "deploy/otel-collector/otel-collector.yaml").write_text(
-        "ava_home: $AVA_HOME\ntempo: $TEMPO_ENDPOINT\nloki: $LOKI_BASE\nprom: $PROM_BASE\n",
+        "meiva_home: $MEIVA_HOME\ntempo: $TEMPO_ENDPOINT\nloki: $LOKI_BASE\nprom: $PROM_BASE\n",
         encoding="utf-8",
     )
     monkeypatch.setattr(
@@ -117,7 +117,7 @@ def test_generate_config_two_state_observability_url(
 
     out = oc.generate_config(
         repo,
-        Path("/home/u/.ava"),
+        Path("/home/u/.meiva"),
         roles=None,
         database_factory=operator_database,
         machine=command_runtime.machine,
@@ -131,7 +131,7 @@ def test_generate_config_two_state_observability_url(
     monkeypatch.setattr(base_config.settings.observability, "observability_url", "")
     out = oc.generate_config(
         repo,
-        Path("/home/u/.ava"),
+        Path("/home/u/.meiva"),
         roles=None,
         database_factory=operator_database,
         machine=command_runtime.machine,
@@ -197,7 +197,7 @@ def test_ensure_skips_download_when_version_matches(
     repo = tmp_path / "repo"
     (repo / "deploy/otel-collector").mkdir(parents=True)
     (repo / "deploy/otel-collector/otel-collector.yaml").write_text(
-        "ok: $AVA_HOME\n", encoding="utf-8"
+        "ok: $MEIVA_HOME\n", encoding="utf-8"
     )
 
     downloaded: list[str] = []
@@ -241,7 +241,7 @@ def test_ensure_downloads_when_missing(
     repo = tmp_path / "repo"
     (repo / "deploy/otel-collector").mkdir(parents=True)
     (repo / "deploy/otel-collector/otel-collector.yaml").write_text(
-        "ok: $AVA_HOME\n", encoding="utf-8"
+        "ok: $MEIVA_HOME\n", encoding="utf-8"
     )
 
     downloaded: list[str] = []
@@ -298,10 +298,10 @@ def test_unsupported_platform_skips(
     assert downloaded == []
 
 
-_HOME = Path("/home/u/.ava")
+_HOME = Path("/home/u/.meiva")
 _PG_PORT = 5433
-# The gateway login a start process adopts into AVA_DB_URL (port 1: never dialed).
-_DELIVERED = "postgresql://ava_g3_gateway:generation-login-password@127.0.0.1:1/ava"
+# The gateway login a start process adopts into MEIVA_DB_URL (port 1: never dialed).
+_DELIVERED = "postgresql://meiva_g3_gateway:generation-login-password@127.0.0.1:1/meiva"
 
 
 def _local_data_plane(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -319,7 +319,7 @@ def _local_data_plane(monkeypatch: pytest.MonkeyPatch) -> None:
 
     monkeypatch.setattr(cluster, "get_record", _get_record)
     monkeypatch.setattr(
-        base_config.settings.data_plane, "redis_url", "redis://ava:runtime@127.0.0.1:6380/0"
+        base_config.settings.data_plane, "redis_url", "redis://meiva:runtime@127.0.0.1:6380/0"
     )
     monkeypatch.setattr(base_config.settings.data_plane, "redis_admin_password", "abc")
 
@@ -406,7 +406,7 @@ def test_sending_queues_are_in_memory_in_every_shape(
     command_runtime: CommandRuntime,
 ) -> None:
     """No exporter queue is persisted: a restart drops what was queued (the trace
-    mirror and `ava trace ship` cover trace gaps), and only the filelog read
+    mirror and `meiva trace ship` cover trace gaps), and only the filelog read
     offsets keep a file_storage extension."""
     cfg = render_real_template(
         monkeypatch, roles, operator_database=operator_database, command_runtime=command_runtime
@@ -440,7 +440,7 @@ def test_gateway_config_scrapes_this_clusters_own_data_plane(
         command_runtime=command_runtime,
     )
     rendered = yaml.safe_dump(cfg)
-    assert "generation-login-password" not in rendered and "ava_g3_gateway" not in rendered
+    assert "generation-login-password" not in rendered and "meiva_g3_gateway" not in rendered
     receivers = cfg["receivers"]
     socket_dir = pg_socket_path(_HOME).as_posix()
     # The receiver prefixes a unix endpoint's host with "/" itself.
@@ -448,7 +448,7 @@ def test_gateway_config_scrapes_this_clusters_own_data_plane(
     assert receivers["postgresql"]["transport"] == "unix"
     assert receivers["postgresql"]["username"] == MONITOR_ROLE
     assert receivers["postgresql"]["password"] == oc.PEER_PLACEHOLDER
-    assert receivers["postgresql"]["databases"] == ["ava"]
+    assert receivers["postgresql"]["databases"] == ["meiva"]
     assert receivers["redis"]["endpoint"] == "127.0.0.1:6380"
     assert receivers["redis"]["password"] == "abc"  # noqa: S105 — fixture value
     assert receivers["redis"]["password"] != "cluster-token"  # noqa: S105 — fixture token
@@ -493,7 +493,7 @@ def test_remote_managed_plane_omits_the_postgres_receiver(
     monkeypatch.setattr(
         base_config.settings.data_plane,
         "db_url",
-        "postgresql://ava:provider-password@10.0.0.2:5433/ava",
+        "postgresql://meiva:provider-password@10.0.0.2:5433/meiva",
     )
     monkeypatch.setattr(base_config.settings.data_plane, "redis_url", "redis://10.0.0.2:6380/0")
     monkeypatch.setattr(base_config.settings.data_plane, "redis_admin_password", "abc")
@@ -590,7 +590,7 @@ def test_infra_pipeline_stamps_machine_name(
     *,
     command_runtime: CommandRuntime,
 ) -> None:
-    """Infra datapoints keep physical host identity and gain Ava roster identity."""
+    """Infra datapoints keep physical host identity and gain Meiva roster identity."""
     cfg = render_real_template(
         monkeypatch,
         frozenset({"gateway"}),
@@ -691,7 +691,7 @@ def test_logs_merge_event_and_filelog_transforms_before_batch(
         }
     ]
     assert cfg["extensions"]["file_storage/logoffsets"] == {
-        "directory": "/home/u/.ava/otel-collector/log-offsets",
+        "directory": "/home/u/.meiva/otel-collector/log-offsets",
         "create_directory": True,
     }
     logs = cfg["service"]["pipelines"]["logs"]
@@ -725,7 +725,7 @@ def test_local_otlp_pipelines_drop_mismatched_cluster_resources(
 
     processor = cfg["processors"]["filter/cluster_allow"]
     expected = [
-        'resource.attributes["cluster"] != nil and resource.attributes["cluster"] != ".ava"'
+        'resource.attributes["cluster"] != nil and resource.attributes["cluster"] != ".meiva"'
     ]
     assert processor == {
         "error_mode": "ignore",

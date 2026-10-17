@@ -1,18 +1,18 @@
 # Compaction redesign: forced / command / spontaneous compact
 
 > Status: forced compact (#1099) + command compact (#1116) landed. The compaction
-> contract (sections + how to write) is now single-sourced in the `ava.self.compact`
+> contract (sections + how to write) is now single-sourced in the `meiva.self.compact`
 > docstring; the three triggers are short openers that defer to it (#1099). Parked
 > items (model-owned compaction timing) remain below.
 
 Compaction has three modes, ordered by how much say the agent has, each mapping
-onto an entry point in `agent/graph/hooks/compact.py` / `ava/self.py`.
+onto an entry point in `agent/graph/hooks/compact.py` / `meiva/self.py`.
 
 | Mode | Trigger / entry point | Who writes the summary | Declinable |
 |---|---|---|---|
 | **forced compact** | LLM node over the ceiling -> `generate_summary` | the model, in a separate compaction LLM call | no — the hard backstop |
-| **command compact** | a `/compact` command (prompt template `ava_builtins/commands/compact.md`), typed or reminder-triggered -> housekeeping turns -> `ava.self.compact(summary)` | the agent, in its own turn | yes |
-| **spontaneous compact** | the agent decides on its own to call `ava.self.compact(summary)` (guided only by that SDK docstring) | the agent | yes — its own choice |
+| **command compact** | a `/compact` command (prompt template `meiva_builtins/commands/compact.md`), typed or reminder-triggered -> housekeeping turns -> `meiva.self.compact(summary)` | the agent, in its own turn | yes |
+| **spontaneous compact** | the agent decides on its own to call `meiva.self.compact(summary)` (guided only by that SDK docstring) | the agent | yes — its own choice |
 
 Compaction always rebuilds the context as `[system prompt, summary]` — a full
 REMOVE_ALL, no raw tail (#1099). After it the agent continues as **the same agent** — same id, same
@@ -29,13 +29,13 @@ The header carries one more job: it states **"your context was just compacted"**
 The compaction is the single event the post-compact context has no surviving
 record of — REMOVE_ALL wipes the turn that ran it, and the exec node never
 writes the compact call's output back in the first place (the `[system halt]
-You just called ava.self.compact` ack survives only in the agent log). Without a
+You just called meiva.self.compact` ack survives only in the agent log). Without a
 standing "just compacted" line, an agent that reads a wind-down command still
 sitting in the summary's verbatim tail (a `/compact` the agent dutifully quoted there) re-reads
 it as a pending order and runs it again — every turn, a self-compact loop until a
 human interrupts (observed: agent 17, five self-compacts in 86s). Two defenses,
 both pulling their weight: the header is the standing signal the wiped ack cannot
-be, and the `ava.self.compact` contract tells the summary to **exclude the
+be, and the `meiva.self.compact` contract tells the summary to **exclude the
 wind-down command that triggered this compaction from the verbatim tail** —
 writing the summary already carries it out, so quoting it back is exactly what
 made it look pending. The header alone only *bounds* the loop (a live re-test on
@@ -48,21 +48,21 @@ compaction.
 - **forced**: a real-overflow ceiling. It is the hard backstop and stays armed at all
   times — including while the agent is mid-housekeeping for a command compact. If the agent's
   own housekeeping turns push the context past the ceiling, forced compact fires anyway.
-- **command**: a **qualitative** reminder, injected by the compact hook (`agent/graph/hooks/compact.py`, moved into core from the ava_compact plugin)
+- **command**: a **qualitative** reminder, injected by the compact hook (`agent/graph/hooks/compact.py`, moved into core from the meiva_compact plugin)
   when the estimated context crosses `soft_compact_tokens` (set *earlier* than the ceiling,
   leaving room for the housekeeping turns). The reminder hook defers above the ceiling, where the LLM node runs forced
   compaction through the durable cancellation boundary. Agent-side
   only: no `InboundKind`, no nudge / heartbeat rail. It fires at most once per context window
-  (re-arms via `compact.version`) and defers to ava_sdk_reminder's agent-reply note when both would
+  (re-arms via `compact.version`) and defers to meiva_sdk_reminder's agent-reply note when both would
   write `messages` in one pass. The reminder does **not** report a remaining-token count.
-- **spontaneous**: no trigger — the agent calls `ava.self.compact` whenever it judges its
+- **spontaneous**: no trigger — the agent calls `meiva.self.compact` whenever it judges its
   context should be reset. This already exists; it is distinct from the parked item below
   (which is about the *framework feeding the model its budget* so it decides timing).
 - **Parked**: full model-owned "decide when to compact" autonomy.
   Rationale — *context anxiety*: Cognition's Devin rebuild on a budget-aware model found that
   feeding the model its remaining budget made it rush, cut corners, and leave tasks unfinished
   *even with ample context left*, while confidently mis-estimating how much it had. All four
-  surveyed tools keep trigger timing in framework code. Ava is immune by default (its model has
+  surveyed tools keep trigger timing in framework code. Meiva is immune by default (its model has
   no context-awareness training and the SDK never exposes remaining budget) — keep it that way.
   Telling the agent its remaining budget (trigger "option a") is a flagged experiment, **off by
   default**; the shipping default is the qualitative reminder ("option b").
@@ -108,11 +108,11 @@ and the fix is to iterate on the **template**, not to grow the gate.
 ### One contract, one place (#1099)
 
 "One shared structure" is now literal: the contract — the summary's mandatory sections and how to
-write it — lives only in the `ava.self.compact` docstring. The three triggers no longer each carry
+write it — lives only in the `meiva.self.compact` docstring. The three triggers no longer each carry
 a copy:
 
 - **spontaneous** — the agent reads the docstring in its own SDK and writes the summary.
-- **command** (`ava_builtins/commands/compact.md`) and the **reminder** nudge — short openers that wind the
+- **command** (`meiva_builtins/commands/compact.md`) and the **reminder** nudge — short openers that wind the
   agent down and tell it to compact "as the docstring specifies"; the agent reads the contract
   when it acts.
 - **forced** (`COMPACTION_INSTRUCTION`) — the opener appends the SDK docstring's contract to
@@ -122,7 +122,7 @@ a copy:
 This is why the triggers can be short and still produce a structured summary, and why a single
 edit to the docstring changes every mode at once. A test pins both halves: the section headers are
 present in the docstring **and** carried by the forced request even when `self` is not resident,
-the cached conversation prefix remains unchanged, and each trigger names `ava.self.compact`.
+the cached conversation prefix remains unchanged, and each trigger names `meiva.self.compact`.
 
 > Open follow-up (deferred): post-compact the agent can still mis-locate its own files when its
 > working directory has drifted from its workspace — the docstring points at durable files but not
@@ -145,7 +145,7 @@ for a path the upstream cap already closes.
   the code was fixed afterward.)
 - **no raw tail**: done. #1099 replaced the kept-tail design with a full REMOVE_ALL —
   compaction rebuilds `[system prompt, summary]` with nothing raw carried over, so there is no
-  tail pair-invariant to maintain (`split_tail` is gone). The `ava.self.compact` `[system halt]`
+  tail pair-invariant to maintain (`split_tail` is gone). The `meiva.self.compact` `[system halt]`
   trigger pair is no longer written back at all — it would be wiped with the rest, so the ordering
   fix the original plan listed is moot — but the wipe still removes the only record that a
   compaction happened, which is why the header now states "just compacted" (see the header
@@ -163,12 +163,12 @@ for a path the upstream cap already closes.
   the command/spontaneous `compact_summary` injection in the same pass).
 - **PR2 — command compact (#1116)**: qualitative reminder as the compact hook's `before_llm`
   (new `soft_compact_tokens` threshold < ceiling, agent-side — no `InboundKind`, no nudge /
-  heartbeat rail; once per window, defers to the agent-reply note) + `ava_builtins/commands/compact.md`
+  heartbeat rail; once per window, defers to the agent-reply note) + `meiva_builtins/commands/compact.md`
   housekeeping template + `CompactDone` emit on the agent claim path. The trigger-pair ordering
   fix the original plan listed is moot — #1099's no-tail REMOVE_ALL wipes the `[system halt]`
   pair with the rest. Depends on PR1's template structure.
 - **PR3 — single-source the contract (#1099)**: the section template, copied across
-  `COMPACTION_INSTRUCTION`, the reminder note, and `ava_builtins/commands/compact.md`, collapses into the
-  `ava.self.compact` docstring; the three triggers become short openers that defer to it (see
+  `COMPACTION_INSTRUCTION`, the reminder note, and `meiva_builtins/commands/compact.md`, collapses into the
+  `meiva.self.compact` docstring; the three triggers become short openers that defer to it (see
   "One contract, one place" above). Pure consolidation — no behavior change to the modes. The CWD
   follow-up noted there is explicitly out of scope.

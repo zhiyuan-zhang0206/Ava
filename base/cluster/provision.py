@@ -14,7 +14,7 @@ Every dial is the administrator (`base.cluster.dataplane.pg_admin`): as itself f
 databases and extensions, and acting as the owner (`owner_session`) for the
 objects the owner must own. The owner never logs in.
 `base.cluster.dataplane.pg_admin` loads psycopg, so each function imports it: `base.cluster`
-is on the `import ava` path, which stays driver-free (task #3816).
+is on the `import meiva` path, which stays driver-free (task #3816).
 """
 
 from __future__ import annotations
@@ -53,7 +53,7 @@ def ensure_cluster_role(
     `identity` is names-as-data: the caller reads it from the cluster's own
     db_url (`identity_from_url`) for an existing cluster, or passes
     `DATA_PLANE_IDENTITY` at birth — it is never derived from a cluster name, so
-    prod's historical `ava_main` keeps working until an ops rename.
+    prod's historical `meiva_main` keeps working until an ops rename.
 
     The owner never logs in: every DDL path is the administrator acting as it
     (`owner_session`), and application processes hold write-generation logins.
@@ -259,7 +259,7 @@ def drop_database(
     maintenance db (`postgres`) on the same Postgres.
 
     Idempotent (IF EXISTS). The caller is responsible for there being no live
-    connections to the target (in prod `ava cluster destroy` runs after the
+    connections to the target (in prod `meiva cluster destroy` runs after the
     cluster is stopped); this does not force-terminate backends. The role is
     dropped after the database so it owns nothing and the drop cannot fail on a
     dependency.
@@ -273,11 +273,11 @@ def drop_database(
         conn.execute(pgsql.SQL("DROP ROLE IF EXISTS {}").format(pgsql.Identifier(identity)))
 
 
-# Frozen at the upstream schema present when Ava adopted mirrored checkpoint
+# Frozen at the upstream schema present when Meiva adopted mirrored checkpoint
 # migrations. Never bump this baseline: future versions belong in the manifest
-# below and must name their mirroring Ava migration.
+# below and must name their mirroring Meiva migration.
 CHECKPOINT_SCHEMA_UPSTREAM_BASELINE_VERSION = 9
-CHECKPOINT_SCHEMA_AVA_MIGRATIONS: Mapping[int, str] = MappingProxyType({})
+CHECKPOINT_SCHEMA_MEIVA_MIGRATIONS: Mapping[int, str] = MappingProxyType({})
 
 
 class CheckpointSchemaError(RuntimeError):
@@ -285,7 +285,7 @@ class CheckpointSchemaError(RuntimeError):
 
 
 class CheckpointDependencyDriftError(CheckpointSchemaError):
-    """The dependency added schema migrations without an Ava timestamp migration."""
+    """The dependency added schema migrations without an Meiva timestamp migration."""
 
 
 class CheckpointSchemaMismatchError(CheckpointSchemaError):
@@ -294,7 +294,7 @@ class CheckpointSchemaMismatchError(CheckpointSchemaError):
 
 def _check_checkpoint_manifest_shape() -> list[int]:
     """The manifest's versions, contiguous after the baseline and named in version order."""
-    declared_versions = sorted(CHECKPOINT_SCHEMA_AVA_MIGRATIONS)
+    declared_versions = sorted(CHECKPOINT_SCHEMA_MEIVA_MIGRATIONS)
     expected_declared = list(
         range(
             CHECKPOINT_SCHEMA_UPSTREAM_BASELINE_VERSION + 1,
@@ -308,7 +308,7 @@ def _check_checkpoint_manifest_shape() -> list[int]:
             f"declared={declared_versions}, expected={expected_declared}"
         )
 
-    declared_names = [CHECKPOINT_SCHEMA_AVA_MIGRATIONS[version] for version in declared_versions]
+    declared_names = [CHECKPOINT_SCHEMA_MEIVA_MIGRATIONS[version] for version in declared_versions]
     if declared_names != sorted(declared_names):
         raise CheckpointDependencyDriftError(
             "checkpoint migration manifest names must follow upstream version order: "
@@ -318,7 +318,7 @@ def _check_checkpoint_manifest_shape() -> list[int]:
 
 
 def _expected_checkpoint_schema_versions() -> frozenset[int]:
-    """The upstream versions explicitly approved by Ava's checkpoint migration manifest."""
+    """The upstream versions explicitly approved by Meiva's checkpoint migration manifest."""
     from langgraph.checkpoint.postgres import PostgresSaver
 
     declared_versions = _check_checkpoint_manifest_shape()
@@ -326,12 +326,12 @@ def _expected_checkpoint_schema_versions() -> frozenset[int]:
     dependency_target = len(PostgresSaver.MIGRATIONS) - 1
     if dependency_target != approved_target:
         raise CheckpointDependencyDriftError(
-            "LangGraph checkpoint migrations changed without an Ava migration: "
+            "LangGraph checkpoint migrations changed without an Meiva migration: "
             f"dependency target={dependency_target}, "
             f"approved target={approved_target}. Mirror every new "
-            "upstream migration in an Ava timestamp migration (including the "
+            "upstream migration in an Meiva timestamp migration (including the "
             "checkpoint_migrations row), then add it to "
-            "CHECKPOINT_SCHEMA_AVA_MIGRATIONS."
+            "CHECKPOINT_SCHEMA_MEIVA_MIGRATIONS."
         )
     return frozenset(range(approved_target + 1))
 
@@ -339,16 +339,16 @@ def _expected_checkpoint_schema_versions() -> frozenset[int]:
 def assert_checkpoint_dependency_pinned(tracked_migrations: Collection[str]) -> None:
     """Fail before any DB work when the dependency schema contract drifted.
 
-    `tracked_migrations` is the caller's set of git-tracked Ava migration names
+    `tracked_migrations` is the caller's set of git-tracked Meiva migration names
     (`base.deploy.schema.migration_layout.required_migration_set()`): `cluster`
     sits below the schema owner, so the caller supplies it. Every manifest entry
     must name one of them.
     """
     _check_checkpoint_manifest_shape()
-    for version, name in CHECKPOINT_SCHEMA_AVA_MIGRATIONS.items():
+    for version, name in CHECKPOINT_SCHEMA_MEIVA_MIGRATIONS.items():
         if name not in tracked_migrations:
             raise CheckpointDependencyDriftError(
-                f"checkpoint version {version} must name a git-tracked Ava "
+                f"checkpoint version {version} must name a git-tracked Meiva "
                 f"migration: name={name!r}, tracked={name in tracked_migrations}"
             )
     _expected_checkpoint_schema_versions()
@@ -372,7 +372,7 @@ def checkpoint_schema_versions(
 def assert_checkpoint_schema_current(db_url: str, *, expected_data_dir: Path | None = None) -> None:
     """Require the exact approved checkpoint migration set, without mutation.
 
-    Every start role calls this after Ava migrations.  A pure runner therefore
+    Every start role calls this after Meiva migrations.  A pure runner therefore
     detects behind, ahead, empty, or internally-gapped checkpoint state without
     acquiring DDL capability.  Ahead is also refused: upstream gives no old-
     runtime/new-schema compatibility guarantee.
@@ -384,7 +384,7 @@ def assert_checkpoint_schema_current(db_url: str, *, expected_data_dir: Path | N
         raise CheckpointSchemaMismatchError(
             "checkpoint schema is not current: "
             f"missing={sorted(expected - found)}, unexpected={sorted(found - expected)}, "
-            f"table_present={actual is not None}. Run `ava start` on the gateway; "
+            f"table_present={actual is not None}. Run `meiva start` on the gateway; "
             "do not grant schema CREATE to runtime roles."
         )
 

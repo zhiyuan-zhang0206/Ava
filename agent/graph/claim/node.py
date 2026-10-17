@@ -29,7 +29,7 @@ Automatic compaction runs in the LLM node via `agent/graph/hooks/compact.py:auto
 after the before_llm hooks commit. Claim still dispatches explicit compaction
 requests.
 
-Deps injected via `runtime.context: AvaContext` (see agent/graph/_context.py).
+Deps injected via `runtime.context: MeivaContext` (see agent/graph/_context.py).
 agent_id read from RunnableConfig (LangGraph checkpointer standard).
 
 State type hint (`state: _state.AgentState`): static only; see `agent/graph/exec/node.py` — the
@@ -60,7 +60,7 @@ from agent.ownership.native_cancel import (
     halt_for_native_cancel,
     observe_bound_cancel,
 )
-from base.agents.context import AvaContext, agent_id_from_config
+from base.agents.context import MeivaContext, agent_id_from_config
 from base.agents.history.timeline_inputs import TimelineReadInputs
 from base.agents.incarnation.native_work_models import NativeCancelPendingError
 
@@ -97,7 +97,7 @@ def claim_will_idle(state: _state.AgentState) -> bool:
 
 async def claim_node_impl(
     state: _state.AgentState,
-    runtime: Runtime[AvaContext],
+    runtime: Runtime[MeivaContext],
     config: RunnableConfig,
 ) -> Command[ClaimGoto]:
     """Claim-node pipeline: container early-return → batch → routing → dispatch → decide.
@@ -208,7 +208,7 @@ async def claim_node_impl(
 
 async def claim_node(
     state: _state.AgentState,
-    runtime: Runtime[AvaContext],
+    runtime: Runtime[MeivaContext],
     config: RunnableConfig,
 ) -> Command[ClaimGoto]:
     """Public entry point: wraps claim_node_impl with node-lifecycle logging.

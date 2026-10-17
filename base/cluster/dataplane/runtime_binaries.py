@@ -1,8 +1,8 @@
 """Vendored relocatable data-plane binaries.
 
-Ava fetches a relocatable Postgres distribution itself, so a clean machine does not
+Meiva fetches a relocatable Postgres distribution itself, so a clean machine does not
 need `brew install postgresql@17` (or the apt equivalent) before running. The
-binaries live host-level under `~/.ava/runtime/` — shared by every cluster and
+binaries live host-level under `~/.meiva/runtime/` — shared by every cluster and
 checkout (they are read-only; only the *data* is per-cluster) — and
 `base.cluster.dataplane.pg_tools.pg_tool()` prefers them over a brew/apt install, falling back to
 brew/apt when the vendored tree is absent. ``base.cluster.dataplane.pg_runtime`` validates an
@@ -82,11 +82,11 @@ def vendored_pg_supported() -> bool:
 
 
 def runtime_root() -> Path:
-    """Vendored binaries root, `$AVA_HOME/runtime`: the host runs one cluster, so
+    """Vendored binaries root, `$MEIVA_HOME/runtime`: the host runs one cluster, so
     the home is the place a download is kept."""
-    from base.paths import ava_home
+    from base.paths import meiva_home
 
-    return ava_home() / "runtime"
+    return meiva_home() / "runtime"
 
 
 def vendored_pg_dir() -> Path:

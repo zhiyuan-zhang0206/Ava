@@ -1,4 +1,4 @@
-"""`ava schedules` thin-client commands — each verb forwards to the right
+"""`meiva schedules` thin-client commands — each verb forwards to the right
 /api/schedules route and renders the response, verified without a live gateway.
 
 The cmd_* functions import `base.host.net.http_dial` inside their bodies, so patching
@@ -517,7 +517,7 @@ def test_verify_rows_file_sweeps_the_dump_without_the_db_or_a_report(
     monkeypatch.setattr(_verify, "_read_schedule_rows", no_table)
     monkeypatch.setattr(_verify, "_report_verify", no_report)
     rows = tmp_path / "rows.json"
-    rows.write_text(json.dumps([[3, "ok", "import os\n"], [4, "stale", "import zz_ava_gone\n"]]))
+    rows.write_text(json.dumps([[3, "ok", "import os\n"], [4, "stale", "import zz_meiva_gone\n"]]))
     assert (
         _verify.cmd_schedules_verify(
             rows_file=str(rows), database_factory=operator_database, producer=operator_pipeline
@@ -526,7 +526,7 @@ def test_verify_rows_file_sweeps_the_dump_without_the_db_or_a_report(
     )
     out = capsys.readouterr().out
     assert "checked=2 green=1 red=1 rc=1" in out
-    assert "RED id=4 name=stale missing=zz_ava_gone" in out
+    assert "RED id=4 name=stale missing=zz_meiva_gone" in out
 
 
 def test_verify_rows_file_unreadable_is_a_tool_error(
@@ -575,14 +575,14 @@ def test_verify_check_file_ok_red_and_syntax_error(
     assert "CHECK-OK" in capsys.readouterr().out
 
     bad = tmp_path / "bad.py"
-    bad.write_text("import zz_ava_verify_missing\n", encoding="utf-8")
+    bad.write_text("import zz_meiva_verify_missing\n", encoding="utf-8")
     assert (
         _verify.cmd_schedules_verify(
             check_file=str(bad), database_factory=operator_database, producer=operator_pipeline
         )
         == 1
     )
-    assert "CHECK-RED missing=zz_ava_verify_missing" in capsys.readouterr().out
+    assert "CHECK-RED missing=zz_meiva_verify_missing" in capsys.readouterr().out
 
     broken = tmp_path / "broken.py"
     broken.write_text("def (:\n", encoding="utf-8")
@@ -666,7 +666,7 @@ def test_verify_reads_all_rows_from_the_real_table(
     rows = _verify._read_schedule_rows(database_factory=operator_database)
     names = [row[1] for row in rows]
     assert "self-evolution-weekly" in names  # enabled builtin
-    assert "trace-ship-tempo" not in names  # retired: only `ava trace ship` remains
+    assert "trace-ship-tempo" not in names  # retired: only `meiva trace ship` remains
     ids = [row[0] for row in rows]
     assert ids == sorted(ids)
 
@@ -679,7 +679,7 @@ def test_provision_creates_builtins(
     capsys: pytest.CaptureFixture[str],
     operator_database: Callable[[], Any],
 ) -> None:
-    """`ava schedules provision` creates the repo's built-in schedules in the
+    """`meiva schedules provision` creates the repo's built-in schedules in the
     DB (product schedules enabled) and is a no-op on the second run."""
     assert _sched.cmd_schedules_provision(database_factory=operator_database) == 0
     out = capsys.readouterr().out

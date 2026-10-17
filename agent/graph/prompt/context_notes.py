@@ -1,4 +1,4 @@
-# ava:ref agent/graph/prompt/docs/composition.ava.okf.md#context-order
+# meiva:ref agent/graph/prompt/docs/composition.meiva.okf.md#context-order
 from __future__ import annotations
 
 from collections.abc import Sequence
@@ -9,7 +9,7 @@ from typing import Any
 from langchain_core.messages import HumanMessage
 
 from agent.messages import NoteTag, system_note_message
-from base.agents.context import AvaContext
+from base.agents.context import MeivaContext
 from base.agents.to_user import read_document
 from base.log import logger
 from base.packages.plugins.extensions import ContextNote, ExtensionRegistry
@@ -31,17 +31,17 @@ def _ordered(extensions: ExtensionRegistry, *, fork_only: bool) -> list[ContextN
     return [n for n in (*FRAMEWORK_NOTES, *plugin_notes) if n.on_fork or not fork_only]
 
 
-def context_notes(extensions: ExtensionRegistry, ctx: AvaContext) -> list[HumanMessage]:
+def context_notes(extensions: ExtensionRegistry, ctx: MeivaContext) -> list[HumanMessage]:
 
     return _rendered(_ordered(extensions, fork_only=False), ctx)
 
 
-def fork_notes(extensions: ExtensionRegistry, ctx: AvaContext) -> list[HumanMessage]:
+def fork_notes(extensions: ExtensionRegistry, ctx: MeivaContext) -> list[HumanMessage]:
 
     return _rendered(_ordered(extensions, fork_only=True), ctx)
 
 
-def _rendered(entries: list[ContextNote], ctx: AvaContext) -> list[HumanMessage]:
+def _rendered(entries: list[ContextNote], ctx: MeivaContext) -> list[HumanMessage]:
     built: list[tuple[int, HumanMessage]] = []
     for entry in entries:
         note = entry.build(ctx)
@@ -56,9 +56,9 @@ def _rendered(entries: list[ContextNote], ctx: AvaContext) -> list[HumanMessage]
     return [note for _, note in sorted(built, key=lambda pair: pair[0])]
 
 
-def _established_agent_id(ctx: AvaContext, note: str) -> int | None:
+def _established_agent_id(ctx: MeivaContext, note: str) -> int | None:
 
-    from ava.sdk_surface.agent_identity import agent_id
+    from meiva.sdk_surface.agent_identity import agent_id
 
     aid = agent_id(ctx)
     if aid is None:
@@ -82,7 +82,7 @@ def _format_timeout_display(timeout_s: float) -> str:
     return f"{timeout_s:.0f} seconds"
 
 
-def exec_timeout_note(ctx: AvaContext) -> HumanMessage | None:
+def exec_timeout_note(ctx: MeivaContext) -> HumanMessage | None:
 
     if _established_agent_id(ctx, "exec-timeout") is None:
         return None
@@ -112,7 +112,7 @@ def _utc_offset(moment: datetime) -> str:
     return f"{raw[:3]}:{raw[3:]}"
 
 
-def timezone_note(ctx: AvaContext) -> HumanMessage | None:
+def timezone_note(ctx: MeivaContext) -> HumanMessage | None:
 
     if _established_agent_id(ctx, "timezone") is None:
         return None
@@ -125,7 +125,7 @@ def timezone_note(ctx: AvaContext) -> HumanMessage | None:
     )
 
 
-def own_label(ctx: AvaContext, agent_id: int) -> str | None:
+def own_label(ctx: MeivaContext, agent_id: int) -> str | None:
 
     with ctx.sql.cursor() as cur:
         cur.execute("SELECT label FROM agents WHERE id=%s", (agent_id,))
@@ -135,7 +135,7 @@ def own_label(ctx: AvaContext, agent_id: int) -> str | None:
     return " ".join(str(row[0]).split())
 
 
-def machine_clause(ctx: AvaContext) -> str | None:
+def machine_clause(ctx: MeivaContext) -> str | None:
 
     from base.cluster.machine import MachineNameMissing
 
@@ -159,7 +159,7 @@ def _workspace_path(agent_id: int, *, enabled: bool) -> str | None:
         return str(ws)
 
 
-def agent_id_note(ctx: AvaContext) -> HumanMessage | None:
+def agent_id_note(ctx: MeivaContext) -> HumanMessage | None:
 
     aid = _established_agent_id(ctx, "agent-id")
     if aid is None:
@@ -200,11 +200,11 @@ _PRELOADED_SKILLS_FRAMING = (
     "Preloaded skills — each section below contains a skill's complete SKILL.md. "
     "Follow these instructions as standing guidance; you do not need to reload "
     "these bodies. Read any supporting files referenced by a skill with "
-    "ava.help(ava.skills.<path>) or ava.files.read."
+    "meiva.help(meiva.skills.<path>) or meiva.files.read."
 )
 
 
-def preloaded_skills_note(ctx: AvaContext) -> HumanMessage | None:
+def preloaded_skills_note(ctx: MeivaContext) -> HumanMessage | None:
 
     from agent.graph.prompt.capabilities import resolve_prompt_skills
 
@@ -249,7 +249,7 @@ def _render_skill_bodies(skills: list[Any], *, label: str) -> tuple[list[str], l
                 exc,
             )
             continue
-        sections.append(f"## ava.skills.{target(skill)}\n\n{body}")
+        sections.append(f"## meiva.skills.{target(skill)}\n\n{body}")
         injected.append(identifier(skill))
     if not sections:
         return None

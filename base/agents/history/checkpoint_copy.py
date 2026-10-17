@@ -64,7 +64,7 @@ def copy_checkpoint_chain(
             source agent (recursive CTE INSERT 0 rows).
     """
     # LangGraph schema preserved: checkpoints.thread_id / checkpoint_blobs.thread_id
-    # are framework column names (hardcoded in PostgresSaver); we cast Ava agent_id to str() here.
+    # are framework column names (hardcoded in PostgresSaver); we cast Meiva agent_id to str() here.
     cur.execute(
         """
         WITH RECURSIVE chain AS (

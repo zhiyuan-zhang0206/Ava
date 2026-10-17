@@ -4,9 +4,9 @@ Recovering a table — or a set of rows — out of the WAL-G physical backup whi
 the live database keeps serving: a `DELETE`, a `DROP` or an `UPDATE` went wrong
 and the goal is to put only that data back, not to restore the cluster. The
 whole-database paths are separate documents:
-[`walg-restore.md`](../../../ava_builtins/skills/platform/ava-guide/operations/references/walg-restore.md)
+[`walg-restore.md`](../../../meiva_builtins/skills/platform/meiva-guide/operations/references/walg-restore.md)
 (physical restore to a time, an LSN or the end of the archive) and
-[`db-restore.md`](../../../ava_builtins/skills/platform/ava-guide/operations/references/db-restore.md)
+[`db-restore.md`](../../../meiva_builtins/skills/platform/meiva-guide/operations/references/db-restore.md)
 (the encrypted logical dump).
 
 **Never restore into the live database, and never point a recovered copy at the
@@ -39,7 +39,7 @@ is served by that increment.
 wal-g --config <the configuration JSON> backup-list --detail
 ```
 
-The configuration JSON is the one `AVA_WALG_CONFIG_FILE` names; on the gateway
+The configuration JSON is the one `MEIVA_WALG_CONFIG_FILE` names; on the gateway
 host it is the file the archiving runbook places. The `start_time` column of
 `backup-list --detail` is what must be before the target, not `finish_time`.
 
@@ -50,7 +50,7 @@ JSON and the encryption key — in practice the gateway host, where the restore
 verb already works for the weekly drill:
 
 ```bash
-ava backup walg restore \
+meiva backup walg restore \
   --dir /srv/restore/agent_tasks-2026-10-03 \
   --backup <backup name from section 2> \
   --time '2026-10-03 04:30:00+00'
@@ -80,7 +80,7 @@ sock=$(mktemp -d /tmp/restore-inspect-XXXX)
 /usr/lib/postgresql/17/bin/pg_ctl -D /srv/restore/agent_tasks-2026-10-03 \
   -o "-p 55444 -c listen_addresses= -c unix_socket_directories=$sock -c unix_socket_permissions=0700 -c archive_mode=off" \
   -l "$sock/postgres.log" start
-psql -h "$sock" -p 55444 -d ava_main
+psql -h "$sock" -p 55444 -d meiva_main
 ```
 
 On macOS resolve the same-major binary through the host's installation (the
@@ -93,7 +93,7 @@ when done; remove the directory afterwards.
 Sanity-check the point in time before extracting:
 
 ```bash
-psql -h "$sock" -p 55444 -d ava_main \
+psql -h "$sock" -p 55444 -d meiva_main \
   -c "SELECT count(*), max(created_at) FROM agent_tasks;"
 ```
 
@@ -109,7 +109,7 @@ Whole table (the task registry's table is `agent_tasks`; list the tables with
 
 ```bash
 pg_dump --format=custom --table=agent_tasks --file=/srv/restore/agent_tasks.dump \
-  "postgresql://<os-user>@/ava_main?host=$sock&port=55444"
+  "postgresql://<os-user>@/meiva_main?host=$sock&port=55444"
 pg_restore --list /srv/restore/agent_tasks.dump    # must name TABLE DATA public agent_tasks
 ```
 
@@ -117,7 +117,7 @@ Selected rows, when only part of the table was lost (CSV keeps the extract
 reviewable):
 
 ```bash
-psql -h "$sock" -p 55444 -d ava_main \
+psql -h "$sock" -p 55444 -d meiva_main \
   -c "\copy (SELECT * FROM agent_tasks WHERE updated_at < '2026-10-03 04:30:00+00') TO '/srv/restore/agent_tasks.csv' WITH (FORMAT csv, HEADER)"
 ```
 

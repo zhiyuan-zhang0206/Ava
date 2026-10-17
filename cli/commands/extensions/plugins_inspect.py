@@ -21,7 +21,7 @@ _LABEL = 13
 _INDENT = " " * (2 + _LABEL)
 
 
-# ava:ref cli/commands/extensions/docs/plugin-inspection.ava.okf.md#inspection-output-and-verification
+# meiva:ref cli/commands/extensions/docs/plugin-inspection.meiva.okf.md#inspection-output-and-verification
 def cmd_plugins_inspect(name: str | None) -> int:
     catalog = build_catalog()
     if name is None:
@@ -31,7 +31,7 @@ def cmd_plugins_inspect(name: str | None) -> int:
     try:
         view = catalog.plugin(name)
     except UnknownPluginError as e:
-        print(f"[ava plugins inspect] {e}", file=sys.stderr)
+        print(f"[meiva plugins inspect] {e}", file=sys.stderr)
         return 1
     _print_plugin_detail(view)
     return 0
@@ -64,7 +64,7 @@ def _print_surfaces(catalog: Catalog) -> None:
 
 def _manifest_key_line(surface: Surface) -> str:
     if surface.manifest_key is None:
-        return "no ava-plugin.json contributions key declares this surface"
+        return "no meiva-plugin.json contributions key declares this surface"
     return f"contributions.{surface.manifest_key}"
 
 
@@ -97,7 +97,7 @@ def _print_plugin_directory(catalog: Catalog) -> None:
                 )
             )
     print()
-    print("# `ava plugins inspect <name>` for one plugin's full contribution list")
+    print("# `meiva plugins inspect <name>` for one plugin's full contribution list")
 
 
 def _summary(view: PluginView) -> str:
@@ -120,7 +120,7 @@ def _print_plugin_detail(view: PluginView) -> None:
     m = view.manifest
     print(
         f"  {_cell('manifest', _LABEL)}{m.name} {m.version}  "
-        f"engines.ava={m.engines.get('ava', '?')}"
+        f"engines.meiva={m.engines.get('meiva', '?')}"
     )
 
     print()
@@ -182,10 +182,10 @@ def _where(exc: BaseException) -> str:
     return f" (at {frames[-1].filename}:{frames[-1].lineno})" if frames else ""
 
 
-# ava:ref cli/commands/extensions/docs/plugin-inspection.ava.okf.md#inspection-output-and-verification
+# meiva:ref cli/commands/extensions/docs/plugin-inspection.meiva.okf.md#inspection-output-and-verification
 def cmd_plugins_verify() -> int:
     from agent.state import plugin_state_schema
-    from ava.sdk_surface.extensions import load_extensions
+    from meiva.sdk_surface.extensions import load_extensions
 
     failures: list[tuple[str, BaseException]] = []
     try:

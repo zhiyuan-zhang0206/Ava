@@ -21,14 +21,14 @@ from cli.database.tests.command_inputs import command_runtime as command_runtime
 from tests.path_scoped.cli_tests import operator_database as operator_database
 from tests.path_scoped.cli_tests import operator_pipeline as operator_pipeline
 
-_STUB_RENDER = '{"title": "Ava Ops", "panels": []}\n'
+_STUB_RENDER = '{"title": "Meiva Ops", "panels": []}\n'
 
 
 @pytest.fixture(autouse=True)
 def _default_provisioning_endpoints(monkeypatch: pytest.MonkeyPatch) -> None:
     """Default-render assertions use an explicit default deployment configuration."""
     monkeypatch.setattr(
-        config.settings.data_plane, "db_url", "postgresql://reader@127.0.0.1:5433/ava"
+        config.settings.data_plane, "db_url", "postgresql://reader@127.0.0.1:5433/meiva"
     )
     monkeypatch.setattr(config.settings.gateway, "gateway_url", "")
     monkeypatch.setattr(config.settings.gateway, "gateway_port", 8000)
@@ -56,7 +56,7 @@ def test_native_backend_listen_hosts_are_settings_rendered_with_loopback_default
     """The native Loki and Prometheus listeners are rendered from
     settings.observability.lgtm_listen_host; the loopback default reproduces the
     pre-parameterization output byte for byte (the contract lock for the
-    AVA_LGTM_LISTEN_HOST knob)."""
+    MEIVA_LGTM_LISTEN_HOST knob)."""
     native = Path(__file__).resolve().parents[3] / "deploy/lgtm/native"
     loki = (native / "config/loki.yaml").read_text(encoding="utf-8")
     assert "http_listen_address: __LGTM_LISTEN_HOST__" in loki
@@ -184,7 +184,7 @@ def test_native_grafana_renders_from_the_repo_and_host_setting(
     _assert_contains(
         runtime_env,
         f"GRAFANA_PROVISIONING_PATH={native_dir}/config/provisioning/dashboards",
-        "AVA_TELEMETRY_TEMPO_QUERY_URL=http://tempo.test:3200",
+        "MEIVA_TELEMETRY_TEMPO_QUERY_URL=http://tempo.test:3200",
     )
     _assert_contains(
         run_script,
@@ -208,10 +208,10 @@ def test_native_grafana_renders_from_the_repo_and_host_setting(
     ).read_text(encoding="utf-8")
     _assert_contains(
         template,
-        "$__env{AVA_TELEMETRY_LOKI_URL}",
-        "$__env{AVA_TELEMETRY_PROMETHEUS_URL}",
-        "$__env{AVA_PG_URL}",
-        "$__env{AVA_TELEMETRY_TEMPO_QUERY_URL}",
+        "$__env{MEIVA_TELEMETRY_LOKI_URL}",
+        "$__env{MEIVA_TELEMETRY_PROMETHEUS_URL}",
+        "$__env{MEIVA_PG_URL}",
+        "$__env{MEIVA_TELEMETRY_TEMPO_QUERY_URL}",
     )
     # The rendered provisioning tree keeps the $__env{} references verbatim;
     # the two-state VALUES are baked into runtime.env (Grafana expands at
@@ -219,18 +219,18 @@ def test_native_grafana_renders_from_the_repo_and_host_setting(
     rendered_datasources = (
         native_dir / "config/provisioning/datasources/datasources.yml"
     ).read_text(encoding="utf-8")
-    assert "$__env{AVA_TELEMETRY_LOKI_URL}" in rendered_datasources
+    assert "$__env{MEIVA_TELEMETRY_LOKI_URL}" in rendered_datasources
     for text in (template, rendered_datasources):
         assert "{{" not in text
     rendered_runtime_env = (native_dir / "config/runtime.env").read_text(encoding="utf-8")
     _assert_contains(
         rendered_runtime_env,
-        "AVA_TELEMETRY_LOKI_URL=http://127.0.0.1:3100",
-        "AVA_TELEMETRY_PROMETHEUS_URL=http://127.0.0.1:9090",
-        "AVA_PG_URL=127.0.0.1:5433",
-        "AVA_ALERTS_WEBHOOK_URL=http://127.0.0.1:8000/api/alerts",
+        "MEIVA_TELEMETRY_LOKI_URL=http://127.0.0.1:3100",
+        "MEIVA_TELEMETRY_PROMETHEUS_URL=http://127.0.0.1:9090",
+        "MEIVA_PG_URL=127.0.0.1:5433",
+        "MEIVA_ALERTS_WEBHOOK_URL=http://127.0.0.1:8000/api/alerts",
     )
-    _assert_rendered_provisioning(native_dir, loki="$__env{AVA_TELEMETRY_LOKI_URL}")
+    _assert_rendered_provisioning(native_dir, loki="$__env{MEIVA_TELEMETRY_LOKI_URL}")
 
 
 def test_native_loki_template_ships_the_noise_reducing_log_level() -> None:

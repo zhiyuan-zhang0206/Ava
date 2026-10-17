@@ -52,45 +52,45 @@ def _commit(source: Path, content: str, msg: str) -> str:
 
 def test_head_sha_absent(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     """No source repo → None (nothing to read)."""
-    monkeypatch.setenv("AVA_HOME", str(tmp_path))
+    monkeypatch.setenv("MEIVA_HOME", str(tmp_path))
     assert prod_source_head_sha() is None
 
 
 def test_head_sha_returns_head(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     sha = _init_prod_source(tmp_path / "source")
-    monkeypatch.setenv("AVA_HOME", str(tmp_path))
+    monkeypatch.setenv("MEIVA_HOME", str(tmp_path))
     assert prod_source_head_sha() == sha
 
 
 def test_branch_drift_absent(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    monkeypatch.setenv("AVA_HOME", str(tmp_path))
+    monkeypatch.setenv("MEIVA_HOME", str(tmp_path))
     assert prod_source_branch_drift() is None
 
 
 def test_branch_drift_on_main(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     _init_prod_source(tmp_path / "source")
-    monkeypatch.setenv("AVA_HOME", str(tmp_path))
+    monkeypatch.setenv("MEIVA_HOME", str(tmp_path))
     assert prod_source_branch_drift() is None
 
 
 def test_branch_drift_feature_branch(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    _init_prod_source(tmp_path / "source", branch="ava-7/fix")
-    monkeypatch.setenv("AVA_HOME", str(tmp_path))
-    assert prod_source_branch_drift() == "ava-7/fix"
+    _init_prod_source(tmp_path / "source", branch="meiva-7/fix")
+    monkeypatch.setenv("MEIVA_HOME", str(tmp_path))
+    assert prod_source_branch_drift() == "meiva-7/fix"
 
 
 def test_prod_source_dir_is_the_homes_own_source(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    """The home names its checkout: `$AVA_HOME/source`. A link at `$AVA_HOME/ava`
-    or the host's bare `ava` names no other."""
-    home = tmp_path / "avahome"
+    """The home names its checkout: `$MEIVA_HOME/source`. A link at `$MEIVA_HOME/meiva`
+    or the host's bare `meiva` names no other."""
+    home = tmp_path / "meivahome"
     home.mkdir()
-    elsewhere = tmp_path / "opt" / "ava" / "source" / ".venv" / "bin" / "ava"
+    elsewhere = tmp_path / "opt" / "meiva" / "source" / ".venv" / "bin" / "meiva"
     elsewhere.parent.mkdir(parents=True)
     elsewhere.write_text("#!/bin/sh\n")
-    (home / "ava").symlink_to(elsewhere)
-    monkeypatch.setattr(paths, "ava_home", lambda: home)
+    (home / "meiva").symlink_to(elsewhere)
+    monkeypatch.setattr(paths, "meiva_home", lambda: home)
     assert prod_source_dir() == home / "source"
 
 

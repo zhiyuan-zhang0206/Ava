@@ -1,4 +1,4 @@
-# Build and publish the Ava App Android APK.
+# Build and publish the Meiva App Android APK.
 #
 # Every build injects versionCode = 1_000_000 + github.run_number through the
 # Tauri `--config` overlay (scripts/codegen/build_android_release.py owns the
@@ -277,7 +277,7 @@ jobs:
             exit 1
           fi
           mkdir -p release-assets
-          cp "${apks[0]}" "release-assets/ava-app-$APP_VERSION.apk"
+          cp "${apks[0]}" "release-assets/meiva-app-$APP_VERSION.apk"
 
       - name: Build the update manifest
         # Only the mutable channel carries the manifest; a tag release is an
@@ -290,7 +290,7 @@ jobs:
           python3 scripts/codegen/build_android_release.py manifest \
             --version-code "$BUILD_NUMBER" \
             --version-name "$APP_VERSION" \
-            --apk "release-assets/ava-app-$APP_VERSION.apk" \
+            --apk "release-assets/meiva-app-$APP_VERSION.apk" \
             --commit "$GITHUB_SHA" \
             --repo "$GITHUB_REPOSITORY" \
             --out release-assets/android-latest.json
@@ -328,10 +328,10 @@ jobs:
           fi
           if ! gh release view "$TAG" >/dev/null 2>&1; then
             if [ "$REF_TYPE" = "tag" ]; then
-              gh release create "$TAG" --title "Ava App Android $TAG" \
-                --notes "Ava App Android APK release."
+              gh release create "$TAG" --title "Meiva App Android $TAG" \
+                --notes "Meiva App Android APK release."
             else
-              gh release create "$TAG" --title "Ava App Android latest" \
+              gh release create "$TAG" --title "Meiva App Android latest" \
                 --notes "Latest APK built from main." --prerelease
             fi
           fi

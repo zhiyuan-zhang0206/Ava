@@ -34,7 +34,7 @@ def _install_locally(
     enabled: bool = True,
     trust: install_registry.TrustTier = "unreviewed",
 ) -> Path:
-    dest = paths.skills_dir(paths.ava_home()) / name
+    dest = paths.skills_dir(paths.meiva_home()) / name
     dest.mkdir(parents=True, exist_ok=True)
     (dest / "SKILL.md").write_text(_SKILL_MD.format(name=name, body=body), encoding="utf-8")
     install_registry.register(
@@ -57,7 +57,7 @@ def test_sweep_uploads_a_pre_registry_install(
         with db.pool(gate=database_gate) as pool:
             result = adopt.adopt_local_installs(
                 pool,
-                skills_root=paths.skills_dir(paths.ava_home()),
+                skills_root=paths.skills_dir(paths.meiva_home()),
                 machine_name=installing_machine.name(),
             )
         assert result.adopted == ["sweep-demo"]
@@ -81,7 +81,7 @@ def test_a_swept_name_crosses_to_a_machine_that_never_had_it(
         with db.pool(gate=database_gate) as pool:
             adopt.adopt_local_installs(
                 pool,
-                skills_root=paths.skills_dir(paths.ava_home()),
+                skills_root=paths.skills_dir(paths.meiva_home()),
                 machine_name=installing_machine.name(),
             )
         original = (src / "SKILL.md").read_text(encoding="utf-8")
@@ -90,7 +90,7 @@ def test_a_swept_name_crosses_to_a_machine_that_never_had_it(
         home_b = tmp_path / "home-b"
         from base.packages.extensions import materialize as mat
 
-        result = mat.materialize_skills(db_conn, dest_root=paths.skills_dir(paths.ava_home()))
+        result = mat.materialize_skills(db_conn, dest_root=paths.skills_dir(paths.meiva_home()))
         assert result.landed == ["crossing-demo"]
         assert (home_b / "skills" / "crossing-demo" / "SKILL.md").read_text(
             encoding="utf-8"
@@ -110,13 +110,13 @@ def test_the_sweep_is_idempotent(
         with db.pool(gate=database_gate) as pool:
             first = adopt.adopt_local_installs(
                 pool,
-                skills_root=paths.skills_dir(paths.ava_home()),
+                skills_root=paths.skills_dir(paths.meiva_home()),
                 machine_name=installing_machine.name(),
             )
         with db.pool(gate=database_gate) as pool:
             second = adopt.adopt_local_installs(
                 pool,
-                skills_root=paths.skills_dir(paths.ava_home()),
+                skills_root=paths.skills_dir(paths.meiva_home()),
                 machine_name=installing_machine.name(),
             )
 
@@ -139,7 +139,7 @@ def test_two_machines_with_identical_content_merge_silently(
             with db.pool(gate=database_gate) as pool:
                 result = adopt.adopt_local_installs(
                     pool,
-                    skills_root=paths.skills_dir(paths.ava_home()),
+                    skills_root=paths.skills_dir(paths.meiva_home()),
                     machine_name=installing_machine.name(),
                 )
 
@@ -159,7 +159,7 @@ def test_a_disagreement_is_refused_with_both_machines_named(
         with db.pool(gate=database_gate) as pool:
             adopt.adopt_local_installs(
                 pool,
-                skills_root=paths.skills_dir(paths.ava_home()),
+                skills_root=paths.skills_dir(paths.meiva_home()),
                 machine_name=installing_machine.name(),
             )
 
@@ -168,7 +168,7 @@ def test_a_disagreement_is_refused_with_both_machines_named(
         with db.pool(gate=database_gate) as pool:
             result = adopt.adopt_local_installs(
                 pool,
-                skills_root=paths.skills_dir(paths.ava_home()),
+                skills_root=paths.skills_dir(paths.meiva_home()),
                 machine_name=installing_machine.name(),
             )
 
@@ -199,7 +199,7 @@ def test_converge_managed_packages_are_not_adopted(
         with db.pool(gate=database_gate) as pool:
             result = adopt.adopt_local_installs(
                 pool,
-                skills_root=paths.skills_dir(paths.ava_home()),
+                skills_root=paths.skills_dir(paths.meiva_home()),
                 machine_name=installing_machine.name(),
             )
 
@@ -219,7 +219,7 @@ def test_a_locally_disabled_skill_adopts_disabled(
         with db.pool(gate=database_gate) as pool:
             adopt.adopt_local_installs(
                 pool,
-                skills_root=paths.skills_dir(paths.ava_home()),
+                skills_root=paths.skills_dir(paths.meiva_home()),
                 machine_name=installing_machine.name(),
             )
 
@@ -241,7 +241,7 @@ def test_local_reviewed_trust_travels(
         with db.pool(gate=database_gate) as pool:
             adopt.adopt_local_installs(
                 pool,
-                skills_root=paths.skills_dir(paths.ava_home()),
+                skills_root=paths.skills_dir(paths.meiva_home()),
                 machine_name=installing_machine.name(),
             )
 
@@ -262,7 +262,7 @@ def test_reviewed_row_survives_a_later_unreviewed_machine(
         with db.pool(gate=database_gate) as pool:
             adopt.adopt_local_installs(
                 pool,
-                skills_root=paths.skills_dir(paths.ava_home()),
+                skills_root=paths.skills_dir(paths.meiva_home()),
                 machine_name=installing_machine.name(),
             )
 
@@ -271,7 +271,7 @@ def test_reviewed_row_survives_a_later_unreviewed_machine(
         with db.pool(gate=database_gate) as pool:
             result = adopt.adopt_local_installs(
                 pool,
-                skills_root=paths.skills_dir(paths.ava_home()),
+                skills_root=paths.skills_dir(paths.meiva_home()),
                 machine_name=installing_machine.name(),
             )
         assert result.conflicts == []
@@ -296,7 +296,7 @@ def test_a_tracked_name_missing_from_disk_is_reported_not_invented(
         with db.pool(gate=database_gate) as pool:
             result = adopt.adopt_local_installs(
                 pool,
-                skills_root=paths.skills_dir(paths.ava_home()),
+                skills_root=paths.skills_dir(paths.meiva_home()),
                 machine_name=installing_machine.name(),
             )
 

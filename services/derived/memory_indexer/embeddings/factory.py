@@ -3,7 +3,7 @@
 `get_provider()` is the single entry point: the indexer daemon (document
 batch path) and the gateway search endpoint (async query path) both take
 their provider from here, keyed by the name supplied by the composition root
-(`AVA_EMBEDDING_BACKEND`, default `gemini`). Unknown names fail fast — an
+(`MEIVA_EMBEDDING_BACKEND`, default `gemini`). Unknown names fail fast — an
 unrecognized value raises ValueError naming the known providers instead of
 silently falling back to Gemini (a typo would otherwise keep the old
 provider while the operator believes the switch happened).
@@ -82,7 +82,7 @@ def get_provider(
     api_key_reader: Callable[[], str | None],
 ) -> EmbeddingProvider:
     """Construct the configured provider
-    (`settings.services.embedding_backend`, env `AVA_EMBEDDING_BACKEND`)."""
+    (`settings.services.embedding_backend`, env `MEIVA_EMBEDDING_BACKEND`)."""
     return get_provider_named(
         name, catalog=catalog, timeout_reader=timeout_reader, api_key_reader=api_key_reader
     )

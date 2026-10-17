@@ -69,7 +69,7 @@ def ensure_pg_runtime() -> None:
     """Provision the pinned vendored Postgres + pgvector, or validate an installed
     PostgreSQL 17 where no vendored artifact exists for the platform.
 
-    The vendored tree is the version Ava pins, so a platform that has an artifact never
+    The vendored tree is the version Meiva pins, so a platform that has an artifact never
     falls back to a host install: an absent pinned tree (first start, or a pin bump
     leaving only an older version directory) is downloaded, whatever else is installed.
     Host installs stay the source of client tools only (`pg_tool` falls through to them

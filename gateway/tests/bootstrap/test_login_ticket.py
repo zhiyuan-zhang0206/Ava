@@ -1,4 +1,4 @@
-"""One-time login tickets: the credential behind the link `ava start` prints.
+"""One-time login tickets: the credential behind the link `meiva start` prints.
 
 A human-secret caller issues a ticket (`POST /api/auth/login-ticket`); a browser
 redeems it, without any credential, for the same session cookie a password

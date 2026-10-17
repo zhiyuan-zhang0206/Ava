@@ -10,7 +10,7 @@ callers that act on an execution owner must also verify its OS birth evidence.
 Python kills the **one** process it spawned and leaves every descendant running.
 Measured consequence: orphaned `git` + `ssh` + `sh` processes, because a
 timeout kills the launcher and the process tail below it survives. Every
-Ava-initiated subprocess with a timeout should go through `run_bounded`
+Meiva-initiated subprocess with a timeout should go through `run_bounded`
 instead, so the bound applies to the work rather than to whichever wrapper
 happened to be on top.
 """
@@ -72,7 +72,7 @@ def hosting_exec_domain() -> str | None:
 
     Membership, not ancestry: the exec root calls setsid (its spawn passes
     `start_new_session`), and `ExecProcessDomain.close()` SIGKILLs its process
-    group as the tool call returns, while `sh -c "nohup ava … &"` reparents the
+    group as the tool call returns, while `sh -c "nohup meiva … &"` reparents the
     child out of any covered lineage WITHOUT leaving the session — the
     2026-09-12 stranding: a restart that passed the ancestry guard was
     group-killed mid-drain and left the host paused. The session id is the
@@ -80,7 +80,7 @@ def hosting_exec_domain() -> str | None:
     member that re-arranged its process group (interactive job control) is
     refused too — deliberately, because the leg is still tied to an ephemeral
     call, not only to the kill that call performs. The env marker is not usable
-    for this: `cli.main` clears `AVA_PROCESS_PROFILE` before any dispatch
+    for this: `cli.main` clears `MEIVA_PROCESS_PROFILE` before any dispatch
     (`docs/decisions/runtime/config/2026-08-24-cli-full-settings-profile.md`) and session shells
     carry the exec request/result files and agent id as well, so only the
     session's identity discriminates (see `hosting_supervised_session` for the

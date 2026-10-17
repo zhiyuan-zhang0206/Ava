@@ -2,27 +2,27 @@ from pathlib import Path
 
 import pytest
 
-import ava
-from ava.tests.fixtures.pin_agent import pin_agent
-from base.agents.context import AvaContext
+import meiva
+from base.agents.context import MeivaContext
 from base.cluster.machine import MachineIdentity
 from base.config import ConfigBoot
+from meiva.tests.fixtures.pin_agent import pin_agent
 
 
 def test_sdk_context_uses_the_prepared_owner_with_a_bare_home(
     unit_home: Path,
     process_config: ConfigBoot,
-    sdk_environment: AvaContext,
+    sdk_environment: MeivaContext,
     machine_identity: MachineIdentity,
 ) -> None:
     assert list(unit_home.iterdir()) == []
-    assert ava.context is sdk_environment
-    assert ava.context.clients is sdk_environment.clients
-    assert ava.context.require_machine() is machine_identity
-    assert ava.self.AGENT_ID == 1
+    assert meiva.context is sdk_environment
+    assert meiva.context.clients is sdk_environment.clients
+    assert meiva.context.require_machine() is machine_identity
+    assert meiva.self.AGENT_ID == 1
     assert process_config.view.data_plane.db_url != ""
-    assert ava.context.clock_factory is not None
-    clock = ava.context.clock_factory()
+    assert meiva.context.clock_factory is not None
+    clock = meiva.context.clock_factory()
     assert clock.timezone == process_config.view.general.timezone
     assert clock.authoritative_timezone == (
         process_config.view.general.timezone
@@ -31,19 +31,19 @@ def test_sdk_context_uses_the_prepared_owner_with_a_bare_home(
     )
 
 
-def test_repinning_borrows_the_same_clients_and_clock(sdk_environment: AvaContext) -> None:
+def test_repinning_borrows_the_same_clients_and_clock(sdk_environment: MeivaContext) -> None:
     pin_agent(91)
-    assert ava.self.AGENT_ID == 91
-    assert ava.context.clients is sdk_environment.clients
-    assert ava.context.clock_factory is sdk_environment.clock_factory
-    assert ava.context.machine is sdk_environment.machine
+    assert meiva.self.AGENT_ID == 91
+    assert meiva.context.clients is sdk_environment.clients
+    assert meiva.context.clock_factory is sdk_environment.clock_factory
+    assert meiva.context.machine is sdk_environment.machine
 
 
 def test_the_following_case_receives_its_own_context(
-    sdk_environment: AvaContext, request: pytest.FixtureRequest
+    sdk_environment: MeivaContext, request: pytest.FixtureRequest
 ) -> None:
-    assert ava.context is sdk_environment
-    assert ava.self.AGENT_ID == 1
+    assert meiva.context is sdk_environment
+    assert meiva.self.AGENT_ID == 1
     assert {"_restore_agent_identity", "_restore_metering"} <= set(request.fixturenames)
 
 
@@ -58,15 +58,15 @@ from tests.fixtures import env_bootstrap
 
 pytest_plugins = ["tests.fixtures.env_bootstrap", "tests.fixtures.identity_restore"]
 
-import ava
-from ava.sdk_surface import process_context
-from base.agents.context import AvaContext
+import meiva
+from meiva.sdk_surface import process_context
+from base.agents.context import MeivaContext
 from base.agents.context.clients import ClientSet
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
-from ava.tests.fixtures.sdk import sdk_environment as sdk_environment
-from ava.tests.fixtures.sdk import sdk_identity as sdk_identity
+from meiva.tests.fixtures.sdk import sdk_environment as sdk_environment
+from meiva.tests.fixtures.sdk import sdk_identity as sdk_identity
 
-prior = AvaContext()
+prior = MeivaContext()
 process_context.bind_context(prior)
 closed = []
 original_close = ClientSet.close
@@ -85,18 +85,18 @@ ClientSet.close = close_owned
 @pytest.hookimpl(wrapper=True)
 def pytest_runtest_teardown(item, nextitem):
     result = yield
-    assert ava.context is prior
+    assert meiva.context is prior
     assert len(closed) == 1
     return result
 """
     )
     pytester.makepyfile(
         """
-import ava
+import meiva
 
 def test_function_root(sdk_environment, machine_identity):
-    assert ava.context is sdk_environment
-    assert ava.context.require_machine() is machine_identity
+    assert meiva.context is sdk_environment
+    assert meiva.context.require_machine() is machine_identity
 """
     )
     result = pytester.runpytest_subprocess("-q", "-o", "addopts=")

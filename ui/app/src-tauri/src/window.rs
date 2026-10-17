@@ -120,7 +120,7 @@ fn build(app: &AppHandle, target: WebviewUrl) -> tauri::Result<WebviewWindow> {
 
     #[allow(unused_mut)]
     let mut builder = WebviewWindowBuilder::new(app, MAIN_WINDOW, target)
-        .title("Ava")
+        .title("Meiva")
         .inner_size(1280.0, 840.0)
         .min_inner_size(960.0, 640.0)
         .background_color(tauri::webview::Color(0x0e, 0x0e, 0x12, 0xff))
@@ -139,7 +139,7 @@ fn build(app: &AppHandle, target: WebviewUrl) -> tauri::Result<WebviewWindow> {
         })
         .on_page_load(move |window, _payload| {
             let script = format!(
-                "{}window.dispatchEvent(new Event('ava-app-config'));",
+                "{}window.dispatchEvent(new Event('meiva-app-config'));",
                 prelude(&page_load_handle),
             );
             if let Err(err) = window.eval(&script) {
@@ -158,14 +158,14 @@ fn build(app: &AppHandle, target: WebviewUrl) -> tauri::Result<WebviewWindow> {
     builder.build()
 }
 
-/// `window.__AVA_APP__` — the resolved configuration the injected scripts
+/// `window.__MEIVA_APP__` — the resolved configuration the injected scripts
 /// read. Serialized rather than templated so a URL can never break out of the
 /// string it sits in.
 fn prelude(app: &AppHandle) -> String {
     let state = app.state::<AppState>();
     let config = AppConfig::build(app, &state);
     let json = serde_json::to_string(&config).unwrap_or_else(|_| "null".to_string());
-    format!("window.__AVA_APP__ = {json};")
+    format!("window.__MEIVA_APP__ = {json};")
 }
 
 /// Let the console's own origin — and only it — reach the app commands the
@@ -352,7 +352,7 @@ mod tests {
     #[test]
     fn runtime_capability_identifiers_are_valid_and_origin_specific() {
         let first = capability_identifier("http://localhost:3000");
-        let second = capability_identifier("https://ava.example.com");
+        let second = capability_identifier("https://meiva.example.com");
         assert!(first.starts_with("remote-console-"));
         assert!(first.chars().all(|c| c.is_ascii_alphanumeric() || c == '-'));
         assert_ne!(first, second);

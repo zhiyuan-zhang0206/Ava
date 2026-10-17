@@ -42,5 +42,5 @@ def add_pty_parser(sub: argparse._SubParsersAction[argparse.ArgumentParser]) -> 
     resume_p = pty_sub.add_parser(
         "resume", help="resume allocation only when the exact owning generation is supplied"
     )
-    resume_p.add_argument("generation", help="generation token printed by `ava pty freeze`")
+    resume_p.add_argument("generation", help="generation token printed by `meiva pty freeze`")
     resume_p.set_defaults(func=_h_pty_resume)

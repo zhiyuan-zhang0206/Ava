@@ -2,7 +2,7 @@
 
 `extract_text` / `invoke_text` / `answer_text` are the one copy of the
 "invoke -> flatten -> empty-check, wrapped in the caller's error type" tail
-that `ava.web.fetch`'s answer step and `ava.understand`'s text/media paths
+that `meiva.web.fetch`'s answer step and `meiva.understand`'s text/media paths
 used to each inline.
 """
 
@@ -82,7 +82,7 @@ def test_invoke_text_emits_chat_billing_span_from_llm_model_name(
 ) -> None:
     """A successful shared text call records the priced provider usage it consumed.
 
-    The regression this catches is ``ava.understand`` and ``ava.web.fetch``
+    The regression this catches is ``meiva.understand`` and ``meiva.web.fetch``
     returning an answer without the one-call/one-billing-span ledger row.
     """
     from opentelemetry import trace as otel_trace
@@ -137,10 +137,10 @@ def test_invoke_text_emits_chat_billing_span_from_llm_model_name(
     )
 
     assert len(tracer.spans) == 1
-    assert tracer.spans[0].attributes["ava.billing.vendor"] == "deepseek"
-    assert tracer.spans[0].attributes["ava.billing.usage_kind"] == "chat"
-    assert tracer.spans[0].attributes["ava.billing.tokens_in"] == 100
-    assert tracer.spans[0].attributes["ava.billing.cache_read_tokens"] == 20
+    assert tracer.spans[0].attributes["meiva.billing.vendor"] == "deepseek"
+    assert tracer.spans[0].attributes["meiva.billing.usage_kind"] == "chat"
+    assert tracer.spans[0].attributes["meiva.billing.tokens_in"] == 100
+    assert tracer.spans[0].attributes["meiva.billing.cache_read_tokens"] == 20
 
 
 def test_invoke_text_logs_priced_chat_usage_with_source(
@@ -148,8 +148,8 @@ def test_invoke_text_logs_priced_chat_usage_with_source(
 ) -> None:
     """A successful auxiliary text call enters the durable usage ledger.
 
-    Removing the usage emitter would leave ``ava.web.fetch`` and
-    ``ava.understand`` invisible to per-agent cost accounting even though
+    Removing the usage emitter would leave ``meiva.web.fetch`` and
+    ``meiva.understand`` invisible to per-agent cost accounting even though
     their billing spans still exist.
     """
     llm = _FakeLLM(

@@ -6,16 +6,16 @@ check_doc_references.py validates that docs point at things that exist
 that is actually there. This script adds three narrative-fact checks, each
 extracted from the code and asserted against the doc that owns the fact:
 
-  A. skill catalog  — every slug-like skill name in docs/skills/skills.ava.okf.md
-     functional-group rows must resolve under ava_builtins/skills/ or
-     ava_builtins/plugins/ (catches a removed skill still listed — the
+  A. skill catalog  — every slug-like skill name in docs/skills/skills.meiva.okf.md
+     functional-group rows must resolve under meiva_builtins/skills/ or
+     meiva_builtins/plugins/ (catches a removed skill still listed — the
      2026-08-03 telegram residual class).
   B. IM command set — every `/command` route in services/entrypoints/im_bridge/core.py
      must appear in the "Command set" line of
-     services/docs/gateway_side/im_bridge/im_bridge.ava.okf.md (catches the 8/2-8/6 drift
+     services/docs/gateway_side/im_bridge/im_bridge.meiva.okf.md (catches the 8/2-8/6 drift
      class: /spawn /commands /notice shipped, doc listed four commands).
   C. IM channels    — every adapter in services/entrypoints/im_bridge/adapters/ must be
-     mentioned in im_bridge.ava.okf.md (channel aliases: weixin/wechat,
+     mentioned in im_bridge.meiva.okf.md (channel aliases: weixin/wechat,
      feishu/lark). Catches "three channels" narrative after convergence.
 
 Facts are declared once in code; the docs are views and this script is the
@@ -52,20 +52,20 @@ def _skill_group_names(doc: str) -> list[str]:
 
 
 def check_skill_catalog() -> list[str]:
-    doc_path = ROOT / "docs/skills/skills.ava.okf.md"
+    doc_path = ROOT / "docs/skills/skills.meiva.okf.md"
     doc = doc_path.read_text(errors="replace")
     problems = []
     for name in _skill_group_names(doc):
         if name in ("comms", "ops_lifecycle", "orchestration", "self_improvement", "web_media"):
             continue  # group nodes, not skills
         if not (
-            any(d.is_dir() for d in (ROOT / "ava_builtins/skills").glob(f"*/{name}"))
-            or (ROOT / f"ava_builtins/plugins/{name}").is_dir()
-            or (ROOT / f"ava_builtins/skills/{name}.ava.okf.md").is_file()
+            any(d.is_dir() for d in (ROOT / "meiva_builtins/skills").glob(f"*/{name}"))
+            or (ROOT / f"meiva_builtins/plugins/{name}").is_dir()
+            or (ROOT / f"meiva_builtins/skills/{name}.meiva.okf.md").is_file()
         ):
             problems.append(
-                f"docs/skills/skills.ava.okf.md lists skill `{name}` but no "
-                f"ava_builtins/skills/<group>/{name}/ or ava_builtins/plugins/{name}/ exists — "
+                f"docs/skills/skills.meiva.okf.md lists skill `{name}` but no "
+                f"meiva_builtins/skills/<group>/{name}/ or meiva_builtins/plugins/{name}/ exists — "
                 f"removed skill still in the catalog?"
             )
     return problems
@@ -76,7 +76,7 @@ def check_im_command_set() -> list[str]:
     cmds = sorted(
         set(re.findall(r'cmd == "/([a-z]+)"', core) + re.findall(r'startswith\("/([a-z]+)"', core))
     )
-    doc_path = ROOT / "services/docs/gateway_side/im_bridge/im_bridge.ava.okf.md"
+    doc_path = ROOT / "services/docs/gateway_side/im_bridge/im_bridge.meiva.okf.md"
     doc = doc_path.read_text(errors="replace")
     cmd_line = next((ln for ln in doc.splitlines() if "Command set" in ln), "")
     missing = [c for c in cmds if f"/{c}" not in cmd_line]
@@ -89,7 +89,7 @@ def check_im_command_set() -> list[str]:
 
 def check_im_channels() -> list[str]:
     adapters_dir = ROOT / "services/entrypoints/im_bridge/adapters"
-    doc = (ROOT / "services/docs/gateway_side/im_bridge/im_bridge.ava.okf.md").read_text(
+    doc = (ROOT / "services/docs/gateway_side/im_bridge/im_bridge.meiva.okf.md").read_text(
         errors="replace"
     )
     lower = doc.lower()
@@ -104,7 +104,7 @@ def check_im_channels() -> list[str]:
         if not any(a in lower for a in aliases):
             problems.append(
                 f"{adapters_dir}/{f.name} exists but the channel is not mentioned in "
-                f"services/docs/gateway_side/im_bridge/im_bridge.ava.okf.md — "
+                f"services/docs/gateway_side/im_bridge/im_bridge.meiva.okf.md — "
                 f"channel-convergence narrative drift"
             )
     return problems

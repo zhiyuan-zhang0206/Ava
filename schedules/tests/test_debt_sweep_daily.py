@@ -13,11 +13,11 @@ from uuid import UUID
 
 import pytest
 
-from ava.agents import AgentStatus as S
+from meiva.agents import AgentStatus as S
 from base.config import settings
 from base.cluster.machine import MachineIdentity
 from base.native_process.loaded_commit import LoadedCommit
-from ava.sdk_surface import process_context
+from meiva.sdk_surface import process_context
 from schedules import entry
 from base import db
 from base.telemetry.tests.capture.event_capture import EmittedEvents
@@ -68,14 +68,14 @@ def test_dry_run_performs_no_agent_claim_database_or_telemetry_side_effects(
         )
 
     monkeypatch.setattr(module, "_run_mechanical_scan", fake_scan)
-    monkeypatch.setattr(module.ava.agents, "list_agents", forbidden)
-    monkeypatch.setattr(module.ava.agents, "spawn", forbidden)
-    monkeypatch.setattr(module.ava.agents, "resurrect", forbidden)
-    monkeypatch.setattr(module.ava.agents, "send_message", forbidden)
+    monkeypatch.setattr(module.meiva.agents, "list_agents", forbidden)
+    monkeypatch.setattr(module.meiva.agents, "spawn", forbidden)
+    monkeypatch.setattr(module.meiva.agents, "resurrect", forbidden)
+    monkeypatch.setattr(module.meiva.agents, "send_message", forbidden)
     monkeypatch.setattr(process_context, "loaded_code_image", forbidden)
     monkeypatch.setattr(entry, "Database", forbidden)
     monkeypatch.setattr(module, "fire_slot_once", forbidden)
-    monkeypatch.setattr(module, "ava_home", forbidden)
+    monkeypatch.setattr(module, "meiva_home", forbidden)
     monkeypatch.setattr(db, "connect", forbidden)
     monkeypatch.setattr(db, "pool", forbidden)
 
@@ -125,10 +125,10 @@ def test_ensure_worker_reuses_or_spawns_by_status(
         calls.append(("spawn", label))
         return 14
 
-    monkeypatch.setattr(module.ava.agents, "list_agents", list_agents)
-    monkeypatch.setattr(module.ava.agents, "resurrect", resurrect)
-    monkeypatch.setattr(module.ava.agents, "send_message", send_message)
-    monkeypatch.setattr(module.ava.agents, "spawn", spawn)
+    monkeypatch.setattr(module.meiva.agents, "list_agents", list_agents)
+    monkeypatch.setattr(module.meiva.agents, "resurrect", resurrect)
+    monkeypatch.setattr(module.meiva.agents, "send_message", send_message)
+    monkeypatch.setattr(module.meiva.agents, "spawn", spawn)
 
     dispatch = module.ensure_worker("debt-sweep-daily", "clear debt")
 
@@ -154,7 +154,7 @@ def test_worker_prompt_names_ledger_scan_artifact_and_one_pr(tmp_path: Path) -> 
 
     assert "today's debt-clearing pass" in prompt
     assert "origin/main" in prompt
-    assert "ava.skills.sweeper" in prompt
+    assert "meiva.skills.sweeper" in prompt
     assert "future/tech-debt/ledger.md" in prompt
     assert str(tmp_path / "debt-scan.txt") in prompt
     assert "mechanical scan failed: exit 2" in prompt
@@ -265,10 +265,10 @@ def test_ensure_worker_reuses_worker_from_later_search_page(
         return pages[len(seen_before_ids) - 1]
 
     resurrect = Mock()
-    monkeypatch.setattr(module.ava.agents, "list_agents", list_agents)
-    monkeypatch.setattr(module.ava.agents, "resurrect", resurrect)
-    monkeypatch.setattr(module.ava.agents, "send_message", Mock())
-    monkeypatch.setattr(module.ava.agents, "spawn", Mock())
+    monkeypatch.setattr(module.meiva.agents, "list_agents", list_agents)
+    monkeypatch.setattr(module.meiva.agents, "resurrect", resurrect)
+    monkeypatch.setattr(module.meiva.agents, "send_message", Mock())
+    monkeypatch.setattr(module.meiva.agents, "spawn", Mock())
 
     dispatch = module.ensure_worker("debt-sweep-daily", "clear debt")
 
@@ -296,8 +296,8 @@ def test_ensure_worker_spawns_only_after_matching_pages_are_exhausted(
     spawn = Mock(return_value=400)
     key = UUID("0eb49ad1-0b9b-4bde-b783-d0c3e4359c33")
     monkeypatch.setattr(module, "uuid4", lambda: key)
-    monkeypatch.setattr(module.ava.agents, "list_agents", list_agents)
-    monkeypatch.setattr(module.ava.agents, "spawn", spawn)
+    monkeypatch.setattr(module.meiva.agents, "list_agents", list_agents)
+    monkeypatch.setattr(module.meiva.agents, "spawn", spawn)
 
     dispatch = module.ensure_worker("missing", "clear debt")
 
@@ -356,4 +356,4 @@ def test_scan_uses_public_candidate_tool_and_preserves_report(
     assert artifact.read_text() == "candidate evidence\n"
     prompt = module.worker_prompt("2026-10-05", scan)
     assert "docs/conventions/engineering/tech-debt.md" in prompt
-    assert "ava-sweeper" not in prompt
+    assert "meiva-sweeper" not in prompt

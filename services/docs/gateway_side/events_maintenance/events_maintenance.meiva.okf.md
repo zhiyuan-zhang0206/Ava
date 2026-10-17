@@ -1,0 +1,62 @@
+---
+type: doc
+title: Events Maintenance — cost-ledger rollup + class resolution
+description: Gateway-owned maintenance daemon for the durable token and cost ledger, immutable-Loki resolution metrics, checkpoint size monitoring, and blob vacuum.
+tags: []
+---
+
+# Events Maintenance — cost-ledger rollup + class resolution
+
+## What it is
+Gateway-owned background daemon (`services/upkeep/events_maintenance/daemon.py`). The telemetry and log record lives in `telemetry_events` (Postgres, permanent); this daemon keeps the derived tables and the record itself in step with it: every `MEIVA_EVENTS_MAINTENANCE_INTERVAL_SECONDS` (default 1h) it replays this machine's JSONL mirror into `telemetry_events`, and recomputes the last eight closed UTC days into `agent_metrics_daily` and `agent_model_tokens_daily`, the cluster's **durable token + cost ledger**. Checkpoint trim opt-in retired 2026-09-30; its implementation remains unscheduled.
+
+**Role home**: gateway side (pure agent-runner does not run) — `services/supervision/roster/spec.py`'s `ServiceSpec.capabilities=GATEWAY`. The daemon ALWAYS runs on the gateway, and its responsibilities are unconditional: the **cost-ledger rollup**, the **mirror replay**, the **checkpoint size sample**, and the **blob vacuum**. VACUUM reclaims physical space without deleting live checkpoint history.
+
+## Core responsibilities
+- **Day-grain rollup** (`services/upkeep/events_maintenance/rollup.py:compute_rollup`, unconditional): each pass recomputes the last eight closed UTC days (`RECOMPUTE_DAYS`, covering the mirror replay's seven-day lateness) from `telemetry_events` with two idempotent full-day overwrite statements per day: `agent_model_tokens_daily` (per agent × day × model: calls, token sums, usage-time cost, costed/unpriced calls; `estimated_calls` is never written) and `agent_metrics_daily` (per agent × UTC-day turn/exec counts, exact turn-duration sum/min/max, and a mergeable `floor(duration_seconds)` histogram for p50/p90). A monotone guard (`ON CONFLICT … WHERE` the recompute has at least as many calls, turns and execs) means a day that `telemetry_events` holds only in part never lowers a ledger row. The operator CLI `python -m services.upkeep.events_maintenance.rollup --from YYYYMMDD --to YYYYMMDD` recomputes a range after a backfill.
+- **Token totals** (`token_totals.py`, right after the rollup): settled ledger days fold into `agent_model_tokens_total` — [[token-totals.meiva.okf.md]].
+- **Observed Inspector metrics**: persisted typed live projection — [[observed-metrics.meiva.okf.md]].
+- **Telemetry events replay**: the hourly mirror → `telemetry_events` pass — [[telemetry-replay.meiva.okf.md]].
+- **Class resolution** (5m cadence) — counts the warning, error and critical rows of one fixed six-hour window in `telemetry_events` (the partial index `telemetry_events_anomaly_ts`; it emits no gauge when the newest recorded event is over 15 minutes old) (grouped by `category, level, event_name, source, process`; pre-dimension rows read as the empty label), subtracts active rows in `event_dismissals` (exact process match, or a wildcard `process = ''` row cancelling every process of its class — task #4329 B5), and emits the absolute `meiva_resolution_status_unresolved_warnings_ratio` / `meiva_resolution_status_unresolved_errors_ratio` / `meiva_resolution_status_dismissed_warnings_ratio` / `meiva_resolution_status_dismissed_errors_ratio` Prometheus gauges (with the dashboard `Warning` / `Error` tiles they render the total / resolved / net trio). The gateway's alert-class reads (`resolution.alert_classes` + `resolution.matching_dismissal`, `/api/stats/alert-classes`) apply the same dismissal match to the dashboard's selected window. Recorded events remain immutable: resolution never mutates a historical event. A second ten-minute read reopens a dismissal whose count exceeds `MEIVA_EVENTS_RESOLUTION_BURST_THRESHOLD` (default 5; exact rows watch their process, wildcards the base-wide sum). Manual API marking is primary; `MEIVA_EVENTS_AUTO_DISMISS_ENABLED` (off by default) is the daily stable-class scan. Each resolution loop owns its scan cadence: a successful history fetch consumes that date before dismissal writes; a fetch failure does not. Restarting the loop starts a fresh cadence.
+- **Checkpoint physical-size monitoring** (`services/upkeep/events_maintenance/blob_vacuum.py`) — each actual plain-vacuum pass measures `checkpoint_blobs`, `checkpoints`, and `checkpoint_writes` with `pg_total_relation_size` and emits the latest values through the existing OTLP metric path as absolute gauges. Grafana warns at 2.5 GiB and errors at 4 GiB for `checkpoint_blobs`; measurements refresh only in the 05:00-08:00 window or on a force run, so an alert lasts through the daily sampling gap. The alerts prompt an operator-led repack/capacity decision before the disk watermark; they do not change vacuum behavior.
+- **Configuration**: `services/upkeep/events_maintenance/daemon.py:events_maintenance_config` reads its required entry ConfigBoot at the original call point; it builds the frozen `EventsMaintenanceConfig` (`config.py`) and passes it to the loops and passes.
+- **Per-loop progress health**: dispatch and class resolution own separate progress trackers with hard deadlines; a timed-out worker wedges its tracker and makes the aggregate `/healthz` return 503 while the sibling loop stays healthy — [[progress-health.meiva.okf.md]].
+
+## Key dependencies
+- [[agent/db/docs/db.meiva.okf.md]] — writes the two rollup tables (the frozen `events` archive was dropped; see the task #1281/#1823 cleanup)
+- `telemetry_events` — the source of the rollup, the class counts and the observation recovery
+
+## Entry points
+- `services/upkeep/events_maintenance/daemon.py` — `.venv/bin/python -m services.upkeep.events_maintenance.daemon`
+- `services/upkeep/events_maintenance/rollup.py` — also the operator CLI for a range of days
+- `services/upkeep/events_maintenance/resolution.py:run_resolution_slice` — immutable Loki class resolution, marker transitions, and the unresolved/dismissed gauges
+- Root's health monitor keeps it alive via the roster's `/healthz` identity probe (`services/supervision/roster/healthz.py`)
+
+## Process composition
+
+The executable entry captures one `LoadedCommit` and retains its `CodeVersion`
+and `ProcessDbGate`. The work database factory and the lazy telemetry producer
+share that gate, so new handles preserve the process admission read budget.
+Logging and the existing health endpoint receive the same captured image; a
+checkout move cannot relabel the running daemon. The daemon's existing startup,
+pidfile, work and bounded-exit order remains unchanged.
+
+The standalone rollup entry captures its own image and binds an explicit,
+non-exempt gate to `events_maintenance_db(config, gate=...)`. Argument rejection precedes
+capture and database access; the closed-day SQL and fold-watermark rules remain
+unchanged.
+
+The service entry retains its prepared `ConfigBoot` and resolved unit runtime
+path. Endpoint and pidfile operations borrow those inputs through
+`ServiceEndpoints.from_boot`; each original lookup reads the same live view.
+The work and logging database factory calls `db_config_from_boot` at each
+handle creation and retains the entry's gate and lazy machine host reader.
+Schema checks, health-before-pool ordering and shutdown stay at their original
+boundaries. Business-specific configuration slices keep their existing readers.
+
+The daemon's slice builder requires the same prepared `ConfigBoot` that its entry
+passes to `run`. The Grafana-credential branch constructs its `EventBusConfig`
+from that owner at the original conditional call point; units without the
+credential do not construct this bus. The standalone rollup entry passes its
+own existing boot owner to `events_maintenance_db`, whose live database slice is
+read at that call. These inputs do not redeliver environment or timezone state.

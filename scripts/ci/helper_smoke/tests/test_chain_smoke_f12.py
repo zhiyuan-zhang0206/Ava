@@ -19,13 +19,13 @@ from scripts.ci import helper_smoke as smoke  # noqa: E402 - checkout path guard
 
 def _line(stamp: str, requesting_pid: int, responsible_pid: int | None = 400) -> str:
     responsible = (
-        f"responsible={{TCCDProcess: identifier=com.ava.helper, pid={responsible_pid}, auid=501}}, "
+        f"responsible={{TCCDProcess: identifier=com.meiva.helper, pid={responsible_pid}, auid=501}}, "
         if responsible_pid is not None
         else ""
     )
     return (
         f"{stamp} 0x1234 Default tccd[99]: AUTHREQ_ATTRIBUTION: {responsible}"
-        f"requesting={{TCCDProcess: identifier=com.ava.smoke, pid={requesting_pid}, auid=501}}"
+        f"requesting={{TCCDProcess: identifier=com.meiva.smoke, pid={requesting_pid}, auid=501}}"
     )
 
 

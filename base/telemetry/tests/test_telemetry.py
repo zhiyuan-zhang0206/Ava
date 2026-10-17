@@ -73,7 +73,7 @@ def _mirror_last(event_name: str, agent: int | None = None) -> dict[str, Any]:
 def bind_telemetry(database: Database) -> Iterator[None]:
     """Bind a stable identity to this test's explicit native writer owner."""
     pipeline = telemetry.build_pipeline(
-        database=lambda: database, machine=machine_identity(), home=Path(".ava")
+        database=lambda: database, machine=machine_identity(), home=Path(".meiva")
     )
     try:
         telemetry.init_telemetry(process="test-proc", pipeline=pipeline)
@@ -198,17 +198,17 @@ def test_explicit_machine_reader_defect_propagates() -> None:
 def test_cluster_label_falls_back_without_raising(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    home = tmp_path / ".ava-preview"
+    home = tmp_path / ".meiva-preview"
 
     def fail_label(_home: Any) -> str:
         raise RuntimeError("label unavailable")
 
     def fallback_slug(_home: Any) -> str:
-        return "ava-preview-fallback"
+        return "meiva-preview-fallback"
 
     monkeypatch.setattr(cluster, "home_label", fail_label)
     monkeypatch.setattr(cluster, "home_slug", fallback_slug)
-    assert observability.cluster_label(home) == "ava-preview-fallback"
+    assert observability.cluster_label(home) == "meiva-preview-fallback"
 
     monkeypatch.setattr(cluster, "home_slug", fail_label)
     assert observability.cluster_label(home) == ".unknown"

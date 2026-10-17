@@ -32,7 +32,7 @@ from the path alone:
 
 | Where | Question it answers | Tense |
 |---|---|---|
-| `*.ava.okf.md` (in the package's `docs/`) | what the system **is** — structure, responsibilities, terminology | now |
+| `*.meiva.okf.md` (in the package's `docs/`) | what the system **is** — structure, responsibilities, terminology | now |
 | `docs/decisions/` | **why** it was chosen this way — rejected alternatives, trade-offs | past, never rewritten |
 | `future/` | what we **plan** to do | future |
 | `docs/conventions/` | **how** to work — shared rules, processes and coordination | now |
@@ -96,21 +96,21 @@ public-repo cutover are not reachable from public `main` and are labelled
 
 Anything derivable from the code — modules, endpoints, schemas, wiring, data
 flow — lives in the OKF graph, never in `docs/conventions/`. Each package keeps its
-`.ava.okf.md` files in its own `docs/` directory, beside its code and `tests/`
-(`agent/`, `ava/`, `ava_builtins/`, `cli/`, `ui/web/`, `gateway/`, `services/`,
+`.meiva.okf.md` files in its own `docs/` directory, beside its code and `tests/`
+(`agent/`, `meiva/`, `meiva_builtins/`, `cli/`, `ui/web/`, `gateway/`, `services/`,
 `base/`); the cross-domain index nodes live in the repository's `docs/`.
 
 Hierarchy is filesystem-derived (`base/packages/docs/okf_graph.py:compute_parent`)
 and runs on **logical paths**: the `docs/` layer is transparent, so the last
 `docs` directory segment is dropped from a node's path (`logical_path`) —
-`agent/graph/docs/graph.ava.okf.md` sits at `agent/graph/graph.ava.okf.md`. On
-logical paths, `<dir>/<dir>.ava.okf.md` is the overview node for `<dir>/`, and
+`agent/graph/docs/graph.meiva.okf.md` sits at `agent/graph/graph.meiva.okf.md`. On
+logical paths, `<dir>/<dir>.meiva.okf.md` is the overview node for `<dir>/`, and
 the other files inside `<dir>/` are its children (user ruling 2026-08-12: a directory's
 overview lives *inside* the directory, not beside it at the parent level).
 `compute_parent` searches for the nearest ancestor overview, skipping the node
 itself and directories without an overview. Nested overviews therefore belong
 to their enclosing domain rather than the apex. Only nodes with no ancestor
-overview fall back to the root. It does not resolve a sibling `<dir>.ava.okf.md`
+overview fall back to the root. It does not resolve a sibling `<dir>.meiva.okf.md`
 at the parent level; lint rule E009 fires on one, layered or not. Links are not logical:
 `[[…]]` and relative markdown links name the real path, `docs/` included.
 
@@ -118,13 +118,13 @@ Splitting an over-cap node follows the same rule: the child goes in the
 directory named after the parent's stem — inside the `docs/` layer, so
 `docs/<stem>/` — and the parent edge is derived rather than asserted. That
 directory holds only documents when the code it describes lives elsewhere
-(`ava_builtins/plugins/ava_fleet/docs/neighbors/`,
+(`meiva_builtins/plugins/meiva_fleet/docs/neighbors/`,
 `ui/web/src/docs/frontend-components/`); a child placed beside its parent in the
 layer would attach to the nearest ancestor overview (or ultimately the root),
 not to the node it was split from.
 
 The **index layer** uses the same documentation placement: the apex is
-`docs/index.ava.okf.md`, and the cross-domain plugin, skill and MCP concept
+`docs/index.meiva.okf.md`, and the cross-domain plugin, skill and MCP concept
 systems live beneath `docs/`. They have no single code directory to own them.
 Chosen alternatives and their rationale belong in `docs/decisions/`;
 unimplemented proposals and plans belong in `future/`. Both use ordinary
@@ -133,7 +133,7 @@ Markdown, so they do not appear as current-system graph nodes.
 tree has exactly one root and no dangling edges.
 
 A `[[wikilink]]` is the **edge syntax of the node graph**, so its universe is the
-`.ava.okf.md` files and nothing else. A link to any other axis — a decision
+`.meiva.okf.md` files and nothing else. A link to any other axis — a decision
 record, a plan, a convention — cannot resolve however plainly the file exists,
 because those are not nodes and `compute_parent` has nowhere to put them. Cite
 them as a normal markdown link or a backticked path
@@ -148,13 +148,13 @@ that basename, so an untouched link starts failing on someone else's commit.
 `W011` (non-blocking) reports a target whose directory component played no part
 in its resolution, while it is still only a wrong path.
 
-Format is enforced by `scripts/content_lint/lint_ava_okf.py`: YAML frontmatter with
+Format is enforced by `scripts/content_lint/lint_meiva_okf.py`: YAML frontmatter with
 `type` / `title` / `description`, a line + character size ceiling (which forces
 hierarchy instead of long files), and `[[wikilink]]` targets that must resolve.
 Every node sits in a `docs/` layer (`E014`; `.github/` is exempt), and
 the overview-position rule (`E009`) is judged on logical paths, so a directory
 whose nodes all sit in `docs/<sub>/` still has its overview there and no sibling
-`docs/<sub>.ava.okf.md`. The three thresholds are `MAX_LINES` / `MAX_CHARS` / `WARN_MARGIN` in that
+`docs/<sub>.meiva.okf.md`. The three thresholds are `MAX_LINES` / `MAX_CHARS` / `WARN_MARGIN` in that
 script, which is their only source of truth — read them there rather than
 trusting a number quoted in prose. In practice the character cap is the one that
 binds: no node has ever approached the line cap.
@@ -170,7 +170,7 @@ The ceiling counts **characters of decoded UTF-8** (`len(text)`), not bytes. So
 `wc -c` reads high on any node containing multi-byte glyphs — `→`, `✓`, CJK — and
 can put a passing file over the cap by tens of characters. Run the linter; do not
 eyeball `wc -c` and trim. (Both directions of that mistake have already been made
-on `cli.ava.okf.md`: a false alarm at `wc -c` 6036 against a real 5996,
+on `cli.meiva.okf.md`: a false alarm at `wc -c` 6036 against a real 5996,
 and a commit that trimmed it to fix a violation that did not exist.)
 
 ## What does NOT go in the doc axes
@@ -184,7 +184,7 @@ repo, the cluster memory pool):
 - Strategy/competitor notes
 - Raw run/result histories of your own deployment
 
-Ava's doc axes must remain publishable as-is — no personal accounts, no internal
+Meiva's doc axes must remain publishable as-is — no personal accounts, no internal
 strategy, no deployment secrets. Before writing: "would I be fine with a
 stranger reading this on GitHub?"
 
@@ -193,25 +193,25 @@ stranger reading this on GitHub?"
 Reconcile in the same PR as the code.
 
 Structure changes → the OKF node in the `docs/` of the package you touched, plus
-its domain overview (the `<dir>/<dir>.ava.okf.md` node of the domain's
+its domain overview (the `<dir>/<dir>.meiva.okf.md` node of the domain's
 directory) when the domain's shape changed. Paths below are the files' real
 paths, `docs/` layer included:
 
 | Change | Domain node |
 |---|---|
-| Agent lifecycle / crash-resurrect | `agent/docs/agent.ava.okf.md` |
-| SDK surface (`ava/__init__.py`, new namespaces) | `ava/docs/ava.ava.okf.md` |
-| Gateway routes / SSE / auth | `gateway/docs/gateway.ava.okf.md` |
-| CLI commands / cluster lifecycle | `cli/docs/cli.ava.okf.md` |
-| Frontend | `ui/web/docs/web.ava.okf.md` |
-| Base library / LM providers / config / migrations | `base/docs/base.ava.okf.md` |
-| Background services | `services/docs/services.ava.okf.md` |
-| GitHub Actions / CI workflows | `.github/.github.ava.okf.md` |
-| Plugins / extension points | `docs/plugins/plugins.ava.okf.md` |
-| Skills | `docs/skills/skills.ava.okf.md` |
-| MCP integrations | `docs/mcps/mcps.ava.okf.md` |
-| Test suite | `tests/docs/tests.ava.okf.md` |
-| Ops scripts | `scripts/docs/scripts.ava.okf.md` |
+| Agent lifecycle / crash-resurrect | `agent/docs/agent.meiva.okf.md` |
+| SDK surface (`meiva/__init__.py`, new namespaces) | `meiva/docs/meiva.meiva.okf.md` |
+| Gateway routes / SSE / auth | `gateway/docs/gateway.meiva.okf.md` |
+| CLI commands / cluster lifecycle | `cli/docs/cli.meiva.okf.md` |
+| Frontend | `ui/web/docs/web.meiva.okf.md` |
+| Base library / LM providers / config / migrations | `base/docs/base.meiva.okf.md` |
+| Background services | `services/docs/services.meiva.okf.md` |
+| GitHub Actions / CI workflows | `.github/.github.meiva.okf.md` |
+| Plugins / extension points | `docs/plugins/plugins.meiva.okf.md` |
+| Skills | `docs/skills/skills.meiva.okf.md` |
+| MCP integrations | `docs/mcps/mcps.meiva.okf.md` |
+| Test suite | `tests/docs/tests.meiva.okf.md` |
+| Ops scripts | `scripts/docs/scripts.meiva.okf.md` |
 Process, rule, and observed-behaviour changes → the doc that owns them:
 
 | Change | Doc |
@@ -225,7 +225,7 @@ Process, rule, and observed-behaviour changes → the doc that owns them:
 | Coding conventions | `python-conventions.md` |
 | Agent communication style | `communicating-with-user.md` |
 | Design philosophy / deliberate omissions | `philosophy.md` + `non-goals.md` |
-| SDK docstrings (`ava/*.py` public API) | `sdk-docstring-discipline.md` |
+| SDK docstrings (`meiva/*.py` public API) | `sdk-docstring-discipline.md` |
 | Lint vs sweeper boundary | `lint-vs-sweeper.md` |
 | Observability surfaces (event fields, span attributes, query recipes) | `.agents/skills/inspect-a-trace/` — the skill IS the reconcile target, since nothing else records what a run looks like |
 | A bug class that already shipped here | `defensive-patterns.md` — plus a `docs/postmortems/` entry when it clears the entry bar |

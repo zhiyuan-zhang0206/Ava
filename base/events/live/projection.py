@@ -1,7 +1,7 @@
 """SSE live projection — typed Redis pub/sub payloads for the real-time UI view.
 
 These events are a **live projection**: they are published to the Redis
-`ava:events` channel and consumed by the frontend, and are never persisted.
+`meiva:events` channel and consumed by the frontend, and are never persisted.
 They are distinct from the unified event-stream facts
 (`base/telemetry/emitter.py` — `Event` LogRecord facts; the JSONL mirror is the
 durable copy and Loki the live read side). A live projection is a render hint for
@@ -19,9 +19,9 @@ consumer stay aligned at ~25 FPS. Regenerate the frontend copy via
 `scripts/codegen/dump_frontend_constants.py` (pre-commit drift-checks it).
 
 
-SDK (ava/) and agent / UI (agent/, ui/) both publish / subscribe to
+SDK (meiva/) and agent / UI (agent/, ui/) both publish / subscribe to
 the same channel; this lives at the top level to avoid agent
-triggering SDK init side effects via ava import (same rationale as
+triggering SDK init side effects via meiva import (same rationale as
 exit_codes.py).
 
 Design: one Pydantic `BaseModel` per role; the shared `role` field
@@ -90,7 +90,7 @@ class ChatDelta(_Base):
 
 class CompactRequest(_Base):
     """Notification sent by the SDK right after the agent calls
-    `ava.self.compact(summary)` — the UI can display
+    `meiva.self.compact(summary)` — the UI can display
     "compacting..."; content carries a human-readable description
     (length etc.)."""
 
@@ -132,7 +132,7 @@ class CompactStarted(_Base):
     trigger class: `request` = an explicitly enqueued compact_request (the
     UI/API Compact action), `auto` = framework-initiated without a request
     (the before_llm context threshold hook).
-    The agent-authored `ava.self.compact` path is not a forced compaction —
+    The agent-authored `meiva.self.compact` path is not a forced compaction —
     it keeps emitting `CompactRequest` / `CompactDone` only, without a
     ticking block."""
 
@@ -405,7 +405,7 @@ class ToUserChanged(_Base):
 
 
 class PageOpened(_Base):
-    """Published when the agent calls `ava.ui.show(name)` to
+    """Published when the agent calls `meiva.ui.show(name)` to
     register / update an HTML page — the frontend Pages popover adds
     or in-place replaces an entry.
 
@@ -427,7 +427,7 @@ class PageOpened(_Base):
 
 
 class PageClosed(_Base):
-    """Published when the agent calls `ava.ui.close(name)`, the terminate
+    """Published when the agent calls `meiva.ui.close(name)`, the terminate
     cascade closes an agent-owned show() page, or the page-server daemon closes
     a row whose serve_dir remains unavailable — the frontend Pages popover
     removes the entry.
@@ -482,7 +482,7 @@ class LabelUpdated(_Base):
 
 class NoticePosted(_Base):
     """Published when the agent posts or edits any open notice via
-    `ava.ui.notify` / `ava.ui.edit_notice`. Carries only the lightweight header
+    `meiva.ui.notify` / `meiva.ui.edit_notice`. Carries only the lightweight header
     (not the body), so the unified Inbox refetches its queue. A notice that needs
     a response also publishes AgentUpdated, which invalidates the selected
     agent's authoritative detail read for inspector consumers."""
@@ -507,7 +507,7 @@ class NoticeResolved(_Base):
 
 
 class TaskCreated(_Base):
-    """Published when an agent creates a task through the ava.tasks SDK. Fleet-wide
+    """Published when an agent creates a task through the meiva.tasks SDK. Fleet-wide
     (GLOBAL_ROLES), so every open task board invalidates and refetches /api/tasks.
     `agent_id` is the creating agent. Carries only the task id — consumers refetch
     the registry rather than upserting from the event, so no task body rides here."""
@@ -517,7 +517,7 @@ class TaskCreated(_Base):
 
 
 class TaskUpdated(_Base):
-    """Published when an agent updates a task through the ava.tasks SDK (status,
+    """Published when an agent updates a task through the meiva.tasks SDK (status,
     owner, priority, results, reminder). Same fleet-wide invalidation trigger as
     TaskCreated; `agent_id` is the acting agent. The gateway PATCH path is a plain
     column write with no acting agent and does not emit — the board's slow poll
@@ -613,7 +613,7 @@ EVENT_ADAPTER: TypeAdapter[Event] = TypeAdapter(
     ]
 )
 
-# All events publish to settings.data_plane.events_channel (default 'ava:events');
+# All events publish to settings.data_plane.events_channel (default 'meiva:events');
 # the UI subscribes to that one channel to receive every role. Derived from the
 # registry — each class's `role` literal is the single declaration.
 SYSTEM_ROLES: frozenset[str] = frozenset(

@@ -80,7 +80,7 @@ class ExecTimedOut:
 
 @dataclass(frozen=True)
 class ExecLifecycle:
-    """Agent actively called `ava.self.{terminate,restart,compact}`, raising a
+    """Agent actively called `meiva.self.{terminate,restart,compact}`, raising a
     `LifecycleExit` subclass inside the child — lifecycle takes priority over
     cancel/timeout. The exception is reconstructed parent-side from the
     envelope's `lifecycle_type` name (fixed three-class map)."""

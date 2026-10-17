@@ -4,8 +4,8 @@
 "test_process_boot.py" = ["child_gateway_scenarios.py"]
 
 [debt.env-patch]
-"test_bootstrap_fetch_gateway.py#monkeypatch.delitem os.environ.AVA_CLUSTER_SECRET" = 1
-"test_bootstrap_fetch_gateway.py#monkeypatch.setitem os.environ.AVA_API_TOKEN" = 1
+"test_bootstrap_fetch_gateway.py#monkeypatch.delitem os.environ.MEIVA_CLUSTER_SECRET" = 1
+"test_bootstrap_fetch_gateway.py#monkeypatch.setitem os.environ.MEIVA_API_TOKEN" = 1
 
 [debt.first-party-patch]
 "test_auth.py#monkeypatch.setattr base.config.settings.data_plane.cluster_secret" = 1
@@ -21,7 +21,7 @@
 "test_auth_enforcement.py#monkeypatch.setattr base.config.settings.services.frontend_healthcheck_url" = 3
 "test_auth_enforcement.py#monkeypatch.setattr gateway.app.time.monotonic" = 1
 "test_bootstrap_endpoint.py#monkeypatch.setattr base.config.settings.data_plane.cluster_secret" = 8
-"test_bootstrap_endpoint.py#monkeypatch.setattr base.paths.ava_home" = 2
+"test_bootstrap_endpoint.py#monkeypatch.setattr base.paths.meiva_home" = 2
 "test_bootstrap_fetch_gateway.py#monkeypatch.setattr base.config.settings.data_plane.cluster_secret" = 1
 "test_bootstrap_fetch_gateway.py#monkeypatch.setattr base.host.env.bootstrap.dial_get" = 1
 "test_config_resolved.py#monkeypatch.setattr base.config.settings.agent.auto_compact_fraction" = 1

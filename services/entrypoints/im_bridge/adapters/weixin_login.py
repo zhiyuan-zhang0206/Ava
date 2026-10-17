@@ -182,7 +182,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--login",
         action="store_true",
-        help="Interactive QR login; credentials are written to $AVA_HOME/state/im_bridge/weixin_account.json",
+        help="Interactive QR login; credentials are written to $MEIVA_HOME/state/im_bridge/weixin_account.json",
     )
     args = parser.parse_args(argv)
     if args.login:

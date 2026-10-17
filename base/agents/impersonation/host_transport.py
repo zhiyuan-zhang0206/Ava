@@ -10,7 +10,7 @@ database waiting for the next idle boundary.
 
 A JSON-RPC error or transport failure is a delivery failure. The caller stops
 the relay; it must not substitute ``codex queue``, whose Pending semantics wait
-for the current turn to finish. Ava's durable, unacknowledged inbox remains the
+for the current turn to finish. Meiva's durable, unacknowledged inbox remains the
 recovery source.
 
 Wire facts verified against Codex 0.155.1: ``turn/start`` atomically starts an
@@ -51,7 +51,7 @@ the bound stays well under the relay's 10s heartbeat cadence.
 _CLOSE_TIMEOUT_SECONDS = 1.0
 _MIN_REMAINING_SECONDS = 0.05
 _REASON_MAX_CHARS = 200
-_CLIENT_INFO: dict[str, str] = {"name": "ava-impersonation-relay", "version": "1"}
+_CLIENT_INFO: dict[str, str] = {"name": "meiva-impersonation-relay", "version": "1"}
 _INITIALIZE_REQUEST_ID = 1
 TURN_REQUEST_ID = 2
 _ANTIGRAVITY_SERVICE_PREFIX = "/exa.language_server_pb.LanguageServerService/"
@@ -137,7 +137,7 @@ def live_submit(
         return None
     except Exception as exc:
         # A timeout may follow server acceptance. Do not retry through another
-        # transport: only a controller ACK establishes receipt in Ava.
+        # transport: only a controller ACK establishes receipt in Meiva.
         return _clip(f"{type(exc).__name__}: {exc}")
     finally:
         if conn is not None:

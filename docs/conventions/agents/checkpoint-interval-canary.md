@@ -1,7 +1,7 @@
-# N-step checkpoint canary protocol (AVA_CHECKPOINT_INTERVAL)
+# N-step checkpoint canary protocol (MEIVA_CHECKPOINT_INTERVAL)
 
 Operational recovery-validation and rollback protocol for the default
-`AVA_CHECKPOINT_INTERVAL=4`, and for evaluating a larger interval one agent
+`MEIVA_CHECKPOINT_INTERVAL=4`, and for evaluating a larger interval one agent
 subset at a time. It formalizes the notes in
 [`runbook.md`](../runbook.md) (checkpoint section)
 and the task #1551 write-amplification evaluation
@@ -10,7 +10,7 @@ and the task #1551 write-amplification evaluation
 
 ## When to use this protocol
 
-`AVA_CHECKPOINT_INTERVAL` is a per-agent flag (`per_agent=True`,
+`MEIVA_CHECKPOINT_INTERVAL` is a per-agent flag (`per_agent=True`,
 `restart_required=agent`), default `4`. Set it to `1` for an agent that needs
 every-super-step persistence; an interval above `4` trades more recovery
 granularity for write volume and must go through this protocol.
@@ -43,16 +43,16 @@ granularity for write volume and must go through this protocol.
    per-agent overlay for the proposed interval above `4` (config overlay wins
    over cluster `.env`; do NOT set the cluster-wide `.env` value first).
 2. **Restart the canaries** (`restart_required=agent`):
-   `ava agents restart <id>` (or the frontend agent settings page).
+   `meiva agents restart <id>` (or the frontend agent settings page).
 3. **Verify write reduction** (the thing the flag exists for): watch the
    checkpoint write rate / `checkpoint_blobs` growth over one full day against
    the pre-canary baseline. Compare the result with N=4 before accepting a
    larger recovery window.
 4. **Force interruption → resurrect recovery check** (the thing that could regress):
-   for each canary, `ava agents kill <id>` mid-turn (an interruption request —
+   for each canary, `meiva agents kill <id>` mid-turn (an interruption request —
    `terminate` is graceful and lets the agent finish its turn). An `enqueued`
    response confirms acceptance, not completed exit or resource settlement.
-   After the original host settles the turn and its resources, run `ava agents
+   After the original host settles the turn and its resources, run `meiva agents
    resurrect <id>` / send it a message and confirm:
    - the agent comes back with its conversation state intact;
    - up to N-1 super-steps replay and the final state is consistent
@@ -64,7 +64,7 @@ granularity for write volume and must go through this protocol.
    roll back (below).
 5. **Widen**: canary a second subset covering one resident role + one
    high-traffic agent, repeat steps 2-4. Only after both rounds are clean
-   consider a cluster `.env` `AVA_CHECKPOINT_INTERVAL=<proposed interval>`
+   consider a cluster `.env` `MEIVA_CHECKPOINT_INTERVAL=<proposed interval>`
    override (still per-agent overridable).
 
 ## Rollback
@@ -73,7 +73,7 @@ granularity for write volume and must go through this protocol.
   next checkpoint writes at the strict cadence; a crash during the transition
   replays at most the current interval's N-1 steps — the same bound as normal
   N-step operation, no special recovery.
-- **Cluster-wide**: set `AVA_CHECKPOINT_INTERVAL=1` in `.env` and restart the
+- **Cluster-wide**: set `MEIVA_CHECKPOINT_INTERVAL=1` in `.env` and restart the
   affected agents. There is no data migration — the flag only changes write
   cadence; existing checkpoints (sparser parent chains included) remain valid
   and readable at any interval.

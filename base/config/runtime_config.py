@@ -1,7 +1,7 @@
-"""Config file accessor — the unit's `$AVA_HOME/.env`.
+"""Config file accessor — the unit's `$MEIVA_HOME/.env`.
 
 Every `Settings` field maps to one `.env` key (its env alias). A process reads
-`.env` at startup (`base/dotenv_boot.load_ava_env` -> `load_dotenv`) into the
+`.env` at startup (`base/dotenv_boot.load_meiva_env` -> `load_dotenv`) into the
 environment, and pydantic-settings builds `Settings` from it; precedence is
 `env(.env) > Field default`, with no override layer in between.
 

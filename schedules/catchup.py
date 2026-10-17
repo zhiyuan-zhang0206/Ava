@@ -21,16 +21,16 @@ _Payload = TypeVar("_Payload")
 
 
 def cluster_timezone() -> str:
-    """The cluster wall-clock timezone (`AVA_TIMEZONE`, cluster-pinned), never the host's OS
+    """The cluster wall-clock timezone (`MEIVA_TIMEZONE`, cluster-pinned), never the host's OS
     timezone: the whole fleet fires at one instant regardless of where each machine sits. A
     weekly cron is the case where a host-local reading lands the run on the wrong CALENDAR
     DAY, not merely at the wrong hour. The schedule script reads it when it runs; a changed
-    value reaches a schedule at its next restart (`ava schedules restart <id>`)."""
+    value reaches a schedule at its next restart (`meiva schedules restart <id>`)."""
     return Clock.from_settings().timezone
 
 
 def _schedule_id(explicit: int | None) -> int:
-    schedule_id = int(os.environ["AVA_SCHEDULE_ID"]) if explicit is None else explicit
+    schedule_id = int(os.environ["MEIVA_SCHEDULE_ID"]) if explicit is None else explicit
     if schedule_id <= 0:
         raise ValueError(f"schedule_id must be positive, got {schedule_id}")
     return schedule_id

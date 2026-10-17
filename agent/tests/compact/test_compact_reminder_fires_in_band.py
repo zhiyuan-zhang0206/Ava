@@ -33,8 +33,8 @@ from agent.tests.test_compact import (
     reminder_state,
     runtime_with_llm,
 )
-from agent.tests.test_compact import ava_compact_loaded as ava_compact_loaded
-from base.agents.context import AvaContext
+from agent.tests.test_compact import meiva_compact_loaded as meiva_compact_loaded
+from base.agents.context import MeivaContext
 from base.agents.tests.units import spawn_agent
 from base.clock import Clock
 from base.cluster.machine import MachineIdentity
@@ -51,13 +51,13 @@ from base.packages.plugins.extensions import EMPTY
 
 
 async def test_compact_reminder_fires_in_band(
-    ava_compact_loaded: tuple[type[AgentState], Hook],
+    meiva_compact_loaded: tuple[type[AgentState], Hook],
     monkeypatch: pytest.MonkeyPatch,
     database_gate: ProcessDbGate,
 ):
     from agent.graph.hooks import compact as _p
 
-    state_cls, wrap_fn = ava_compact_loaded
+    state_cls, wrap_fn = meiva_compact_loaded
     patch_compact_config(monkeypatch, compact_reminder_tokens=1, auto_compact_tokens=1_000_000)
     result = await wrap_fn(
         reminder_state(state_cls),
@@ -68,8 +68,8 @@ async def test_compact_reminder_fires_in_band(
     assert result is not None
     note = result["messages"][0]
     assert isinstance(note, HumanMessage)
-    assert note.additional_kwargs["ava_msg_type"] == "system_note"
-    assert note.additional_kwargs["ava_note_tag"] == "compact_reminder"
+    assert note.additional_kwargs["meiva_msg_type"] == "system_note"
+    assert note.additional_kwargs["meiva_note_tag"] == "compact_reminder"
     assert note.text.startswith(f"[system] {_p.COMPACT_REMINDER_NOTE}")
     compact = result["compact"]
     assert isinstance(compact, CompactState)
@@ -78,11 +78,11 @@ async def test_compact_reminder_fires_in_band(
 
 
 async def test_compact_reminder_silent_below_threshold(
-    ava_compact_loaded: tuple[type[AgentState], Hook],
+    meiva_compact_loaded: tuple[type[AgentState], Hook],
     monkeypatch: pytest.MonkeyPatch,
     database_gate: ProcessDbGate,
 ):
-    state_cls, wrap_fn = ava_compact_loaded
+    state_cls, wrap_fn = meiva_compact_loaded
     patch_compact_config(
         monkeypatch, compact_reminder_tokens=1_000_000, auto_compact_tokens=2_000_000
     )
@@ -95,11 +95,11 @@ async def test_compact_reminder_silent_below_threshold(
 
 
 async def test_compact_reminder_yields_to_force_above_ceiling(
-    ava_compact_loaded: tuple[type[AgentState], Hook],
+    meiva_compact_loaded: tuple[type[AgentState], Hook],
     monkeypatch: pytest.MonkeyPatch,
     database_gate: ProcessDbGate,
 ):
-    state_cls, wrap_fn = ava_compact_loaded
+    state_cls, wrap_fn = meiva_compact_loaded
     patch_compact_config(monkeypatch, compact_reminder_tokens=0, auto_compact_tokens=1)
     result = await wrap_fn(
         reminder_state(state_cls),
@@ -111,11 +111,11 @@ async def test_compact_reminder_yields_to_force_above_ceiling(
 
 
 async def test_compact_reminder_once_per_window(
-    ava_compact_loaded: tuple[type[AgentState], Hook],
+    meiva_compact_loaded: tuple[type[AgentState], Hook],
     monkeypatch: pytest.MonkeyPatch,
     database_gate: ProcessDbGate,
 ):
-    state_cls, wrap_fn = ava_compact_loaded
+    state_cls, wrap_fn = meiva_compact_loaded
     patch_compact_config(monkeypatch, compact_reminder_tokens=1, auto_compact_tokens=1_000_000)
     state = reminder_state(state_cls, version=0, shown=True, seen=0)
     result = await wrap_fn(
@@ -125,11 +125,11 @@ async def test_compact_reminder_once_per_window(
 
 
 async def test_compact_reminder_rearms_after_compaction(
-    ava_compact_loaded: tuple[type[AgentState], Hook],
+    meiva_compact_loaded: tuple[type[AgentState], Hook],
     monkeypatch: pytest.MonkeyPatch,
     database_gate: ProcessDbGate,
 ):
-    state_cls, wrap_fn = ava_compact_loaded
+    state_cls, wrap_fn = meiva_compact_loaded
     patch_compact_config(monkeypatch, compact_reminder_tokens=1, auto_compact_tokens=1_000_000)
     state = reminder_state(state_cls, version=1, shown=True, seen=0)
     result = await wrap_fn(
@@ -144,11 +144,11 @@ async def test_compact_reminder_rearms_after_compaction(
 
 
 async def test_compact_reminder_is_not_starved_by_agent_inbounds(
-    ava_compact_loaded: tuple[type[AgentState], Hook],
+    meiva_compact_loaded: tuple[type[AgentState], Hook],
     monkeypatch: pytest.MonkeyPatch,
     database_gate: ProcessDbGate,
 ):
-    state_cls, wrap_fn = ava_compact_loaded
+    state_cls, wrap_fn = meiva_compact_loaded
     patch_compact_config(monkeypatch, compact_reminder_tokens=1, auto_compact_tokens=1_000_000)
     msgs = [
         SystemMessage(content="<sys>"),
@@ -162,15 +162,15 @@ async def test_compact_reminder_is_not_starved_by_agent_inbounds(
     assert result is not None
     note = result["messages"][0]
     assert isinstance(note, HumanMessage)
-    assert "ava.self.compact(summary)" in note.text
+    assert "meiva.self.compact(summary)" in note.text
 
 
 async def test_compact_reminder_silent_when_no_conversation(
-    ava_compact_loaded: tuple[type[AgentState], Hook],
+    meiva_compact_loaded: tuple[type[AgentState], Hook],
     monkeypatch: pytest.MonkeyPatch,
     database_gate: ProcessDbGate,
 ):
-    state_cls, wrap_fn = ava_compact_loaded
+    state_cls, wrap_fn = meiva_compact_loaded
     patch_compact_config(monkeypatch, compact_reminder_tokens=1, auto_compact_tokens=1_000_000)
     state = reminder_state(state_cls, messages=[SystemMessage(content="x" * 100_000)])
     result = await wrap_fn(
@@ -179,9 +179,9 @@ async def test_compact_reminder_silent_when_no_conversation(
     assert result is None
 
 
-async def test_compact_contract_reaches_request_without_resident_self(ava_compact_loaded):
+async def test_compact_contract_reaches_request_without_resident_self(meiva_compact_loaded):
     from agent.graph.prompt.system_prompt import build_system_prompt
-    from ava.self import compact
+    from meiva.self import compact
 
     contract = compact.__doc__
     assert contract is not None
@@ -198,7 +198,7 @@ async def test_compact_contract_reaches_request_without_resident_self(ava_compac
         agent_id=1,
         catalog=build_model_catalog(),
     )
-    assert "## ava.self\n" not in system_prompt
+    assert "## meiva.self\n" not in system_prompt
     head = SystemMessage(content=system_prompt)
     llm = make_fake_llm()
     await generate_summary(
@@ -323,7 +323,7 @@ async def test_compact_summary_emits_compact_done(
         compact=CompactState(reminder_shown=reminded),
     )
     publisher = MagicMock()
-    ctx = AvaContext(
+    ctx = MeivaContext(
         ops_pool=aops_pool,
         llm=AsyncMock(),
         event_publisher=publisher,

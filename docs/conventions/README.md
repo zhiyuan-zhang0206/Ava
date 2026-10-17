@@ -1,9 +1,9 @@
 # Current cross-cutting rules
 
-These documents describe how to work on Ava and the technical rules shared by
+These documents describe how to work on Meiva and the technical rules shared by
 its components. Start at [the contribution guide](../contributing.md); component
 behavior and domain contracts remain in component-local `docs/` and the
-[OKF graph](../index.ava.okf.md).
+[OKF graph](../index.meiva.okf.md).
 
 - [Philosophy](philosophy.md) and [technology selection](technology-selection.md)
 - [Python conventions](python-conventions.md) and [import layering](import-layering.md)

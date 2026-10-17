@@ -45,7 +45,7 @@ function httpStatus(error: unknown): number | null {
   return typeof status === "number" ? status : null;
 }
 
-// ava:ref ui/web/src/docs/frontend-components/context-breakdown.ava.okf.md#context-point-and-failure
+// meiva:ref ui/web/src/docs/frontend-components/context-breakdown.meiva.okf.md#context-point-and-failure
 export function ContextBreakdownCard({
   agentId,
   at,
@@ -101,7 +101,7 @@ export function ContextBreakdownCard({
   );
 }
 
-// ava:ref ui/web/src/docs/frontend-components/context-breakdown.ava.okf.md#context-point-and-failure
+// meiva:ref ui/web/src/docs/frontend-components/context-breakdown.meiva.okf.md#context-point-and-failure
 export function ContextBreakdownBody({
   agentId,
   categoryHighlight,
@@ -119,7 +119,7 @@ export function ContextBreakdownBody({
   return <BreakdownQuery query={query} categoryHighlight={categoryHighlight} />;
 }
 
-// ava:ref ui/web/src/docs/frontend-components/context-breakdown.ava.okf.md#context-point-and-failure
+// meiva:ref ui/web/src/docs/frontend-components/context-breakdown.meiva.okf.md#context-point-and-failure
 function BreakdownQuery({
   query,
   categoryHighlight,
@@ -163,7 +163,7 @@ function BreakdownQuery({
   return <BreakdownContent data={data} categoryHighlight={categoryHighlight} />;
 }
 
-// ava:ref ui/web/src/docs/frontend-components/context-breakdown.ava.okf.md#context-category-display
+// meiva:ref ui/web/src/docs/frontend-components/context-breakdown.meiva.okf.md#context-category-display
 function BreakdownContent({
   data,
   categoryHighlight,

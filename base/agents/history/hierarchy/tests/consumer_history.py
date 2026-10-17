@@ -6,7 +6,9 @@ from base.agents.history.checkpoint import FullHistory
 
 def notes_history() -> FullHistory:
     body: list[BaseMessage] = [
-        HumanMessage(content=f"m{i}", id=f"m{i}", additional_kwargs={"ava_msg_type": "system_note"})
+        HumanMessage(
+            content=f"m{i}", id=f"m{i}", additional_kwargs={"meiva_msg_type": "system_note"}
+        )
         for i in range(4)
     ]
     return FullHistory(body, (SystemMessage(content="head"),), (0,))
@@ -26,9 +28,9 @@ def inbound_history() -> FullHistory:
             content=f"m{i}",
             id=f"m{i}",
             additional_kwargs={
-                "ava_msg_type": "inbound",
-                "ava_source": "user",
-                "ava_created_at": f"2026-10-05T0{i}:00:00+00:00",
+                "meiva_msg_type": "inbound",
+                "meiva_source": "user",
+                "meiva_created_at": f"2026-10-05T0{i}:00:00+00:00",
             },
         )
         for i in range(4)

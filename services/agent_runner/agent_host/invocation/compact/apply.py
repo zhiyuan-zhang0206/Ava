@@ -13,9 +13,9 @@ from agent.state import BaseAgentState, CompactState
 from base.agents.compaction.application import authorize
 from base.agents.compaction.execution import CompactCommand, require_receiver, settle
 from base.agents.compaction.models import CompactHeldError, CompactOutcome
-from base.agents.context import AvaContext
+from base.agents.context import MeivaContext
 from base.agents.incarnation.native_work import latest_checkpoint_id_in_transaction
-from base.agents.messages.kwargs import AvaMsgType
+from base.agents.messages.kwargs import MeivaMsgType
 from base.db.transaction import async_write_transaction
 from base.native_process.runtime_incarnation import RuntimeIncarnation
 from base.native_process.turn_identity import HostedTurnResources, hosted_resources_settled
@@ -25,7 +25,7 @@ from services.agent_runner.agent_host.invocation.compact.checkpoint import (
     marker_for,
 )
 
-CompactGraph = CompiledStateGraph[BaseAgentState, AvaContext, BaseAgentState, BaseAgentState]
+CompactGraph = CompiledStateGraph[BaseAgentState, MeivaContext, BaseAgentState, BaseAgentState]
 
 
 async def acknowledge(
@@ -57,7 +57,7 @@ async def apply_prepared(
     graph: CompactGraph,
     command: CompactCommand,
     incarnation: RuntimeIncarnation,
-    ctx: AvaContext,
+    ctx: MeivaContext,
 ) -> bool:
     """Apply the stored result of the attempt this call just claimed, then prove the cold head."""
     if not await authorize(pool, command, incarnation):
@@ -79,9 +79,9 @@ async def apply_prepared(
         summary_kwargs={
             "id": str(result.message_id),
             "additional_kwargs": {
-                "ava_msg_type": AvaMsgType.COMPACT_REQUEST.value,
-                "ava_created_at": result.created_at.isoformat(),
-                "ava_compact_id": str(command.acceptance.command_id),
+                "meiva_msg_type": MeivaMsgType.COMPACT_REQUEST.value,
+                "meiva_created_at": result.created_at.isoformat(),
+                "meiva_compact_id": str(command.acceptance.command_id),
             },
         },
     )

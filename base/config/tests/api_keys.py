@@ -1,4 +1,4 @@
-"""The provider-key mock the ava, gateway and integration tests share.
+"""The provider-key mock the meiva, gateway and integration tests share.
 
 One definition, registered once per path-scoped module that imports it (importing
 a fixture into a module registers it under that name there), so each of those

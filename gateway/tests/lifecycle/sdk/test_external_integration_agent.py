@@ -11,15 +11,11 @@ from langgraph.checkpoint.base import empty_checkpoint
 from langgraph.checkpoint.postgres import PostgresSaver
 from pydantic import BaseModel, Field
 
-import ava
 import base.packages.plugins.loading.registry as extensions_registry
+import meiva
 from agent import state as state_module
 from agent.extensions.plugin_state_codec import decode_plugin_delta, load_snapshot
 from agent.messages import NoteTag, system_note_message
-from ava import impersonation
-from ava.sdk_surface import agent_identity, process_context
-from ava.sdk_surface.installation import Installation
-from ava.tests.fixtures.pin_agent import pin_agent
 from base.agents import impersonation as leases
 from base.agents.impersonation import history
 from base.agents.impersonation.tests.impersonation_support import recorded_tree
@@ -31,6 +27,10 @@ from base.db import Database, create_agent
 from base.events.live.bus import EventBus
 from base.native_process.runtime_incarnation import RuntimeIncarnation
 from base.packages.plugins.extensions import ExtensionRegistry, PluginContributions
+from meiva import impersonation
+from meiva.sdk_surface import agent_identity, process_context
+from meiva.sdk_surface.installation import Installation
+from meiva.tests.fixtures.pin_agent import pin_agent
 
 
 def _union(left: set[str], right: set[str]) -> set[str]:
@@ -63,12 +63,12 @@ def native_checkpoint(
     request.addfinalizer(process_context.unbind_exec_turn)
 
     installation = replace(model_installation, registry=registry, faces=True)
-    monkeypatch.setattr(ava, "__plugin_installation__", installation, raising=False)
+    monkeypatch.setattr(meiva, "__plugin_installation__", installation, raising=False)
 
     def loader_stub(**_kwargs: object) -> None:
         pass
 
-    monkeypatch.setattr(ava, "ensure_plugins_loaded", loader_stub)
+    monkeypatch.setattr(meiva, "ensure_plugins_loaded", loader_stub)
     handle = state_module.PluginStateHandle(IntegrationPlugin, "integration")
     state_module.build_agent_state(registry)
 
@@ -137,7 +137,7 @@ def test_external_attach_reads_native_checkpoint_and_only_journals_delta(
     leases.activate(database, event_bus, lease["id"], owner)
     script = (
         Path(__file__).parents[4]
-        / "ava_builtins/skills/platform/impersonator-guide/scripts/read_instructions.py"
+        / "meiva_builtins/skills/platform/impersonator-guide/scripts/read_instructions.py"
     )
     spec = importlib.util.spec_from_file_location("impersonator_instruction_reader", script)
     assert spec is not None and spec.loader is not None
@@ -146,9 +146,9 @@ def test_external_attach_reads_native_checkpoint_and_only_journals_delta(
     expected = "Native core and plugin rules\n\n[system] Configured skill rules"
     assert reader.read_instructions(lease["session_id"], agent_id) == expected
     with impersonation.attach(lease["id"]):
-        assert agent_id == ava.self.AGENT_ID
+        assert agent_id == meiva.self.AGENT_ID
         assert agent_identity.require_actor() == f"agent:{agent_id}"
-        assert ava.state.messages[-1].content == "Native task"
+        assert meiva.state.messages[-1].content == "Native task"
         assert handle.read().seen == {"native"}
         handle.update({"seen": {"external"}})
     updated = leases.get(
@@ -190,7 +190,7 @@ def test_borrowed_sender_reaches_peer_through_gateway_and_returns_real_provenanc
 ) -> None:
     owner, _ = native_checkpoint
     monkeypatch.setenv(
-        "AVA_CALLER_IDENTITY", '{"kind":"external_agent","subject":"codex","instance":"test"}'
+        "MEIVA_CALLER_IDENTITY", '{"kind":"external_agent","subject":"codex","instance":"test"}'
     )
     peer_id = create_agent(db_conn)
     db_conn.execute(
@@ -223,7 +223,7 @@ def test_borrowed_sender_reaches_peer_through_gateway_and_returns_real_provenanc
     leases.activate(database, event_bus, lease["id"], owner)
 
     with impersonation.attach(lease["id"]):
-        ava.agents.send_message(peer_id, "Implementation ready for review")
+        meiva.agents.send_message(peer_id, "Implementation ready for review")
 
     outbound = db_conn.execute(
         "SELECT content,kind,source,status FROM inbound_messages WHERE agent_id=%s", (peer_id,)
@@ -295,7 +295,7 @@ def test_attachment_send_message_is_recorded_in_the_lease_log_and_completes(
     )
     leases.activate(database, event_bus, lease["id"], owner)
     with impersonation.attach(lease["id"]):
-        ava.agents.send_message(peer_id, "Log-backed attachment send")
+        meiva.agents.send_message(peer_id, "Log-backed attachment send")
     leases.release(
         database,
         event_bus,

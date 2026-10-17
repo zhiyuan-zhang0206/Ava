@@ -54,11 +54,13 @@ def test_probe_gateway_reports_which_fact_failed(monkeypatch: pytest.MonkeyPatch
 
     spec = replace(
         spec,
-        identity_probe=lambda: DaemonProbe.port_taken("identity mismatch: home='/home/ava/.ava'"),
+        identity_probe=lambda: DaemonProbe.port_taken(
+            "identity mismatch: home='/home/meiva/.meiva'"
+        ),
     )
     probe = _probe_commands.probe_service(spec)
     assert probe.alive is False
-    assert "/home/ava/.ava" in probe.detail
+    assert "/home/meiva/.meiva" in probe.detail
 
 
 def test_probe_survives_an_identity_probe_that_raises() -> None:
@@ -148,7 +150,7 @@ def test_register_gateway_only_advertises_reachable_host(
         calls.append(url)
 
     monkeypatch.setattr(machines, "register_self", fake_register_self)
-    command_runtime.config.set_field("gateway_url", "https://ava.example:8000")
+    command_runtime.config.set_field("gateway_url", "https://meiva.example:8000")
     command_runtime.machine.set(host="10.0.0.2")
 
     rc = register_machine_or_die(
@@ -241,7 +243,7 @@ def test_register_agent_runner_loopback_host_exits_nonzero(
 
 
 def _named_commands(text: str) -> set[str]:
-    return set(re.findall(r"`(ava [^`]+)`", text))
+    return set(re.findall(r"`(meiva [^`]+)`", text))
 
 
 def test_register_schema_behind_hint_names_working_commands(
@@ -278,8 +280,8 @@ def test_register_schema_behind_hint_names_working_commands(
 
     assert rc == 1
     err = capsys.readouterr().err
-    assert "`ava stop` then `ava start` on the gateway" in err
-    assert _named_commands(err) == {"ava stop", "ava start"}
+    assert "`meiva stop` then `meiva start` on the gateway" in err
+    assert _named_commands(err) == {"meiva stop", "meiva start"}
 
 
 def test_code_behind_schema_hint_names_working_commands(
@@ -293,7 +295,7 @@ def test_code_behind_schema_hint_names_working_commands(
 
     monkeypatch.setattr(migrations, "assert_schema_current", _ahead)
 
-    assert _repo_commands.assert_schema_current_or_die("postgresql://ava@127.0.0.1:1/ava") == 1
+    assert _repo_commands.assert_schema_current_or_die("postgresql://meiva@127.0.0.1:1/meiva") == 1
     err = capsys.readouterr().err
     assert "gateway's revision" in err
-    assert _named_commands(err) == {"ava start"}
+    assert _named_commands(err) == {"meiva start"}

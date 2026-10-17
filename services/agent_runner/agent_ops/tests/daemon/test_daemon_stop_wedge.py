@@ -45,7 +45,7 @@ def test_a_stop_stays_bounded_while_the_watcher_and_blocked_worker_run(unit_home
     )
     log = (unit_home / "child.log").open("w")
     env = dict(os.environ)
-    env.update(AVA_HOME=str(unit_home), AVA_CONFIG_FETCH="skip")
+    env.update(MEIVA_HOME=str(unit_home), MEIVA_CONFIG_FETCH="skip")
     child = subprocess.Popen(  # noqa: S603 — fixed test-owned script
         [
             sys.executable,

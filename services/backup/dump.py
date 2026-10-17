@@ -1,6 +1,6 @@
 """Daily local Postgres backup, driven by the gateway scheduler daemon.
 
-One `pg_dump --format=custom` per day into `$AVA_HOME/backups/db/`,
+One `pg_dump --format=custom` per day into `$MEIVA_HOME/backups/db/`,
 keeping the newest ``backup_keep`` dumps (``services.backup_keep``, default 7).
 `services.backup.scheduler.daemon` calls `is_due()` independently of watchdog
 rounds: at the first wake after ``backup_hour`` cluster time with no dump for
@@ -31,7 +31,7 @@ Only files matching `services.backup.artifact.names` are managed (counted
 for due-ness, pruned); a hand-made dump parked in the same directory is never
 touched.
 
-Restore procedure: `.agents/skills/ava-guide/operations/references/db-restore.md`.
+Restore procedure: `.agents/skills/meiva-guide/operations/references/db-restore.md`.
 """
 
 from __future__ import annotations
@@ -57,7 +57,7 @@ from base.cluster.dataplane.pg_tools import pg_tool
 from base.db import Database, connect_url
 from base.host.private_storage import ensure_private_file
 from base.native_process.os_platform import LockTimeoutError, file_lock
-from base.paths import ava_home
+from base.paths import meiva_home
 from base.paths.private_dir import ensure_private_dir
 from services.backup.artifact import passphrase as backup_passphrase
 from services.backup.artifact.intermediates import sweep_closed_partials
@@ -97,7 +97,7 @@ def _require_aware(now: datetime) -> datetime:
 def backup_dir() -> Path:
     # `<home>/backups/db`: the home itself already scopes the cluster (path-only
     # identity), so the dump dir needs no per-cluster token.
-    return ava_home() / "backups" / "db"
+    return meiva_home() / "backups" / "db"
 
 
 @contextmanager

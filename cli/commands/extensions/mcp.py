@@ -1,12 +1,12 @@
-"""`ava mcp` subcommands — manage MCP servers.
+"""`meiva mcp` subcommands — manage MCP servers.
 
 MCP is a cross-vendor standard: the same `mcpServers` entry shape that Claude
-Code and Codex consume is what Ava's MCP loader merges. Two kinds of server
-exist, mirroring skills: **built-in** ones ship in the repo (`<repo>/ava_builtins/mcps/`),
-and **installed** ones are added out-of-core via `ava mcp install`, landing as
-self-contained packages under `$AVA_HOME/mcps/<name>/` (own `.mcp.json` +
+Code and Codex consume is what Meiva's MCP loader merges. Two kinds of server
+exist, mirroring skills: **built-in** ones ship in the repo (`<repo>/meiva_builtins/mcps/`),
+and **installed** ones are added out-of-core via `meiva mcp install`, landing as
+self-contained packages under `$MEIVA_HOME/mcps/<name>/` (own `.mcp.json` +
 `pyproject.toml` + `.venv`) and tracked in the install registry (`type="mcp"`).
-A third, ad-hoc layer is the **machine** config (`$AVA_HOME/mcp.json`, edited by
+A third, ad-hoc layer is the **machine** config (`$MEIVA_HOME/mcp.json`, edited by
 `add`/`remove`), applied last so a machine entry overrides a same-named default.
 
 - `install <source>`              — install a standalone MCP package from a git
@@ -35,7 +35,7 @@ A third, ad-hoc layer is the **machine** config (`$AVA_HOME/mcp.json`, edited by
 - `disable <name>`                — toggle an already-defined server off for this
                                     machine without removing its definition.
 
-Every verb here points outward — servers Ava's own agents connect to. The
+Every verb here points outward — servers Meiva's own agents connect to. The
 cluster control plane is exposed to external MCP clients by the gateway `/mcp`
 endpoint, not by this CLI.
 """
@@ -55,13 +55,13 @@ from cli.commands.extensions._pkg_source import AcquiredSource, SourcePathNotFou
 
 
 def _machine_config_file() -> Path:
-    from ava.mcps.config import machine_config_path
+    from meiva.mcps.config import machine_config_path
 
     return machine_config_path()
 
 
 def _read_machine_config(path: Path) -> dict[str, Any]:
-    """Read `$AVA_HOME/mcp.json` as a dict ({} when absent).
+    """Read `$MEIVA_HOME/mcp.json` as a dict ({} when absent).
 
     Raises:
         ValueError: the file is present but not a JSON object.
@@ -129,25 +129,25 @@ def cmd_mcp_add(
     args: list[str],
     env_pairs: list[str],
 ) -> int:
-    """`ava mcp add <name>` — add/replace a server in the machine MCP config."""
+    """`meiva mcp add <name>` — add/replace a server in the machine MCP config."""
     path = _machine_config_file()
     try:
         spec = _build_server_spec(json_spec, command, args, env_pairs)
         config = _read_machine_config(path)
     except (ValueError, json.JSONDecodeError, OSError) as e:
-        print(f"[ava mcp add] {e}", file=sys.stderr)
+        print(f"[meiva mcp add] {e}", file=sys.stderr)
         return 1
 
     servers = config.setdefault("mcpServers", {})
     if not isinstance(servers, dict):
-        print(f"[ava mcp add] {path} mcpServers field is not an object.", file=sys.stderr)
+        print(f"[meiva mcp add] {path} mcpServers field is not an object.", file=sys.stderr)
         return 1
     replaced = name in servers
     servers[name] = spec
     _write_machine_config(path, config)
 
     verb = "replaced" if replaced else "added"
-    print(f"[ava mcp add] {verb} MCP server '{name}' in {path}")
+    print(f"[meiva mcp add] {verb} MCP server '{name}' in {path}")
     print("  connects on next use; no restart needed.")
     return 0
 
@@ -166,11 +166,11 @@ def _server_summary(spec: Any) -> str:
 
 
 def cmd_mcp_list() -> int:
-    """`ava mcp list` — print the merged server set, flagging each server's
+    """`meiva mcp list` — print the merged server set, flagging each server's
     origin (machine / installed / plugin-built-in) and which are disabled."""
-    from ava.mcps.config import MCPError, load_mcp_config, validate_requirements
     from base.packages.extensions.install_registry import installed_mcp_names
     from base.packages.plugins.mcp_enabled import McpEnabledConfigError, read_enabled
+    from meiva.mcps.config import MCPError, load_mcp_config, validate_requirements
 
     try:
         merged = load_mcp_config(include_disabled=True)
@@ -180,11 +180,11 @@ def cmd_mcp_list() -> int:
         for spec in merged.values():
             validate_requirements(spec)
     except (MCPError, McpEnabledConfigError, ValueError, json.JSONDecodeError, OSError) as e:
-        print(f"[ava mcp list] {e}", file=sys.stderr)
+        print(f"[meiva mcp list] {e}", file=sys.stderr)
         return 1
 
     if not merged:
-        print("[ava mcp list] (no MCP servers configured)")
+        print("[meiva mcp list] (no MCP servers configured)")
         return 0
     machine_servers: dict[str, Any] = (
         machine.get("mcpServers", {}) if isinstance(machine, dict) else {}
@@ -196,7 +196,7 @@ def cmd_mcp_list() -> int:
         if name in machine_names:
             origin = "machine"
         elif name in installed:
-            origin = "installed (ava mcp uninstall)"
+            origin = "installed (meiva mcp uninstall)"
         else:
             origin = "plugin/built-in (read-only here)"
         disabled = " [disabled]" if not enabled.get(name, True) else ""
@@ -204,7 +204,7 @@ def cmd_mcp_list() -> int:
         print(f"      {_server_summary(merged[name])}")
         if name in installed and _source_is_dead_local_path(name):
             print(
-                f"      ! recorded source path no longer exists — `ava mcp upgrade {name}` "
+                f"      ! recorded source path no longer exists — `meiva mcp upgrade {name}` "
                 f"will fail (reinstall from a live git URL to restore upgradeability)",
                 file=sys.stderr,
             )
@@ -215,7 +215,7 @@ def _source_is_dead_local_path(name: str) -> bool:
     """True when the installed package's recorded source is a local path that
     no longer exists on disk (an MCP installed from a git worktree that has
     since been removed — audit round 2, skills-plugins #4). Such a source
-    cannot be re-fetched: `ava mcp upgrade` would fail."""
+    cannot be re-fetched: `meiva mcp upgrade` would fail."""
     from pathlib import Path
 
     from base.packages.extensions import install_registry
@@ -227,30 +227,30 @@ def _source_is_dead_local_path(name: str) -> bool:
 
 
 def cmd_mcp_enable(name: str) -> int:
-    """`ava mcp enable <name>` — turn an MCP server on for this machine."""
+    """`meiva mcp enable <name>` — turn an MCP server on for this machine."""
     return _set_mcp_enabled(name, enabled=True)
 
 
 def cmd_mcp_disable(name: str) -> int:
-    """`ava mcp disable <name>` — turn an MCP server off for this machine."""
+    """`meiva mcp disable <name>` — turn an MCP server off for this machine."""
     return _set_mcp_enabled(name, enabled=False)
 
 
 def _set_mcp_enabled(name: str, *, enabled: bool) -> int:
-    from ava.mcps.config import MCPError, load_mcp_config, validate_requirements
     from base.packages.plugins.mcp_enabled import local_config_path, set_mcp_enabled
+    from meiva.mcps.config import MCPError, load_mcp_config, validate_requirements
 
     merged = load_mcp_config(include_disabled=True)
     if enabled and name in merged:
         try:
             validate_requirements(merged[name])
         except MCPError as exc:
-            print(f"[ava mcp enable] {exc}", file=sys.stderr)
+            print(f"[meiva mcp enable] {exc}", file=sys.stderr)
             return 1
     set_mcp_enabled(name, enabled=enabled)
     verb = "enabled" if enabled else "disabled"
     print(
-        f"[ava mcp {'enable' if enabled else 'disable'}] {verb} MCP server '{name}' "
+        f"[meiva mcp {'enable' if enabled else 'disable'}] {verb} MCP server '{name}' "
         f"in {local_config_path()}"
     )
     print("  takes effect on the next tool request; no restart needed.")
@@ -263,25 +263,25 @@ def _set_mcp_enabled(name: str, *, enabled: bool) -> int:
 
 
 def cmd_mcp_remove(name: str) -> int:
-    """`ava mcp remove <name>` — drop a machine-config MCP entry."""
+    """`meiva mcp remove <name>` — drop a machine-config MCP entry."""
     path = _machine_config_file()
     try:
         config = _read_machine_config(path)
     except (ValueError, json.JSONDecodeError, OSError) as e:
-        print(f"[ava mcp remove] {e}", file=sys.stderr)
+        print(f"[meiva mcp remove] {e}", file=sys.stderr)
         return 1
 
     servers = config.get("mcpServers")
     if not isinstance(servers, dict) or name not in servers:
         print(
-            f"[ava mcp remove] '{name}' is not a machine-config server. "
-            "Built-in / plugin-bundled servers are managed via `ava plugins`.",
+            f"[meiva mcp remove] '{name}' is not a machine-config server. "
+            "Built-in / plugin-bundled servers are managed via `meiva plugins`.",
             file=sys.stderr,
         )
         return 1
     del servers[name]
     _write_machine_config(path, config)
-    print(f"[ava mcp remove] removed '{name}' from {path}")
+    print(f"[meiva mcp remove] removed '{name}' from {path}")
     return 0
 
 
@@ -296,7 +296,7 @@ def _package_server_name(mcp_json: Path) -> str:
         ValueError: the file is unreadable, has no `mcpServers`, or does not
             declare exactly one server.
     """
-    from ava.mcps.config import MCPError, read_servers
+    from meiva.mcps.config import MCPError, read_servers
 
     try:
         servers = read_servers(mcp_json)
@@ -311,9 +311,9 @@ def _package_server_name(mcp_json: Path) -> str:
 
 
 def _builtin_server_names() -> set[str]:
-    """Names of the servers shipped in the repo's `<repo>/ava_builtins/mcps/` — an installed
+    """Names of the servers shipped in the repo's `<repo>/meiva_builtins/mcps/` — an installed
     package may not reuse one of these (it would be shadowed)."""
-    from ava.mcps.config import builtin_mcp_paths, read_servers
+    from meiva.mcps.config import builtin_mcp_paths, read_servers
 
     names: set[str] = set()
     for path in builtin_mcp_paths():
@@ -343,7 +343,7 @@ def _landed_env(dest: Path, name: str) -> dict[str, str]:
     An installed MCP's secrets live here (see `_apply_env_overrides`), so this is
     what `upgrade` reads before re-landing in order to carry them forward.
     """
-    from ava.mcps.config import MCPError, read_servers
+    from meiva.mcps.config import MCPError, read_servers
 
     mcp_json = dest / ".mcp.json"
     if not mcp_json.is_file():
@@ -364,8 +364,8 @@ def _apply_env_overrides(dest: Path, name: str, overrides: dict[str, str]) -> No
 
     This is how a machine-local secret reaches an installed server: the stdio
     transport passes only `get_default_environment()` plus this `env` dict, so a
-    token can arrive no other way. `$AVA_HOME` is outside the repo, so the value
-    never enters git — the same trust boundary as `$AVA_HOME/mcp.json`.
+    token can arrive no other way. `$MEIVA_HOME` is outside the repo, so the value
+    never enters git — the same trust boundary as `$MEIVA_HOME/mcp.json`.
     """
     if not overrides:
         return
@@ -432,11 +432,11 @@ def _register_mcp(
 def _derive_server_name(raw_name: str) -> str:
     """Derive a clean server name from a pyproject ``name`` field.
 
-    Strips common prefixes (``ava-mcp-``, ``mcp-server-``, ``mcp-``) and replaces
+    Strips common prefixes (``meiva-mcp-``, ``mcp-server-``, ``mcp-``) and replaces
     underscores with hyphens so the name is consistent with built-in / machine
     server naming.
     """
-    for prefix in ("ava-mcp-", "mcp-server-", "mcp-"):
+    for prefix in ("meiva-mcp-", "mcp-server-", "mcp-"):
         if raw_name.lower().startswith(prefix):
             raw_name = raw_name[len(prefix) :]
             break
@@ -574,7 +574,7 @@ def _acquire_or_report(source: str, ref: str | None, verb: str) -> AcquiredSourc
         return acquire_source(source, ref)
     except (subprocess.CalledProcessError, SourcePathNotFoundError) as e:
         detail = e.stderr.strip() if isinstance(e, subprocess.CalledProcessError) else str(e)
-        print(f"[ava mcp {verb}] {detail}", file=sys.stderr)
+        print(f"[meiva mcp {verb}] {detail}", file=sys.stderr)
         return None
 
 
@@ -586,7 +586,7 @@ def _detect_server(pkg_dir: Path) -> tuple[str, Any] | None:
             return _package_server_name(mcp_json), None
         return _auto_detect_mcp(pkg_dir)
     except ValueError as e:
-        print(f"[ava mcp install] {e}", file=sys.stderr)
+        print(f"[meiva mcp install] {e}", file=sys.stderr)
         return None
 
 
@@ -596,14 +596,14 @@ def _install_name_conflict(name: str, dest: Path) -> bool:
 
     if name in _builtin_server_names():
         print(
-            f"[ava mcp install] '{name}' collides with a built-in MCP server; "
+            f"[meiva mcp install] '{name}' collides with a built-in MCP server; "
             "rename the server (in the package's .mcp.json or pyproject.toml [project] name).",
             file=sys.stderr,
         )
         return True
     if install_registry.get(name) is not None or dest.exists():
         print(
-            f"[ava mcp install] '{name}' already installed; use `ava mcp upgrade {name}`.",
+            f"[meiva mcp install] '{name}' already installed; use `meiva mcp upgrade {name}`.",
             file=sys.stderr,
         )
         return True
@@ -613,7 +613,7 @@ def _install_name_conflict(name: str, dest: Path) -> bool:
 def cmd_mcp_install(
     source: str, ref: str | None, path: str | None, env_pairs: list[str] | None = None
 ) -> int:
-    """`ava mcp install <source> [--path SUBDIR] [--ref REF] [--env K=V]...` —
+    """`meiva mcp install <source> [--path SUBDIR] [--ref REF] [--env K=V]...` —
     install a standalone MCP package from a git URL or a local directory.
 
     The package may ship its own `.mcp.json`; when it does not, the command
@@ -631,7 +631,7 @@ def cmd_mcp_install(
     try:
         overrides = _parse_env_pairs(env_pairs or [])
     except ValueError as e:
-        print(f"[ava mcp install] {e}", file=sys.stderr)
+        print(f"[meiva mcp install] {e}", file=sys.stderr)
         return 1
 
     acq = _acquire_or_report(source, ref, "install")
@@ -641,13 +641,13 @@ def cmd_mcp_install(
     try:
         pkg_dir = acq.root / path if path else acq.root
         if not pkg_dir.is_dir():
-            print(f"[ava mcp install] path '{path}' not found in source.", file=sys.stderr)
+            print(f"[meiva mcp install] path '{path}' not found in source.", file=sys.stderr)
             return 1
         detected = _detect_server(pkg_dir)
         if detected is None:
             return 1
         name, auto_spec = detected
-        dest = paths.mcps_dir(paths.ava_home()) / name
+        dest = paths.mcps_dir(paths.meiva_home()) / name
         if _install_name_conflict(name, dest):
             return 1
 
@@ -664,11 +664,11 @@ def cmd_mcp_install(
             uv_sync(dest)
         except subprocess.CalledProcessError as e:
             shutil.rmtree(dest, ignore_errors=True)
-            print(f"[ava mcp install] uv sync failed: {e.stderr.strip()}", file=sys.stderr)
+            print(f"[meiva mcp install] uv sync failed: {e.stderr.strip()}", file=sys.stderr)
             return 1
 
         _register_mcp(name, source, path, ref, content_hash=install_registry.tree_hash(dest))
-        print(f"[ava mcp install] installed MCP server '{name}' -> {dest}")
+        print(f"[meiva mcp install] installed MCP server '{name}' -> {dest}")
         if overrides:
             print(f"  env set on the installed copy: {', '.join(sorted(overrides))}")
         print("  connects on next use; no restart needed.")
@@ -678,28 +678,28 @@ def cmd_mcp_install(
 
 
 def cmd_mcp_uninstall(name: str) -> int:
-    """`ava mcp uninstall <name>` — remove an installed MCP package + its entry."""
+    """`meiva mcp uninstall <name>` — remove an installed MCP package + its entry."""
     from base import paths
     from base.packages.extensions import install_registry
 
     pkg = install_registry.get(name)
     if pkg is None or pkg.type != "mcp":
         print(
-            f"[ava mcp uninstall] '{name}' is not an installed MCP package "
+            f"[meiva mcp uninstall] '{name}' is not an installed MCP package "
             "(built-in / plugin / machine servers are managed elsewhere).",
             file=sys.stderr,
         )
         return 1
-    dest = paths.mcps_dir(paths.ava_home()) / name
+    dest = paths.mcps_dir(paths.meiva_home()) / name
     if dest.exists():
         shutil.rmtree(dest)
     install_registry.deregister(name)
-    print(f"[ava mcp uninstall] removed MCP server '{name}'.")
+    print(f"[meiva mcp uninstall] removed MCP server '{name}'.")
     return 0
 
 
 def cmd_mcp_upgrade(name: str) -> int:
-    """`ava mcp upgrade <name>` — re-fetch an installed MCP package
+    """`meiva mcp upgrade <name>` — re-fetch an installed MCP package
     from its source.
 
     A locally edited copy (content differs from what the last install/upgrade
@@ -712,16 +712,16 @@ def cmd_mcp_upgrade(name: str) -> int:
 
     pkg = install_registry.get(name)
     if pkg is None or pkg.type != "mcp":
-        print(f"[ava mcp upgrade] '{name}' is not an installed MCP package.", file=sys.stderr)
+        print(f"[meiva mcp upgrade] '{name}' is not an installed MCP package.", file=sys.stderr)
         return 1
     if pkg.source is None:
-        print(f"[ava mcp upgrade] '{name}' has no recorded source.", file=sys.stderr)
+        print(f"[meiva mcp upgrade] '{name}' has no recorded source.", file=sys.stderr)
         return 1
 
-    dest = paths.mcps_dir(paths.ava_home()) / name
+    dest = paths.mcps_dir(paths.meiva_home()) / name
     if dest.exists() and install_registry.copy_changed(dest, pkg.installed_hash):
         print(
-            f"[ava mcp upgrade] note: '{name}' was modified locally; "
+            f"[meiva mcp upgrade] note: '{name}' was modified locally; "
             "replacing it with the fetched source."
         )
 
@@ -734,20 +734,20 @@ def cmd_mcp_upgrade(name: str) -> int:
         mcp_json = pkg_dir / ".mcp.json"
         if not mcp_json.is_file():
             print(
-                "[ava mcp upgrade] source no longer has .mcp.json at the package root; aborting.",
+                "[meiva mcp upgrade] source no longer has .mcp.json at the package root; aborting.",
                 file=sys.stderr,
             )
             return 1
-        from ava.mcps.config import MCPError, read_servers
+        from meiva.mcps.config import MCPError, read_servers
 
         try:
             servers = read_servers(mcp_json)
         except MCPError as e:
-            print(f"[ava mcp upgrade] bad .mcp.json: {e}", file=sys.stderr)
+            print(f"[meiva mcp upgrade] bad .mcp.json: {e}", file=sys.stderr)
             return 1
         if name not in servers:
             print(
-                f"[ava mcp upgrade] source .mcp.json no longer declares server '{name}'; aborting.",
+                f"[meiva mcp upgrade] source .mcp.json no longer declares server '{name}'; aborting.",
                 file=sys.stderr,
             )
             return 1
@@ -767,7 +767,7 @@ def cmd_mcp_upgrade(name: str) -> int:
         try:
             uv_sync(dest)
         except subprocess.CalledProcessError as e:
-            print(f"[ava mcp upgrade] uv sync failed: {e.stderr.strip()}", file=sys.stderr)
+            print(f"[meiva mcp upgrade] uv sync failed: {e.stderr.strip()}", file=sys.stderr)
             return 1
 
         from datetime import UTC, datetime
@@ -775,7 +775,7 @@ def cmd_mcp_upgrade(name: str) -> int:
         pkg.updated_at = datetime.now(UTC).isoformat(timespec="seconds")
         pkg.installed_hash = install_registry.tree_hash(dest)
         install_registry.register(pkg)
-        print(f"[ava mcp upgrade] re-fetched '{name}' from {pkg.source}.")
+        print(f"[meiva mcp upgrade] re-fetched '{name}' from {pkg.source}.")
         print("  connects on next use; no restart needed.")
         return 0
     finally:

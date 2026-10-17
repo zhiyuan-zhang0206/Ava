@@ -27,7 +27,7 @@ FAILING = frozenset(
     }
 )
 CONFLICTING = frozenset({"CONFLICTING"})
-_FALLBACK_REPO = "zhiyuan-zhang0206/Ava"
+_FALLBACK_REPO = "zhiyuan-zhang0206/Meiva"
 
 POLL_INTERVAL = 30
 MAX_CONSECUTIVE_ERRORS = 3

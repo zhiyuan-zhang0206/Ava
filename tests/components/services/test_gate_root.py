@@ -19,15 +19,15 @@ from base.native_process.root_control.client import RootClient, native_identity
 from base.paths import root_run_dir
 from services.entrypoints.gate.tests.test_gate import FakeApp, FakeGateway, Servers, gate_request
 from services.entrypoints.gate.tests.test_gate import servers as servers
-from services.supervision.ava_root.manifest import RestartPolicy, UnitManifest, UnitRegistry
-from services.supervision.ava_root.server import ControlServer
-from services.supervision.ava_root.supervisor import Supervisor, SupervisorConfig
 from services.supervision.healthchecks import gate
+from services.supervision.meiva_root.manifest import RestartPolicy, UnitManifest, UnitRegistry
+from services.supervision.meiva_root.server import ControlServer
+from services.supervision.meiva_root.supervisor import Supervisor, SupervisorConfig
 from services.supervision.roster import build_services
 
 
 def _gate_process(home: Path) -> OwnedProcess:
-    response = RootClient(root_run_dir(home) / "ava-root.sock", timeout=2.0).status()
+    response = RootClient(root_run_dir(home) / "meiva-root.sock", timeout=2.0).status()
     body = response.get("result")
     assert response.get("ok") is True and isinstance(body, dict)
     units = cast("list[object]", cast("dict[str, object]", body).get("units"))
@@ -68,12 +68,12 @@ async def test_gate_native_child_readiness_restart_and_stop(
         (sys.executable, "-m", "services.entrypoints.gate.daemon", "--port", str(port)),
         RestartPolicy.ALWAYS,
         "root",
-        (("AVA_TELEMETRY_OTLP_ENABLED", "false"),),
+        (("MEIVA_TELEMETRY_OTLP_ENABLED", "false"),),
     )
     owner = Supervisor(
         UnitRegistry([unit]), run_dir=run_dir, config=SupervisorConfig(stop_timeout_s=3)
     )
-    server = ControlServer(run_dir / "ava-root.sock", owner.dispatch)
+    server = ControlServer(run_dir / "meiva-root.sock", owner.dispatch)
     await server.start()
     try:
         await owner.start()
@@ -114,19 +114,19 @@ def test_gate_protocol_rejects_another_homes_payload(monkeypatch: pytest.MonkeyP
 def test_gate_health_is_independent_of_auth_and_application(servers: Servers) -> None:
     import os
 
-    from base.paths import ava_home
+    from base.paths import meiva_home
 
     FakeGateway.down = True
-    status, body, headers = gate_request(servers["gate"] + "/__ava/healthz")
+    status, body, headers = gate_request(servers["gate"] + "/__meiva/healthz")
     assert status == 200
     assert headers["Cache-Control"] == "no-store"
-    assert json.loads(body) == {"name": "gate", "home": str(ava_home()), "pid": os.getpid()}
+    assert json.loads(body) == {"name": "gate", "home": str(meiva_home()), "pid": os.getpid()}
     assert FakeGateway.requests == 0
     assert FakeApp.requests == 0
 
 
 def test_gate_health_rejects_post(servers: Servers) -> None:
-    status, _body, headers = gate_request(servers["gate"] + "/__ava/healthz", method="POST")
+    status, _body, headers = gate_request(servers["gate"] + "/__meiva/healthz", method="POST")
     assert status == 405
     assert headers["Allow"] == "GET"
     assert FakeGateway.requests == 0

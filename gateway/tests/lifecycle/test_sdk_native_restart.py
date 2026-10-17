@@ -8,8 +8,6 @@ import psycopg
 import pytest
 from psycopg_pool import AsyncConnectionPool, ConnectionPool
 
-from ava.agents import work
-from ava.gateway_client import use_client
 from base.agents.incarnation.native_restart_models import NativeRestartOperation
 from base.api_contracts.agent_contract import GatewayUnavailable
 from base.config import settings
@@ -18,6 +16,8 @@ from base.db.code_version_gate import ProcessDbGate
 from base.host.net.tests.retry_waits import retry_waits as retry_waits
 from base.packages.plugin_providers import build_model_catalog
 from gateway.agents import lifecycle
+from meiva.agents import work
+from meiva.gateway_client import use_client
 from ops.lifecycle.native_restart import restart_native_work_op
 from services.agent_runner.agent_host.tests.managed_work import managed_work
 from tests.fixtures.gateway_config import gateway_test_client

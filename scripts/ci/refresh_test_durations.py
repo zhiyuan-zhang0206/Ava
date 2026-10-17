@@ -14,7 +14,7 @@ same way CI runs them and rewrites the file:
 * backend: `pytest --omit-static-tests --ignore=tests/e2e -m "not flaky" -n 4` (no positional path:
   pyproject's `testpaths` collect the top-level tests/ and every package's own
   `<pkg>/**/tests/`, exactly as the CI shards do) plus CI's
-  `--cov=agent --cov=ava ...` module list (coverage tracing is part of the
+  `--cov=agent --cov=meiva ...` module list (coverage tracing is part of the
   CI shard environment, so durations measured without it run systematically
   faster and the split under-estimates);
 * e2e: `pytest tests/e2e/ -v -n 2` (CI's e2e job carries no --cov).
@@ -67,14 +67,14 @@ _MEASUREMENT_ATTEMPTS = 3
 # shards will pay.
 BACKEND_COVERAGE_ARGS = [
     "--cov=agent",
-    "--cov=ava",
+    "--cov=meiva",
     "--cov=cli",
     "--cov=gateway",
     "--cov=base",
     "--cov=ui",
     "--cov=ops",
     "--cov=services",
-    "--cov=ava_builtins",
+    "--cov=meiva_builtins",
 ]
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 DURATIONS_PATH = _REPO_ROOT / ".test_durations"

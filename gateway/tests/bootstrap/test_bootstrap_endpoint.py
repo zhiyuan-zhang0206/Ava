@@ -43,14 +43,14 @@ def test_bootstrap_returns_config_with_secret(
     reachable = self_machine_host()
     if not is_loopback_host(reachable):
         expected = url_with_host(expected, reachable)
-    served, owner = urlsplit(body["AVA_DB_URL"]), urlsplit(expected)
+    served, owner = urlsplit(body["MEIVA_DB_URL"]), urlsplit(expected)
     assert (served.username, served.password) == (owner.username, None)
     assert served.hostname == owner.hostname
     assert served.port == owner.port
     assert served.path == owner.path
-    assert "AVA_REDIS_URL" in body
-    assert "AVA_REDIS_ADMIN_PASSWORD" not in body
-    assert "AVA_REDIS_PASSWORD" not in body
+    assert "MEIVA_REDIS_URL" in body
+    assert "MEIVA_REDIS_ADMIN_PASSWORD" not in body
+    assert "MEIVA_REDIS_PASSWORD" not in body
 
 
 @pytest.mark.usefixtures("served_gateway_home")
@@ -64,7 +64,7 @@ def test_bootstrap_carries_no_cluster_name(
     with gateway_test_client(machine=machine_identity) as client:
         resp = client.get("/api/bootstrap", headers=_auth())
     assert resp.status_code == 200
-    assert "AVA_CLUSTER" not in resp.json()
+    assert "MEIVA_CLUSTER" not in resp.json()
 
 
 def test_bootstrap_rejects_missing_secret(
@@ -112,8 +112,8 @@ def test_old_role_runner_request_gets_no_database_login(
         resp = client.get("/api/bootstrap", params={"role": "runner"}, headers=_auth())
     assert resp.status_code == 200
     body: dict[str, str] = resp.json()
-    assert "AVA_RUNNER_DB_PASSWORD" not in body
-    parts = urlsplit(body["AVA_DB_URL"])
+    assert "MEIVA_RUNNER_DB_PASSWORD" not in body
+    parts = urlsplit(body["MEIVA_DB_URL"])
     assert parts.password is None
     payload = "".join(body.values())
     for role in (served_gateway_home.roles.runner, served_gateway_home.roles.gateway):
@@ -124,14 +124,14 @@ def test_old_role_runner_request_gets_no_database_login(
 def test_bootstrap_without_a_database_endpoint_refused(
     db_conn, monkeypatch: pytest.MonkeyPatch, tmp_path: Path, *, machine_identity: MachineIdentity
 ) -> None:
-    """A gateway config snapshot without AVA_DB_URL is a 400, never a guess."""
-    (tmp_path / ".env").write_text("AVA_REDIS_URL=redis://127.0.0.1:1/0\n")
-    monkeypatch.setattr(paths, "ava_home", lambda: tmp_path)
+    """A gateway config snapshot without MEIVA_DB_URL is a 400, never a guess."""
+    (tmp_path / ".env").write_text("MEIVA_REDIS_URL=redis://127.0.0.1:1/0\n")
+    monkeypatch.setattr(paths, "meiva_home", lambda: tmp_path)
     monkeypatch.setattr(config.settings.data_plane, "cluster_secret", _SECRET)
     with gateway_test_client(machine=machine_identity) as client:
         resp = client.get("/api/bootstrap", headers=_auth())
     assert resp.status_code == 400
-    assert "AVA_DB_URL is missing" in resp.json()["detail"]
+    assert "MEIVA_DB_URL is missing" in resp.json()["detail"]
 
 
 def test_bootstrap_strips_a_remote_managed_planes_provider_password(
@@ -142,16 +142,16 @@ def test_bootstrap_strips_a_remote_managed_planes_provider_password(
     cannot tell). Bootstrap serves the endpoint and never that password."""
     provider_password = "provider-" + "p" * 24
     (tmp_path / ".env").write_text(
-        f"AVA_DB_URL=postgresql://ava_owner:{provider_password}@db.example.com:5432/ava\n"
-        "AVA_REDIS_URL=redis://ava:runtime@redis.example.com:6379/0\n"
+        f"MEIVA_DB_URL=postgresql://meiva_owner:{provider_password}@db.example.com:5432/meiva\n"
+        "MEIVA_REDIS_URL=redis://meiva:runtime@redis.example.com:6379/0\n"
     )
-    monkeypatch.setattr(paths, "ava_home", lambda: tmp_path)
+    monkeypatch.setattr(paths, "meiva_home", lambda: tmp_path)
     monkeypatch.setattr(config.settings.data_plane, "cluster_secret", _SECRET)
     monkeypatch.setattr(type(config.settings.data_plane), "is_remote", property(lambda _s: True))
     with gateway_test_client(machine=machine_identity) as client:
         resp = client.get("/api/bootstrap", headers=_auth())
     assert resp.status_code == 200, resp.text
-    served = urlsplit(cast(dict[str, str], resp.json())["AVA_DB_URL"])
-    assert (served.username, served.password) == ("ava_owner", None)
-    assert (served.hostname, served.port, served.path) == ("db.example.com", 5432, "/ava")
+    served = urlsplit(cast(dict[str, str], resp.json())["MEIVA_DB_URL"])
+    assert (served.username, served.password) == ("meiva_owner", None)
+    assert (served.hostname, served.port, served.path) == ("db.example.com", 5432, "/meiva")
     assert provider_password not in resp.text

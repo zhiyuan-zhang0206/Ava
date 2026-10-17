@@ -1,4 +1,4 @@
-title = "Ava secret scanning policy"
+title = "Meiva secret scanning policy"
 
 [extend]
 useDefault = true
@@ -6,7 +6,7 @@ useDefault = true
 [[allowlists]]
 description = "Development and test fixture values that are not deployable credentials"
 regexes = [
-    '''\bava_dev_only\b''',
+    '''\b(ava|meiva)_dev_only\b''',
     '''\bpw123\b''',
     '''\bs3cr3t\b''',
     '''\bnew-db\b''',
@@ -32,7 +32,7 @@ paths = [
 ]
 regexTarget = "match"
 regexes = [
-    '''(?s)AVA_TELEGRAM_BOT_TOKEN=\nAVA_TELEGRAM_OWNER_ID=0''',
+    '''(?s)(AVA|MEIVA)_TELEGRAM_BOT_TOKEN=\n(AVA|MEIVA)_TELEGRAM_OWNER_ID=0''',
 ]
 
 # This demo's fixed localStorage key is not an API key. Keep its exception

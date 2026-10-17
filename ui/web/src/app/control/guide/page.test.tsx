@@ -30,7 +30,7 @@ describe("GuidePage", () => {
     const input = screen.getByPlaceholderText(/Describe an operations task/);
     fireEvent.change(input, { target: { value: "install tools" } });
     fireEvent.keyDown(input, { key: "Enter" });
-    await waitFor(() => expect(screen.getByRole("button", { name: "Ask Ava" }).hasAttribute("disabled")).toBe(true));
+    await waitFor(() => expect(screen.getByRole("button", { name: "Ask Meiva" }).hasAttribute("disabled")).toBe(true));
     fireEvent.keyDown(input, { key: "Enter" });
     expect(draft).toHaveBeenCalledOnce();
   });
@@ -40,7 +40,7 @@ describe("GuidePage", () => {
     const client = new QueryClient({ defaultOptions: { mutations: { retry: 3, retryDelay: 0 } } });
     render(<QueryClientProvider client={client}><GuidePage /></QueryClientProvider>);
     fireEvent.change(screen.getByPlaceholderText(/Describe an operations task/), { target: { value: "install tools" } });
-    fireEvent.click(screen.getByRole("button", { name: "Ask Ava" }));
+    fireEvent.click(screen.getByRole("button", { name: "Ask Meiva" }));
     await waitFor(() => expect(showToast).toHaveBeenCalledWith("Guide failed: response lost"));
     expect(draft).toHaveBeenCalledOnce();
     expect(push).not.toHaveBeenCalled();
@@ -53,7 +53,7 @@ describe("GuidePage", () => {
       </QueryClientProvider>,
     );
 
-    const ask = screen.getByRole("button", { name: "Ask Ava" });
+    const ask = screen.getByRole("button", { name: "Ask Meiva" });
     expect(ask.hasAttribute("disabled")).toBe(true);
 
     fireEvent.change(screen.getByPlaceholderText(/Describe an operations task/), {
@@ -73,11 +73,11 @@ describe("GuidePage", () => {
     fireEvent.change(screen.getByPlaceholderText(/Describe an operations task/), {
       target: { value: "  install the linear MCP server  " },
     });
-    fireEvent.click(screen.getByRole("button", { name: "Ask Ava" }));
+    fireEvent.click(screen.getByRole("button", { name: "Ask Meiva" }));
 
     await waitFor(() => expect(draftGuide).toHaveBeenCalledWith("install the linear MCP server"));
     await waitFor(() => expect(setActiveId).toHaveBeenCalledWith(42));
-    expect(showToast).toHaveBeenCalledWith("Ava Guide #42 created — check its conversation for progress");
+    expect(showToast).toHaveBeenCalledWith("Meiva Guide #42 created — check its conversation for progress");
     expect(push).toHaveBeenCalledWith("/");
     expect(screen.getByPlaceholderText<HTMLInputElement>(/Describe an operations task/).value).toBe("");
   });

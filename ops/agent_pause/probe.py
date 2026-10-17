@@ -8,9 +8,9 @@ from urllib.request import ProxyHandler, build_opener
 from uuid import UUID
 
 from base.daemon.endpoints import ServiceEndpoints
-from base.paths import ava_home
+from base.paths import meiva_home
 
-_ROOT_SOCKET_NAME = "ava-root.sock"  # the K1 control socket under root_run_dir()
+_ROOT_SOCKET_NAME = "meiva-root.sock"  # the K1 control socket under root_run_dir()
 
 
 @dataclass(frozen=True)
@@ -22,7 +22,7 @@ class HostIdentity:
 def host_running() -> bool:
     """A down recorded service has no hosted work; reject live unrecorded owners.
 
-    A root-driven host (W1.2e-2) keeps its services as ava-root tree units, not
+    A root-driven host (W1.2e-2) keeps its services as meiva-root tree units, not
     session records — the pidfile is the same, so the pidfile-only inconsistency
     check would misread that normal state as a live unrecorded owner. The root's
     own status settles it: a unit running at exactly that pid is owned.
@@ -43,7 +43,7 @@ def host_running() -> bool:
             raise RuntimeError("agent-host PID exists without its owned service session")
     # A missing record is not evidence that a daemon which lost that record
     # exited. Check the stable launch module and its private home identity too.
-    home = ava_home().resolve()
+    home = meiva_home().resolve()
     if _find_unrecorded_agent_host(home):
         raise RuntimeError("agent-host is still running without its service record")
     return False
@@ -75,7 +75,7 @@ def _find_unrecorded_agent_host(home: Path) -> bool:
         ):
             continue
         try:
-            raw_home = process.environ().get("AVA_HOME")
+            raw_home = process.environ().get("MEIVA_HOME")
         except psutil.NoSuchProcess:
             continue
         except psutil.AccessDenied as exc:
@@ -86,9 +86,9 @@ def _find_unrecorded_agent_host(home: Path) -> bool:
 
 
 def _root_unit(unit_id: str) -> dict[str, object] | None:
-    """This home's ava-root tree row for `unit_id`, or None when no root answers.
+    """This home's meiva-root tree row for `unit_id`, or None when no root answers.
 
-    A root-driven host (W1.2e) keeps its services as ava-root tree units, not
+    A root-driven host (W1.2e) keeps its services as meiva-root tree units, not
     session records — "is this service up" is a question for the tree. An
     unreachable root reads as "no unit", the conservative rule `host_running`
     applies too: a claim the root cannot make is not made.
@@ -97,7 +97,7 @@ def _root_unit(unit_id: str) -> dict[str, object] | None:
     from base.paths import root_run_dir
 
     try:
-        response = RootClient(root_run_dir(ava_home()) / _ROOT_SOCKET_NAME, timeout=2.0).status()
+        response = RootClient(root_run_dir(meiva_home()) / _ROOT_SOCKET_NAME, timeout=2.0).status()
     except RootClientError:
         return None
     if not response.get("ok"):
@@ -118,13 +118,13 @@ def _root_unit(unit_id: str) -> dict[str, object] | None:
 
 
 def _root_unit_running(unit_id: str) -> bool:
-    """True when this home's ava-root runs its `unit_id` unit right now."""
+    """True when this home's meiva-root runs its `unit_id` unit right now."""
     unit = _root_unit(unit_id)
     return unit is not None and unit.get("state") == "running"
 
 
 def _root_supervises_agent_host(pid: int) -> bool:
-    """True when this home's ava-root runs its agent-host unit at `pid`."""
+    """True when this home's meiva-root runs its agent-host unit at `pid`."""
     unit = _root_unit("agent-host")
     return unit is not None and unit.get("state") == "running" and unit.get("pid") == pid
 
@@ -139,7 +139,7 @@ def host_identity() -> HostIdentity:
     if not isinstance(raw, dict):
         raise TypeError("agent-host did not return an identity object")
     data = cast(dict[str, object], raw)
-    if data["maintenance_protocol"] != 1 or data["home"] != str(ava_home()):
+    if data["maintenance_protocol"] != 1 or data["home"] != str(meiva_home()):
         raise RuntimeError("running agent-host does not support maintenance for this home")
     pid = int(ServiceEndpoints.from_settings().of("agent_host").pidfile.read_text().strip())
     if type(data["pid"]) is not int or data["pid"] != pid:
@@ -159,7 +159,7 @@ def ops_quiescent(timeout: float) -> None:
     """Wait for admitted HTTP requests and actual executor work, after closing admission.
 
     "Is ops even running" is answered in the unit's own management mode: a
-    session host records `ava-ops`; a root-driven host keeps ops as an ava-root
+    session host records `meiva-ops`; a root-driven host keeps ops as an meiva-root
     tree unit with no record — without the tree check this gate silently
     skipped the whole wait there (task #3370).
     """
@@ -181,7 +181,7 @@ def ops_quiescent(timeout: float) -> None:
             timeout=min(5, remaining),
         ) as response:
             data = json.loads(response.read(65537))
-        if data["home"] != str(ava_home()):
+        if data["home"] != str(meiva_home()):
             raise RuntimeError("ops health belongs to another home")
         if data["pid"] != int(
             ServiceEndpoints.from_settings().of("ops").pidfile.read_text().strip()

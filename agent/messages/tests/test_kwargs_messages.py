@@ -10,11 +10,11 @@ import pytest
 from langgraph.checkpoint.serde.jsonplus import JsonPlusSerializer
 
 from agent.messages import exec_output_message, inbound_message, system_note_message
-from base.agents.messages.kwargs import AvaMsgType, ExecStatus, NoteTag, read_ava_kwargs
+from base.agents.messages.kwargs import ExecStatus, MeivaMsgType, NoteTag, read_meiva_kwargs
 
 
 def test_stored_discriminator_is_plain_str() -> None:
-    """Constructors store `ava_msg_type` / `ava_note_tag` as plain `str`, never
+    """Constructors store `meiva_msg_type` / `meiva_note_tag` as plain `str`, never
     the StrEnum member — the serialization-safety invariant."""
     inbound = inbound_message(content="hi", source="user", inbound_id=1, body_start=0)
     note = system_note_message(content="n", tag=NoteTag.MEMORY)
@@ -26,12 +26,12 @@ def test_stored_discriminator_is_plain_str() -> None:
         created_at=datetime.now(UTC),
     )
 
-    assert type(inbound.additional_kwargs["ava_msg_type"]) is str  # pyright: ignore[reportUnknownArgumentType, reportUnknownMemberType]
-    assert inbound.additional_kwargs["ava_msg_type"] == AvaMsgType.INBOUND  # pyright: ignore[reportUnknownMemberType]
-    assert type(note.additional_kwargs["ava_msg_type"]) is str  # pyright: ignore[reportUnknownArgumentType, reportUnknownMemberType]
-    assert type(note.additional_kwargs["ava_note_tag"]) is str  # pyright: ignore[reportUnknownArgumentType, reportUnknownMemberType]
-    assert note.additional_kwargs["ava_note_tag"] == NoteTag.MEMORY  # pyright: ignore[reportUnknownMemberType]
-    assert type(exec_out.additional_kwargs["ava_msg_type"]) is str  # pyright: ignore[reportUnknownArgumentType, reportUnknownMemberType]
+    assert type(inbound.additional_kwargs["meiva_msg_type"]) is str  # pyright: ignore[reportUnknownArgumentType, reportUnknownMemberType]
+    assert inbound.additional_kwargs["meiva_msg_type"] == MeivaMsgType.INBOUND  # pyright: ignore[reportUnknownMemberType]
+    assert type(note.additional_kwargs["meiva_msg_type"]) is str  # pyright: ignore[reportUnknownArgumentType, reportUnknownMemberType]
+    assert type(note.additional_kwargs["meiva_note_tag"]) is str  # pyright: ignore[reportUnknownArgumentType, reportUnknownMemberType]
+    assert note.additional_kwargs["meiva_note_tag"] == NoteTag.MEMORY  # pyright: ignore[reportUnknownMemberType]
+    assert type(exec_out.additional_kwargs["meiva_msg_type"]) is str  # pyright: ignore[reportUnknownArgumentType, reportUnknownMemberType]
 
 
 def test_checkpoint_roundtrip_no_custom_type() -> None:
@@ -40,7 +40,7 @@ def test_checkpoint_roundtrip_no_custom_type() -> None:
     serde = JsonPlusSerializer()
     note = system_note_message(content="n", tag=NoteTag.SECURITY)
     restored = serde.loads_typed(serde.dumps_typed(note))
-    tag = restored.additional_kwargs["ava_note_tag"]
+    tag = restored.additional_kwargs["meiva_note_tag"]
     assert type(tag) is str
     assert tag == NoteTag.SECURITY
 
@@ -104,19 +104,19 @@ def test_exec_output_records_status_start_and_body_offset() -> None:
         exec_ms=113_000,
         created_at=datetime.now(UTC),
     )
-    kwargs = read_ava_kwargs(msg)
-    assert kwargs.get("ava_exec_status") == "timed_out"
-    assert kwargs.get("ava_exec_started_at") == started.isoformat()
-    assert kwargs.get("ava_exec_ms") == 113_000
-    assert msg.text[kwargs.get("ava_exec_body_start", -1) :] == "hi\n"
+    kwargs = read_meiva_kwargs(msg)
+    assert kwargs.get("meiva_exec_status") == "timed_out"
+    assert kwargs.get("meiva_exec_started_at") == started.isoformat()
+    assert kwargs.get("meiva_exec_ms") == 113_000
+    assert msg.text[kwargs.get("meiva_exec_body_start", -1) :] == "hi\n"
 
 
 def test_inbound_records_where_its_content_begins() -> None:
     msg = inbound_message(
         content="Agent 5 [t]:\n\nhi", source="agent:5", inbound_id=1, body_start=14
     )
-    kwargs = read_ava_kwargs(msg)
-    assert msg.text[kwargs.get("ava_inbound_body_start", -1) :] == "hi"
+    kwargs = read_meiva_kwargs(msg)
+    assert msg.text[kwargs.get("meiva_inbound_body_start", -1) :] == "hi"
 
 
 def test_inbound_without_a_queue_row_carries_no_inbound_id_and_keeps_its_message_id() -> None:
@@ -128,11 +128,11 @@ def test_inbound_without_a_queue_row_carries_no_inbound_id_and_keeps_its_message
         created_at=datetime(2026, 10, 13, tzinfo=UTC),
         message_id="request-1",
     )
-    kwargs = read_ava_kwargs(msg)
+    kwargs = read_meiva_kwargs(msg)
     assert msg.id == "request-1"
-    assert "ava_inbound_id" not in kwargs
-    assert kwargs.get("ava_created_at") == "2026-10-13T00:00:00+00:00"
-    assert "ava_picked_up_at" in kwargs
+    assert "meiva_inbound_id" not in kwargs
+    assert kwargs.get("meiva_created_at") == "2026-10-13T00:00:00+00:00"
+    assert "meiva_picked_up_at" in kwargs
 
 
 def test_exec_output_requires_a_creation_time() -> None:

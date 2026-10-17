@@ -1,7 +1,7 @@
 """A cluster home's own record: the ports and data-plane host it was born with.
 
 The record lives in the home it describes, as the `record` of the home's start
-intent (`$AVA_HOME/start-intent.json`, written by `cli.start_identity` before
+intent (`$MEIVA_HOME/start-intent.json`, written by `cli.start_identity` before
 any effect). A home describes only itself: nothing here lists, looks up or
 reserves against another cluster. A unit without the gateway capability owns no
 data plane, so its intent carries no record.
@@ -26,7 +26,7 @@ class ClusterRecord:
     # The host this cluster's data-plane URLs are DERIVED at (birth); empty =
     # loopback (127.0.0.1), the single-box posture. Stored on the record because
     # derivation happens at birth, before the home's `.env` exists; the birth path
-    # snapshots it from `AVA_DATA_PLANE_HOST` — see `cli.start_identity` and
+    # snapshots it from `MEIVA_DATA_PLANE_HOST` — see `cli.start_identity` and
     # `base.cluster.derive.per_cluster_base_urls`. External data plane: Task #1752.
     data_plane_host: str = ""
 

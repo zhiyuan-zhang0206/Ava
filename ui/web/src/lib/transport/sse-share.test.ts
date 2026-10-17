@@ -44,7 +44,7 @@ class FakeLocks {
     callback: (lock: Lock) => Promise<void>,
   ): Promise<void> {
     if (this.failure !== null) return Promise.reject(this.failure);
-    expect(name).toBe("ava-ui-sse");
+    expect(name).toBe("meiva-ui-sse");
     expect(options.mode).toBe("exclusive");
     const signal = options.signal;
     if (!signal) throw new Error("missing lock abort signal");
@@ -65,7 +65,7 @@ class FakeLocks {
     const item = this.queue.shift();
     if (!item) return;
     this.held = true;
-    void item.callback({ name: "ava-ui-sse", mode: "exclusive" })
+    void item.callback({ name: "meiva-ui-sse", mode: "exclusive" })
       .then(item.resolve, item.reject)
       .finally(() => {
         this.held = false;

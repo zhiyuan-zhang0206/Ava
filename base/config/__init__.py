@@ -8,7 +8,7 @@ The former flat `Settings` god object is split by owning domain into sub-models
 (`LmSettings`, `AgentSettings`, `DataPlaneSettings`, …), each its own
 `BaseSettings` that populates from the flat `os.environ` through its fields' env
 aliases. `Settings` aggregates one instance of each; access is nested
-(`settings.lm.llm_model`). The split is invisible to `.env`: every AVA_* alias is
+(`settings.lm.llm_model`). The split is invisible to `.env`: every MEIVA_* alias is
 unchanged, so `.env` files, `_enforce_cluster_env_authority`, the bootstrap
 payload, and the config PUT keep working byte-for-byte.
 
@@ -19,8 +19,8 @@ metadata) in `base/config/admin/`. Grouping is by folder only: the registry stay
 the flat `DOMAIN_MODELS` / `model_classes()` in `base/config/config_registry.py`, and a
 component's own config slice belongs in that component's package, not here.
 
-Precedence: env var > Field default. `$AVA_HOME/.env` is the single source of
-truth — the config panel and `ava config set` write edits straight into it
+Precedence: env var > Field default. `$MEIVA_HOME/.env` is the single source of
+truth — the config panel and `meiva config set` write edits straight into it
 (`set_key` / `unset_key` by alias; see `base/config/runtime_config.py`), and
 pydantic-settings reads it at startup. There is no separate override layer: a
 value lives in exactly one place.
@@ -34,10 +34,10 @@ index (`base/host/env/config_lite_table.py`) through `settings`. The first touch
 anything outside that surface upgrades the process to the eager chain
 (`base/config/_lite.py` holds the state machine, `base/config/_full.py` the
 assembly) exactly once; overlay writes made before the upgrade are replayed onto
-the singleton. `AVA_CONFIG_BOOT=eager` (read at import) restores the eager boot,
+the singleton. `MEIVA_CONFIG_BOOT=eager` (read at import) restores the eager boot,
 and `ensure_eager()` is the explicit entry point for processes that must
 construct every domain at boot. Settings-lite maintenance verbs
-(`AVA_CONFIG_FETCH=skip`) keep their deferred load — a broken `.env` stays
+(`MEIVA_CONFIG_FETCH=skip`) keep their deferred load — a broken `.env` stays
 repairable.
 
 Third-party-library-consumed secrets (ANTHROPIC_API_KEY, ...) are modeled
@@ -54,7 +54,7 @@ level is the owning sub-model's `group` label. `capability` below is conceptual
 ownership + the remote-view field filter, not panel grouping (default capability
 per domain in `DOMAIN_MODELS`). Each Field's json_schema_extra carries the
 remaining metadata the frontend and distribution logic need:
-- restart_required: "agent" | "ops" | "gateway" | "all" | "schedule" | "" — which process must restart after a change; "gateway" names the gateway process AND every gateway-profile daemon that consumes the field (im_bridge / memory_indexer / memory_search / ... — an `ava restart` bounces all of them); "schedule" = the gateway-hosted schedule runner
+- restart_required: "agent" | "ops" | "gateway" | "all" | "schedule" | "" — which process must restart after a change; "gateway" names the gateway process AND every gateway-profile daemon that consumes the field (im_bridge / memory_indexer / memory_search / ... — an `meiva restart` bounces all of them); "schedule" = the gateway-hosted schedule runner
 - writable: whether the frontend allows editing
 - sensitive: whether the frontend masks the display
 - scope: cluster-pinned | cluster-default | host | agent — drives BOOTSTRAP_FIELDS + write routing
@@ -100,10 +100,10 @@ Resolution + stamping mechanics: `base/agents/model/birth_config.py`.
 
 ## Reading per-agent fields from turn-scoped code
 
-Turn-scoped code (`agent/`, `ava_builtins/`, `base/lm/`) reads `per_agent`
+Turn-scoped code (`agent/`, `meiva_builtins/`, `base/lm/`) reads `per_agent`
 fields from the agent's slices (`base/host/env/agent_slices.py`, on
 `runtime.context.agent`) — never the bare singleton, which holds the cluster
-default. The exec child and the SDK (`ava/`) run one agent per process, so
+default. The exec child and the SDK (`meiva/`) run one agent per process, so
 their settings carry that agent's overlay. Enforced by
 `scripts/lint/turn_scoped_config.py`.
 """
@@ -145,7 +145,7 @@ from base.config.config_registry import (
     schema_extra as schema_extra,
 )
 from base.config.profiles import (
-    AVA_PROCESS_PROFILE_ENV as AVA_PROCESS_PROFILE_ENV,
+    MEIVA_PROCESS_PROFILE_ENV as MEIVA_PROCESS_PROFILE_ENV,
 )
 from base.config.profiles import (
     PROCESS_PROFILES as PROCESS_PROFILES,
@@ -174,7 +174,7 @@ from base.host.env.config_lite_table import (
     PER_AGENT_FIELDS,
 )
 from base.host.env.dotenv_boot import (
-    load_ava_env as load_ava_env,
+    load_meiva_env as load_meiva_env,
 )
 
 if TYPE_CHECKING:
@@ -253,7 +253,7 @@ def per_agent_field_names() -> set[str]:
 # User ruling 2026-08-27: the timezone is a cluster-level setting; every agent
 # runner pulls it from the gateway and must NOT fall back to its own machine's
 # OS timezone (a runner whose OS zone was never switched exposed the
-# mismatch). ``AVA_TIMEZONE`` (scope ``cluster-pinned``) already travels
+# mismatch). ``MEIVA_TIMEZONE`` (scope ``cluster-pinned``) already travels
 # gateway -> runner: a pure agent-runner fetches it from ``GET /api/bootstrap``
 # at every process start and the gateway unit keeps it in its own ``.env``, so
 # a process that has the value in its environment holds the *authoritative*
@@ -302,7 +302,7 @@ def apply_cluster_timezone() -> None:
     """Apply the cluster timezone to this process's wall clock.
 
     Sets ``os.environ["TZ"]`` and calls ``time.tzset()`` when the process
-    holds an authoritative ``AVA_TIMEZONE`` (the gateway unit's ``.env``, a
+    holds an authoritative ``MEIVA_TIMEZONE`` (the gateway unit's ``.env``, a
     runner's bootstrap fetch, a schedule runner's pinned spawn env). After
     this, every naive local-time read — ``datetime.now()``, no-arg
     ``.astimezone()``, loguru's ``{time}`` stamp, ``time.localtime()``, and
@@ -357,14 +357,14 @@ def __getattr__(name: str) -> Any:
     read that races another thread's in-flight build waits for it (bounded),
     only the building thread's own re-entrant read raises the window error,
     and a name the build never installs stays an AttributeError (PEP 562,
-    the `ava/__init__` latch shape).
+    the `meiva/__init__` latch shape).
 
     The two registry-backed field faces (`FIELD_REFS`, `FIELD_INFOS`) and the
     write-path metadata pair (`CONFIG_UNCHANGED_SENTINEL`, `ConfigFieldMeta`)
     are served WITHOUT the upgrade and ahead of the gate, because they never
     depend on it: building the registry is construction-free — it never
     loads `.env` or constructs Settings — and the settings-lite repair paths
-    (`ava config set` → `validate_env_patch_for_write`) import them in
+    (`meiva config set` → `validate_env_patch_for_write`) import them in
     exactly the states where a broken `.env` makes Settings unable to
     construct (task #3621) — the pre-boot-lite import-time registry served
     the same surfaces. Gating them on the process-global build flag turned a
@@ -402,7 +402,7 @@ def __getattr__(name: str) -> Any:
 
 # ── The boot tail ──
 #
-# Prepare the boot-lite state (or go eager now with `AVA_CONFIG_BOOT=eager`).
-# A settings-lite process (`AVA_CONFIG_FETCH=skip`) degrades to the deferred
+# Prepare the boot-lite state (or go eager now with `MEIVA_CONFIG_BOOT=eager`).
+# A settings-lite process (`MEIVA_CONFIG_FETCH=skip`) degrades to the deferred
 # load: nothing happens until the first config read.
 _lite.boot(globals(), apply_cluster_timezone)

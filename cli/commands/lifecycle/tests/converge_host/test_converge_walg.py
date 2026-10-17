@@ -46,11 +46,11 @@ def _ctx(
     config = ConfigBoot()
     config.set_field("walg_config_file", sandbox.config_file if enabled else None)
     host = "192.0.2.10" if remote else "127.0.0.1"
-    config.set_field("db_url", f"postgresql://test:test@{host}:5433/ava")
+    config.set_field("db_url", f"postgresql://test:test@{host}:5433/meiva")
     config.set_field("redis_url", "redis://127.0.0.1:6380/0")
     return ConvergeCtx(
         repo=sandbox.home,
-        ava_home=sandbox.home,
+        meiva_home=sandbox.home,
         roles=frozenset({"gateway"}),
         config=config,
         database_factory=operator_database,

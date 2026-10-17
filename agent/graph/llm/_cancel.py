@@ -24,7 +24,7 @@ from agent.graph.llm_errors import (
     classify_and_log_provider_error,
 )
 from agent.nodes import AFTER_EXEC
-from base.agents.context import AvaContext
+from base.agents.context import MeivaContext
 from base.events.live.projection import Cancelled
 from base.log import logger
 
@@ -32,7 +32,7 @@ from .goto import LlmGoto
 
 
 async def race_stream_vs_cancel(
-    ctx: AvaContext,
+    ctx: MeivaContext,
     agent_id: int,
     stream_coro: Coroutine[Any, Any, None],
     handler: RedisStreamHandler,

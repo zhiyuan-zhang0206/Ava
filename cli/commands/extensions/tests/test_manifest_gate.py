@@ -1,7 +1,7 @@
 """Install-time manifest gate across the install/upgrade entries (S1–S2).
 
-A package that ships `ava-plugin.json` is held to its contract before anything
-is landed: invalid manifest / unsatisfied `engines.ava` / a pyproject that
+A package that ships `meiva-plugin.json` is held to its contract before anything
+is landed: invalid manifest / unsatisfied `engines.meiva` / a pyproject that
 breaks the `dependencies.pythonPackages` mirror all refuse the install with a
 clear error, and nothing is written. Packages without a manifest keep the
 legacy paths (covered by the existing install tests).
@@ -36,14 +36,14 @@ GOOD_MANIFEST = {
     "name": "acme",
     "version": "1.0.0",
     "description": "test package",
-    "engines": {"ava": ">=0.1.0"},
+    "engines": {"meiva": ">=0.1.0"},
     "dependencies": {"pythonPackages": ["mcp>=1.27,<2"]},
     "lifecycle": {"entry": "plugin.py", "activation": "immediate", "dispose": "effect-registry"},
 }
 
 
 def _write_manifest(pkg: Path, manifest: dict) -> None:
-    (pkg / "ava-plugin.json").write_text(json.dumps(manifest), encoding="utf-8")
+    (pkg / "meiva-plugin.json").write_text(json.dumps(manifest), encoding="utf-8")
 
 
 def _make_mcp_package(root: Path, name: str = "acme") -> Path:
@@ -79,7 +79,7 @@ def fake_uv_sync(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(mcp, "uv_sync", _fake)
 
 
-# ─── ava mcp install ───────────────────────────────────────────────────
+# ─── meiva mcp install ───────────────────────────────────────────────────
 
 
 def test_mcp_install_refuses_manifest_beyond_host_engines(
@@ -88,10 +88,10 @@ def test_mcp_install_refuses_manifest_beyond_host_engines(
     pkg = _make_mcp_package(tmp_path)
     # ">=2099" (not ">=99"): the host version is now the derived date axis
     # (2026.x), so the beyond-host example must outrun a full year, not two digits.
-    bad = dict(GOOD_MANIFEST, engines={"ava": ">=2099"})
+    bad = dict(GOOD_MANIFEST, engines={"meiva": ">=2099"})
     _write_manifest(pkg, bad)
     assert cmd_mcp_install(str(pkg), None, None) == 1
-    assert "requires Ava >=2099" in capsys.readouterr().err  # pyright: ignore[reportUnknownMemberType]
+    assert "requires Meiva >=2099" in capsys.readouterr().err  # pyright: ignore[reportUnknownMemberType]
     assert reg.get("acme") is None
     assert not (unit_home / "mcps" / "acme").exists()
 
@@ -108,9 +108,9 @@ def test_mcp_install_refuses_prerelease_host_without_opt_in(
 
     monkeypatch.setattr(host_version, "host_version", prerelease_host)
     pkg = _make_mcp_package(tmp_path)
-    _write_manifest(pkg, dict(GOOD_MANIFEST, engines={"ava": ">=1.2.3"}))
+    _write_manifest(pkg, dict(GOOD_MANIFEST, engines={"meiva": ">=1.2.3"}))
     assert cmd_mcp_install(str(pkg), None, None) == 1
-    assert "requires Ava >=1.2.3" in capsys.readouterr().err  # pyright: ignore[reportUnknownMemberType]
+    assert "requires Meiva >=1.2.3" in capsys.readouterr().err  # pyright: ignore[reportUnknownMemberType]
     assert reg.get("acme") is None
     assert not (unit_home / "mcps" / "acme").exists()
 
@@ -150,7 +150,7 @@ def test_mcp_install_refuses_invalid_manifest(
     unit_home: Path, tmp_path: Path, fake_uv_sync: None, capsys: pytest.CaptureFixture
 ) -> None:
     pkg = _make_mcp_package(tmp_path)
-    (pkg / "ava-plugin.json").write_text("not json", encoding="utf-8")
+    (pkg / "meiva-plugin.json").write_text("not json", encoding="utf-8")
     assert cmd_mcp_install(str(pkg), None, None) == 1
     assert "not valid JSON" in capsys.readouterr().err  # pyright: ignore[reportUnknownMemberType]
     assert reg.get("acme") is None
@@ -164,7 +164,7 @@ def test_mcp_install_accepts_valid_manifest(
     assert cmd_mcp_install(str(pkg), None, None) == 0
     row = reg.get("acme")
     assert row is not None
-    assert (unit_home / "mcps" / "acme" / "ava-plugin.json").is_file()
+    assert (unit_home / "mcps" / "acme" / "meiva-plugin.json").is_file()
 
 
 def test_mcp_install_manifest_without_pyproject_fails_when_declaring_packages(
@@ -177,7 +177,7 @@ def test_mcp_install_manifest_without_pyproject_fails_when_declaring_packages(
     assert "no pyproject.toml" in capsys.readouterr().err  # pyright: ignore[reportUnknownMemberType]
 
 
-# ─── ava mcp upgrade ───────────────────────────────────────────────────
+# ─── meiva mcp upgrade ───────────────────────────────────────────────────
 
 
 def test_mcp_upgrade_refuses_source_that_breaks_the_contract(
@@ -193,17 +193,17 @@ def test_mcp_upgrade_refuses_source_that_breaks_the_contract(
     url = f"file://{pkg}"
     assert cmd_mcp_install(url, None, None) == 0
 
-    _write_manifest(pkg, dict(GOOD_MANIFEST, engines={"ava": ">=2099"}))
+    _write_manifest(pkg, dict(GOOD_MANIFEST, engines={"meiva": ">=2099"}))
     _git(pkg, "add", ".")
     _git(pkg, "commit", "-q", "-m", "break engines")
     assert cmd_mcp_upgrade("acme") == 1
-    assert "requires Ava >=2099" in capsys.readouterr().err  # pyright: ignore[reportUnknownMemberType]
+    assert "requires Meiva >=2099" in capsys.readouterr().err  # pyright: ignore[reportUnknownMemberType]
     # the landed copy still carries the previous manifest — nothing was re-landed
-    landed = unit_home / "mcps" / "acme" / "ava-plugin.json"
-    assert json.loads(landed.read_text(encoding="utf-8"))["engines"] == {"ava": ">=0.1.0"}
+    landed = unit_home / "mcps" / "acme" / "meiva-plugin.json"
+    assert json.loads(landed.read_text(encoding="utf-8"))["engines"] == {"meiva": ">=0.1.0"}
 
 
-# ─── ava plugins install / ava skill install ───────────────────────────
+# ─── meiva plugins install / meiva skill install ───────────────────────────
 
 
 def _git_repo(pkg: Path) -> str:
@@ -225,7 +225,7 @@ def test_plugins_install_refuses_invalid_manifest_before_detection(
 ) -> None:
     pkg = tmp_path / "pkg"
     pkg.mkdir()
-    (pkg / "ava-plugin.json").write_text('{"apiVersion": 99}', encoding="utf-8")
+    (pkg / "meiva-plugin.json").write_text('{"apiVersion": 99}', encoding="utf-8")
     assert (
         cmd_plugins_install(
             _git_repo(pkg), None, None, database_factory=operator_database, machine=command_machine
@@ -270,7 +270,7 @@ def test_skill_install_refuses_invalid_manifest_before_discovery(
 ) -> None:
     pkg = tmp_path / "skills-src"
     pkg.mkdir()
-    (pkg / "ava-plugin.json").write_text('{"apiVersion": 2, "name": "x"}', encoding="utf-8")
+    (pkg / "meiva-plugin.json").write_text('{"apiVersion": 2, "name": "x"}', encoding="utf-8")
     assert (
         cmd_skill_install(
             str(pkg),

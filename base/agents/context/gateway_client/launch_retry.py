@@ -3,7 +3,7 @@
 from typing import cast
 from uuid import UUID
 
-from base.agents.context import AvaContext
+from base.agents.context import MeivaContext
 from base.api_contracts.idempotency import validate_idempotency_key
 from base.api_contracts.launch_retry import RetryLaunchAccepted, RetryLaunchRequest
 
@@ -16,7 +16,7 @@ def validate_agent_id(agent_id: int, *, operation: str) -> None:
         raise ValueError(f"{operation} requires a positive agent ID")
 
 
-def get_launch_attempt(agent_id: int, *, context: AvaContext) -> UUID:
+def get_launch_attempt(agent_id: int, *, context: MeivaContext) -> UUID:
     """Read the current metadata attempt; an absent old field is not evidence."""
     validate_agent_id(agent_id, operation="launch attempt observation")
     response = transport.get(f"/api/agents/{agent_id}", context=context)
@@ -46,7 +46,7 @@ def retry_launch(
     *,
     idempotency_key: str,
     expected_prior_attempt_id: str | UUID,
-    context: AvaContext,
+    context: MeivaContext,
 ) -> int:
     """Retry one observed attempt through the fixed guarded operation."""
     key, request = validate_retry_admission(

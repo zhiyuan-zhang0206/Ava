@@ -24,13 +24,13 @@ const TURN_ROWS_FALLBACK = 100;
 const MEASURE_ROWS_FALLBACK = 75;
 
 export function useTimelineWindowLimits() {
-  const configuredActivationRows = useDisplayLimit("AVA_TIMELINE_WINDOW_ACTIVATION_ROWS", ACTIVATION_ROWS_FALLBACK);
+  const configuredActivationRows = useDisplayLimit("MEIVA_TIMELINE_WINDOW_ACTIVATION_ROWS", ACTIVATION_ROWS_FALLBACK);
   const activationRows = useDeferredValue(configuredActivationRows);
-  const turnRows = useDisplayLimit("AVA_TIMELINE_WINDOW_TURN_ROWS", TURN_ROWS_FALLBACK);
+  const turnRows = useDisplayLimit("MEIVA_TIMELINE_WINDOW_TURN_ROWS", TURN_ROWS_FALLBACK);
   // A lower runtime threshold first renders with measurement active, then switches
   // the DOM window on the next commit so the parked row can be pinned.
   const measureRows = Math.min(
-    useDisplayLimit("AVA_TIMELINE_WINDOW_MEASURE_ROWS", MEASURE_ROWS_FALLBACK),
+    useDisplayLimit("MEIVA_TIMELINE_WINDOW_MEASURE_ROWS", MEASURE_ROWS_FALLBACK),
     configuredActivationRows - 1, activationRows - 1,
   );
   return { activationRows, turnRows, measureRows };

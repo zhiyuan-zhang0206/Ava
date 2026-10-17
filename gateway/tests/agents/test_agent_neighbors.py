@@ -1,6 +1,6 @@
 """GET /api/agents/{id}/neighbors integration tests.
 
-FastAPI TestClient + real ava_test DB. The tie graph is aggregated from the audit
+FastAPI TestClient + real meiva_test DB. The tie graph is aggregated from the audit
 record (`audit_events`) and the walk runs in Python (gateway/inspect/neighbors.py).
 Covered end to end: undirected ties, permanent lineage weights
 (spawn/fork/resurrect, no time decay) vs decaying message weights
@@ -191,7 +191,7 @@ def test_defaults_come_from_display_config(
     db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """Omitted depth/limit resolve from settings.display.neighbors_default_*
-    (``AVA_NEIGHBORS_DEFAULT_DEPTH`` / ``AVA_NEIGHBORS_DEFAULT_LIMIT``); the
+    (``MEIVA_NEIGHBORS_DEFAULT_DEPTH`` / ``MEIVA_NEIGHBORS_DEFAULT_LIMIT``); the
     literals 1/20 are only the fields' defaults, not hard-coded query
     parameters."""
     from base.config import settings

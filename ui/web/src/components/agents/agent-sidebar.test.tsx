@@ -370,10 +370,10 @@ describe("DesktopSidebar collapse/expand", () => {
     expect(container.querySelectorAll(".animate-pulse").length).toBe(0);
   });
 
-  it("collapsed=false → shows ChevronLeft + 'Ava' title", () => {
+  it("collapsed=false → shows ChevronLeft + 'Meiva' title", () => {
     wrap(<AgentSidebar {...handlers} />);
     expect(screen.getByLabelText("Collapse sidebar")).toBeTruthy();
-    expect(screen.getByText("Ava")).toBeTruthy();
+    expect(screen.getByText("Meiva")).toBeTruthy();
     expect(screen.queryByLabelText("Drag to resize width")).toBeNull();
   });
 
@@ -388,7 +388,7 @@ describe("DesktopSidebar collapse/expand", () => {
 
   it("leaves the vertical separator to the owning layout handle", () => {
     wrap(<AgentSidebar {...handlers} />);
-    expect(screen.getByText("Ava").closest("aside")?.className).not.toContain("border-r");
+    expect(screen.getByText("Meiva").closest("aside")?.className).not.toContain("border-r");
     cleanup();
 
     state.sidebarCollapsed = true;
@@ -400,7 +400,7 @@ describe("DesktopSidebar collapse/expand", () => {
 
   it("expanded header and collapsed-rail toggle share the same BAR_HEIGHT_CLASS", () => {
     wrap(<AgentSidebar {...handlers} />);
-    const expandedHeader = screen.getByText("Ava").closest("header");
+    const expandedHeader = screen.getByText("Meiva").closest("header");
     expect(expandedHeader?.className).toContain(BAR_HEIGHT_CLASS);
     cleanup();
 
@@ -414,7 +414,7 @@ describe("DesktopSidebar collapse/expand", () => {
 
   it("insets the expanded title divider", () => {
     wrap(<AgentSidebar {...handlers} />);
-    const header = screen.getByText("Ava").closest("header");
+    const header = screen.getByText("Meiva").closest("header");
     for (const dividerClass of BAR_DIVIDER_CLASS.split(" ")) {
       expect(header?.className).toContain(dividerClass);
     }
@@ -424,13 +424,13 @@ describe("DesktopSidebar collapse/expand", () => {
 
   it("expanded sidebar aside clips horizontal overflow (overflow-x-hidden backstop)", () => {
     wrap(<AgentSidebar {...handlers} />);
-    const aside = screen.getByText("Ava").closest("aside");
+    const aside = screen.getByText("Meiva").closest("aside");
     expect(aside?.className).toContain("overflow-x-hidden");
   });
 
   it("expanded sidebar aside is a flex column (Task #1053 regression: R4-PR3 dropped display:flex, so the agent-list ScrollArea stopped bounding and the whole aside — header/bars/fixed footer — scrolled together)", () => {
     wrap(<AgentSidebar {...handlers} />);
-    const aside = screen.getByText("Ava").closest("aside");
+    const aside = screen.getByText("Meiva").closest("aside");
     expect(aside?.className).toContain("flex");
     expect(aside?.className).toContain("flex-col");
   });
@@ -1234,14 +1234,14 @@ describe("Flat view mode", () => {
 });
 
 describe("Header layout + search overlay (task #723)", () => {
-  it("expanded header: Ava left, search before collapse (rightmost)", () => {
+  it("expanded header: Meiva left, search before collapse (rightmost)", () => {
     state.agents = [makeAgent({ agent_id: 1 })];
     wrap(<AgentSidebar {...handlers} />);
-    const header = screen.getByText("Ava").closest("header")!;
+    const header = screen.getByText("Meiva").closest("header")!;
     const labels = Array.from(header.querySelectorAll("button")).map((b) => b.getAttribute("aria-label"));
-    // Expanded-state top button order: search -> collapse (collapse rightmost); Ava title leftmost
+    // Expanded-state top button order: search -> collapse (collapse rightmost); Meiva title leftmost
     expect(labels.filter(Boolean)).toEqual(["Search agents", "Collapse sidebar"]);
-    expect(screen.getByText("Ava")).toBeTruthy();
+    expect(screen.getByText("Meiva")).toBeTruthy();
   });
 
   it("collapsed rail: expand on top, search below it, nav shortcuts stacked at the bottom", () => {

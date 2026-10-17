@@ -78,7 +78,7 @@ _TREE_SCAN_ONLY_FILES = frozenset(
 _TREE_SCAN_ONLY_PREFIXES = (
     ".github/",
     ".agents/",
-    ".ava/",
+    ".meiva/",
     ".trunk/",
     "demos/",
     "tests/e2e/",  # CI runs the whole e2e package for every diff that is not docs-only
@@ -86,7 +86,7 @@ _TREE_SCAN_ONLY_PREFIXES = (
 # Hidden tool directories that tests read by path rather than import. A change
 # there also selects every collectable test whose source text names the directory
 # (`referencing_tests`), so the set of readers is derived, never listed by hand.
-_REFERENCED_ROOTS = (".github", ".agents", ".ava", ".trunk")
+_REFERENCED_ROOTS = (".github", ".agents", ".meiva", ".trunk")
 # Top-level directories whose files belong to a package with an owning `tests/`.
 _PACKAGE_ROOTS = frozenset(all_packages())
 _QUEUE_PREFIXES = ("trunk-merge/", "trunk-temp/")

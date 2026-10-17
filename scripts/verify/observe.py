@@ -1,8 +1,8 @@
 """In-boundary observer for the verification recipes (Linux container, Tart macOS guest).
 
-Runs inside the boundary after `ava start`, from the checkout's own interpreter:
+Runs inside the boundary after `meiva start`, from the checkout's own interpreter:
 
-    cd ~/.ava/source && PYTHONPATH=. .venv/bin/python observe.py OUT.json
+    cd ~/.meiva/source && PYTHONPATH=. .venv/bin/python observe.py OUT.json
 
 It checks the started cluster from the outside, the way an operator would, and
 writes one JSON document with every check's outcome. A failed check is recorded and
@@ -20,7 +20,7 @@ is listed under `not_applicable` with its reason: it neither passes nor fails.
   `print(1 + 2)` through the real gateway and agent host, and the recorded output
   body is `3` (not a model claim, not a digit in a timestamp);
 - helper_chain (macOS only): the signed permissions helper answers with both desktop
-  grants held, and the process tree is launchd -> helper -> ava-root -> every unit.
+  grants held, and the process tree is launchd -> helper -> meiva-root -> every unit.
 """
 
 from __future__ import annotations
@@ -42,7 +42,7 @@ SERVICES = frozenset({"gateway", "frontend", "ops", "agent-host"})
 PG_BIN = Path("/usr/lib/postgresql/17/bin")
 TCC_DB = "/Library/Application Support/com.apple.TCC/TCC.db"
 HELPER_TCC_QUERY = (
-    "select service, auth_value from access where client = 'com.ava.permissions-helper'"
+    "select service, auth_value from access where client = 'com.meiva.permissions-helper'"
 )
 # The helper's ping, the two desktop grants it must hold, and the lifecycle protocols
 # the start admits it by (cli/commands/lifecycle/root_driver.py).
@@ -159,9 +159,9 @@ def check_frontend(home: Path, _source: Path) -> Detail:
 def human_secret(home: Path) -> str:
     from dotenv import dotenv_values
 
-    secret = (dotenv_values(home / ".env").get("AVA_CLUSTER_SECRET") or "").strip()
+    secret = (dotenv_values(home / ".env").get("MEIVA_CLUSTER_SECRET") or "").strip()
     if not secret:
-        raise RuntimeError(f"the home has no AVA_CLUSTER_SECRET in {home / '.env'}")
+        raise RuntimeError(f"the home has no MEIVA_CLUSTER_SECRET in {home / '.env'}")
     return secret
 
 
@@ -284,7 +284,7 @@ def _helper_signature() -> list[str]:
     requirement on stdout and the signature details on stderr)."""
     from base.paths import permissions_helper_app_dir
 
-    app = permissions_helper_app_dir() / "AvaPermissionsHelper.app"
+    app = permissions_helper_app_dir() / "MeivaPermissionsHelper.app"
     signing = subprocess.run(  # noqa: S603 — fixed read-only command, no shell
         ["codesign", "-dv", "-r-", "--verbose=4", str(app)],
         capture_output=True,
@@ -300,10 +300,10 @@ def _helper_signature() -> list[str]:
 
 def check_helper_chain(_home: Path, _source: Path) -> Detail:
     """The signed helper holds both desktop grants and owns the tree: launchd -> helper
-    -> ava-root -> every unit. Reads the helper, the root and the system TCC database;
+    -> meiva-root -> every unit. Reads the helper, the root and the system TCC database;
     changes nothing."""
     from base.native_process.root_control.client import RootClient
-    from base.paths import ava_home, root_run_dir
+    from base.paths import meiva_home, root_run_dir
     from base.sessions.helperproc import helper_client
 
     helper = helper_client()
@@ -315,10 +315,10 @@ def check_helper_chain(_home: Path, _source: Path) -> Detail:
     helper_pid = ping["pid"]
     keeper: Detail = dict(helper.root_status())
     root_pid = keeper["pid"]
-    if keeper["state"] != "running" or keeper["run_dir"] != str(root_run_dir(ava_home())):
+    if keeper["state"] != "running" or keeper["run_dir"] != str(root_run_dir(meiva_home())):
         raise RuntimeError(f"the helper does not keep this home's running root: {keeper}")
     reply: Detail = dict(
-        RootClient(root_run_dir(ava_home()) / "ava-root.sock", timeout=10).status()
+        RootClient(root_run_dir(meiva_home()) / "meiva-root.sock", timeout=10).status()
     )
     status: Detail = reply["result"]
     if status["root"]["pid"] != root_pid:
@@ -408,7 +408,7 @@ def observe(home: Path, source: Path) -> Detail:
 
 def main() -> int:
     out = Path(sys.argv[1])
-    home = Path.home() / ".ava"
+    home = Path.home() / ".meiva"
     report = observe(home, home / "source")
     out.write_text(json.dumps(report, indent=2) + "\n")
     print(

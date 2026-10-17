@@ -38,7 +38,7 @@ class GatewayServer(uvicorn.Server):
 
     uvicorn cancels an unfinished response only when `timeout_graceful_shutdown`
     runs out, so an SSE stream that never ends by itself holds every stop for that
-    whole budget (and ava-root's window for this unit is derived from it). Marking
+    whole budget (and meiva-root's window for this unit is derived from it). Marking
     the shutdown first lets the streams end within one poll tick; the budget stays
     the bound for whatever does not end.
     """
@@ -140,12 +140,12 @@ def _serve_process(process: GatewayProcess, build_app: Callable[[GatewayProcess]
     #   sets IPV6_V6ONLY on an explicit "::" bind, which refuses plain-IPv4
     #   clients (healthchecks, SDK) outright — verified on macOS.
     #   A gateway whose reachable address is a loopback alias (the single-box
-    #   default, `AVA_MACHINE_HOST` unset) binds 127.0.0.1 instead, like its data
+    #   default, `MEIVA_MACHINE_HOST` unset) binds 127.0.0.1 instead, like its data
     #   plane (`port_preflight.bind_addrs`): the API is authenticated either way, but
     #   a box that declares no private-network address serves no other machine.
     # - **agent-runner**: 127.0.0.1. The gateway does not reach an
     #   agent-runner's gateway directly — gateway→agent-runner RPC goes
-    #   to the separate ava-ops server (services/agent_runner/agent_ops), which dispatches
+    #   to the separate meiva-ops server (services/agent_runner/agent_ops), which dispatches
     #   each op in-process via gateway.ops_*. The only callers of an
     #   agent-runner's gateway :8000 are local SDK + local agent processes,
     #   so bind 127.0.0.1.
@@ -156,7 +156,7 @@ def _serve_process(process: GatewayProcess, build_app: Callable[[GatewayProcess]
     # not die, leaving a zombie holding :8000; the next graceful kill on
     # a fleet update cannot catch it, and the new gateway boot gets
     # [Errno 48] Address already in use. For dev hot-reload, set
-    # AVA_GATEWAY_RELOAD=1 (usually in a dev clone's .env or shell). Reload
+    # MEIVA_GATEWAY_RELOAD=1 (usually in a dev clone's .env or shell). Reload
     # mode binds through uvicorn's own bind_socket, which maps "" to a
     # v4-only wildcard — dev-only, and browsers fall back from the refused
     # IPv6 dial instantly.
@@ -212,7 +212,7 @@ def serve_kwargs(*, host: str, app: Any, factory: bool, config: ConfigBoot) -> d
         "host": host,
         "port": config.view.gateway.gateway_port,
         "reload": reload,
-        "reload_dirs": ["gateway", "base", "ava", "agent"] if reload else None,
+        "reload_dirs": ["gateway", "base", "meiva", "agent"] if reload else None,
         # log_config=None: uvicorn's default LOGGING_CONFIG dictConfig would
         # clobber the root-handler install (`_StdlibInterceptHandler`) that
         # init_gateway_process set up above, sending uvicorn's own records

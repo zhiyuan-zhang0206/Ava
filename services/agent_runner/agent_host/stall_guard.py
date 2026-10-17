@@ -2,7 +2,7 @@
 
 The hosted runner's turn-level injection guard (task #2417 half 2): a graph
 invocation whose turn-progress clock has shown no activity for
-``AVA_HOST_TURN_NO_PROGRESS_TIMEOUT_SECONDS`` is aborted instead of hanging
+``MEIVA_HOST_TURN_NO_PROGRESS_TIMEOUT_SECONDS`` is aborted instead of hanging
 forever under a live heartbeat lease — agent 2998's exact failure (claimed its
 whole inbound queue, then hung inside ``graph.ainvoke`` for 3.5 hours with the
 lease renewing).
@@ -30,12 +30,12 @@ from langgraph.graph.state import CompiledStateGraph
 
 from agent.state import BaseAgentState
 from agent.turn.runloop import emit_error_event
-from base.agents.context import AvaContext
+from base.agents.context import MeivaContext
 from base.config import settings
 from base.log import logger
 from base.native_process.stop_timing import CANCEL_UNWIND_TIMEOUT_S
 
-_Graph = CompiledStateGraph[BaseAgentState, AvaContext, BaseAgentState, BaseAgentState]
+_Graph = CompiledStateGraph[BaseAgentState, MeivaContext, BaseAgentState, BaseAgentState]
 
 
 class HostRestartRequiredError(RuntimeError):
@@ -50,7 +50,7 @@ class TurnStallTimeoutError(RuntimeError):
     """A hosted turn was aborted by the no-progress stall guard (host.py).
 
     Its ``graph.ainvoke`` made no progress for
-    ``AVA_HOST_TURN_NO_PROGRESS_TIMEOUT_SECONDS`` and was cancelled; the turn
+    ``MEIVA_HOST_TURN_NO_PROGRESS_TIMEOUT_SECONDS`` and was cancelled; the turn
     task ends (the task DID unwind — that is the whole point of the bounded
     abort) and a later fresh input starts a new work. Distinct from
     ``HostRestartRequiredError``, which is raised when the cancel refuses to
@@ -61,7 +61,7 @@ class TurnStallTimeoutError(RuntimeError):
 async def run_invocation_with_stall_guard(
     graph: _Graph,
     agent_id: int,
-    ctx: AvaContext,
+    ctx: MeivaContext,
     config: RunnableConfig,
     input_update: dict[str, object],
 ) -> dict[str, object]:
@@ -120,7 +120,7 @@ async def run_invocation_with_stall_guard(
 
 async def _abort_stalled_invocation(
     agent_id: int,
-    ctx: AvaContext,
+    ctx: MeivaContext,
     invoke_task: asyncio.Task[dict[str, object]],
     age_s: float,
 ) -> dict[str, object]:

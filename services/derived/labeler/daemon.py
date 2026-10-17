@@ -47,7 +47,7 @@ from base.lm.factory import build_chat_model
 from base.native_process.code_version import CodeVersion
 from base.native_process.loaded_commit import LoadedCommit
 from base.packages.plugin_providers import build_model_catalog
-from base.paths import ava_home
+from base.paths import meiva_home
 from base.telemetry import build_pipeline
 from base.telemetry.process_logging import init_gateway_process
 from services.derived.labeler.config import LabelerConfig
@@ -279,7 +279,7 @@ def main() -> None:
     """Entry point: init logger + run asyncio loop.
 
     SIGTERM (the graceful stop the fleet update sends) and Ctrl-C converge on
-    the same `KeyboardInterrupt` unwind — see `base.daemon.shutdown`. `ava stop`
+    the same `KeyboardInterrupt` unwind — see `base.daemon.shutdown`. `meiva stop`
     default force-kill does not reach this.
     """
     from base.deploy.schema.migrations import assert_schema_current
@@ -288,7 +288,7 @@ def main() -> None:
     machine_config = ConfigBoot()
     machine_config.boot()
     machine = machine_from_boot(machine_config)
-    process_home = ava_home().resolve()
+    process_home = meiva_home().resolve()
     # Pre-startup sanity: schema version must match code; raises SchemaVersionMismatch if not.
     assert_schema_current(machine_config.view.data_plane.db_url)
     version = CodeVersion(image)

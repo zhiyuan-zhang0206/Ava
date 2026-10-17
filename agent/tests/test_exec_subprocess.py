@@ -25,7 +25,6 @@ from agent.graph.exec._result import (
 )
 from agent.graph.exec._stream import ExecOutputChunkPublisher
 from agent.graph.exec._subprocess import run_in_subprocess
-from ava.tests.fixtures.pin_agent import exec_context
 from base.agents.lifecycle import AgentRestart, AgentTermination, SystemHalt
 from base.config import settings
 from base.db import Database
@@ -33,6 +32,7 @@ from base.db.code_version_gate import ProcessDbGate
 from base.host.env.dotenv_file import upsert_env
 from base.host.proc import kill_process_tree
 from base.paths import logs_dir
+from meiva.tests.fixtures.pin_agent import exec_context
 
 _AGENT_ID = 424242
 
@@ -140,23 +140,23 @@ async def test_subprocess_done(tmp_path: Path, database_gate: ProcessDbGate) -> 
 async def test_exec_child_disables_otlp_after_cluster_env_authority(
     tmp_path: Path, database_gate: ProcessDbGate
 ) -> None:
-    env_path = Path(os.environ["AVA_HOME"]) / ".env"
+    env_path = Path(os.environ["MEIVA_HOME"]) / ".env"
     original_env = env_path.read_text()
     log_path = logs_dir() / f"agent-{_AGENT_ID}.log"
     log_offset = log_path.stat().st_size if log_path.exists() else 0
-    upsert_env(env_path, {"AVA_TELEMETRY_OTLP_ENABLED": "true"})
+    upsert_env(env_path, {"MEIVA_TELEMETRY_OTLP_ENABLED": "true"})
     try:
         result = await _run(
             tmp_path,
             (
-                "import ava\n"
+                "import meiva\n"
                 "from base.telemetry.otlp import telemetry_otlp\n"
                 "probes = []\n"
                 "def endpoint_probe(endpoint):\n"
                 "    probes.append(endpoint)\n"
                 "    return False\n"
                 "telemetry_otlp.endpoint_reachable = endpoint_probe\n"
-                "ava.context.clients.event_pipeline().warmup_exports()\n"
+                "meiva.context.clients.event_pipeline().warmup_exports()\n"
                 'print("OTLP_ENABLED_IN_CHILD:", bool(probes))\n'
             ),
             database_gate=database_gate,
@@ -497,7 +497,7 @@ async def test_subprocess_state_snapshot_reaches_child(
     state = {"messages": [HumanMessage(content="snapshot says hi")], "halted": False}
     result = await _run(
         tmp_path,
-        "import ava\nprint(ava.state.messages[0].content)",
+        "import meiva\nprint(meiva.state.messages[0].content)",
         state=state,
         database_gate=database_gate,
     )
@@ -507,11 +507,11 @@ async def test_subprocess_state_snapshot_reaches_child(
 
 def _self_lifecycle_code(action: str) -> str:
     return (
-        "import ava, os, psycopg\n"
+        "import meiva, os, psycopg\n"
         "from base.host.env.registry import ADMIN_DATA_PLANE_ALIASES\n"
         "assert not ADMIN_DATA_PLANE_ALIASES.intersection(os.environ)\n"
-        "with psycopg.connect(ava.DB_URL) as conn:\n"
-        "    assert conn.execute('SELECT current_user').fetchone() == ('ava_g0_runner',)\n"
+        "with psycopg.connect(meiva.DB_URL) as conn:\n"
+        "    assert conn.execute('SELECT current_user').fetchone() == ('meiva_g0_runner',)\n"
         f"{action}\n"
     )
 
@@ -523,7 +523,7 @@ async def test_subprocess_self_terminate_lifecycle_and_inbound(
     _seed_agent_for_self_lifecycle()
 
     result = await _run(
-        tmp_path, _self_lifecycle_code("ava.self.terminate()"), database_gate=database_gate
+        tmp_path, _self_lifecycle_code("meiva.self.terminate()"), database_gate=database_gate
     )
 
     assert isinstance(result, ExecLifecycle)
@@ -540,7 +540,7 @@ async def test_subprocess_self_restart_lifecycle_and_inbound(
     _seed_agent_for_self_lifecycle()
 
     result = await _run(
-        tmp_path, _self_lifecycle_code("ava.self.restart()"), database_gate=database_gate
+        tmp_path, _self_lifecycle_code("meiva.self.restart()"), database_gate=database_gate
     )
 
     assert isinstance(result, ExecLifecycle)
@@ -558,7 +558,7 @@ async def test_subprocess_self_compact_lifecycle_and_inbound(
 
     result = await _run(
         tmp_path,
-        _self_lifecycle_code("ava.self.compact('audit e2e summary')"),
+        _self_lifecycle_code("meiva.self.compact('audit e2e summary')"),
         database_gate=database_gate,
     )
 

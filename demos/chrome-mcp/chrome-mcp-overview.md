@@ -1,19 +1,19 @@
-# Chrome MCP — The Real Browser That Comes with Ava
+# Chrome MCP — The Real Browser That Comes with Meiva
 
-**What this shows**: Ava comes with Chrome DevTools MCP built-in. Chrome DevTools MCP, for security policy, prohibits using the default profile—raw users have to create a new profile themselves, manage it, and log in to each website again. Ava's approach is to make "creating and managing a dedicated Chrome profile" explicit: Ava maintains a clean Chrome profile for you, guides you to log in to your Google account on it, and use it as your daily Chrome.
+**What this shows**: Meiva comes with Chrome DevTools MCP built-in. Chrome DevTools MCP, for security policy, prohibits using the default profile—raw users have to create a new profile themselves, manage it, and log in to each website again. Meiva's approach is to make "creating and managing a dedicated Chrome profile" explicit: Meiva maintains a clean Chrome profile for you, guides you to log in to your Google account on it, and use it as your daily Chrome.
 
-This way, **the user and agent share the exact same browser context**—the same login state, the same session, the same cookies. You log in once to Google / X / bank, and all agents can use it. This is one of the most fundamental differences of Ava compared to other agent frameworks.
+This way, **the user and agent share the exact same browser context**—the same login state, the same session, the same cookies. You log in once to Google / X / bank, and all agents can use it. This is one of the most fundamental differences of Meiva compared to other agent frameworks.
 
 > ❌ Raw Chrome DevTools MCP: You have to install it yourself → create profile yourself → manage it yourself → log in again for each website
 >
-> ✅ Ava Chrome MCP: Ava creates and manages the profile → guides you to log in once → you and the agent share the same context.
+> ✅ Meiva Chrome MCP: Meiva creates and manages the profile → guides you to log in once → you and the agent share the same context.
 
 ---
 
 ## Prompt
 
 ```
-You are an Ava agent, directly controlling Ava's built-in logged-in Chrome browser via Chrome MCP.
+You are an Meiva agent, directly controlling Meiva's built-in logged-in Chrome browser via Chrome MCP.
 
 Your task: Execute the following four scenarios in order, save screenshots of each step to the workspace, and finally generate a report.
 
@@ -73,52 +73,52 @@ Log into Chase, download the current month's statement, summarize income and exp
 
 ## Scenario 4: AI Aggregation — One Question, Four Models Answer Simultaneously
 
-Ava has a built-in `web-ai` skill that uses Chrome MCP to simultaneously drive the user's subscribed ChatGPT, Gemini, Claude, and Perplexity—without spending API credits, all using the user's paid flat-rate subscriptions. One question, four models answer, automatically aggregated.
+Meiva has a built-in `web-ai` skill that uses Chrome MCP to simultaneously drive the user's subscribed ChatGPT, Gemini, Claude, and Perplexity—without spending API credits, all using the user's paid flat-rate subscriptions. One question, four models answer, automatically aggregated.
 
 1. Choose a question (e.g., "Design a real-time collaborative editor using three different architectural approaches, compare their trade-offs")
-2. Use `ava.shell.run` to call `web-ai console`, sending one prompt simultaneously to ChatGPT + Gemini + Claude + Perplexity:
+2. Use `meiva.shell.run` to call `web-ai console`, sending one prompt simultaneously to ChatGPT + Gemini + Claude + Perplexity:
 
    ```bash
-   .venv/bin/python ava_builtins/skills/integrations/web-ai/console/scripts/ask.py \
+   .venv/bin/python meiva_builtins/skills/integrations/web-ai/console/scripts/ask.py \
      --prompt "Design a real-time collaborative editor using three different architectural approaches, compare their trade-offs" \
      --models chatgpt,gemini,claude,perplexity
    ```
 
 3. Collect the complete answers from the four models
-4. Render an aggregated report to HTML and display it with `ava.ui.serve()`, containing:
+4. Render an aggregated report to HTML and display it with `meiva.ui.serve()`, containing:
    - Original question
    - Complete answer from each model
    - Comparative analysis: answer consistency, highlights from each, points of divergence
 
-**Why only Ava can do this scenario**:
+**Why only Meiva can do this scenario**:
 
-| | API Approach | Ava Chrome MCP + web-ai |
+| | API Approach | Meiva Chrome MCP + web-ai |
 |---|---|---|
 | Cost | Each call charged by token | ✅ Zero marginal cost—user has paid flat-rate subscription |
 | Model coverage | Need to apply for each provider's API key separately | ✅ One browser, all logged-in AIs used simultaneously |
 | Deep Research | OpenAI/Google have APIs but expensive and slow | ✅ Directly use web UI's Deep Research feature |
 | Perplexity | API is not cheap | ✅ User's Pro subscription unlimited searches |
 
-> **Your AI subscription fees, Ava helps you use them to the fullest.**
+> **Your AI subscription fees, Meiva helps you use them to the fullest.**
 
 ---
 
 ## Final: Generate Comparison Report
 
-Render the report to HTML and display it with `ava.ui.serve()`, containing:
+Render the report to HTML and display it with `meiva.ui.serve()`, containing:
 
 1. Four scenario screenshots
 2. Operation steps and results for each scenario
 3. Core comparison table:
 
-| | API Approach | Ava Chrome MCP |
+| | API Approach | Meiva Chrome MCP |
 |---|---|---|
 | X.com | Read-only Bearer Token (cannot post/like/follow) | Full logged-in user capability |
 | Travel Portal | ❌ No API | ✅ Browser operation, works for all portals |
 | Chase Bank | Third-party authorization like Plaid, doesn't cover all banks | ✅ Direct browser operation |
 | AI Aggregation | Charged by token, apply for each provider's API key separately | ✅ Use flat-rate subscription, zero marginal cost |
 
-4. One-sentence summary: **Ava comes with a browser out of the box. Log in once, and all websites can be operated.**
+4. One-sentence summary: **Meiva comes with a browser out of the box. Log in once, and all websites can be operated.**
 ```
 
 ## Expected flow
@@ -126,7 +126,7 @@ Render the report to HTML and display it with `ava.ui.serve()`, containing:
 1. Agent sequentially executes four scenarios via Chrome MCP:
    - `navigate_page` → `take_snapshot` → `take_screenshot` → `fill`/`fill_form` → `evaluate_script`
 2. Each scenario is an independent real problem, not a demo-like toy example
-3. Four screenshots + data summary → render HTML → `ava.ui.serve()` display report
+3. Four screenshots + data summary → render HTML → `meiva.ui.serve()` display report
 
 ## Expected output
 
@@ -134,11 +134,11 @@ A Markdown report, containing:
 - X timeline screenshot + trending topics
 - Travel search results + filled booking form screenshot
 - Chase account overview + monthly income/expense summary
-- "Ava Chrome MCP vs API" comparison analysis
+- "Meiva Chrome MCP vs API" comparison analysis
 
 ## Why This Matters
 
-### Ava's Fundamental Difference: User and Agent Share Browser Context
+### Meiva's Fundamental Difference: User and Agent Share Browser Context
 
 Other agent frameworks:
 - Need the user to install Chrome DevTools MCP themselves
@@ -146,10 +146,10 @@ Other agent frameworks:
 - User logs back into all websites in the new empty profile
 - agent and user each use their own browser, context fragmented
 
-Ava:
+Meiva:
 - Comes ready to use. Chrome MCP is already inside
-- Ava creates and maintains a dedicated Chrome profile, taking this management burden off the user
-- Guides the user to log into Google account in Ava's Chrome, and use it as daily browser
+- Meiva creates and maintains a dedicated Chrome profile, taking this management burden off the user
+- Guides the user to log into Google account in Meiva's Chrome, and use it as daily browser
 - User and agent share exactly the same login state, cookies, session
 - No OAuth needed, no API key needed, no token management
 

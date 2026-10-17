@@ -45,7 +45,7 @@ class AlertRow(BaseModel):
 
 # The Redis pub/sub channel every ingest publishes to and the SSE stream
 # subscribes to.
-ALERTS_CHANNEL = "ava:alerts"
+ALERTS_CHANNEL = "meiva:alerts"
 
 
 def publish_alert_rows(bus: EventBus, rows: list[dict[str, Any]]) -> None:

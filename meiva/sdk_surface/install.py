@@ -1,0 +1,366 @@
+"""The one writer of the `meiva` module: install a registry's SDK surface, undo it, nothing else.
+
+A plugin declares its SDK surface in `plugin.py`'s `contribute()` (`PluginContributions.sdk_namespaces`,
+`sdk_members`, `sdk_expansions`, `sdk_wraps`, `skill_sources`, `config`, `flags`) and never touches `meiva`.
+`install(registry)` applies every plugin's declaration, in registry order (plugin name order), through
+the primitives in `plugins.py` / `wraps.py` / `skill_sources.py` / `config_registration.py` /
+`flags.py`; each returns the undo that reverses it. Why this exists at all: agent code reaches the SDK as
+attribute access on the singleton `meiva` module, so the module itself is the one thing that cannot be
+passed around as a value — the write to it is concentrated here, once per process.
+
+`install` produces one **`Installation`** (defined in `installation.py`, which also owns the slot and the
+`installed()` read every lower SDK module uses): the admitted registry, the expansions, the wrap layers, the
+skill providers, resolved plugin configs, the metering ledger, sampling owner, SDK-disable entries,
+the faces flag, and undos. Metadata is frozen; runtime owners retain their own synchronization.
+The holder is a single slot on the `meiva`
+module (`__plugin_installation__`); a change (an additive SDK-disable entry, a scoped skill root, the
+agent-runtime faces loading) builds a new value and swaps the holder. `uninstall` reverses the surface
+and empties the slot.
+
+Before any plugin applies, the env's `MEIVA_SDK_DISABLE` entries are applied (so a disabled plugin
+namespace is refused, exactly as it was when the env was applied at `import meiva`); later additions
+(per-agent config overlay, the eval-isolation boundary) apply additively on the installed value
+(`sdk_disable.apply_sdk_disable`). After the last plugin the SDK-usage recorder is installed over the
+final surface, so it sits outermost of any wrap layer (one count per agent call); `uninstall` removes
+it first for the same reason.
+
+Per plugin the order is: namespaces, members (a member may hang on the plugin's own namespace),
+expansions, wraps (a wrap target may be a namespace or member just added, or another plugin's),
+skill sources, flags, config. Explicit declaration refusals (`RegisterNamespaceError`,
+`WrapTargetError`, `PluginFlagError`, `SchemaDriftError`, `InvalidConfigData`) are rolled back whole,
+reported, and left out of the returned registry only if rollback succeeds. Other errors abort the
+entire installation and propagate unchanged after every undo is attempted. Cleanup failures are
+fatal themselves when there is no primary error; otherwise they are notes on the primary error.
+
+`install` refuses to run twice: the one installation must be `uninstall`ed before the next, which is
+what a reload is (a new registry, a new install). Nothing here triggers a reload at runtime; the host
+loads once per process and a changed plugin set takes effect on the next host start.
+"""
+
+from __future__ import annotations
+
+import atexit
+from collections.abc import Callable
+from dataclasses import dataclass, field, replace
+from types import MappingProxyType
+from typing import Any
+
+from pydantic import BaseModel
+
+from base.agents.sdk.call_policy import SamplingPolicyOwner
+from base.clock import Clock
+from base.config.service_read import ConfigAuthority
+from base.lm.catalog import ModelCatalog
+from base.packages.plugins import load_report
+from base.packages.plugins.extensions import ExtensionRegistry, PluginContributions
+
+from . import meiva_module, wraps
+from . import plugins as _plugins
+from .installation import (
+    LOADING,
+    SLOT,
+    Installation,
+    Loading,
+    SkillProvider,
+    WrapLayer,
+    installed,
+    slot,
+)
+
+
+def load_attempted() -> bool:
+    """Whether a load is in flight or was attempted and failed in this process (no retry)."""
+    return isinstance(slot(), Loading)
+
+
+def mark_load_attempt() -> None:
+    """Guard a load or faces upgrade without discarding the already-installed surface."""
+    if not load_attempted():
+        setattr(meiva_module(), SLOT, Loading(installed()))
+
+
+def mark_load_failed(exc: BaseException) -> None:
+    """Keep the original failed load in the same slot; later accesses must not retry it."""
+    setattr(meiva_module(), SLOT, Loading(installed(), exc))
+
+
+def raise_load_failure() -> None:
+    """Propagate a prior load failure instead of answering as if the surface were ready."""
+    value = slot()
+    if isinstance(value, Loading) and value.failure is not None:
+        raise value.failure
+
+
+def clear_load_attempt() -> None:
+    """Release the slot after a deferred load (the loader module was still importing)."""
+    value = slot()
+    if isinstance(value, Loading):
+        setattr(meiva_module(), SLOT, value.installation)
+
+
+def mark_faces_loaded() -> None:
+    """Record that the registry's agent-runtime faces loaded: build a new value, swap the holder."""
+    current = installed()
+    if current is None or current.faces:
+        return
+    setattr(meiva_module(), SLOT, replace(current, faces=True))
+
+
+def expansions() -> tuple[str, ...]:
+    """Dotted `meiva` paths the installed plugins promote into the system prompt's expanded SDK
+    reference, in registry order (rendered ahead of the configured framework list)."""
+    current = installed()
+    return () if current is None else current.expansions
+
+
+def _provider_remover(
+    providers: list[SkillProvider], provider: SkillProvider
+) -> Callable[[], None]:
+    def undo() -> None:
+        providers.remove(provider)
+
+    return undo
+
+
+def _provider_mount(provider: SkillProvider) -> Installation:
+    """The minimal installation a scoped skill root carries when nothing is installed.
+
+    The ops runner scopes a project skill root around one request without running a
+    plugin load (its process has no installation of its own); the value still needs a
+    home because there is one holder for the process's SDK configuration."""
+    return Installation(
+        registry=ExtensionRegistry(),
+        expansions=(),
+        wrap_layers=MappingProxyType({}),
+        skill_providers=(provider,),
+        metered=(),
+        disabled=frozenset(),
+        faces=False,
+        undo=(),
+    )
+
+
+def mount_skill_provider(provider: SkillProvider) -> Callable[[], None]:
+    """Extend this process's skill-root providers by one; returns the undo.
+
+    For a framework caller that needs a request-scoped skill root (the ops runner's
+    per-agent command view): build a new installation value with the provider appended
+    and swap the holder; the undo removes exactly that provider and puts the holder
+    back. With no installation at all, a minimal provider-only value is mounted.
+    """
+    prior = slot()
+    mounted = (
+        replace(prior, skill_providers=(*prior.skill_providers, provider))
+        if isinstance(prior, Installation)
+        else _provider_mount(provider)
+    )
+    setattr(meiva_module(), SLOT, mounted)
+
+    def undo() -> None:
+        current = slot()
+        if current is mounted:
+            setattr(meiva_module(), SLOT, prior)
+            return
+        # An interleaved mount/unmount changed the value under us: remove exactly this
+        # provider from whatever is current, and clear the holder if nothing is left.
+        if isinstance(current, Installation):
+            remaining = tuple(p for p in current.skill_providers if p is not provider)
+            if not remaining and _is_bare_provider_mount(current):
+                setattr(meiva_module(), SLOT, None)
+            else:
+                setattr(meiva_module(), SLOT, replace(current, skill_providers=remaining))
+
+    return undo
+
+
+def _is_bare_provider_mount(installation: Installation) -> bool:
+    """Whether the value carries nothing but skill providers (a scoped mount's shell)."""
+    return (
+        not installation.registry.plugins
+        and not installation.expansions
+        and not installation.wrap_layers
+        and not installation.metered
+        and not installation.disabled
+        and not installation.faces
+        and not installation.undo
+    )
+
+
+def _apply(
+    plugin: str,
+    contributions: PluginContributions,
+    build: _Build,
+    namespaces: dict[str, str],
+) -> list[str]:
+    """Apply one plugin's SDK declaration into `build`; each applied piece appends its undo.
+    Returns the plugin's expansion paths. Raises on the first piece that cannot be applied."""
+    from base.packages.plugins import config_registration, flags
+
+    promoted: list[str] = []
+    for ns in contributions.sdk_namespaces:
+        build.undo.append(_plugins.install_namespace(plugin, ns.name, ns.module, namespaces))
+        namespaces[ns.name] = plugin
+        if ns.expand:
+            _plugins.check_expansion(ns.name)
+            promoted.append(ns.name)
+    for member in contributions.sdk_members:
+        build.undo.append(_plugins.install_member(plugin, member.namespace, member.name, member.fn))
+    for path in contributions.sdk_expansions:
+        _plugins.check_expansion(path)
+        promoted.append(path)
+    for wrap in contributions.sdk_wraps:
+        build.undo.append(wraps.apply_wrap(wrap.target, wrap.wrapper, plugin, build.layers))
+    for provider in contributions.skill_sources:
+        build.providers.append(provider)
+        build.undo.append(_provider_remover(build.providers, provider))
+    for key in contributions.flags:
+        flags.validate_flag_key(key)
+    if contributions.config is not None:
+        build.undo.append(
+            config_registration.bind_plugin_config(plugin, contributions.config, build.configs)
+        )
+    return promoted
+
+
+@dataclass
+class _Build:
+    """The mutable ledger `install` fills while it applies plugins; frozen into the Installation."""
+
+    namespaces: dict[str, str] = field(default_factory=dict)
+    layers: dict[str, list[WrapLayer]] = field(default_factory=dict)
+    providers: list[SkillProvider] = field(default_factory=list)
+    expansions: list[str] = field(default_factory=list)
+    undo: list[Callable[[], None]] = field(default_factory=list)
+    configs: dict[str, BaseModel] = field(default_factory=dict[str, BaseModel])
+
+
+def _run(undo: list[Callable[[], None]], primary: BaseException | None = None) -> None:
+    """Attempt every undo; preserve a primary failure or raise the first cleanup failure."""
+    failure = primary
+    while undo:
+        step = undo.pop()
+        try:
+            step()
+        except BaseException as exc:
+            if failure is None:
+                failure = exc
+            else:
+                failure.add_note(f"SDK rollback also failed: {type(exc).__name__}: {exc}")
+    if primary is None and failure is not None:
+        raise failure
+
+
+def install(
+    registry: ExtensionRegistry,
+    report: load_report.Reporter | None = None,
+    *,
+    catalog: ModelCatalog | None = None,
+    authority: ConfigAuthority | None = None,
+    sampling: SamplingPolicyOwner | None = None,
+    clock_factory: Callable[[], Clock] | None = None,
+    producer: Callable[[], Any] | None = None,
+) -> ExtensionRegistry:
+    """Install `registry`'s SDK surface into `meiva`; return the registry of the plugins admitted.
+
+    Raises:
+        RuntimeError: a previous installation is still in place (`uninstall()` first).
+        BaseException: an unexpected application or cleanup failure; already-applied
+            pieces are undone before the original error propagates.
+    """
+    if installed() is not None:
+        raise RuntimeError(
+            "the SDK surface is already installed; uninstall() it before installing another registry"
+        )
+    from base.packages.plugins import flags, plugin_errors
+
+    from . import metering, sdk_disable
+
+    prior = slot()
+    sampling_owner = sampling if sampling is not None else SamplingPolicyOwner()
+    setattr(meiva_module(), SLOT, LOADING)
+    build = _Build()
+    admitted: list[tuple[str, PluginContributions]] = []
+    disabled = sdk_disable.env_entries()
+    try:
+        if disabled:
+            # Apply the env entries before any plugin: a disabled plugin namespace is
+            # refused by install_namespace (same as when the env was applied at import).
+            sdk_disable.apply_entries(disabled)
+        for plugin, contributions in registry.plugins:
+            mark = len(build.undo)
+            claimed = dict(build.namespaces)
+            try:
+                paths = _apply(plugin, contributions, build, claimed)
+            except (
+                _plugins.RegisterNamespaceError,
+                wraps.WrapTargetError,
+                flags.PluginFlagError,
+                plugin_errors.SchemaDriftError,
+                plugin_errors.InvalidConfigData,
+            ) as exc:
+                partial = build.undo[mark:]
+                del build.undo[mark:]
+                _run(partial)
+                load_report.reporter(report)(plugin, exc)
+                continue
+            build.namespaces = claimed
+            build.expansions.extend(paths)
+            admitted.append((plugin, contributions))
+        metered = metering.install(sampling_owner, producer=producer)
+    except BaseException as exc:
+        _run(build.undo, exc)
+        setattr(meiva_module(), SLOT, prior)
+        raise
+    installation = Installation(
+        registry=ExtensionRegistry(tuple(admitted)),
+        expansions=tuple(build.expansions),
+        wrap_layers=MappingProxyType(
+            {target: tuple(layers) for target, layers in build.layers.items()}
+        ),
+        skill_providers=tuple(build.providers),
+        metered=metered,
+        sampling=sampling_owner,
+        disabled=frozenset(disabled),
+        faces=False,
+        undo=tuple(build.undo),
+        configs=MappingProxyType(dict(build.configs)),
+        catalog=catalog,
+        authority=authority,
+        clock_factory=clock_factory,
+        producer=producer,
+    )
+    setattr(meiva_module(), SLOT, installation)
+    if sampling is None:
+        # Bare SDK processes have no service lifespan. This is finite cleanup,
+        # not a guarantee of a nonzero exit or delivery after a hard exit.
+        atexit.register(sampling_owner.close)
+    return installation.registry
+
+
+def apply_config_overlay(overlay: dict[str, object]) -> None:
+    """Apply this exec child's plugin overlay to its installed config image."""
+    from base.packages.plugins import config_registration
+
+    current = installed()
+    if current is None:
+        raise RuntimeError("the SDK surface must be installed before applying plugin config")
+    configs = config_registration.apply_config_overlay(
+        overlay, configs=current.configs, scope="plugin"
+    )
+    setattr(meiva_module(), SLOT, replace(current, configs=MappingProxyType(configs)))
+
+
+def uninstall() -> Installation | None:
+    """Remove the SDK surface and return its owners for an explicit subsequent reinstall."""
+    from . import metering
+
+    installation = installed()
+    # The recorder sits outermost over plugin wraps, so it comes off first.
+    metering.uninstall(() if installation is None else installation.metered)
+    if installation is None:
+        # A `LOADING` marker is not an installation: leave it in place (a load may be
+        # in flight; a failed attempt stays un-retried), a fresh install overwrites it.
+        return None
+    setattr(meiva_module(), SLOT, None)
+    _run(list(installation.undo))
+    return installation

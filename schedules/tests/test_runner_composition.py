@@ -8,8 +8,8 @@ from typing import Any
 import psycopg
 import pytest
 
-from ava.sdk_surface import process_context
-from base.agents.context import AvaContext
+from meiva.sdk_surface import process_context
+from base.agents.context import MeivaContext
 from base.agents.context.clients import ClientSet
 from base.clock import Clock
 from base.cluster.dataplane.direct_url import ClusterDirectUrl
@@ -40,7 +40,7 @@ def test_actor_binding_failure_does_not_open_history(
     sid = _schedule(db_conn)
     error = RuntimeError("actor unavailable")
 
-    def bind(context: AvaContext) -> None:
+    def bind(context: MeivaContext) -> None:
         assert context.identity is not None
         assert context.identity.actor == f"schedule:{sid}"
         assert (unit_home / "schedules" / str(sid) / "schedule.py").read_text() == "pass"
@@ -62,11 +62,11 @@ def test_plugins_load_under_guard_after_actor_and_history(
     def plugins(
         *, config: ConfigBoot, clock_factory: Callable[[], Clock], producer: Callable[[], Any]
     ) -> None:
-        from ava.sdk_surface.agent_identity import require_actor
+        from meiva.sdk_surface.agent_identity import require_actor
 
         assert require_actor() == f"schedule:{sid}"
-        assert runner.ava.context.require_clock().timezone == clock_factory().timezone
-        assert producer == runner.ava.context.clients.event_pipeline
+        assert runner.meiva.context.require_clock().timezone == clock_factory().timezone
+        assert producer == runner.meiva.context.clients.event_pipeline
         assert config.view.general.timezone == clock_factory().timezone
         assert (unit_home / "schedules" / str(sid) / "schedule.py").exists()
         assert db_conn.execute("SELECT ok FROM schedule_runs").fetchall() == [(None,)]
@@ -74,7 +74,7 @@ def test_plugins_load_under_guard_after_actor_and_history(
         assert len(guards) == 1 and guards[0].is_alive()
         raise RuntimeError("plugin failure")
 
-    monkeypatch.setattr(runner.ava, "ensure_plugins_loaded", plugins)
+    monkeypatch.setattr(runner.meiva, "ensure_plugins_loaded", plugins)
     assert runner.run(sid) == 1
     assert not guards[0].is_alive()
     assert db_conn.execute("SELECT ok FROM schedule_runs").fetchall() == [(False,)]
@@ -123,7 +123,7 @@ def test_process_owns_one_gate_and_closes_its_pipeline(
         assert (schedule_id, revision) == (17, 3)
         database()
         bind_actor(schedule_id)
-        context = runner.ava.context
+        context = runner.meiva.context
         assert inputs.database is database
         assert inputs.producer == context.clients.event_pipeline
         assert inputs.image is image
@@ -157,7 +157,7 @@ def test_actor_failure_stays_primary_when_client_cleanup_fails(
     secondary = OSError("client close failed")
     close = ClientSet.close
 
-    def bind(_context: AvaContext) -> None:
+    def bind(_context: MeivaContext) -> None:
         raise primary
 
     def execute(
@@ -192,15 +192,15 @@ def test_runpy_script_receives_the_same_entry_builders(
     sid = _schedule(db_conn)
     marker = unit_home / "borrowed.txt"
     script = (
-        "import ava\n"
+        "import meiva\n"
         "from pathlib import Path\n"
-        "from ava.sdk_surface import process_context\n"
+        "from meiva.sdk_surface import process_context\n"
         "from schedules.entry import schedule_entry\n"
-        "with schedule_entry(AVA_SCHEDULE_INPUTS) as inputs:\n"
-        "    assert inputs is AVA_SCHEDULE_INPUTS\n"
-        "    assert inputs.producer == ava.context.clients.event_pipeline\n"
+        "with schedule_entry(MEIVA_SCHEDULE_INPUTS) as inputs:\n"
+        "    assert inputs is MEIVA_SCHEDULE_INPUTS\n"
+        "    assert inputs.producer == meiva.context.clients.event_pipeline\n"
         "    assert inputs.image is process_context.loaded_code_image()\n"
-        "    assert inputs.machine is ava.context.require_machine()\n"
+        "    assert inputs.machine is meiva.context.require_machine()\n"
         f"    Path({str(marker)!r}).write_text('borrowed')\n"
     )
     db_conn.execute("UPDATE schedules SET script = %s WHERE id = %s", (script, sid))
@@ -211,6 +211,6 @@ def test_runpy_script_receives_the_same_entry_builders(
     ) -> None:
         pass
 
-    monkeypatch.setattr(runner.ava, "ensure_plugins_loaded", plugins)
+    monkeypatch.setattr(runner.meiva, "ensure_plugins_loaded", plugins)
     assert runner.run(sid) == 0
     assert marker.read_text() == "borrowed"

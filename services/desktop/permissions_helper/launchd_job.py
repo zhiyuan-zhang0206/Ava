@@ -5,7 +5,7 @@ domain — and for bounded ``launchctl print`` inspection of the job. The
 build/cert/repair steps stay in ``lifecycle``; that module delegates the job
 identity here so the label formula exists once, and the helper healthcheck
 (task #3393) reads and parses the job here so the ``launchctl print`` field
-vocabulary exists once too. Exact-home retirement (``ava stop``) lives here, and
+vocabulary exists once too. Exact-home retirement (``meiva stop``) lives here, and
 so does ``require_retired_helper``, which admits replacing a stale installed
 artifact only once that retirement is complete.
 
@@ -38,7 +38,7 @@ from base.host.permissions_helper.client import HelperAtSocket
 from base.host.proc import run_bounded
 from base.native_process.ownership import OwnedProcess, capture_tree, leader_owns_pids
 
-HELPER_BUNDLE_ID = "com.ava.permissions-helper"
+HELPER_BUNDLE_ID = "com.meiva.permissions-helper"
 """Fixed across clusters so one TCC grant covers all (the grant keys on this)."""
 
 _READ_TIMEOUT_S = 30.0
@@ -56,9 +56,9 @@ def helper_job_label(home: Path | None = None) -> str:
     (the TCC grant) stays shared across clusters.
     """
     from base.cluster import home_slug
-    from base.paths import ava_home
+    from base.paths import meiva_home
 
-    return f"{HELPER_BUNDLE_ID}.{home_slug(ava_home() if home is None else home)}"
+    return f"{HELPER_BUNDLE_ID}.{home_slug(meiva_home() if home is None else home)}"
 
 
 def helper_job_domain() -> str:
@@ -76,7 +76,7 @@ def helper_job_plist_path(home: Path | None = None) -> Path:
 
 def helper_stop_intent(home: Path) -> bool:
     """Read native shutdown intent; corrupt or foreign inputs are never absence."""
-    path = home / "run" / "ava-root" / "helper-stopped"
+    path = home / "run" / "meiva-root" / "helper-stopped"
     try:
         info = path.lstat()
     except FileNotFoundError:
@@ -95,7 +95,7 @@ def clear_helper_stop_intent(home: Path) -> None:
     """Explicit start only, after positive native job absence."""
     if not helper_stop_intent(home):
         return
-    path = home / "run" / "ava-root" / "helper-stopped"
+    path = home / "run" / "meiva-root" / "helper-stopped"
     path.unlink()
     fd = os.open(path.parent, os.O_RDONLY | os.O_DIRECTORY)
     try:
@@ -130,8 +130,8 @@ def helper_job_loaded() -> bool:
 def require_retired_helper(executable: Path) -> None:
     """Refuse replacing this home's installed helper executable while it may still run.
 
-    The helper is ava-root's parent, so its artifact is replaced only after
-    ``ava stop`` retired it: launchd holds no job under this home's label, the
+    The helper is meiva-root's parent, so its artifact is replaced only after
+    ``meiva stop`` retired it: launchd holds no job under this home's label, the
     job's plist is gone, and no live process runs ``executable``. An unknown
     launchd answer raises from ``retirement_query``; it never reads as absence.
     """
@@ -146,7 +146,7 @@ def require_retired_helper(executable: Path) -> None:
         return
     raise RuntimeError(
         f"the installed permissions helper is stale but still in use ({blocker}); "
-        "run `ava stop` first, then `ava start` replaces it"
+        "run `meiva stop` first, then `meiva start` replaces it"
     )
 
 
@@ -180,9 +180,9 @@ def retirement_plist(path: Path, home: Path, socket_path: Path) -> tuple[bytes, 
     if (
         data["Label"] != helper_job_label(home)
         or data.get("KeepAlive") != {"SuccessfulExit": False}
-        or environment.get("AVA_PERMISSIONS_HELPER_SOCKET") != str(socket_path)
-        or environment.get("AVA_PERMISSIONS_HELPER_ROOT_SEED")
-        != str(home / "run" / "ava-root" / "seed.json")
+        or environment.get("MEIVA_PERMISSIONS_HELPER_SOCKET") != str(socket_path)
+        or environment.get("MEIVA_PERMISSIONS_HELPER_ROOT_SEED")
+        != str(home / "run" / "meiva-root" / "seed.json")
         or len(argv) != 1
         or not isinstance(argv[0], str)
     ):
@@ -250,7 +250,7 @@ def unregister_helper(
         release_instance_lock,
     )
 
-    run_dir = home / "run" / "ava-root"
+    run_dir = home / "run" / "meiva-root"
     run_dir.mkdir(mode=0o700, parents=True, exist_ok=True)
     deadline = time.monotonic() + timeout_s
     original = None if force else _request_helper_shutdown(home, helper_port, deadline, connect)
@@ -279,8 +279,8 @@ def _request_helper_shutdown(
     owner = retirement_owner(state, socket_path, executable, connect=connect)
     if path.is_symlink() or path.read_bytes() != original:
         raise RuntimeError("helper definition changed before shutdown")
-    reply = connect(socket_path).shutdown_helper(home / "run" / "ava-root")
-    if reply != {"stopping": True, "pid": owner.pid, "run_dir": str(home / "run" / "ava-root")}:
+    reply = connect(socket_path).shutdown_helper(home / "run" / "meiva-root")
+    if reply != {"stopping": True, "pid": owner.pid, "run_dir": str(home / "run" / "meiva-root")}:
         raise RuntimeError("helper shutdown did not acknowledge exact-home native custody")
     wait_retirement_owner(owner, deadline)
     while (latest := retirement_query(target, deadline)) is not None:

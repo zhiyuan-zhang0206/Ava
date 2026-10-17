@@ -1,7 +1,7 @@
 # Local log maintenance
 
-`ava logs rotate` copytruncates top-level `$AVA_HOME/logs/*.out.log` files and
-top-level `$AVA_HOME/lgtm/native/logs/*.log` files when they reach 64 MiB or
+`meiva logs rotate` copytruncates top-level `$MEIVA_HOME/logs/*.out.log` files and
+top-level `$MEIVA_HOME/lgtm/native/logs/*.log` files when they reach 64 MiB or
 their mtime's UTC date differs from today. A zero-byte file never triggers:
 there is nothing to archive, and a stale empty log would otherwise produce a
 fresh empty archive every day. Grafana logs are excluded because
@@ -10,14 +10,14 @@ archive suffix is today's UTC date; an existing archive makes that file a
 same-day idempotent no-op. Copytruncate preserves the live path and inode, so a
 writer keeps its open file descriptor.
 
-`ava logs retention` removes expired allowlisted files from those two
+`meiva logs retention` removes expired allowlisted files from those two
 top-level roots plus the nested computer-use snapshot dir
-`$AVA_HOME/logs/computer/snapshots/`. The allowlist covers agent-main
-`ava-agent-<id>.out.log`, named PTY
-`ava-agent-<id>-shell-<n>-<name>.{out,host}.log`, every service
-`ava-*.out.log`, Loguru rotations named
+`$MEIVA_HOME/logs/computer/snapshots/`. The allowlist covers agent-main
+`meiva-agent-<id>.out.log`, named PTY
+`meiva-agent-<id>-shell-<n>-<name>.{out,host}.log`, every service
+`meiva-*.out.log`, Loguru rotations named
 `<service>.YYYY-MM-DD_HH-MM-SS_<pid>.log`, the dated service/native archives
-created by `ava logs rotate`, and computer-use snapshots `agent-<id>-<stamp>.png`
+created by `meiva logs rotate`, and computer-use snapshots `agent-<id>-<stamp>.png`
 (7 days). Rotation stays top-level-only; retention reads the fixed roots above
 without general recursion, and neither command follows symlinks; retention also
 skips every file held open by a visible process.
@@ -25,20 +25,20 @@ skips every file held open by a visible process.
 Preview the exact paths, UTC mtimes, sizes, and total bytes before deleting:
 
 ```bash
-ava logs rotate --dry-run
-ava logs rotate
-ava logs retention --dry-run
-ava logs retention
-AVA_LOG_RETENTION_DAYS=21 ava logs retention --dry-run
-ava logs retention --older-than 21
-ava logs retention --family-days agent=15,shell=7,gateway=30,ops=30,watchdog=30,snapshot=7,other=3 --dry-run
+meiva logs rotate --dry-run
+meiva logs rotate
+meiva logs retention --dry-run
+meiva logs retention
+MEIVA_LOG_RETENTION_DAYS=21 meiva logs retention --dry-run
+meiva logs retention --older-than 21
+meiva logs retention --family-days agent=15,shell=7,gateway=30,ops=30,watchdog=30,snapshot=7,other=3 --dry-run
 ```
 
 The age is a positive integer number of days. `--older-than` and
 `--family-days` are mutually exclusive. Without either flag, the legacy global
-threshold remains: `AVA_LOG_RETENTION_DAYS`, otherwise 14 days. `--older-than`
+threshold remains: `MEIVA_LOG_RETENTION_DAYS`, otherwise 14 days. `--older-than`
 is the explicit global override. `--family-days` activates the C baseline:
-agent-main, `ava-agent-*` service stdout, and their archives 15 days; named PTY
+agent-main, `meiva-agent-*` service stdout, and their archives 15 days; named PTY
 shell transcript/host files and computer-use snapshots 7 days; `gateway*`,
 `ops*`, and `*-watchdog` / `*_watchdog` service files and rotations 30 days;
 all other service and native
@@ -63,17 +63,17 @@ Raw session output is queried in Loki, not tailed from a file — Grafana Explor
 (Loki datasource), `logcli`, or the HTTP API:
 
 ```bash
-logcli --addr http://127.0.0.1:3100 query '{service_name="ava-gateway"}' --since=1h --limit=100
-logcli --addr http://127.0.0.1:3100 query '{service_name=~"ava-agent-.+-shell-.+"}' --tail
+logcli --addr http://127.0.0.1:3100 query '{service_name="meiva-gateway"}' --since=1h --limit=100
+logcli --addr http://127.0.0.1:3100 query '{service_name=~"meiva-agent-.+-shell-.+"}' --tail
 curl -G -s http://127.0.0.1:3100/loki/api/v1/query \
-  --data-urlencode 'query={service_name="ava-gateway"} |= "error"' \
+  --data-urlencode 'query={service_name="meiva-gateway"} |= "error"' \
   --data-urlencode 'limit=50'
 ```
 
 Raw filelog streams and the OTLP event stream both use `service_name`; filelog
-values are session names such as `ava-agent-1818-shell-1` or `ava-gateway`.
+values are session names such as `meiva-agent-1818-shell-1` or `meiva-gateway`.
 Agent loguru JSONL (`agent-{N}.log`) is not scraped — it already reaches Loki
 structured via OTLP.
 
 The emitter wiring behind that stream, the unified `events` schema (and its
-legacy `agent_events` mirror), and the monthly partitioning are in [the logging owner](../../../../base/log/docs/log.ava.okf.md).
+legacy `agent_events` mirror), and the monthly partitioning are in [the logging owner](../../../../base/log/docs/log.meiva.okf.md).

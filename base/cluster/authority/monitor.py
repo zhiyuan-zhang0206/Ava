@@ -1,9 +1,9 @@
 """The stable monitoring login: the OTel collector's PostgreSQL receiver.
 
-``ava_monitor`` is not a write generation. It holds no application privilege
+``meiva_monitor`` is not a write generation. It holds no application privilege
 and is delivered no credential. It is created without any password, and ``pg_hba`` admits it
 only by ``peer`` on the home's owner-only socket, mapped from the home's OS
-user (``pg_ident`` map ``ava_monitor``); SCRAM can never authenticate a role
+user (``pg_ident`` map ``meiva_monitor``); SCRAM can never authenticate a role
 without a verifier.
 No credential therefore exists to store in the collector configuration.
 
@@ -32,9 +32,9 @@ from base.cluster.authority.catalog import (
 )
 from base.host.db_authority.model import AuthorityRefusedError, CatalogRefusedError
 
-MONITOR_ROLE = "ava_monitor"
+MONITOR_ROLE = "meiva_monitor"
 # The pg_ident map pg_hba names for the monitor's peer line.
-MONITOR_MAP = "ava_monitor"
+MONITOR_MAP = "meiva_monitor"
 _STATS_ROLE = "pg_read_all_stats"
 
 _DIRECT_GRANTS = """

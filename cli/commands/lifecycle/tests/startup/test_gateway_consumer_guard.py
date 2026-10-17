@@ -11,7 +11,7 @@ import pytest
 
 from cli.commands.data_plane import bringup
 
-os.environ["AVA_CONFIG_FETCH"] = "skip"
+os.environ["MEIVA_CONFIG_FETCH"] = "skip"
 
 _GATEWAY_SOURCE_ROOTS = (
     "gateway/",
@@ -168,7 +168,7 @@ _AGENT_ONLY_ALLOWLIST = frozenset(
 )
 
 _FALLBACK_CONSUMED_READS: dict[tuple[str, str], str] = {
-    ("ava_builtins/plugins/lm_deepseek/provider.py", "deepseek_api_key"): (
+    ("meiva_builtins/plugins/lm_deepseek/provider.py", "deepseek_api_key"): (
         "gateway in-process drafts (reply-suggestion) need the deepseek key the "
         "gateway profile popped; consume-only .env fallback in "
         "_require_deepseek_key()"
@@ -312,8 +312,8 @@ _KIND_ROOTS: dict[str, tuple[str, ...]] = {
     ),
     "agent": (
         "agent/",
-        "ava/",
-        "ava_builtins/",
+        "meiva/",
+        "meiva_builtins/",
         "services/agent_runner/agent_host/",
     ),
     "runner": (
@@ -334,8 +334,8 @@ _CLOSURE_PACKAGES = (
     "services",
     "agent",
     "ops",
-    "ava",
-    "ava_builtins",
+    "meiva",
+    "meiva_builtins",
     "db",
     "ui",
     "cli",
@@ -435,16 +435,16 @@ def test_agent_host_launches_under_the_agent_profile(monkeypatch: pytest.MonkeyP
     from services.supervision.roster import build_services
 
     def delivery(_cls: str, *, remote_data_plane: bool) -> dict[str, str]:
-        return {"AVA_DB_URL": "postgresql://ava_g0_runner@fixture/ava"}
+        return {"MEIVA_DB_URL": "postgresql://meiva_g0_runner@fixture/meiva"}
 
     def token_delivery(_cls: str, *, remote_data_plane: bool) -> dict[str, str]:
-        return {"AVA_API_TOKEN": "fixture-token"}
+        return {"MEIVA_API_TOKEN": "fixture-token"}
 
     monkeypatch.setattr(bringup, "db_delivery", delivery)
     monkeypatch.setattr(bringup, "api_delivery", token_delivery)
     agent_host = next(spec for spec in build_services() if spec.session == "agent-host")
     profile = root_driver.service_extra_env(agent_host, remote_data_plane=False)[
-        "AVA_PROCESS_PROFILE"
+        "MEIVA_PROCESS_PROFILE"
     ]
     assert profile in PROCESS_PROFILES, f"{profile} is not a process profile"
     assert profile == "agent"

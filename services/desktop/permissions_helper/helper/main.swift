@@ -1,4 +1,4 @@
-// AvaPermissionsHelper — the macOS desktop-automation daemon.
+// MeivaPermissionsHelper — the macOS desktop-automation daemon.
 //
 // This binary is the one process that holds the machine's TCC grants (Screen
 // Recording, Accessibility). It MUST be launched by launchd so it is its own
@@ -82,7 +82,7 @@ private let maxFileReadBytes: Int64 = 32 * 1024 * 1024
 /// machine nobody is sitting at. Production plists never set it, and it only
 /// skips the System Settings registration nudge — every enforcement point is
 /// untouched (default behavior is byte-for-byte the old one).
-private let skipRegistrationEnvironment = "AVA_PERMISSIONS_HELPER_SKIP_REGISTRATION"
+private let skipRegistrationEnvironment = "MEIVA_PERMISSIONS_HELPER_SKIP_REGISTRATION"
 
 struct Child {
     let pid: pid_t
@@ -144,7 +144,7 @@ func reportResponsiblePID() {
 
     let symbols = UnsafeMutableRawPointer(bitPattern: -2)  // RTLD_DEFAULT on Darwin.
     guard let procPIDInfoSymbol = dlsym(symbols, "proc_pidinfo") else {
-        FileHandle.standardError.write(Data("AvaPermissionsHelper: responsible-probe unsupported\n".utf8))
+        FileHandle.standardError.write(Data("MeivaPermissionsHelper: responsible-probe unsupported\n".utf8))
         return
     }
 
@@ -170,11 +170,11 @@ func reportResponsiblePID() {
         responsiblePID = responsiblePIDForProcess(ownPID)
     }
     guard responsiblePID > 0 else {
-        FileHandle.standardError.write(Data("AvaPermissionsHelper: responsible-probe unsupported\n".utf8))
+        FileHandle.standardError.write(Data("MeivaPermissionsHelper: responsible-probe unsupported\n".utf8))
         return
     }
     FileHandle.standardError.write(
-        Data("AvaPermissionsHelper: responsible_pid=\(responsiblePID) self=\(ownPID)\n".utf8)
+        Data("MeivaPermissionsHelper: responsible_pid=\(responsiblePID) self=\(ownPID)\n".utf8)
     )
 }
 
@@ -224,7 +224,7 @@ func spawnProcess(_ req: [String: Any]) throws -> [String: Any] {
 /// The shared low-level spawn the session table and the root keeper both use:
 /// one detached child (SETSID | CLOEXEC_DEFAULT, stdio redirected to
 /// append-only files, cwd set) with no bookkeeping. `environment` must be the
-/// child's full environment; `AVA_PERMISSIONS_HELPER_PID` is stamped here.
+/// child's full environment; `MEIVA_PERMISSIONS_HELPER_PID` is stamped here.
 func spawnDetachedChild(
     argv: [String], environment: [String: String], cwd: String,
     stdoutPath: String, stderrPath: String
@@ -241,7 +241,7 @@ func spawnDetachedChild(
     defer { argumentPointers.forEach { if let pointer = $0 { free(pointer) } } }
 
     var childEnvironment = environment
-    childEnvironment["AVA_PERMISSIONS_HELPER_PID"] = String(getpid())
+    childEnvironment["MEIVA_PERMISSIONS_HELPER_PID"] = String(getpid())
     var environmentPointers = childEnvironment.map { key, value in strdup("\(key)=\(value)") }
     guard environmentPointers.allSatisfy({ $0 != nil }) else {
         environmentPointers.forEach { if let pointer = $0 { free(pointer) } }
@@ -267,7 +267,7 @@ func spawnDetachedChild(
     // thread's signal mask and the process's dispositions through posix_spawn,
     // and the root keeper spawns from a GCD worker thread, where libdispatch
     // blocks most signals including SIGTERM — without this reset a
-    // keeper-spawned ava-root never sees SIGTERM (empirically confirmed
+    // keeper-spawned meiva-root never sees SIGTERM (empirically confirmed
     // 2026-09-12; same fix family as services/agent_runner/pty_sessions/session.py's SIG_DFL
     // reset before spawning a shell).
     let spawnFlags = Int16(
@@ -371,7 +371,7 @@ func signalSession(_ req: [String: Any]) throws -> [String: Any] {
 }
 
 /// Resolve an allowed path or reject it. A bare prefix is insufficient:
-/// `/Users/ava/DownloadsEvil` is not in `/Users/ava/Downloads`.
+/// `/Users/meiva/DownloadsEvil` is not in `/Users/meiva/Downloads`.
 // SECURITY SYNC: tests/components/services/test_permissions_helper.py::
 // _is_whitelisted_file_path mirrors this exact resolved-path boundary rule in
 // `resolvedWhitelistedFilePath`. Update both implementations together whenever
@@ -382,7 +382,7 @@ func resolvedWhitelistedFilePath(_ requestedPath: String) throws -> String {
     let resolvedPath = ((requestedPath as NSString).standardizingPath as NSString)
         .resolvingSymlinksInPath
     let home = NSHomeDirectory()
-    let roots = ["Downloads", "Desktop", ".ava/incoming"].map { relativePath in
+    let roots = ["Downloads", "Desktop", ".meiva/incoming"].map { relativePath in
         (((home as NSString).appendingPathComponent(relativePath) as NSString)
             .standardizingPath as NSString)
             .resolvingSymlinksInPath
@@ -664,7 +664,7 @@ var lastAXPromptAt = Date.distantPast
 let axPromptMinInterval: TimeInterval = 30.0
 let axGrantError = "Accessibility grant missing (ax_trusted=false): macOS drops synthetic " +
     "click/type/key events from a process without this grant, so the action did not run. " +
-    "The authorization prompt was triggered; enable AvaPermissionsHelper in System Settings " +
+    "The authorization prompt was triggered; enable MeivaPermissionsHelper in System Settings " +
     "> Privacy & Security > Accessibility, then retry. Rebuilding or re-signing the helper " +
     "resets this grant once."
 
@@ -862,13 +862,13 @@ func failsafeHold(_ seconds: Double, releasing up: CGEvent? = nil) throws {
 
 // MARK: - Held mouse buttons
 
-/// How long a button Ava holds may go without a mouse call before the helper releases it.
+/// How long a button Meiva holds may go without a mouse call before the helper releases it.
 let heldIdleTimeoutSeconds = 30.0
 
 /// How often the monitor looks at a held button while one is held.
 let heldMonitorSeconds = 0.1
 
-/// The one button Ava pressed with `mouse_down` and has not released. Everything needed to
+/// The one button Meiva pressed with `mouse_down` and has not released. Everything needed to
 /// release it is allocated at the press, so a release can never fail for lack of an event.
 final class HeldMouse {
     let kinds: MouseButtonKinds
@@ -892,21 +892,21 @@ private var heldMouse: HeldMouse?
 private var heldNotices: [[String: Any]] = []
 
 func heldMouseLog(_ message: String) {
-    FileHandle.standardError.write(Data("AvaPermissionsHelper: held mouse \(message)\n".utf8))
+    FileHandle.standardError.write(Data("MeivaPermissionsHelper: held mouse \(message)\n".utf8))
 }
 
 /// The pointer's live position in CG global coordinates, or nil when it cannot be read.
 func liveCursorPosition() -> CGPoint? { CGEvent(source: nil)?.location }
 
-/// Refuse an action that cannot share the pointer with a button Ava holds.
+/// Refuse an action that cannot share the pointer with a button Meiva holds.
 func requireNoHeldMouse(_ action: String) throws {
     heldMouseLock.lock(); defer { heldMouseLock.unlock() }
     if let held = heldMouse {
-        throw OpError.bad("\(action) refused: mouse button \(held.kinds.name) is held by Ava; call mouse_up first")
+        throw OpError.bad("\(action) refused: mouse button \(held.kinds.name) is held by Meiva; call mouse_up first")
     }
 }
 
-/// End the hold now (caller holds the lock): the button comes up at `point`, or where Ava last
+/// End the hold now (caller holds the lock): the button comes up at `point`, or where Meiva last
 /// put the pointer, then the modifiers the press brought down.
 @discardableResult
 private func endHoldLocked(at point: CGPoint?) -> HeldMouse? {
@@ -967,7 +967,7 @@ func takeHeldNotices() -> [[String: Any]] {
     return notices
 }
 
-/// The pointer-movement event for `point`: a drag of the held button while Ava holds one, a plain
+/// The pointer-movement event for `point`: a drag of the held button while Meiva holds one, a plain
 /// move otherwise, carrying the held modifiers either way. Caller holds the lock.
 private func pointerMovementLocked(_ point: CGPoint, _ flags: CGEventFlags) throws -> CGEvent {
     let held = heldMouse
@@ -1084,7 +1084,7 @@ func mouseDown(_ req: [String: Any]) throws -> [String: Any] {
     let requested = try inputOptionalPoint(req)
     heldMouseLock.lock(); defer { heldMouseLock.unlock() }
     if let current = heldMouse {
-        throw OpError.bad("mouse button \(current.kinds.name) is already held by Ava; call mouse_up first")
+        throw OpError.bad("mouse button \(current.kinds.name) is already held by Meiva; call mouse_up first")
     }
     guard let point = requested ?? liveCursorPosition()
     else { throw OpError.bad("could not read cursor position for mouse_down") }
@@ -1103,7 +1103,7 @@ func mouseDown(_ req: [String: Any]) throws -> [String: Any] {
 }
 
 /// Release the button `mouse_down` pressed, at `x`/`y` when given (the pointer is dragged there
-/// first, as a hand would) and otherwise where the pointer is. A button Ava does not hold is an
+/// first, as a hand would) and otherwise where the pointer is. A button Meiva does not hold is an
 /// error that says so, and names an automatic release when that is why. The modifiers the press
 /// brought down come up after the button, in reverse order.
 func mouseUp(_ req: [String: Any]) throws -> [String: Any] {
@@ -1112,7 +1112,7 @@ func mouseUp(_ req: [String: Any]) throws -> [String: Any] {
     let requested = try inputOptionalPoint(req)
     heldMouseLock.lock(); defer { heldMouseLock.unlock() }
     guard let held = heldMouse, held.kinds.name == kinds.name else {
-        var message = "mouse button \(kinds.name) is not held by Ava; mouse_up needs an earlier mouse_down"
+        var message = "mouse button \(kinds.name) is not held by Meiva; mouse_up needs an earlier mouse_down"
         if let index = heldNotices.firstIndex(where: { ($0["button"] as? String) == kinds.name }) {
             message += ". " + (heldNotices.remove(at: index)["message"] as? String ?? "")
         } else if let other = heldMouse {
@@ -1131,7 +1131,7 @@ func mouseUp(_ req: [String: Any]) throws -> [String: Any] {
             "held_ms": Int(Date().timeIntervalSince(held.pressedAt) * 1000)]
 }
 
-/// Release whatever Ava holds, quietly: the daemon's cleanup when the screen is handed over. Not
+/// Release whatever Meiva holds, quietly: the daemon's cleanup when the screen is handed over. Not
 /// stoppable by the fail-safe and no notice is left, because the caller asked for it.
 func mouseReleaseAll(_ req: [String: Any]) throws -> [String: Any] {
     try rejectUnknownFields(req, allowed: [])
@@ -1200,7 +1200,7 @@ func scroll(_ req: [String: Any]) throws -> [String: Any] {
     return ["scrolled": dy, "dx": dx]
 }
 
-/// Move the pointer. While Ava holds a button this is a drag of that button, so the target app
+/// Move the pointer. While Meiva holds a button this is a drag of that button, so the target app
 /// sees a drag and not a plain move; the held modifiers ride along.
 func mouseMove(_ req: [String: Any]) throws -> [String: Any] {
     let x = try inputNumber(req, "x"), y = try inputNumber(req, "y")
@@ -1880,7 +1880,7 @@ func axAct(_ req: [String: Any]) throws -> [String: Any] {
 /// Environment variable naming the JSON seed file the keeper loads when the
 /// helper comes up (see `RootSeed`). Unset leaves the keeper dormant: the
 /// helper behaves exactly as before this feature existed.
-private let rootSeedEnvironment = "AVA_PERMISSIONS_HELPER_ROOT_SEED"
+private let rootSeedEnvironment = "MEIVA_PERMISSIONS_HELPER_ROOT_SEED"
 
 /// Timing knobs of the keeper state machine, in seconds.
 private enum RootKeeperTiming {
@@ -1896,10 +1896,10 @@ private enum RootKeeperTiming {
 }
 
 func rootKeeperLog(_ message: String) {
-    FileHandle.standardError.write(Data("AvaPermissionsHelper: root-keeper: \(message)\n".utf8))
+    FileHandle.standardError.write(Data("MeivaPermissionsHelper: root-keeper: \(message)\n".utf8))
 }
 
-/// Everything needed to launch one ava-root (the K3 `spawn_root` face),
+/// Everything needed to launch one meiva-root (the K3 `spawn_root` face),
 /// validated fail-fast. Absolute paths only: the keeper runs without a shell
 /// and under launchd's minimal environment, so nothing may rely on a shell or
 /// on PATH resolution.
@@ -1962,7 +1962,7 @@ struct RootSeed {
         )
     }
 
-    /// Read a seed file (the startup path, `AVA_PERMISSIONS_HELPER_ROOT_SEED`).
+    /// Read a seed file (the startup path, `MEIVA_PERMISSIONS_HELPER_ROOT_SEED`).
     static func load(path: String) throws -> RootSeed {
         guard let data = FileManager.default.contents(atPath: path) else {
             throw OpError.bad("root seed: cannot read \(path)")
@@ -1974,7 +1974,7 @@ struct RootSeed {
     }
 }
 
-/// Non-blocking liveness probe of `<run_dir>/ava-root.lock`, the run dir's
+/// Non-blocking liveness probe of `<run_dir>/meiva-root.lock`, the run dir's
 /// instance lock (flock; see `base/native_process/root_control/instance_lock.py`). The lock is
 /// the authority: the kernel releases it with its owner, so acquiring it
 /// proves no live root holds the dir — no pid-reuse window. The pid recorded
@@ -1987,7 +1987,7 @@ enum RootDirLock {
 }
 
 func probeRootDirLock(runDir: String) -> RootDirLock {
-    let lockPath = (runDir as NSString).appendingPathComponent("ava-root.lock")
+    let lockPath = (runDir as NSString).appendingPathComponent("meiva-root.lock")
     guard FileManager.default.fileExists(atPath: lockPath) else { return .free }
     let fd = open(lockPath, O_RDWR | O_CLOEXEC)
     guard fd >= 0 else { return .unknown }
@@ -2086,7 +2086,7 @@ func requestHelperShutdown(runDir: String) throws -> [String: Any] {
     }
 }
 
-/// Owns the life of one ava-root process: seed it, keep it alive, and never
+/// Owns the life of one meiva-root process: seed it, keep it alive, and never
 /// let it fight another instance for the same run dir.
 ///
 /// The root is spawned as a direct child of the helper with the same detached
@@ -2095,7 +2095,7 @@ func requestHelperShutdown(runDir: String) throws -> [String: Any] {
 /// root stays the launcher's direct child, ppid unchanged, no reparent —
 /// I2's setsid prohibition is scoped to the units below the root.
 ///
-/// Single instance: `ava-root.lock` is the authority. Before every spawn the
+/// Single instance: `meiva-root.lock` is the authority. Before every spawn the
 /// keeper probes it non-blockingly; a held lock means another live root owns
 /// the run dir, so the keeper rests in `conflict` — the serving tree is left
 /// alone, nothing is killed, and there is no crash loop ("lose attribution,
@@ -2104,12 +2104,12 @@ func requestHelperShutdown(runDir: String) throws -> [String: Any] {
 ///
 /// An unexpected exit restarts root with bounded exponential backoff, but only
 /// until `maxConsecutiveFailures` consecutive unstable failures: a root that cannot
-/// stay up is left in `exited` for the operator (`ava start` re-seeds it with a
+/// stay up is left in `exited` for the operator (`meiva start` re-seeds it with a
 /// fresh budget) instead of being restarted for ever. An exit this keeper
 /// requested does not restart. Dormant when no seed is configured.
 final class RootKeeper {
     private let lock = childOwnershipLock
-    private let queue = DispatchQueue(label: "ava.permissions-helper.root-keeper")
+    private let queue = DispatchQueue(label: "meiva.permissions-helper.root-keeper")
 
     // Everything below is guarded by `lock`.
     private var seed: RootSeed?
@@ -2334,7 +2334,7 @@ final class RootKeeper {
             conflictPID = nil
             conflictSince = nil
             lock.unlock()
-            rootKeeperLog("ava-root started (pid \(pid))")
+            rootKeeperLog("meiva-root started (pid \(pid))")
         } catch {
             // scheduleSpawnRetry takes the same lock; release before reporting.
             lock.unlock()
@@ -2474,7 +2474,7 @@ func rejectUnknownFields(_ req: [String: Any], allowed: Set<String>) throws {
 }
 
 func logIndicator(_ message: String) {
-    FileHandle.standardError.write(Data("AvaPermissionsHelper: capture indicator \(message)\n".utf8))
+    FileHandle.standardError.write(Data("MeivaPermissionsHelper: capture indicator \(message)\n".utf8))
 }
 
 /// A window the next input lands on, by window-server ID and owning process.
@@ -2592,7 +2592,7 @@ final class CaptureIndicator {
     }
 
     private let lock = NSLock()
-    private let queue = DispatchQueue(label: "ava.capture-indicator")
+    private let queue = DispatchQueue(label: "meiva.capture-indicator")
     private var lease: Lease?
     private var generation = 0
 
@@ -2748,7 +2748,7 @@ func indicatorStop(_ req: [String: Any]) throws -> [String: Any] {
 }
 
 /// Stop the stream if one runs. Also the fail-safe's hook: the badge must disappear when the
-/// user stops Ava, before the refusal is reported.
+/// user stops Meiva, before the refusal is reported.
 @discardableResult
 func stopCaptureIndicator() -> Bool {
     return captureIndicator.stop()
@@ -2841,8 +2841,8 @@ func dispatch(_ req: [String: Any]) -> [String: Any] {
         }
         return ["id": id as Any, "ok": true, "result": result]
     } catch let abort as UserAbort {
-        // The user stopped Ava: the capture badge goes before the refusal is reported, and a
-        // button Ava holds comes up under the parked pointer.
+        // The user stopped Meiva: the capture badge goes before the refusal is reported, and a
+        // button Meiva holds comes up under the parked pointer.
         stopCaptureIndicator()
         releaseHeldMouseForStop(at: abort.position)
         return ["id": id as Any, "ok": false, "error": userAbortMessage, "error_code": "user_abort"]
@@ -2925,7 +2925,7 @@ final class PanelDelegate: NSObject, NSApplicationDelegate, NSTableViewDataSourc
     private var logOffset = 0
     private var pollTimer: Timer?
     private var reportsBeforeRun: Set<String> = []
-    private let workdir = "/tmp/ava-panel-tcc"
+    private let workdir = "/tmp/meiva-panel-tcc"
 
     init(args: PanelArgs) {
         self.args = args
@@ -3097,7 +3097,7 @@ final class PanelDelegate: NSObject, NSApplicationDelegate, NSTableViewDataSourc
         task.currentDirectoryURL = URL(fileURLWithPath: repo)
         var environment = ProcessInfo.processInfo.environment
         if let socket = args.helperSocket {
-            environment["AVA_PERMISSIONS_HELPER_SOCKET"] = socket
+            environment["MEIVA_PERMISSIONS_HELPER_SOCKET"] = socket
         }
         task.environment = environment
         task.standardOutput = logHandle
@@ -3255,7 +3255,7 @@ private var heldMonitor: DispatchSourceTimer?
 /// button is held: it looks for the stop gesture and for an unattended hold.
 func startHeldMouseMonitor() {
     guard heldMonitor == nil else { return }
-    let timer = DispatchSource.makeTimerSource(queue: DispatchQueue(label: "ava.held-mouse"))
+    let timer = DispatchSource.makeTimerSource(queue: DispatchQueue(label: "meiva.held-mouse"))
     timer.schedule(deadline: .now() + heldMonitorSeconds, repeating: heldMonitorSeconds)
     timer.setEventHandler { heldMouseTick() }
     timer.resume()
@@ -3270,14 +3270,14 @@ func stopHeldMouseMonitor() {
 // MARK: - Socket server
 
 func socketPath() -> String {
-    if let p = ProcessInfo.processInfo.environment["AVA_PERMISSIONS_HELPER_SOCKET"] { return p }
+    if let p = ProcessInfo.processInfo.environment["MEIVA_PERMISSIONS_HELPER_SOCKET"] { return p }
     if CommandLine.arguments.count > 1, !CommandLine.arguments[1].hasPrefix("--") {
         return CommandLine.arguments[1]
     }
     // No socket path: this process is not the launchd daemon -- it is a
     // user-facing launch (Finder double-click / `open -n -a`), so it becomes
     // the panel instance instead of exiting.
-    FileHandle.standardError.write(Data("AvaPermissionsHelper: no socket path -- starting panel mode\n".utf8))
+    FileHandle.standardError.write(Data("MeivaPermissionsHelper: no socket path -- starting panel mode\n".utf8))
     runPanelMode()
 }
 
@@ -3287,7 +3287,7 @@ func socketPath() -> String {
 func registerPermissions() {
     if ProcessInfo.processInfo.environment[skipRegistrationEnvironment] == "1" {
         FileHandle.standardError.write(
-            Data("AvaPermissionsHelper: permission registration skipped (test affordance)\n".utf8)
+            Data("MeivaPermissionsHelper: permission registration skipped (test affordance)\n".utf8)
         )
         return
     }
@@ -3339,7 +3339,7 @@ func serve() {
     }
     startChildReaper()
     rootKeeper.startIfConfigured()
-    FileHandle.standardError.write(Data("AvaPermissionsHelper: listening on \(path)\n".utf8))
+    FileHandle.standardError.write(Data("MeivaPermissionsHelper: listening on \(path)\n".utf8))
 
     while true {
         let conn = accept(fd, nil, nil)

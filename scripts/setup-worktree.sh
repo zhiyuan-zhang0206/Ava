@@ -5,8 +5,8 @@
 # git-hook / editable-venv guards.
 #
 #   bash scripts/setup-worktree.sh <task> [--branch NAME] [--base REF]
-#       Create <main clone>/.worktrees/<task> on branch ava-<task> (or <task>
-#       itself when it already starts with ava-) off a freshly fetched
+#       Create <main clone>/.worktrees/<task> on branch meiva-<task> (or <task>
+#       itself when it already starts with meiva-) off a freshly fetched
 #       origin/main, then bootstrap it. Run it from the main clone or from any
 #       worktree; the new one always lands under the main clone's .worktrees/.
 #   bash scripts/setup-worktree.sh
@@ -64,7 +64,7 @@ create_worktree() {
     || die "task '$TASK' must be a plain directory name (letters, digits, '.', '_', '-'; no slashes)"
   local wanted_branch="$BRANCH" holder current
   if [ -z "$BRANCH" ]; then
-    case "$TASK" in ava-*) BRANCH="$TASK" ;; *) BRANCH="ava-$TASK" ;; esac
+    case "$TASK" in meiva-*) BRANCH="$TASK" ;; *) BRANCH="meiva-$TASK" ;; esac
   fi
   WORKTREE="$MAIN_ROOT/.worktrees/$TASK"
 

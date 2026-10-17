@@ -5,7 +5,6 @@ import pytest
 
 from agent.extensions import catalog as catalog_mod
 from agent.state import plugin_state_schema
-from ava.sdk_surface.extensions import load_extensions
 from base import paths
 from base.lm.catalog import ModelCatalog
 from base.packages import plugin_providers
@@ -14,6 +13,7 @@ from base.packages.plugins.enable_config import write_local
 from base.packages.plugins.gate import ContributionMismatch
 from base.packages.plugins.loading.registry import declarations
 from base.packages.plugins.manifest import ManifestError
+from meiva.sdk_surface.extensions import load_extensions
 
 
 @pytest.fixture(autouse=True)
@@ -25,8 +25,8 @@ def _isolate_paths(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, model_catalo
     user.mkdir()
     monkeypatch.setattr(paths, "repo_plugins_dir", lambda: repo)
     monkeypatch.setattr(paths, "plugins_dir", lambda: user)
-    monkeypatch.setenv("AVA_HOME", str(tmp_path / "ava"))
-    monkeypatch.setattr(paths, "ava_home", lambda: tmp_path)
+    monkeypatch.setenv("MEIVA_HOME", str(tmp_path / "meiva"))
+    monkeypatch.setattr(paths, "meiva_home", lambda: tmp_path)
 
 
 _DEMO_PLUGIN = '''
@@ -82,7 +82,7 @@ def _demo_manifest(name: str, *, runtime: bool) -> str:
             "apiVersion": 2,
             "name": name,
             "version": "1.0.0",
-            "engines": {"ava": ">=0.1.0"},
+            "engines": {"meiva": ">=0.1.0"},
             "contributions": contributions,
         }
     )
@@ -96,7 +96,7 @@ def _write_plugin(
     (plugin_dir / "plugin.py").write_text(body)
     if runtime is not None:
         (plugin_dir / "agent_runtime.py").write_text(runtime)
-    (plugin_dir / "ava-plugin.json").write_text(
+    (plugin_dir / "meiva-plugin.json").write_text(
         manifest if manifest is not None else _demo_manifest(name, runtime=runtime is not None)
     )
     return plugin_dir
@@ -181,7 +181,7 @@ _MANIFEST = """{
   "apiVersion": 2,
   "name": "declared",
   "version": "1.0.0",
-  "engines": {"ava": ">=0.1.0"},
+  "engines": {"meiva": ">=0.1.0"},
   "contributions": {
     "hooks": ["before_llm", "after_exec"],
     "systemPromptSections": ["demo_section"],
@@ -243,10 +243,10 @@ def test_declared_vs_registered_reports_both_directions():
 
 def test_a_plugin_without_a_manifest_fails_the_catalog():
     plugin_dir = _write_plugin("demo", _DEMO_PLUGIN, runtime=_DEMO_RUNTIME)
-    (plugin_dir / "ava-plugin.json").unlink()
+    (plugin_dir / "meiva-plugin.json").unlink()
     _enable(demo=True)
 
-    with pytest.raises(ManifestError, match=r"demo.*ava-plugin\.json not found"):
+    with pytest.raises(ManifestError, match=r"demo.*meiva-plugin\.json not found"):
         catalog_mod.build_catalog()
 
 
@@ -315,7 +315,7 @@ def _gate_manifest(
             "apiVersion": 2,
             "name": name,
             "version": "1.0.0",
-            "engines": {"ava": ">=0.1.0"},
+            "engines": {"meiva": ">=0.1.0"},
             "contributions": {"hooks": list(hooks), "systemPromptSections": list(sections)},
         }
     )
@@ -445,7 +445,7 @@ def test_a_plugin_without_a_manifest_is_excluded(load_failures: list[tuple[str, 
     bare = _write_plugin(
         "gate_bare", _GATE_PLUGIN, runtime=_gate_runtime(("before_llm", "after_exec"))
     )
-    (bare / "ava-plugin.json").unlink()
+    (bare / "meiva-plugin.json").unlink()
     _write_plugin(
         "gate_ok",
         _GATE_PLUGIN,
@@ -458,7 +458,7 @@ def test_a_plugin_without_a_manifest_is_excluded(load_failures: list[tuple[str, 
     [(name, exc)] = load_failures
     assert name == "gate_bare"
     assert isinstance(exc, ManifestError)
-    assert "ava-plugin.json not found" in str(exc)
+    assert "meiva-plugin.json not found" in str(exc)
 
 
 def test_an_invalid_state_declaration_excludes_the_plugin(

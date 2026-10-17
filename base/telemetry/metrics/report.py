@@ -164,7 +164,7 @@ def render_plugin_activation(data: dict[str, Any]) -> str:
 
     Philosophy §6 asks a shim to measure its own obsolescence, so the block
     leads with the per-contribution counts (the same
-    `<plugin>/<surface>/<identifier>` key `ava plugins inspect` lists as
+    `<plugin>/<surface>/<identifier>` key `meiva plugins inspect` lists as
     registered) and closes with the per-model cut: a contribution sitting at
     zero for a model across successive windows is the removal evidence.
     """

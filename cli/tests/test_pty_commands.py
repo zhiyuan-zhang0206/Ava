@@ -17,7 +17,7 @@ from cli import main as cli_main
 
 @pytest.fixture(autouse=True)
 def _isolated_home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("AVA_HOME", str(tmp_path / "home"))
+    monkeypatch.setenv("MEIVA_HOME", str(tmp_path / "home"))
 
 
 def test_operator_round_trip_needs_no_gateway_or_data_plane(
@@ -34,7 +34,7 @@ def test_operator_round_trip_needs_no_gateway_or_data_plane(
     monkeypatch.setattr(psycopg, "connect", _offline)
     monkeypatch.setattr(redis.Redis, "execute_command", _offline)
     monkeypatch.setattr(urllib.request, "urlopen", _offline)
-    monkeypatch.delenv("AVA_CONFIG_FETCH", raising=False)
+    monkeypatch.delenv("MEIVA_CONFIG_FETCH", raising=False)
 
     assert (
         cli_main.main(["pty", "freeze", "--holder", "operator-1818", "--reason", "offline cleanup"])

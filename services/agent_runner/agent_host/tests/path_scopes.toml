@@ -4,7 +4,7 @@
     "test_circuit_breaker.py",
     "test_maintenance_prior_failure.py",
 ]
-"ava.tests.fixtures.ava_tests" = [
+"meiva.tests.fixtures.meiva_tests" = [
 ]
 "services.backup.artifact.tests.passphrase" = [
     "test_turn_dispatcher.py",
@@ -23,6 +23,6 @@
 "base.log.tests.log_records" = [
     "test_circuit_breaker.py",
 ]
-"ava.tests.fixtures.sdk" = [
+"meiva.tests.fixtures.sdk" = [
     "."
 ]

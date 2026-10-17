@@ -1,17 +1,17 @@
 #!/usr/bin/env python3
 """Lint: core-content manifests — declared gates must hold against this repo.
 
-Every manifest (`ava-plugin.json`) shipped under `ava_builtins/` is core
+Every manifest (`meiva-plugin.json`) shipped under `meiva_builtins/` is core
 content: once the content channel delivers it (tasks #2915 / #3267), the gates
 it declares are checked against the *derived* host version (the commit date of
 the checkout it runs on, design §5.5 v3). CI is where that stays honest.
 
 Hard checks (exit 1):
-1. every builtin plugin (a tracked `ava_builtins/plugins/<name>/plugin.py`)
-   ships a tracked `ava-plugin.json` beside it;
+1. every builtin plugin (a tracked `meiva_builtins/plugins/<name>/plugin.py`)
+   ships a tracked `meiva-plugin.json` beside it;
 2. every core-content manifest validates (the same validator the install and
    refresh paths use);
-3. `engines.ava` (when declared) admits this checkout's derived host version —
+3. `engines.meiva` (when declared) admits this checkout's derived host version —
    a range that excludes the repo's own current version would refuse the very
    content that ships it;
 4. `requires_commit` (when declared) is an ancestor of this checkout's HEAD —
@@ -45,8 +45,8 @@ from base.packages.plugins import manifest as pm
 
 _REPO_ROOT = Path(__file__).resolve().parent.parent.parent
 
-_CORE_ROOT = "ava_builtins"
-_PLUGINS_ROOT = "ava_builtins/plugins"
+_CORE_ROOT = "meiva_builtins"
+_PLUGINS_ROOT = "meiva_builtins/plugins"
 
 
 def _tracked(pattern: str, rel_dir: str | None = None) -> list[Path]:
@@ -77,8 +77,8 @@ def _tracked(pattern: str, rel_dir: str | None = None) -> list[Path]:
 
 
 def _tracked_manifests(rel_dir: str | None = None) -> list[Path]:
-    """Tracked `ava-plugin.json` files (optionally under `rel_dir`)."""
-    return _tracked("*ava-plugin.json", rel_dir)
+    """Tracked `meiva-plugin.json` files (optionally under `rel_dir`)."""
+    return _tracked("*meiva-plugin.json", rel_dir)
 
 
 def _ranges_verdict(manifest: pm.PluginManifest, host: str) -> str:
@@ -136,7 +136,9 @@ def _missing_plugin_manifests() -> int:
         if plugin_py.name != "plugin.py" or plugin_dir.parent != root:
             continue
         if plugin_dir not in manifests:
-            print(f"{plugin_dir.relative_to(_REPO_ROOT)}: builtin plugin ships no ava-plugin.json")
+            print(
+                f"{plugin_dir.relative_to(_REPO_ROOT)}: builtin plugin ships no meiva-plugin.json"
+            )
             missing += 1
     return missing
 
@@ -178,7 +180,7 @@ def main(argv: list[str] | None = None) -> int:
     audit = [p for p in _tracked_manifests() if not p.is_relative_to(_REPO_ROOT / _CORE_ROOT)]
     for d in audit_dirs:
         if d.is_dir():
-            audit.extend(sorted(d.rglob("ava-plugin.json")))
+            audit.extend(sorted(d.rglob("meiva-plugin.json")))
     if audit:
         print(f"audit: {len(audit)} non-core manifest(s) against derived {derived}:")
         for path in audit:

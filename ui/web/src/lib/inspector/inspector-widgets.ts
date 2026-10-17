@@ -1,4 +1,4 @@
-// ava:ref ui/web/src/docs/frontend-components/inspector/inspector.ava.okf.md#section-order
+// meiva:ref ui/web/src/docs/frontend-components/inspector/inspector.meiva.okf.md#section-order
 export const INSPECT_SECTION_ORDER = {
   runLink: 50,
   costActivity: 75,

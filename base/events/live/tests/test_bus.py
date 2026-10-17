@@ -26,7 +26,7 @@ class _Client:
         self.closed = True
 
 
-def _bus(url: str = "redis://secret@host:1/0", channel: str = "ava:test") -> EventBus:
+def _bus(url: str = "redis://secret@host:1/0", channel: str = "meiva:test") -> EventBus:
     return EventBus(EventBusConfig(redis_url=url, events_channel=channel))
 
 
@@ -35,8 +35,8 @@ def test_config_hides_the_url_from_repr() -> None:
 
 
 def test_from_settings_reads_the_live_settings(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(settings.data_plane, "events_channel", "ava:other")
-    assert EventBus.from_settings().channel == "ava:other"
+    monkeypatch.setattr(settings.data_plane, "events_channel", "meiva:other")
+    assert EventBus.from_settings().channel == "meiva:other"
 
 
 async def test_the_async_client_is_shared_per_loop_and_dialed_with_the_handles_url(
@@ -64,12 +64,12 @@ async def test_publish_goes_to_the_events_channel_unless_another_is_named(
         return client
 
     monkeypatch.setattr(bus_module, "open_async_redis", open_client)
-    handle = _bus(channel="ava:events")
+    handle = _bus(channel="meiva:events")
 
     assert await handle.publish_best_effort("p1", context="t") == 2
-    assert await handle.publish_best_effort("p2", channel="ava:page") == 2
+    assert await handle.publish_best_effort("p2", channel="meiva:page") == 2
 
-    assert client.published == [("ava:events", "p1"), ("ava:page", "p2")]
+    assert client.published == [("meiva:events", "p1"), ("meiva:page", "p2")]
 
 
 async def test_a_failed_publish_returns_none_and_never_raises(
@@ -94,7 +94,7 @@ def test_sync_publish_uses_a_one_off_client_and_closes_it(monkeypatch: pytest.Mo
 
     monkeypatch.setattr(bus_module, "open_sync_redis", open_client)
 
-    assert _bus("redis://sync", "ava:e").publish_best_effort_sync("p", context="t") == 1
-    assert sent == [("ava:e", "p")]
+    assert _bus("redis://sync", "meiva:e").publish_best_effort_sync("p", context="t") == 1
+    assert sent == [("meiva:e", "p")]
     assert urls == ["redis://sync"]
     assert client.closed

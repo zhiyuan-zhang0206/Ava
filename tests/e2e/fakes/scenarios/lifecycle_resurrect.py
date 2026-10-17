@@ -15,7 +15,7 @@ TERMINATE_SCRIPT: tuple[AIMessage, ...] = (
             {
                 "id": "call_terminate",
                 "name": "execute_code",
-                "args": {"code": "import ava\nava.self.terminate()"},
+                "args": {"code": "import meiva\nmeiva.self.terminate()"},
             }
         ],
         usage_metadata=_USAGE,

@@ -1,7 +1,7 @@
 """Agent events endpoints — /api/agents/{id}/events*.
 
 Two faces of the same observability stream:
-- `GET …/events/stream`: the live SSE tail (subscribe to Redis `ava:events`,
+- `GET …/events/stream`: the live SSE tail (subscribe to Redis `meiva:events`,
   filter by `agent_id`) — only carries events from the moment you subscribe.
 - `GET …/events`: the historical REST query over `telemetry_events` in
   Postgres (the durable record of the agent's telemetry and log events) —
@@ -39,7 +39,7 @@ _READ_STATEMENT_TIMEOUT_MS = 10_000
     dependencies=[Depends(deny_isolated_result_read)],
 )
 async def get_events_stream(agent_id: int, request: Request) -> StreamingResponse:
-    """SSE endpoint — subscribe to Redis `ava:events`, filter by `agent_id`,
+    """SSE endpoint — subscribe to Redis `meiva:events`, filter by `agent_id`,
     forward.
 
     Client `EventSource` receives `data: {json}\\n\\n` frames, one JSON

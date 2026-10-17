@@ -1,7 +1,7 @@
 # Prometheus — scrapes only the viewer's own components (zero impact on the
 # main flow). Converge renders the scrape targets from the telemetry read URLs,
-# so a widened listen host plus a consistent AVA_TELEMETRY_*_URL keeps
-# self-scrape working. Ava's own series arrive by OTLP push
+# so a widened listen host plus a consistent MEIVA_TELEMETRY_*_URL keeps
+# self-scrape working. Meiva's own series arrive by OTLP push
 # (--web.enable-otlp-receiver in the native service arguments); retention is
 # set there too (180h time / 8GB size).
 #
@@ -10,8 +10,8 @@
 # Collector sidecar (`host_metrics` receiver, plus `postgresql` + `redis` on a
 # gateway unit). One already-pinned binary per machine instead of three more,
 # and the same path for a remote runner that this Prometheus cannot scrape.
-# Those series land under `job="ava-infra"` with `host` (OS hostname / physical
-# identity) and `machine_name` (Ava roster identity); consumers group by the
+# Those series land under `job="meiva-infra"` with `host` (OS hostname / physical
+# identity) and `machine_name` (Meiva roster identity); consumers group by the
 # latter.
 global:
   scrape_interval: 15s
@@ -25,7 +25,7 @@ global:
 # Task #4650: 43 batches / 27,154 points dropped 2026-09-20..23; worst
 # observed lateness ~2h15m. 6h keeps ~2.7x margin over that case. The window
 # is bounded because late samples stay in the TSDB head (memory). Episodes
-# beyond it surface through `ava-ops-prom-too-old-samples`.
+# beyond it surface through `meiva-ops-prom-too-old-samples`.
 # Rationale and acceptance runbook: deploy/lgtm/README.md.
 storage:
   tsdb:
@@ -34,16 +34,16 @@ storage:
 scrape_configs:
   - job_name: prometheus
     static_configs:
-      - targets: ["{{AVA_PROMETHEUS_SCRAPE_TARGET}}"]
+      - targets: ["{{MEIVA_PROMETHEUS_SCRAPE_TARGET}}"]
   - job_name: tempo
     static_configs:
-      - targets: ["{{AVA_TEMPO_QUERY_URL}}"]
+      - targets: ["{{MEIVA_TEMPO_QUERY_URL}}"]
   - job_name: loki
     static_configs:
-      - targets: ["{{AVA_LOKI_SCRAPE_TARGET}}"]
+      - targets: ["{{MEIVA_LOKI_SCRAPE_TARGET}}"]
   - job_name: grafana
     # Grafana serves from /grafana (grafana.ini serve_from_sub_path); scraping
     # /metrics would 301-redirect into the gateway auth wall (task #3316).
     metrics_path: /grafana/metrics
     static_configs:
-      - targets: ["{{AVA_GRAFANA_SCRAPE_TARGET}}"]
+      - targets: ["{{MEIVA_GRAFANA_SCRAPE_TARGET}}"]

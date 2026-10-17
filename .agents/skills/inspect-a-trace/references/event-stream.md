@@ -42,7 +42,7 @@ Two rules the whole tree obeys, both learned the hard way:
   per-query series cap.
 
 Retention is 84h. Older than that, the run is gone from Loki; the JSONL event mirror
-(`$AVA_HOME/logs/events-*.jsonl`, 7 days, per machine) still holds every event.
+(`$MEIVA_HOME/logs/events-*.jsonl`, 7 days, per machine) still holds every event.
 
 ## The line shape
 
@@ -165,13 +165,13 @@ off a dashboard as an upper-ish estimate, not a median.
 Raw stdout shipped by the collector's filelog receivers has no JSON structure.
 The receiver split is intentional: `filelog/sessions` admits only agent shell
 transcripts, while `filelog/services` admits gateway/daemon/schedule output and
-excludes every `ava-agent-*` main log. Both set resource `service.name` from the
+excludes every `meiva-agent-*` main log. Both set resource `service.name` from the
 file name, which Loki exposes as `service_name`:
 
 ```logql
-{service_name="ava-agent-1818-shell-1"}
-{service_name=~"ava-agent-.+-shell-.+"} |~ "(?i)traceback"
-{service_name="ava-gateway"} |= "error"
+{service_name="meiva-agent-1818-shell-1"}
+{service_name=~"meiva-agent-.+-shell-.+"} |~ "(?i)traceback"
+{service_name="meiva-gateway"} |= "error"
 ```
 
 The banner-only agent main stdout is not ingested; its structured records
@@ -184,7 +184,7 @@ trace the event stream only summarizes.
 |---|---|
 | Loki | `http://127.0.0.1:3100` (`/loki/api/v1/query_range`, `/loki/api/v1/query`) |
 | Grafana | `http://localhost:3003` (anonymous viewer; datasource uid `loki`) |
-| Gateway | `http://localhost:8000/api/events` (bearer `AVA_API_TOKEN` or the gateway's `AVA_CLUSTER_SECRET`) |
+| Gateway | `http://localhost:8000/api/events` (bearer `MEIVA_API_TOKEN` or the gateway's `MEIVA_CLUSTER_SECRET`) |
 
-`ava lgtm status` reports the marker, containers, and readiness probes; the
-whole stack only exists on the host holding the `$AVA_HOME/lgtm-host` marker.
+`meiva lgtm status` reports the marker, containers, and readiness probes; the
+whole stack only exists on the host holding the `$MEIVA_HOME/lgtm-host` marker.

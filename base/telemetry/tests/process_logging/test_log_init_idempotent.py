@@ -249,7 +249,7 @@ def test_a_warning_written_while_the_init_builds_settings_reaches_stderr(
     # A configured pure runner: its `.env` carries the role, the gateway URL and the
     # name the gateway init gives its host.
     (home / ".env").write_text(
-        f"AVA_MACHINE_NAME=probe-host\nAVA_MACHINE_SERVE_AGENT_RUNNER=true\nAVA_GATEWAY_URL={gateway}\n"
+        f"MEIVA_MACHINE_NAME=probe-host\nMEIVA_MACHINE_SERVE_AGENT_RUNNER=true\nMEIVA_GATEWAY_URL={gateway}\n"
     )
     (home / ".env").chmod(0o600)
     (home / "run" / "bootstrap-snapshot.json").write_text(
@@ -259,14 +259,14 @@ def test_a_warning_written_while_the_init_builds_settings_reaches_stderr(
                 "base_url": gateway,
                 "written_at": time.time() - 10_000,
                 "values": {
-                    "AVA_DB_URL": "postgresql://ava@127.0.0.1:1/ava",
-                    "AVA_REDIS_URL": "redis://127.0.0.1:1/0",
+                    "MEIVA_DB_URL": "postgresql://meiva@127.0.0.1:1/meiva",
+                    "MEIVA_REDIS_URL": "redis://127.0.0.1:1/0",
                 },
             }
         )
     )
-    env = {key: value for key, value in os.environ.items() if not key.startswith("AVA_")}
-    env.update(AVA_HOME=str(home))
+    env = {key: value for key, value in os.environ.items() if not key.startswith("MEIVA_")}
+    env.update(MEIVA_HOME=str(home))
     child = subprocess.run(  # noqa: S603 — this interpreter, fixed child script, a private home
         [sys.executable, "-I", "-B", str(_SETTINGS_BUILD_WARNING), str(_REPO_ROOT), init],
         cwd=tmp_path,

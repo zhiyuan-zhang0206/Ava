@@ -1,4 +1,4 @@
-# ava:ref tests/fixtures/docs/native-provisioning.ava.okf.md#native-test-isolation
+# meiva:ref tests/fixtures/docs/native-provisioning.meiva.okf.md#native-test-isolation
 from __future__ import annotations
 
 import functools
@@ -15,14 +15,14 @@ from base.cluster.dataplane.pg_throwaway_base import ThrowawayConfig, configured
 from base.native_process.code_version import CodeVersion
 from base.native_process.loaded_commit import LoadedCommit
 from gateway.tests.agents.gateway_auth import install_default_gateway_credentials
-from tests._os_jobs import host_ava_os_jobs
+from tests._os_jobs import host_meiva_os_jobs
 from tests._test_env_file import rewrite_line as _rewrite_test_env_file_line
 from tests.fixtures.env_bootstrap import (
-    TEST_AVA_HOME,
+    TEST_MEIVA_HOME,
 )
 from tests.fixtures.static_environment import static_mode
 
-_OS_JOBS_AT_START = host_ava_os_jobs()
+_OS_JOBS_AT_START = host_meiva_os_jobs()
 _PROCESS_IMAGE_KEY = pytest.StashKey[LoadedCommit]()
 
 
@@ -86,12 +86,12 @@ def full_run_guard_message(
 ) -> str | None:
     if env.get("GITHUB_ACTIONS") == "true":
         return None
-    if env.get("AVA_ALLOW_FULL_PYTEST") == "1":
+    if env.get("MEIVA_ALLOW_FULL_PYTEST") == "1":
         return None
 
     shared_roots = {
-        (Path.home() / "Ava").resolve(),
-        (Path.home() / ".ava" / "source").resolve(),
+        (Path.home() / "Meiva").resolve(),
+        (Path.home() / ".meiva" / "source").resolve(),
     }
     resolved_rootpath = rootpath.resolve()
     if resolved_rootpath not in shared_roots:
@@ -117,14 +117,14 @@ def full_run_guard_message(
             return None
 
     return """\
-Full local pytest runs are blocked on this shared Ava checkout.
+Full local pytest runs are blocked on this shared Meiva checkout.
 User ruling (2026-08-24): do not run the full suite on the shared production host.
 Run a targeted test instead:
   pytest tests/<path>::<func>
 Directory-only selections are blocked because they still collect too much.
 Full-suite verification runs in GitHub CI when you push.
 For an explicitly user-approved local full run, use:
-  AVA_ALLOW_FULL_PYTEST=1 pytest ...
+  MEIVA_ALLOW_FULL_PYTEST=1 pytest ...
 Do not use this override without user approval."""
 
 
@@ -141,7 +141,7 @@ def pytest_configure(config: pytest.Config) -> None:
 def pytest_sessionstart(session: pytest.Session) -> None:
     from tests.fixtures.env_bootstrap import UNPROVISIONED_DB_URL
 
-    assert os.environ["AVA_DB_URL"] == UNPROVISIONED_DB_URL
+    assert os.environ["MEIVA_DB_URL"] == UNPROVISIONED_DB_URL
 
 
 _PER_TEST_TRUNCATE_TABLES = (
@@ -255,11 +255,11 @@ def _clean_db(
     from base.telemetry.metrics.observed_metrics import close_projection
 
     monkeypatch.setattr(settings.data_plane, "db_url", provisioned_db)
-    monkeypatch.setitem(os.environ, "AVA_DB_URL", provisioned_db)
-    env_file = TEST_AVA_HOME / ".env"
+    monkeypatch.setitem(os.environ, "MEIVA_DB_URL", provisioned_db)
+    env_file = TEST_MEIVA_HOME / ".env"
     previous_file = env_file.read_text()
     request.addfinalizer(functools.partial(env_file.write_text, previous_file))
-    _rewrite_test_env_file_line(env_file, "AVA_DB_URL", provisioned_db)
+    _rewrite_test_env_file_line(env_file, "MEIVA_DB_URL", provisioned_db)
     event_store.set_enabled(enabled=False)
 
     sync()
@@ -298,30 +298,30 @@ def _clean_redis(
     from base.config import settings
 
     monkeypatch.setattr(settings.data_plane, "redis_url", provisioned_redis)
-    monkeypatch.setitem(os.environ, "AVA_REDIS_URL", provisioned_redis)
-    env_file = TEST_AVA_HOME / ".env"
+    monkeypatch.setitem(os.environ, "MEIVA_REDIS_URL", provisioned_redis)
+    env_file = TEST_MEIVA_HOME / ".env"
     previous_file = env_file.read_text()
     request.addfinalizer(functools.partial(env_file.write_text, previous_file))
-    _rewrite_test_env_file_line(env_file, "AVA_REDIS_URL", provisioned_redis)
+    _rewrite_test_env_file_line(env_file, "MEIVA_REDIS_URL", provisioned_redis)
     with redis.Redis.from_url(provisioned_redis) as client:
         client.flushdb()
     yield
 
 
 def _fail_on_leaked_os_jobs(session: pytest.Session) -> None:
-    leaked = sorted(host_ava_os_jobs() - _OS_JOBS_AT_START)
+    leaked = sorted(host_meiva_os_jobs() - _OS_JOBS_AT_START)
     if not leaked:
         return
     sys.stderr.write(
         "\nOS-SCHEDULER LEAK: this pytest run registered or rewrote "
         f"{len(leaked)} job(s) on the host:\n  "
         + "\n  ".join(leaked)
-        + "\nThe suite runs with AVA_OS_JOBS_ENABLED=false (see "
+        + "\nThe suite runs with MEIVA_OS_JOBS_ENABLED=false (see "
         "base.host.system.cron.os_jobs_enabled), only the default home may register "
         "a job (base.host.system.cron.owns_os_jobs), and the helper native-effect "
         "guard is on. A job listed here means a test bypassed one of these "
         "boundaries. The job was left in place: it replaced the host's own, so "
-        "re-run `ava converge` to restore it, unless this was your own `ava start`.\n",
+        "re-run `meiva converge` to restore it, unless this was your own `meiva start`.\n",
     )
     session.exitstatus = 1
 
@@ -372,7 +372,7 @@ def pytest_sessionfinish(session: pytest.Session, exitstatus: int) -> None:
 
     _fail_on_leaked_os_jobs(session)
     _fail_on_runaway_memory(session)
-    shutil.rmtree(TEST_AVA_HOME, ignore_errors=True)
+    shutil.rmtree(TEST_MEIVA_HOME, ignore_errors=True)
 
 
 @pytest.fixture

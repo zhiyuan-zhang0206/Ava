@@ -13,15 +13,15 @@ Fixture dependency:
 
 env injection chain:
     pytest sets os.environ → gateway subprocess inherits → gateway internally spawns
-    agent subprocess inherits → agent build_chat_model reads AVA_LLM_OVERRIDE.
+    agent subprocess inherits → agent build_chat_model reads MEIVA_LLM_OVERRIDE.
     gateway must be function-scoped——session-scoped start once then env is fixed,
     subsequent setenv cannot get into agent subprocess.
 
 Concurrency isolation: DB/Redis reuses the throwaway Postgres + Redis started per worker in the top-level conftest
 (`provisioned_db` / `provisioned_redis`, URLs already in settings + env). This conftest
 adds another layer of per-session suffix `<PID>_<TS>` to isolate remaining process-level resources:
-- Redis channel `ava:events:e2e:<suffix>`
-- AVA_HOME `tmp/ava_e2e_home_<suffix>` (transcripts/plugins)
+- Redis channel `meiva:events:e2e:<suffix>`
+- MEIVA_HOME `tmp/meiva_e2e_home_<suffix>` (transcripts/plugins)
 - gateway/frontend ports (kernel-assigned, see `_ports.py`)
 - agents_id_seq PID offset (session names don't collide across workers)
 ensuring multiple local e2e sessions (dev agents + CI runner) truly run concurrently without interference.
@@ -120,11 +120,11 @@ def pytest_collection_modifyitems(
 
 # Suffix: PID + microsecond timestamp. e2e reuses the suite's session
 # native Postgres + Redis (provisioned by the autouse fixtures in tests/fixtures/provisioning.py); this suffix
-# only scopes the per-session AVA_HOME and the Redis channel names so
+# only scopes the per-session MEIVA_HOME and the Redis channel names so
 # concurrent e2e workers don't collide.
 _E2E_SUFFIX = f"{os.getpid()}_{int(time.time() * 1_000_000)}"
 
-_AVA_HOME = _REPO_ROOT / "tmp" / f"ava_e2e_home_{_E2E_SUFFIX}"
+_MEIVA_HOME = _REPO_ROOT / "tmp" / f"meiva_e2e_home_{_E2E_SUFFIX}"
 
 
 # ---- session fixtures ---------------------------------------------------
@@ -134,14 +134,14 @@ _GC_THRESHOLD_SECONDS = 3600
 
 
 def _gc_orphan_e2e() -> None:
-    """GC orphan tmp AVA_HOME + frontend build dirs older than 1h, left by a
+    """GC orphan tmp MEIVA_HOME + frontend build dirs older than 1h, left by a
     crashed session. The e2e Postgres is the suite's session cluster
     (auto-removed), so there are no orphan databases to drop."""
     threshold_us = int((time.time() - _GC_THRESHOLD_SECONDS) * 1_000_000)
     # tmp dir GC
     tmp_root = _REPO_ROOT / "tmp"
     if tmp_root.exists():
-        for d in tmp_root.glob("ava_e2e_home_*"):
+        for d in tmp_root.glob("meiva_e2e_home_*"):
             try:
                 ts_us = int(d.name.rsplit("_", 1)[1])
             except (IndexError, ValueError):
@@ -170,7 +170,7 @@ def e2e_process_env(provisioned_db: str, provisioned_redis: str) -> Iterator[Non
     """Layer e2e-specific process config on the suite's session Postgres +
     Redis requested from tests/fixtures/provisioning.py. This package delivers
     their URLs to settings and environment for gateway / agent subprocesses.
-    It adds the e2e channel names, AVA_HOME, machine files and the agents_id_seq offset.
+    It adds the e2e channel names, MEIVA_HOME, machine files and the agents_id_seq offset.
 
     Package scope and tests/e2e/__init__.py make restoration happen when pytest
     leaves this package. Without that file pytest silently falls back to session
@@ -194,20 +194,20 @@ def e2e_process_env(provisioned_db: str, provisioned_redis: str) -> Iterator[Non
     # from this body by AST and fails if the tuple falls behind it, so a key added to
     # the setup without a line here cannot merge.
     _env_keys = (
-        "AVA_DB_URL",
-        "AVA_REDIS_URL",
-        "AVA_CLUSTER_SECRET",
-        "AVA_CONFIG_FETCH",
-        "AVA_DB_GENERATION",
-        "AVA_EVENTS_CHANNEL",
-        "AVA_HOME",
-        "AVA_GATEWAY_CORS_ALLOWED_ORIGINS",
-        "AVA_GATEWAY_URL",
-        "AVA_GATEWAY_HEALTH_URL",
-        "AVA_MACHINE_SERVE_GATEWAY",
-        "AVA_MACHINE_SERVE_AGENT_RUNNER",
-        "AVA_MACHINE_NAME",
-        "AVA_NODE_STALL_DUMP_SECONDS",
+        "MEIVA_DB_URL",
+        "MEIVA_REDIS_URL",
+        "MEIVA_CLUSTER_SECRET",
+        "MEIVA_CONFIG_FETCH",
+        "MEIVA_DB_GENERATION",
+        "MEIVA_EVENTS_CHANNEL",
+        "MEIVA_HOME",
+        "MEIVA_GATEWAY_CORS_ALLOWED_ORIGINS",
+        "MEIVA_GATEWAY_URL",
+        "MEIVA_GATEWAY_HEALTH_URL",
+        "MEIVA_MACHINE_SERVE_GATEWAY",
+        "MEIVA_MACHINE_SERVE_AGENT_RUNNER",
+        "MEIVA_MACHINE_NAME",
+        "MEIVA_NODE_STALL_DUMP_SECONDS",
     )
     previous = (
         settings.data_plane.events_channel,
@@ -219,61 +219,61 @@ def e2e_process_env(provisioned_db: str, provisioned_redis: str) -> Iterator[Non
         provisioned_db,
         provisioned_redis,
     )
-    os.environ["AVA_DB_URL"] = provisioned_db
-    os.environ["AVA_REDIS_URL"] = provisioned_redis
+    os.environ["MEIVA_DB_URL"] = provisioned_db
+    os.environ["MEIVA_REDIS_URL"] = provisioned_redis
     apply_e2e_seq_offset()
 
-    settings.data_plane.events_channel = f"ava:events:e2e:{_E2E_SUFFIX}"
-    os.environ["AVA_EVENTS_CHANNEL"] = settings.data_plane.events_channel
-    # Diagnostic: the e2e model is instant (AVA_LLM_OVERRIDE), so any node that
+    settings.data_plane.events_channel = f"meiva:events:e2e:{_E2E_SUFFIX}"
+    os.environ["MEIVA_EVENTS_CHANNEL"] = settings.data_plane.events_channel
+    # Diagnostic: the e2e model is instant (MEIVA_LLM_OVERRIDE), so any node that
     # sits longer than this is a real stall, not inference. Spawned agents
     # inherit the var and dump every thread's stack to stderr (captured as the
     # agent-*.log artifact), naming the blocked frame.
-    os.environ["AVA_NODE_STALL_DUMP_SECONDS"] = "15"
-    # No AVA_LAUNCH_CONFIRM_TIMEOUT_SECONDS override (and so no `_env_keys` entry
+    os.environ["MEIVA_NODE_STALL_DUMP_SECONDS"] = "15"
+    # No MEIVA_LAUNCH_CONFIRM_TIMEOUT_SECONDS override (and so no `_env_keys` entry
     # for it): this fixture used to widen the 10s prod default to 25s because a CI
     # runner's parallel load ran the agent's boot — self-fetching config from the
     # gateway plus its import chain — past it. The default is now 45s with a
     # live-child extension on top, so pinning a number here could only NARROW the
     # window this suite runs with.
-    _AVA_HOME.mkdir(parents=True, exist_ok=True)
+    _MEIVA_HOME.mkdir(parents=True, exist_ok=True)
     _LOG_DIR.mkdir(parents=True, exist_ok=True)
-    os.environ["AVA_HOME"] = str(_AVA_HOME)
-    # Set the identity env explicitly: the host operator's real ~/.ava/.env may
-    # have exported AVA_MACHINE_NAME / AVA_MACHINE_SERVE_*, which would leak the
+    os.environ["MEIVA_HOME"] = str(_MEIVA_HOME)
+    # Set the identity env explicitly: the host operator's real ~/.meiva/.env may
+    # have exported MEIVA_MACHINE_NAME / MEIVA_MACHINE_SERVE_*, which would leak the
     # host's identity (e.g. name=test-host) into the gateway/ops subprocesses — so the
     # gateway would dispatch a spawn to the host's name instead of the e2e machine
     # registered below. The same keys are declared in the e2e home's `.env` below: a
     # unit's identity is read from its own `.env`, and an inherited value it does not
     # declare is dropped.
-    os.environ["AVA_MACHINE_NAME"] = f"e2e-{_E2E_SUFFIX}"
-    os.environ["AVA_MACHINE_SERVE_AGENT_RUNNER"] = "true"
-    os.environ["AVA_MACHINE_SERVE_GATEWAY"] = "true"
+    os.environ["MEIVA_MACHINE_NAME"] = f"e2e-{_E2E_SUFFIX}"
+    os.environ["MEIVA_MACHINE_SERVE_AGENT_RUNNER"] = "true"
+    os.environ["MEIVA_MACHINE_SERVE_GATEWAY"] = "true"
     # This home owns both the gateway config and its local runner, like the
     # production single-box shape. Calling it a pure runner while handing ops
     # an owner URL would bypass the authenticated runner projection contract.
     # Keep the maintenance fetch opt-out for the fixture's subprocess setup.
-    os.environ["AVA_CONFIG_FETCH"] = "skip"
+    os.environ["MEIVA_CONFIG_FETCH"] = "skip"
     # Agent subprocesses reach the e2e gateway via gateway_api_base().
-    os.environ["AVA_GATEWAY_URL"] = GATEWAY_URL
+    os.environ["MEIVA_GATEWAY_URL"] = GATEWAY_URL
     # The restarter daemon (services/restarter/daemon.py) gates respawn on
     # `_gateway_healthy()` which probes settings.services.gateway_health_url. Default is
     # http://localhost:8000/api/health — but the e2e gateway runs on a dynamic
     # port. Point it at the e2e gateway so the health check can pass.
-    os.environ["AVA_GATEWAY_HEALTH_URL"] = f"{GATEWAY_URL}/api/health"
+    os.environ["MEIVA_GATEWAY_HEALTH_URL"] = f"{GATEWAY_URL}/api/health"
     # e2e runs the PROD DEFAULT deployment shape: a single box. It is the one
     # place a real gateway spawns real agent subprocesses, so it exercises the
     # shape prod actually runs — issue #993 (every agent dead on a single box:
-    # spawn env pinned AVA_CONFIG_SOURCE=gateway while /api/bootstrap 404s).
-    # A real single box keeps the cluster config in $AVA_HOME/.env — that file
-    # is what a spawned agent (AVA_CONFIG_SOURCE=local, cluster keys env -u'd
+    # spawn env pinned MEIVA_CONFIG_SOURCE=gateway while /api/bootstrap 404s).
+    # A real single box keeps the cluster config in $MEIVA_HOME/.env — that file
+    # is what a spawned agent (MEIVA_CONFIG_SOURCE=local, cluster keys env -u'd
     # off its launch command) re-reads at import. Mirror that: persist the
     # session's cluster-scoped values (the native DB/Redis URLs, the e2e
     # event channels) into the e2e home's .env.
     # Daemon health ports are dynamically allocated per e2e run (ops / restarter /
     # labeler / etc. fixtures each bind to a free kernel-assigned port). Writing
-    # them into $AVA_HOME/.env would let _enforce_cluster_env_authority() (called
-    # by load_ava_env at daemon startup) clobber the dynamic ports with the .env
+    # them into $MEIVA_HOME/.env would let _enforce_cluster_env_authority() (called
+    # by load_meiva_env at daemon startup) clobber the dynamic ports with the .env
     # values — causing "address already in use" on the production defaults.
     # Derived from the same map the endpoint table consults, not hand-listed: the
     # hand-listed version had already drifted (events_maintenance missing), and a
@@ -282,19 +282,19 @@ def e2e_process_env(provisioned_db: str, provisioned_redis: str) -> Iterator[Non
     from base.host.env.registry import cluster_scope_aliases
 
     _health_port_keys: frozenset[str] = frozenset(
-        f"AVA_{attr.upper()}" for attr in HEALTH_PORT_OVERRIDES.values()
+        f"MEIVA_{attr.upper()}" for attr in HEALTH_PORT_OVERRIDES.values()
     )
     # Cluster-scoped CORS origins must be in the unit .env before gateway boot.
-    os.environ["AVA_GATEWAY_CORS_ALLOWED_ORIGINS"] = (
+    os.environ["MEIVA_GATEWAY_CORS_ALLOWED_ORIGINS"] = (
         f"http://localhost:{FRONTEND_PORT},http://127.0.0.1:{FRONTEND_PORT}"
     )
     # The stack authenticates like a started cluster (`tests/e2e/_credentials.py`):
     # a cluster secret declared in the home's `.env` (cluster-scope keys the unit .env
     # does not declare are dropped by the env-authority pass), and an active write
     # generation whose machine API tokens /ops accepts and each service is delivered.
-    credentials = mint_credentials(_AVA_HOME)
-    os.environ["AVA_CLUSTER_SECRET"] = credentials.secret
-    os.environ["AVA_DB_GENERATION"] = "0"
+    credentials = mint_credentials(_MEIVA_HOME)
+    os.environ["MEIVA_CLUSTER_SECRET"] = credentials.secret
+    os.environ["MEIVA_DB_GENERATION"] = "0"
 
     env_lines = [
         *(
@@ -305,13 +305,13 @@ def e2e_process_env(provisioned_db: str, provisioned_redis: str) -> Iterator[Non
         *(
             f"{key}={os.environ[key]}"
             for key in (
-                "AVA_MACHINE_NAME",
-                "AVA_MACHINE_SERVE_AGENT_RUNNER",
-                "AVA_MACHINE_SERVE_GATEWAY",
+                "MEIVA_MACHINE_NAME",
+                "MEIVA_MACHINE_SERVE_AGENT_RUNNER",
+                "MEIVA_MACHINE_SERVE_GATEWAY",
             )
         ),
     ]
-    (_AVA_HOME / ".env").write_text("\n".join(env_lines) + "\n")
+    (_MEIVA_HOME / ".env").write_text("\n".join(env_lines) + "\n")
     try:
         yield
     finally:
@@ -334,16 +334,16 @@ def e2e_process_env(provisioned_db: str, provisioned_redis: str) -> Iterator[Non
             else:
                 os.environ[k] = v
         # Preserve agent logs into _LOG_DIR (tmp/e2e-logs, the dir CI uploads on
-        # failure) before tearing down AVA_HOME. The artifact upload runs after
+        # failure) before tearing down MEIVA_HOME. The artifact upload runs after
         # pytest exits, by which point this rmtree would otherwise have deleted
-        # $AVA_HOME/logs/agent-*.log — so an e2e failure left no agent-side trace.
-        agent_logs = _AVA_HOME / "logs"
+        # $MEIVA_HOME/logs/agent-*.log — so an e2e failure left no agent-side trace.
+        agent_logs = _MEIVA_HOME / "logs"
         if agent_logs.is_dir():
             for log in agent_logs.glob("agent-*.log"):
                 with contextlib.suppress(OSError):
                     shutil.copy2(log, _LOG_DIR / log.name)
         with contextlib.suppress(OSError):
-            shutil.rmtree(_AVA_HOME)
+            shutil.rmtree(_MEIVA_HOME)
 
 
 @pytest.fixture(autouse=True)
@@ -482,7 +482,7 @@ def playwright_browser(playwright_runtime: Playwright) -> Iterator[Browser]:
 
 @pytest.fixture
 def scenario_env(e2e_process_env: None, request: pytest.FixtureRequest) -> Iterator[None]:
-    """Read test's @pytest.mark.scenario('module:factory') to set AVA_LLM_OVERRIDE.
+    """Read test's @pytest.mark.scenario('module:factory') to set MEIVA_LLM_OVERRIDE.
 
     Use bare os.environ not monkeypatch——the latter function teardown automatically unsets,
     which would clear it while gateway_proc still needs env. This fixture's own finalizer clears.
@@ -495,20 +495,20 @@ def scenario_env(e2e_process_env: None, request: pytest.FixtureRequest) -> Itera
             f"e2e test {request.node.name} needs @pytest.mark.scenario('module:factory')"  # pyright: ignore[reportUnknownMemberType]
         )
     scenario = marker.args[0]  # pyright: ignore[reportUnknownMemberType]
-    prev = os.environ.get("AVA_LLM_OVERRIDE")
-    os.environ["AVA_LLM_OVERRIDE"] = scenario
+    prev = os.environ.get("MEIVA_LLM_OVERRIDE")
+    os.environ["MEIVA_LLM_OVERRIDE"] = scenario
     try:
         yield
     finally:
         if prev is None:
-            os.environ.pop("AVA_LLM_OVERRIDE", None)
+            os.environ.pop("MEIVA_LLM_OVERRIDE", None)
         else:
-            os.environ["AVA_LLM_OVERRIDE"] = prev
+            os.environ["MEIVA_LLM_OVERRIDE"] = prev
 
 
 @pytest.fixture
 def gateway_proc(scenario_env: None, monkeypatch: pytest.MonkeyPatch) -> Iterator[str]:
-    """gateway uvicorn (kernel-assigned port, see `_ports.py`)——inherits current os.environ (including AVA_LLM_OVERRIDE).
+    """gateway uvicorn (kernel-assigned port, see `_ports.py`)——inherits current os.environ (including MEIVA_LLM_OVERRIDE).
 
     function-scoped rather than session: each test restarts gateway to pick up new scenario env.
     Startup ~2-3s acceptable.
@@ -520,8 +520,8 @@ def gateway_proc(scenario_env: None, monkeypatch: pytest.MonkeyPatch) -> Iterato
 
     # This direct-process fixture gate lives in the private E2E home.
     # It grants no production root custody or local birth evidence.
-    monkeypatch.setenv("AVA_HOME", str(_AVA_HOME))
-    fixture_gate = _AVA_HOME / "e2e-serving"
+    monkeypatch.setenv("MEIVA_HOME", str(_MEIVA_HOME))
+    fixture_gate = _MEIVA_HOME / "e2e-serving"
     fixture_gate.unlink(missing_ok=True)
     generation = str(fixture_gate)
     cmd = [
@@ -540,7 +540,7 @@ def gateway_proc(scenario_env: None, monkeypatch: pytest.MonkeyPatch) -> Iterato
     log_path = _LOG_DIR / f"gateway-{_E2E_SUFFIX}.log"
     env = os.environ.copy()
     # Construct the same gateway profile that production starts.
-    env["AVA_PROCESS_PROFILE"] = "gateway"
+    env["MEIVA_PROCESS_PROFILE"] = "gateway"
     env.update(current_credentials().service_env("gateway"))
     evidence_path = log_path.with_suffix(".listeners.json")
     evidence_path.write_text(json.dumps(listener_evidence(GATEWAY_PORT, "reserved-before-start")))
@@ -623,14 +623,14 @@ def agent_host_proc(gateway_proc: str, pty_sessions_proc: None) -> Iterator[None
     # Prod-shaped launch: the `agent` profile (marker-less construction masked a
     # `runner`-profile soak crash, 2026-08-30) dialing as a write generation's
     # runner login, the class login the root launcher delivers to agent hosts.
-    env["AVA_PROCESS_PROFILE"] = "agent"
+    env["MEIVA_PROCESS_PROFILE"] = "agent"
     env.update(current_credentials().service_env("runner"))
-    env["AVA_DB_URL"] = runner_projection()
+    env["MEIVA_DB_URL"] = runner_projection()
     # Kernel-assigned per worker, avoiding a shared health port across tests.
     with socket.socket() as s:
         s.bind(("127.0.0.1", 0))
         agent_host_health_port = s.getsockname()[1]
-    env["AVA_AGENT_HOST_HEALTH_PORT"] = str(agent_host_health_port)
+    env["MEIVA_AGENT_HOST_HEALTH_PORT"] = str(agent_host_health_port)
     log_path = _LOG_DIR / f"agent-host-{_E2E_SUFFIX}.log"
     with managed_proc(cmd, env=env, label="agent-host", log_path=str(log_path)) as proc:
         try:
@@ -653,18 +653,18 @@ def ops_proc(gateway_proc: str) -> Iterator[None]:
     Spawn is HTTP-uniform: `POST /api/keyed/v1/agents` creates the row on the gateway and
     forwards the launch to this host's ops server over localhost (no in-process
     shortcut), which dispatches launch_agent_op. So the e2e single box must run
-    the ops daemon (like a real `ava start`) AND have its machine registered
+    the ops daemon (like a real `meiva start`) AND have its machine registered
     with the ops URL, or every spawn 502s. Function-scoped
     + inherits os.environ so the spawned agent subprocess sees the per-test
-    scenario env (AVA_LLM_OVERRIDE), same reason gateway_proc is function-scoped.
+    scenario env (MEIVA_LLM_OVERRIDE), same reason gateway_proc is function-scoped.
     """
     env = os.environ.copy()
-    env["AVA_PROCESS_PROFILE"] = "runner"
+    env["MEIVA_PROCESS_PROFILE"] = "runner"
     env.update(current_credentials().service_env("runner"))
     with socket.socket() as s:
         s.bind(("127.0.0.1", 0))
         ops_port = s.getsockname()[1]
-    env["AVA_OPS_HEALTH_PORT"] = str(ops_port)
+    env["MEIVA_OPS_HEALTH_PORT"] = str(ops_port)
     # Register this single box as a runner advertising its ops URL — what the
     # gateway dials. UPSERT (function-scoped; the port is re-allocated per test).
     with psycopg.connect(settings.data_plane.db_url) as conn, conn.cursor() as cur:
@@ -711,7 +711,7 @@ def spawned_agent(ops_proc: None, agent_host_proc: None, truncated_db: None) -> 
             raise RuntimeError(
                 f"agent {agent_id} did not reach idling within 90s: "
                 f"last_status={last_status!r} last_pid={last_pid!r}; "
-                f"see $AVA_HOME/logs/agent-{agent_id}.log "
+                f"see $MEIVA_HOME/logs/agent-{agent_id}.log "
                 f"(CI: the e2e-logs artifact)"
             )
         yield agent_id

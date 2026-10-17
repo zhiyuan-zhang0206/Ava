@@ -2,7 +2,7 @@
 
 The gateway exposes the cluster control plane as a standard MCP server over
 [Streamable HTTP] at `/mcp` (implementation
-[`gateway/mcp_server/endpoint.py`](../../../gateway/mcp_server/docs/mcp-endpoint/mcp-endpoint.ava.okf.md)). Any MCP
+[`gateway/mcp_server/endpoint.py`](../../../gateway/mcp_server/docs/mcp-endpoint/mcp-endpoint.meiva.okf.md)). Any MCP
 client — Claude Code, Codex, anything speaking the protocol — drives the fleet
 through it with seven control tools
 (list_agents / get_agent / spawn_agent_guarded_v1 / send_message / get_messages /
@@ -17,14 +17,14 @@ completely unaffected (off, `/mcp` answers 404):
 
 ```bash
 # in the gateway home's .env, on the gateway host:
-AVA_MCP_ENDPOINT_ENABLED=true
+MEIVA_MCP_ENDPOINT_ENABLED=true
 # then restart the gateway: the flag is read at gateway start
 ```
 
 The flag decides whether MCP client tokens authenticate at all, and those
-tokens outlive every write generation, so no config write sets it: `ava config
+tokens outlive every write generation, so no config write sets it: `meiva config
 set` (API or `--local`) refuses it and the settings panel shows it read-only,
-as for `AVA_ALERTS_WEBHOOK_TOKEN`. Edit the gateway `.env` on its host, after
+as for `MEIVA_ALERTS_WEBHOOK_TOKEN`. Edit the gateway `.env` on its host, after
 the rollout that ships the endpoint code.
 
 ## Connect a client
@@ -54,12 +54,12 @@ curl -s http://<gateway-host>/api/keyed/v1/mcp/clients \
 Configure the client with the returned `token`, not the cluster secret:
 
 ```bash
-claude mcp add --transport http ava http://<gateway-host>/mcp \
+claude mcp add --transport http meiva http://<gateway-host>/mcp \
   --header "Authorization: Bearer <mcp-client-token>"
 ```
 
 Codex takes the same shape (`codex mcp add`). `<gateway-host>` is the address
-the cluster advertises (`AVA_GATEWAY_URL`). `/mcp` requires a client token; a session cookie or cluster-secret Bearer is rejected.
+the cluster advertises (`MEIVA_GATEWAY_URL`). `/mcp` requires a client token; a session cookie or cluster-secret Bearer is rejected.
 
 List client metadata with `GET /api/mcp/clients`. Revoke one immediately with
 `POST /api/mcp/clients/<id>/revoke`; a revoked token receives 401 thereafter.

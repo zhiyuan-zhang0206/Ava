@@ -265,13 +265,13 @@ describe("single tilde stays literal (task #3653)", () => {
 
   it("leaves tildes inside inline code alone", () => {
     const { container } = render(
-      <ChatMarkdown content={"`~/work` \u548c `~61G` \u548c `~/.ava`"} />,
+      <ChatMarkdown content={"`~/work` \u548c `~61G` \u548c `~/.meiva`"} />,
     );
     expect(container.querySelector("del")).toBeNull();
     const codes = container.querySelectorAll("code");
     expect(codes).toHaveLength(3);
     expect(Array.from(codes).map((c) => c.textContent).join("|")).toBe(
-      "~/work|~61G|~/.ava",
+      "~/work|~61G|~/.meiva",
     );
   });
 });

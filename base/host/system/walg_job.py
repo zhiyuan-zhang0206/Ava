@@ -1,4 +1,4 @@
-"""Daily OS job for the WAL-G physical backup (`ava backup walg run`).
+"""Daily OS job for the WAL-G physical backup (`meiva backup walg run`).
 
 One schedule per host runs the daily tick: backup, verify the archived chain,
 apply retention. The command owns every gate (the key switch, a deploy window,
@@ -10,9 +10,9 @@ The time of day is a scheduling choice, not a comparison threshold: it sits
 (`services.backup_hour`) so the dump and its Sunday restore drill have finished
 before a base backup starts reading the same disks, and it is not the 04:40 log
 maintenance slot. Which hour that is follows the dump's hour; a changed
-`AVA_BACKUP_HOUR` is picked up by the next converge.
+`MEIVA_BACKUP_HOUR` is picked up by the next converge.
 
-POSIX surfaces the run's output in `$AVA_HOME/logs/walg.log` (launchd appends
+POSIX surfaces the run's output in `$MEIVA_HOME/logs/walg.log` (launchd appends
 stdout/stderr; the crontab line redirects).
 """
 
@@ -29,7 +29,7 @@ from loguru import logger
 import base.host.system.cron
 from base.host.system.hostport import Host
 
-_CRON_MARKER = "# ava-walg"
+_CRON_MARKER = "# meiva-walg"
 _HOURS_AFTER_LOGICAL_BACKUP = 3
 MINUTE = 25
 
@@ -49,8 +49,8 @@ def _log_file() -> Path:
 
 
 def _shell_command(*, host: Host) -> str:
-    ava = shlex.quote(base.host.system.cron.ava_binary_path(host=host))
-    return f"{ava} backup walg run"
+    meiva = shlex.quote(base.host.system.cron.meiva_binary_path(host=host))
+    return f"{meiva} backup walg run"
 
 
 def launchd_plist_content(*, backup_hour_reader: Callable[[], int], host: Host) -> str:
@@ -161,7 +161,7 @@ def register_walg_job(
     platform unchanged and is read while generating the job spec and the
     existing macOS success log, preserving the three-hour offset.
 
-    Skipped when OS jobs are off (`AVA_OS_JOBS_ENABLED`) or this home is not the
+    Skipped when OS jobs are off (`MEIVA_OS_JOBS_ENABLED`) or this home is not the
     default home (`owns_os_jobs`). Whether WAL-G is switched on is the converge
     step's decision (`ensure_walg_job`), not this registrar's.
     """

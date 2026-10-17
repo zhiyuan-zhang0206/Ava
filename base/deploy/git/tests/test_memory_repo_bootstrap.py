@@ -305,7 +305,7 @@ def test_bootstrap_from_gateway_missing_gateway_url_fails_loud(
         _machine,
         "gateway_api_base",
         gateway_api_base_raises(
-            _machine.GatewayApiBaseMissing("gateway_url unset — `ava start` writes it")
+            _machine.GatewayApiBaseMissing("gateway_url unset — `meiva start` writes it")
         ),
     )
     machine_identity.set(role="agent-runner", name="test-host-2")

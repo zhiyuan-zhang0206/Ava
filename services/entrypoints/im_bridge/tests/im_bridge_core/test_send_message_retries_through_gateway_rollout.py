@@ -76,7 +76,7 @@ async def test_list_on_button_channel_is_text_one_liner_plus_buttons() -> None:
     async with owned_tasks() as _owned_tasks:
         gateway = FakeGateway(
             agents=[
-                row(405, label="Ava \u8d1f\u8d23\u4eba"),
+                row(405, label="Meiva \u8d1f\u8d23\u4eba"),
                 row(228, label=None, status="running"),
                 row(999, label="gone", status="terminated"),
             ]
@@ -92,19 +92,19 @@ async def test_list_on_button_channel_is_text_one_liner_plus_buttons() -> None:
         cmds = [b[1] for b in out.buttons]
         assert labels == [
             f"228 {copy.UNNAMED_LABEL} [running]",
-            "405 Ava \u8d1f\u8d23\u4eba [idling]",
+            "405 Meiva \u8d1f\u8d23\u4eba [idling]",
         ]
         assert cmds == ["/switch 228", "/switch 405"]
 
 
 async def test_list_on_plain_channel_keeps_full_text_list() -> None:
     async with owned_tasks() as _owned_tasks:
-        gateway = FakeGateway(agents=[row(405, label="Ava \u8d1f\u8d23\u4eba")])
+        gateway = FakeGateway(agents=[row(405, label="Meiva \u8d1f\u8d23\u4eba")])
         core = create_test_core(gateway, tasks=_owned_tasks)
         core.register(FakePlainAdapter())
         out = await core._cmd_list("weixin")
         assert isinstance(out, Reply)
-        assert "405  Ava \u8d1f\u8d23\u4eba  [idling]" in out.text
+        assert "405  Meiva \u8d1f\u8d23\u4eba  [idling]" in out.text
         assert out.buttons is None
 
 
@@ -148,7 +148,7 @@ async def test_chat_typing_starts_and_stops_on_agent_reply(
             await asyncio.sleep(0.06)
             assert len(adapter.typing_calls) == calls_after_acceptance
             await core.outbound_worker.run_once()
-            assert adapter.sent == [("12345", "[Ava #405] answer")]
+            assert adapter.sent == [("12345", "[Meiva #405] answer")]
 
         await scenario()
 
@@ -180,7 +180,7 @@ async def test_typing_skipped_for_plain_adapters() -> None:
             ]
             await core._push_snapshot(("weixin", "67890"), state, {"items": []})
             await core.outbound_worker.run_once()
-            assert adapter.sent == [("67890", "[Ava #405] answer")]
+            assert adapter.sent == [("67890", "[Meiva #405] answer")]
 
         await scenario()
 
@@ -299,7 +299,7 @@ async def test_commands_lists_everything() -> None:
         assert "/switch" not in text
 
 
-async def test_commands_lists_ava_slash_catalog_as_buttons() -> None:
+async def test_commands_lists_meiva_slash_catalog_as_buttons() -> None:
     async with owned_tasks() as _owned_tasks:
         gateway = FakeGateway()
         gateway.commands = [
@@ -309,7 +309,7 @@ async def test_commands_lists_ava_slash_catalog_as_buttons() -> None:
                 "instruction_hint": "<src>",
             },
             {
-                "name": "ava-fleet",
+                "name": "meiva-fleet",
                 "description": "Decompose a large goal into parallel workers",
                 "instruction_hint": "<goal>",
             },
@@ -319,7 +319,7 @@ async def test_commands_lists_ava_slash_catalog_as_buttons() -> None:
         out = await core._cmd_commands("telegram")
         assert isinstance(out, Reply)
         assert "/audio-transcribe" in out.text
-        assert "/ava-fleet" in out.text
+        assert "/meiva-fleet" in out.text
         assert copy.COMMANDS_HEADER in out.text
         assert copy.COMMANDS_INTRO.format(count=2) in out.text
         assert "—" not in out.text
@@ -328,7 +328,7 @@ async def test_commands_lists_ava_slash_catalog_as_buttons() -> None:
         assert "or me..." in out.text
         assert out.buttons is not None
         assert ("/audio-transcribe", "/audio-transcribe") in out.buttons
-        assert ("/ava-fleet", "/ava-fleet") in out.buttons
+        assert ("/meiva-fleet", "/meiva-fleet") in out.buttons
 
 
 async def test_commands_plain_channel_keeps_text_only() -> None:
@@ -495,8 +495,8 @@ async def test_restore_subscriptions_skips_disabled_channels(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Any
 ) -> None:
     async with owned_tasks() as _owned_tasks:
-        monkeypatch.setenv("AVA_HOME", str(tmp_path))
-        gateway = FakeGateway(agents=[row(405, label="Ava \u8d1f\u8d23\u4eba")])
+        monkeypatch.setenv("MEIVA_HOME", str(tmp_path))
+        gateway = FakeGateway(agents=[row(405, label="Meiva \u8d1f\u8d23\u4eba")])
         core = create_test_core(gateway, im_disabled_adapters=(), tasks=_owned_tasks)
         for channel, chat_id in (("weixin", "wx123"), ("telegram", "12345")):
             state = ChatState(channel, chat_id)
@@ -532,7 +532,7 @@ async def test_push_snapshot_watermark_compares_numerically() -> None:
             ]
             await core._push_snapshot(("telegram", "12345"), state, {})
             await core.outbound_worker.run_once()
-            assert adapter.sent == [("12345", "[Ava #405] ten")]
+            assert adapter.sent == [("12345", "[Meiva #405] ten")]
             assert core._last_pushed[("telegram", "12345", 405)] == PushWatermark(None, "10.1")
             gateway.timeline = [
                 dict(item, source_message_id="stored-nine", source_block_idx=0)
@@ -540,7 +540,7 @@ async def test_push_snapshot_watermark_compares_numerically() -> None:
             ]
             await core._push_snapshot(("telegram", "12345"), state, {})
             await core.outbound_worker.run_once()
-            assert adapter.sent == [("12345", "[Ava #405] ten")]
+            assert adapter.sent == [("12345", "[Meiva #405] ten")]
 
         await scenario()
 
@@ -567,7 +567,7 @@ async def test_handle_inbound_reports_unconfirmed_delivery_when_gateway_stays_do
     monkeypatch: pytest.MonkeyPatch, tmp_path: Any
 ) -> None:
     async with owned_tasks() as _owned_tasks:
-        monkeypatch.setenv("AVA_HOME", str(tmp_path))
+        monkeypatch.setenv("MEIVA_HOME", str(tmp_path))
         gateway = FakeGateway(send_failures=10)
         core = create_test_core(gateway, tasks=_owned_tasks)
         adapter = FakeTypingAdapter()

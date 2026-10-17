@@ -1,4 +1,4 @@
-// ava:ref ui/web/src/docs/frontend-components/markdown-safe-content.ava.okf.md#markdown-math
+// meiva:ref ui/web/src/docs/frontend-components/markdown-safe-content.meiva.okf.md#markdown-math
 import type { PluggableList } from "unified";
 
 export interface MarkdownMath {

@@ -19,7 +19,7 @@ from agent.graph.claim.node import claim_node
 from agent.impersonation_handoff import flush_checkpoint
 from agent.startup import wrap_saver_writes_with_nstep_interval
 from agent.state import AgentState, checkpoint_msgpack_allowlist
-from base.agents.context import AvaContext
+from base.agents.context import MeivaContext
 from base.agents.history.delta_read_compat import wrap_saver_reads_with_delta_reconstruction
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
@@ -61,7 +61,7 @@ async def make_host(
     catalog: ModelCatalog,
     database_gate: ProcessDbGate,
 ) -> tuple[AgentHost, AsyncPostgresSaver, RunnableConfig]:
-    async def model(state: AgentState, runtime: Runtime[AvaContext]) -> Command[Any]:
+    async def model(state: AgentState, runtime: Runtime[MeivaContext]) -> Command[Any]:
         work = runtime.context.native_work
         ordinary.append(None if work is None else work.work_id)
         return Command(
@@ -74,7 +74,7 @@ async def make_host(
     )
     wrap_saver_writes_with_nstep_interval(saver, interval)
     wrap_saver_reads_with_delta_reconstruction(saver)
-    builder: Any = StateGraph(AgentState, context_schema=AvaContext)
+    builder: Any = StateGraph(AgentState, context_schema=MeivaContext)
     builder.add_node(
         "claim", claim_node, destinations=("before_llm", "init_context", "claim", "__end__")
     )

@@ -65,7 +65,7 @@ def _sync_fixture(
     plugin_checked_at: str = "2026-09-01",
 ) -> tuple[Path, Path, Path]:
     repo_root = tmp_path / "repo"
-    provider_path = repo_root / "ava_builtins/plugins/lm_fixture/provider.py"
+    provider_path = repo_root / "meiva_builtins/plugins/lm_fixture/provider.py"
     provider_path.parent.mkdir(parents=True)
     provider_path.write_text(
         _PLUGIN_SOURCE.replace("2026-09-01", plugin_checked_at),

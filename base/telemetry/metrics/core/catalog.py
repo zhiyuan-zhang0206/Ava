@@ -9,22 +9,22 @@ Two-tier metric architecture since 2026-08-06 (user ruling):
   as plugin metrics but is not admitted through a plugin entry: core metrics are
   repo code, not plugin code.
 - **Plugin metrics** (``base/telemetry/metrics/plugin_metrics.py``): metrics contributed by
-  first-party business plugins (ava_fleet / ava_memory / ava_syntax_fix) or
+  first-party business plugins (meiva_fleet / meiva_memory / meiva_syntax_fix) or
   external plugins, declared under their plugin name (`PluginContributions.metrics`).
 
 The dashboards (``deploy/lgtm/config/grafana/provisioning/dashboards/
-ava-ops-main.json``) carry the **core section first** — row header ``core``,
+meiva-ops-main.json``) carry the **core section first** — row header ``core``,
 then one row per plugin. The inspector surface (``gateway/routers/
 _plugin_metrics.py``) builds both registries in process — task #180 PR D
-replaced the generator's state snapshot ($AVA_HOME/state/plugin_metrics.json),
+replaced the generator's state snapshot ($MEIVA_HOME/state/plugin_metrics.json),
 which froze when the generator did not survive the archive->public port. The
 dashboard render is being rebuilt (task #3697): ``base.telemetry.metrics.grafana_dashboard``
-renders the registries into the dashboard JSON, previewed by ``ava lgtm
+renders the registries into the dashboard JSON, previewed by ``meiva lgtm
 render`` and wired into converge by slice S3.
 
 Core definitions live in ``base/telemetry/metrics/core/panels.py`` (the migrated
 ops-dashboard panels), ``base/telemetry/metrics/core/observability.py`` (the migrated
-ava_observability pack), ``base/telemetry/metrics/core/events.py`` (the event-stream
+meiva_observability pack), ``base/telemetry/metrics/core/events.py`` (the event-stream
 panels: the Events trio and the gateway sample count) and
 ``base/telemetry/metrics/core/host.py`` (the "Host & data plane" section), plus the
 smaller modules beside them (``cost`` / ``frontend`` / ``dismissed`` / ``fleet``

@@ -11,7 +11,7 @@ from base.config.base import EnvSettings
 class AgentEvalSettings(EnvSettings):
     eval_isolation: bool = Field(
         default=False,
-        alias="AVA_EVAL_ISOLATION",
+        alias="MEIVA_EVAL_ISOLATION",
         description=(
             "Isolate an evaluation agent from shared memory, network-facing SDK "
             "capabilities, and peer-result reads."
@@ -28,7 +28,7 @@ class AgentEvalSettings(EnvSettings):
 
     eval_network_allowlist: Annotated[list[str], NoDecode] = Field(
         default_factory=list,
-        alias="AVA_EVAL_NETWORK_ALLOWLIST",
+        alias="MEIVA_EVAL_NETWORK_ALLOWLIST",
         description=(
             "Comma-separated network-facing SDK capabilities an isolated evaluation "
             "agent may use: `web` and `understand`."
@@ -45,7 +45,7 @@ class AgentEvalSettings(EnvSettings):
 
     security_scan_enabled: bool = Field(
         default=True,
-        alias="AVA_SECURITY_SCAN_ENABLED",
+        alias="MEIVA_SECURITY_SCAN_ENABLED",
         description=(
             "Enable prompt-injection security scan on inbound chat. "
             "Set false for benchmark / hermetic environments where all input is trusted."

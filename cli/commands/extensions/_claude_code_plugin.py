@@ -1,10 +1,10 @@
-"""Materialize a Claude Code plugin into Ava's models.
+"""Materialize a Claude Code plugin into Meiva's models.
 
 A Claude Code plugin ships a `.claude-plugin/plugin.json` manifest plus any of:
 `skills/<name>/SKILL.md` (reusable instruction packs), `agents/*.md` (specialist
 sub-agents), `commands/*.md` (slash-command prompt templates), and a root
 `.mcp.json` (bundled MCP servers, declared exactly like Claude Code's). It maps
-onto Ava as a single installed plugin under `<dest_root>/<name>/` that contributes:
+onto Meiva as a single installed plugin under `<dest_root>/<name>/` that contributes:
 
 - its **shipped skills** (when the plugin ships `skills/`): each skill directory
   is copied verbatim to `<dest_root>/<name>/skills/<skill>/`, where the skill
@@ -16,14 +16,14 @@ onto Ava as a single installed plugin under `<dest_root>/<name>/` that contribut
   to `<dest_root>/<name>/skills/<name>/`.
 - its **MCP servers** (when the plugin ships a root `.mcp.json`): the file is
   copied to `<dest_root>/<name>/.mcp.json`, where the shared MCP config loader
-  (`ava/mcps/config.py`, scanning `~/.ava/plugins/*/.mcp.json`) merges it in —
+  (`meiva/mcps/config.py`, scanning `~/.meiva/plugins/*/.mcp.json`) merges it in —
   so the bundled servers connect on next use, no extra wiring.
 - its **commands** (when the plugin ships `commands/`): the directory is copied
   to `<dest_root>/<name>/commands/`, where `base/packages/composer_commands.py:discover_commands`
-  (scanning `~/.ava/plugins/*/commands/`) surfaces them as composer `/`-commands —
+  (scanning `~/.meiva/plugins/*/commands/`) surfaces them as composer `/`-commands —
   no extra wiring.
 
-This is the deterministic format adapter behind `ava plugins install` for
+This is the deterministic format adapter behind `meiva plugins install` for
 Claude Code plugins. A plugin that bundles none of the above (e.g. hooks-only)
 is refused until that piece lands.
 """
@@ -41,7 +41,7 @@ class Materialized:
     """What a `materialize` call produced, for an honest install message.
 
     A Claude Code plugin is a container; this records what it actually
-    contributed to Ava. `name` is the plugin (folder) name. `shipped_skills`
+    contributed to Meiva. `name` is the plugin (folder) name. `shipped_skills`
     lists skills copied verbatim from the plugin's `skills/` (empty when none).
     `skill_name` is the generated orchestrator skill, or None when the plugin
     shipped no `agents/`. `agents` lists the specialist names folded into that
@@ -164,7 +164,7 @@ one autonomous sub-agent per review dimension and aggregate their reports.
 - **Sub-agents are autonomous** — each has its own shell, filesystem, and Python
   namespace. Hand it the task and the code location; let it run `git diff`, read
   files, and run tests itself. Don't pour the diff into the prompt.
-- **Sub-agents you spawn can only message you** — spawn via `ava.agents.spawn`,
+- **Sub-agents you spawn can only message you** — spawn via `meiva.agents.spawn`,
   give them your agent_id so they can report back, then idle and wait.
 
 ## Review dimensions
@@ -182,10 +182,10 @@ reference opens with its own when-to-invoke / scope. Available dimensions:
    ones matching the changed files. When unsure, run code-reviewer. Run any
    simplification / polish dimension **last**, only when no critical issues
    remain and the change is non-trivial (> ~50 lines).
-3. **Dispatch** — for each enabled dimension: `ava.files.read()` its reference,
-   then `ava.agents.spawn()` a sub-agent whose prompt carries the reference body
+3. **Dispatch** — for each enabled dimension: `meiva.files.read()` its reference,
+   then `meiva.agents.spawn()` a sub-agent whose prompt carries the reference body
    + the worktree path + base branch + an instruction to report back via
-   `ava.agents.send_message(<your agent_id>, report)`.
+   `meiva.agents.send_message(<your agent_id>, report)`.
    You can dispatch several in parallel.
 4. **Aggregate** — once all report, combine into:
 
@@ -219,7 +219,7 @@ def _mcp_server_names(mcp_path: Path) -> list[str]:
     Raises:
         ClaudeCodePluginError: the file is not valid JSON or its `mcpServers` is not an object.
     """
-    from ava.mcps.config import MCPError, read_servers
+    from meiva.mcps.config import MCPError, read_servers
 
     try:
         return sorted(read_servers(mcp_path))
@@ -352,13 +352,13 @@ def materialize(pkg_dir: Path, dest_root: Path) -> Materialized:
     dest = dest_root / name
     if dest.exists():
         raise ClaudeCodePluginError(
-            f"'{name}' already installed at {dest}; use `ava plugins upgrade {name}`."
+            f"'{name}' already installed at {dest}; use `meiva plugins upgrade {name}`."
         )
     # Atomic landing: everything is written into a staging sibling first, then
     # renamed into place in a single rename(2). A crash or exception mid-copy
     # must never leave a half-materialized plugin behind — the 2026-08-28
-    # ava_ledger incident (plugin.py present, _ledger.py missing) took
-    # `import ava` down cluster-wide. Staging lives inside dest_root so the
+    # meiva_ledger incident (plugin.py present, _ledger.py missing) took
+    # `import meiva` down cluster-wide. Staging lives inside dest_root so the
     # rename stays on one filesystem; any staging left by a hard kill is
     # swept here before the new pass starts.
     staging = dest_root / f".{name}.staging"

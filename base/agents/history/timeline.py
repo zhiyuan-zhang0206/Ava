@@ -15,11 +15,11 @@ from base.agents.history.timeline_inputs import TimelineReadInputs
 from base.agents.history.timeline_item import TimelineItem as TimelineItem
 from base.agents.impersonation.history import ImpersonationMetadata
 from base.agents.messages.kwargs import (
-    AvaMessageKwargs,
-    AvaMsgType,
+    MeivaMessageKwargs,
+    MeivaMsgType,
     NoteTag,
     kwargs_read_time,
-    read_ava_kwargs,
+    read_meiva_kwargs,
 )
 from base.agents.sdk.telemetry import SdkCall, sdk_calls_by_tool_call_id
 from base.lm.content import message_addl_kwargs, message_content
@@ -31,7 +31,7 @@ __all__ = [
 ]
 
 
-# ava:ref base/agents/history/docs/timeline/note-timestamp-policy.ava.okf.md#note-timestamp-policy
+# meiva:ref base/agents/history/docs/timeline/note-timestamp-policy.meiva.okf.md#note-timestamp-policy
 _NO_TIMESTAMP_NOTE_TAGS = frozenset(
     {
         NoteTag.MEMORY,
@@ -73,7 +73,7 @@ def _inbound_text(content: str | list[str | dict[str, Any]]) -> str:
     return str(content)
 
 
-# ava:ref base/agents/history/docs/timeline/timeline.ava.okf.md#timeline-window-contract
+# meiva:ref base/agents/history/docs/timeline/timeline.meiva.okf.md#timeline-window-contract
 def build_timeline_items(
     messages: Sequence[BaseMessage],
     *,
@@ -94,8 +94,8 @@ def build_timeline_items(
             )
             continue
         raw_content = message_content(msg)
-        kwargs = read_ava_kwargs(msg)
-        if kwargs.get("ava_msg_type") == AvaMsgType.INBOUND:
+        kwargs = read_meiva_kwargs(msg)
+        if kwargs.get("meiva_msg_type") == MeivaMsgType.INBOUND:
             items.append(_inbound_item(msg_idx, raw_content, kwargs))
         else:
             items.extend(_message_items(msg, msg_idx, kwargs, sdk_by_id, inputs))
@@ -112,11 +112,11 @@ def _add_source_coordinates(items: list[TimelineItem], messages: Sequence[BaseMe
     for item in items:
         msg_idx, block_idx = (int(part) for part in item.item_id.split("."))
         message = messages[msg_idx]
-        kwargs = read_ava_kwargs(message)
-        if message.id and not kwargs.get("ava_ephemeral_message_id"):
+        kwargs = read_meiva_kwargs(message)
+        if message.id and not kwargs.get("meiva_ephemeral_message_id"):
             item.source_message_id = message.id
             item.source_block_idx = block_idx
-        embedded_id = kwargs.get("ava_inbound_id")
+        embedded_id = kwargs.get("meiva_inbound_id")
         if isinstance(embedded_id, int) and not isinstance(embedded_id, bool) and embedded_id > 0:
             item.source_inbound_id = embedded_id
             item.source_block_idx = block_idx
@@ -125,42 +125,42 @@ def _add_source_coordinates(items: list[TimelineItem], messages: Sequence[BaseMe
 def _message_items(
     msg: BaseMessage,
     msg_idx: int,
-    kwargs: AvaMessageKwargs,
+    kwargs: MeivaMessageKwargs,
     sdk_by_id: dict[str, Any],
     inputs: TimelineReadInputs,
 ) -> list[TimelineItem]:
     raw_content = message_content(msg)
     content = raw_content if isinstance(raw_content, str) else str(raw_content)
-    ava_type = kwargs.get("ava_msg_type")
+    meiva_type = kwargs.get("meiva_msg_type")
     created_at = kwargs_read_time(kwargs)
-    if ava_type == AvaMsgType.ATTACH:
+    if meiva_type == MeivaMsgType.ATTACH:
         return [_attach_item(msg_idx, raw_content, created_at)]
-    if ava_type == AvaMsgType.EXEC_OUTPUT:
-        return [_exec_output_item(msg_idx, content, created_at, kwargs.get("ava_exec_ms"))]
-    if ava_type == AvaMsgType.SYSTEM_NOTE:
-        item = _system_note_item(msg_idx, content, kwargs.get("ava_note_tag"), created_at)
-        if "ava_impersonation" in kwargs:
-            item.impersonation = ImpersonationMetadata.model_validate(kwargs["ava_impersonation"])
+    if meiva_type == MeivaMsgType.EXEC_OUTPUT:
+        return [_exec_output_item(msg_idx, content, created_at, kwargs.get("meiva_exec_ms"))]
+    if meiva_type == MeivaMsgType.SYSTEM_NOTE:
+        item = _system_note_item(msg_idx, content, kwargs.get("meiva_note_tag"), created_at)
+        if "meiva_impersonation" in kwargs:
+            item.impersonation = ImpersonationMetadata.model_validate(kwargs["meiva_impersonation"])
         return [item]
-    if ava_type == AvaMsgType.COMPACT_SUMMARY:
+    if meiva_type == MeivaMsgType.COMPACT_SUMMARY:
         return [
             _compact_item(
                 msg_idx,
                 "inbound_compact_summary",
                 content,
                 created_at,
-                kwargs.get("ava_compact_id"),
+                kwargs.get("meiva_compact_id"),
                 inputs=inputs,
             )
         ]
-    if ava_type == AvaMsgType.COMPACT_REQUEST:
+    if meiva_type == MeivaMsgType.COMPACT_REQUEST:
         return [
             _compact_item(
                 msg_idx,
                 "inbound_compact_request",
                 content,
                 created_at,
-                kwargs.get("ava_compact_id"),
+                kwargs.get("meiva_compact_id"),
                 inputs=inputs,
             )
         ]
@@ -185,18 +185,20 @@ def _system_prompt_item(msg_idx: int, content: str) -> TimelineItem:
 def _inbound_item(
     msg_idx: int,
     raw_content: str | list[str | dict[str, Any]],
-    kwargs: AvaMessageKwargs,
+    kwargs: MeivaMessageKwargs,
 ) -> TimelineItem:
     embedded_id = None
-    if "ava_inbound_id" in kwargs:
-        embedded_id = kwargs["ava_inbound_id"]
+    if "meiva_inbound_id" in kwargs:
+        embedded_id = kwargs["meiva_inbound_id"]
         if type(embedded_id) is not int or embedded_id <= 0:
-            raise ValueError(f"inbound ava_inbound_id must be a positive int, got {embedded_id!r}")
-    images = kwargs.get("ava_image_urls")
+            raise ValueError(
+                f"inbound meiva_inbound_id must be a positive int, got {embedded_id!r}"
+            )
+    images = kwargs.get("meiva_image_urls")
     return TimelineItem(
         item_id=f"{msg_idx}.0",
         kind="inbound_chat",
-        source=kwargs.get("ava_source"),
+        source=kwargs.get("meiva_source"),
         payload=_inbound_text(raw_content),
         created_at=kwargs_read_time(kwargs),
         inbound_id=embedded_id,
@@ -222,7 +224,7 @@ def _attach_images(content: str | list[str | dict[str, Any]]) -> list[str] | Non
     return urls or None
 
 
-# ava:ref base/agents/history/docs/timeline/timeline.ava.okf.md#attach-caption-pairing
+# meiva:ref base/agents/history/docs/timeline/timeline.meiva.okf.md#attach-caption-pairing
 def _attach_image_captions(content: str | list[str | dict[str, Any]]) -> list[str] | None:
     from base.lm.reasoning import content_blocks
 
@@ -314,7 +316,7 @@ def _compact_item(
     )
 
 
-# ava:ref base/agents/history/docs/timeline/timeline.ava.okf.md#human-fallback-fail-loud
+# meiva:ref base/agents/history/docs/timeline/timeline.meiva.okf.md#human-fallback-fail-loud
 def _fallback_human_item(msg_idx: int, content: str, created_at: str | None) -> TimelineItem:
     return TimelineItem(
         item_id=f"{msg_idx}.0",
@@ -326,7 +328,7 @@ def _fallback_human_item(msg_idx: int, content: str, created_at: str | None) -> 
     )
 
 
-# ava:ref base/agents/history/docs/timeline/timeline.ava.okf.md#timeline-window-unit
+# meiva:ref base/agents/history/docs/timeline/timeline.meiva.okf.md#timeline-window-unit
 def timeline_default_limit(*, limit_reader: Callable[[], int]) -> int:
     return limit_reader()
 
@@ -365,10 +367,10 @@ def ai_message_items(
     sdk_by_id: Mapping[str, list[SdkCall]],
 ) -> list[TimelineItem]:
     out: list[TimelineItem] = []
-    kwargs = read_ava_kwargs(msg)
+    kwargs = read_meiva_kwargs(msg)
     created_at = kwargs_read_time(kwargs)
-    reasoning_ms_by_block = kwargs.get("ava_reasoning_ms_by_block")
-    code_ms_by_block = kwargs.get("ava_code_ms_by_block")
+    reasoning_ms_by_block = kwargs.get("meiva_reasoning_ms_by_block")
+    code_ms_by_block = kwargs.get("meiva_code_ms_by_block")
     from base.lm.reasoning import extract_reasoning_tokens, to_canonical_reasoning
 
     reasoning_tokens = (
@@ -417,7 +419,7 @@ def _chat_item(msg_idx: int, block_idx: int, payload: str, created_at: str | Non
     )
 
 
-# ava:ref base/agents/history/docs/timeline/timeline.ava.okf.md#reasoning-timing
+# meiva:ref base/agents/history/docs/timeline/timeline.meiva.okf.md#reasoning-timing
 def _content_block_item(
     block: str | dict[str, Any],
     pos: int,
@@ -459,7 +461,7 @@ def _content_block_item(
     return _chat_item(msg_idx, block_idx, t, created_at), block_idx, reasoning_attached
 
 
-# ava:ref base/agents/history/docs/timeline/timeline.ava.okf.md#tool-call-block-offset
+# meiva:ref base/agents/history/docs/timeline/timeline.meiva.okf.md#tool-call-block-offset
 def _tool_call_items(
     msg: AIMessage,
     msg_idx: int,

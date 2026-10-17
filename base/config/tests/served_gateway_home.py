@@ -24,8 +24,8 @@ def served_gateway_home(
 
     home = config_authority.env_path.parent
     config_authority.env_path.write_text(
-        f"AVA_DB_URL={config_authority.service_field_value('db_url')}\n"
-        f"AVA_REDIS_URL={config_authority.service_field_value('redis_url')}\n"
+        f"MEIVA_DB_URL={config_authority.service_field_value('db_url')}\n"
+        f"MEIVA_REDIS_URL={config_authority.service_field_value('redis_url')}\n"
     )
-    monkeypatch.setattr(paths, "ava_home", lambda: home)
+    monkeypatch.setattr(paths, "meiva_home", lambda: home)
     return seed_write_generation(home)

@@ -12,7 +12,7 @@ from agent.graph.hooks.compact import (
 from agent.hooks import Hook, make_hook_runner
 from agent.messages import inbound_message
 from agent.state import AgentState, CompactState
-from base.agents.context import AvaContext
+from base.agents.context import MeivaContext
 from base.config.tests.configuration import defaults
 from base.host.env.agent_slices import AgentSlices
 from base.lm.catalog import ModelCatalog
@@ -22,9 +22,9 @@ from base.packages.plugins.extensions import EMPTY, ExtensionRegistry, PluginCon
 
 def _runtime(
     extensions: ExtensionRegistry = EMPTY, *, hard_ceiling: int = 0
-) -> Runtime[AvaContext]:
+) -> Runtime[MeivaContext]:
     return Runtime(
-        context=AvaContext(
+        context=MeivaContext(
             agent=AgentSlices.resolve(
                 {
                     "llm_model": "deepseek-flash",
@@ -133,7 +133,7 @@ async def test_soft_reminder_composes_with_another_message_writer(compact_first:
     assert command.goto == "llm"
     assert len(update["messages"]) == 2
     assert update["compact"].reminder_shown
-    assert any("ava.self.compact(summary)" in m.content for m in update["messages"])
+    assert any("meiva.self.compact(summary)" in m.content for m in update["messages"])
 
 
 @pytest.mark.parametrize(
@@ -167,7 +167,7 @@ async def test_committed_summary_gets_an_ordinary_reply_before_preparation_rearm
     state = AgentState(
         messages=[
             SystemMessage(content="standing head"),
-            HumanMessage(content="summary " * 200, additional_kwargs={"ava_msg_type": kind}),
+            HumanMessage(content="summary " * 200, additional_kwargs={"meiva_msg_type": kind}),
             HumanMessage(content="new inbound"),
         ]
     )

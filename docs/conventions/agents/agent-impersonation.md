@@ -1,7 +1,7 @@
 # External agent impersonation
 
 A trusted Codex, Claude Code, Antigravity or DeepSeek Harness (dsh) process on
-an Ava agent's machine can take over its identity. Preparation drains native
+an Meiva agent's machine can take over its identity. Preparation drains native
 work and saves its checkpoint before activation. It does not ask the native
 model to approve. TTL is an explicit
 recovery deadline, for renewal and the initial takeover alike — estimate it
@@ -12,12 +12,12 @@ span if the external side dies.
 
 ## Start a named session
 
-Run the commands with a bare `ava`: it acts on the cluster `AVA_HOME` names,
-else `~/.ava`. A checkout's own `.venv/bin/ava` acts on that checkout's
+Run the commands with a bare `meiva`: it acts on the cluster `MEIVA_HOME` names,
+else `~/.meiva`. A checkout's own `.venv/bin/meiva` acts on that checkout's
 cluster.
 
 ```bash
-ava impersonate request --agent 405 --name 'Fix login' --as 'Codex: login helper' \
+meiva impersonate request --agent 405 --name 'Fix login' --as 'Codex: login helper' \
   --provider codex --thread-id CODEX_SESSION_UUID --ttl 1800 --batch-window 0 \
   --reason 'Implement the login fix and return verification results'
 ```
@@ -33,30 +33,30 @@ from the declaration. `--provider` selects `codex`, `claude`, `dsh` or `antigrav
 relay transport.
 Codex's own thread UUID (`CODEX_THREAD_ID`) and Antigravity's cascade UUID
 (`ANTIGRAVITY_CONVERSATION_ID`, used automatically when `--thread-id` is omitted)
-are provider addresses, not the Ava session handle.
+are provider addresses, not the Meiva session handle.
 For Codex, preserve `CODEX_HOME` and optionally supply `--codex-remote` so the
 native relay reaches the owning server. For Antigravity, the request verifies
 that the local `language_server_macos_*` ConnectRPC endpoint is reachable and the
 accepting runtime starts the relay at activation. For Claude, start the `Monitor`
 watch immediately after the request, armed with `timeout_ms: 1800000` and
 re-armed at each expiry notice.
-A dsh takeover runs from a DeepSeek Harness session that loaded the Ava relay
+A dsh takeover runs from a DeepSeek Harness session that loaded the Meiva relay
 plugin: the request writes the relay credential to the stub the plugin exports
-(`DSH_AVA_RELAY_STUB`) instead of printing it, fails before creating a lease
+(`DSH_MEIVA_RELAY_STUB`) instead of printing it, fails before creating a lease
 when the plugin is absent, and the plugin starts the relay by itself.
 See [host setup](agent-impersonation-hosts.md).
 
 The response returns a per-agent integer `id` / `session_id`, starting at zero.
 There is no controller credential: control commands are authorized by the
 `(agent_id, session_id)` lease handle on the hosting machine. The claude and dsh
-relays use the separate scoped `AVA_IMPERSONATION_RELAY_TOKEN`; that credential
+relays use the separate scoped `MEIVA_IMPERSONATION_RELAY_TOKEN`; that credential
 belongs to the relay, never to the controller. Status/list responses omit
 credentials.
 
 ```bash
-ava impersonate status 0 --agent 405
-ava impersonate list --agent 405 --limit 20
-ava impersonate list --agent 405 --before 20 --limit 20
+meiva impersonate status 0 --agent 405
+meiva impersonate list --agent 405 --limit 20
+meiva impersonate list --agent 405 --before 20 --limit 20
 ```
 
 Wait for `active`. `preparing` means native work or relay readiness is still
@@ -67,39 +67,39 @@ get reused. Names may repeat; the pair `(agent_id, session_id)` identifies work.
 ## Read context and act
 
 ```bash
-ava agents timeline 405 --limit 100 --before 23.0
-ava impersonate exec 0 --agent 405 --file operation.py
+meiva agents timeline 405 --limit 100 --before 23.0
+meiva impersonate exec 0 --agent 405 --file operation.py
 ```
 
 These reads authenticate with the local machine's cluster bearer and work
 directly from an admitted bare executor on a gateway or pure runner. On a pure
 runner, the lite CLI reads its installed API capability when no token is
-inherited; an explicit `AVA_API_TOKEN` wins. A launcher descendant missing its
+inherited; an explicit `MEIVA_API_TOKEN` wins. A launcher descendant missing its
 delivered token and a runner without an admitted local capability still have
 no lite fallback. If an authorized lease attachment carries a bearer, it can
-read the same window with `ava impersonate exec 0 --agent 405`, then
-`ava.context.gateway.get("/api/agents/405/timeline")` with `params` as in the
+read the same window with `meiva impersonate exec 0 --agent 405`, then
+`meiva.context.gateway.get("/api/agents/405/timeline")` with `params` as in the
 CLI form (`{"limit": 100, "before": 23.0}`).
 
 The exec form runs local Python in a short attachment. Direct Python uses:
 
 ```python
-import ava
+import meiva
 
-with ava.impersonation.attach(0, agent_id=405):
-    ava.agents.send_message(406, "Please review the login change")
+with meiva.impersonation.attach(0, agent_id=405):
+    meiva.agents.send_message(406, "Please review the login change")
 ```
 
-Replies to human requests delivered through Ava never go through the attachment — send them with the CLI (`ava impersonate say`, see *Talk to the human*; peer messages have their own CLI form, see *Message another agent as the borrowed identity*).
+Replies to human requests delivered through Meiva never go through the attachment — send them with the CLI (`meiva impersonate say`, see *Talk to the human*; peer messages have their own CLI form, see *Message another agent as the borrowed identity*).
 
-Direct Python is the normal SDK path; `ava impersonate exec` is an optional
+Direct Python is the normal SDK path; `meiva impersonate exec` is an optional
 wrapper. Use the cluster checkout's `.venv/bin/python` inside the controller's
-own process tree, preserving its `AVA_HOME`. No long-lived interpreter is needed. Before work, run the impersonator skill's
+own process tree, preserving its `MEIVA_HOME`. No long-lived interpreter is needed. Before work, run the impersonator skill's
 bundled `scripts/read_instructions.py`
 with the session id and `--agent`. Read its output in full: the system prompt and
 configured preloaded skill notes saved in the current native context window,
 not a newly rendered prompt. Restore relevant memory, tasks and workspace
-context separately; follow the [impersonator guide](../../../ava_builtins/skills/platform/impersonator-guide/SKILL.md)
+context separately; follow the [impersonator guide](../../../meiva_builtins/skills/platform/impersonator-guide/SKILL.md)
 for translating native execution instructions to your host.
 
 An attachment binds the borrowed identity and saved configuration. SDK calls,
@@ -107,21 +107,21 @@ plugin state accesses and flush validate the active lease. Plugin changes are
 journaled; the native graph applies them before resuming. Direct Python object
 reads and native shell/editor actions are outside this cooperative guard.
 Concurrent attachments fail on conflicting state versions. External deltas cannot
-clear all message history. `ava.self.restart`, `terminate` and `compact` remain
+clear all message history. `meiva.self.restart`, `terminate` and `compact` remain
 native-loop operations; include such needs in the release summary. Durable
-`ava.agents.restart` / `terminate` requests still reach the paused dispatcher.
+`meiva.agents.restart` / `terminate` requests still reach the paused dispatcher.
 
 ## Message another agent as the borrowed identity
 
-Sending to another Ava agent as the played identity has a CLI form that runs
+Sending to another Meiva agent as the played identity has a CLI form that runs
 from the controller session's own process tree, like every control command:
 
 ```bash
-ava impersonate send 0 --agent 405 --to 406 --content 'Please review the login change'
+meiva impersonate send 0 --agent 405 --to 406 --content 'Please review the login change'
 ```
 
 The delivered source is `agent:405` — the borrowed identity, the same source the
-attachment stamps for `ava.agents.send_message` above. `--content -` reads the
+attachment stamps for `meiva.agents.send_message` above. `--content -` reads the
 message from stdin. Sending under an identity that is not one's own is exactly
 what the lease attests — there is no declared form (task #4102).
 
@@ -129,24 +129,24 @@ what the lease attests — there is no declared form (task #4102).
 
 Reply where each request entered. Direct human messages in the external host
 conversation, including a manually opened Codex in tmux, get plain text there.
-Human requests from Ava get progress, questions and results through `say` below.
-Ava relay envelopes carry agent, lease and message ids plus each item's source;
-the host message role alone cannot distinguish Ava delivery from direct input.
+Human requests from Meiva get progress, questions and results through `say` below.
+Meiva relay envelopes carry agent, lease and message ids plus each item's source;
+the host message role alone cannot distinguish Meiva delivery from direct input.
 Preserve the route for each request when messages interleave. Peer messages use
 the borrowed peer channel above. Do not duplicate replies across entries unless
 requested. Before investigating a human request, send a brief substantive reply
 at its entry point; an immediate answer needs no separate acknowledgment.
-Relay ACK and the final Ava release summary remain separate requirements.
+Relay ACK and the final Meiva release summary remain separate requirements.
 
 ```bash
-ava impersonate say 0 --agent 405 --key progress-1 'I found the cause.'
-ava impersonate say 0 --agent 405 --key question-1 'Should the empty state offer sign-in?'
-ava impersonate say 0 --agent 405 --key final-1 --phase final 'The fix is verified.'
+meiva impersonate say 0 --agent 405 --key progress-1 'I found the cause.'
+meiva impersonate say 0 --agent 405 --key question-1 'Should the empty state offer sign-in?'
+meiva impersonate say 0 --agent 405 --key final-1 --phase final 'The fix is verified.'
 ```
 
-These replies appear immediately on the ordinary Ava timeline with executor and
+These replies appear immediately on the ordinary Meiva timeline with executor and
 session metadata. Reuse a key only for retrying identical content. A repeated key
-with different content fails. The logical sender is the Ava agent; incoming user
+with different content fails. The logical sender is the Meiva agent; incoming user
 messages retain their direction and sender. No frontend message table is split.
 
 ## Receive, ACK and renew
@@ -155,9 +155,9 @@ The relay pushes full inbound content, IDs and the exact ACK command. Acknowledg
 each batch as soon as it arrives — receipt, not completion — then process it:
 
 ```bash
-ava impersonate ack 0 123 124 --agent 405
-ava impersonate inbox 0 --agent 405 --limit 100
-ava impersonate renew 0 --agent 405 --ttl 1800
+meiva impersonate ack 0 123 124 --agent 405
+meiva impersonate inbox 0 --agent 405 --limit 100
+meiva impersonate renew 0 --agent 405 --ttl 1800
 ```
 
 Inbox reads do not ACK. Each lease snapshots the configured ACK window and
@@ -212,12 +212,12 @@ show as finished.
 Stop external work and close attachments before releasing:
 
 ```bash
-ava impersonate release 0 --agent 405 \
+meiva impersonate release 0 --agent 405 \
   --summary 'Implemented X and verified Y. Z remains open; resume from its failing case.'
 ```
 
 The summary must be written by the impersonator — naming any work left
-unfinished, acknowledged or not. Ava generates one JSON file at
+unfinished, acknowledged or not. Meiva generates one JSON file at
 `<agent workspace>/impersonation/0.json`, with session/process metadata, all
 incoming/outgoing messages, inbound ACK state, lifecycle history, original
 consumed SDK/API events and counts (calls, task changes, recipients, duration).

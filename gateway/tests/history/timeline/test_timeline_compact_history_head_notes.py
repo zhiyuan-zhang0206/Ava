@@ -94,9 +94,9 @@ class TestTimelineCompactHistoryHeadNotes(CompactHistoryCases):
         standing_note = HumanMessage(
             content="remember this",
             additional_kwargs={
-                "ava_msg_type": "system_note",
-                "ava_note_tag": "memory",
-                "ava_created_at": "2026-08-25T00:00:01+00:00",
+                "meiva_msg_type": "system_note",
+                "meiva_note_tag": "memory",
+                "meiva_created_at": "2026-08-25T00:00:01+00:00",
             },
         )
         self._put_checkpoint(
@@ -168,8 +168,8 @@ class TestTimelineCompactHistoryHeadNotes(CompactHistoryCases):
                     HumanMessage(
                         content="damaged inbound",
                         additional_kwargs={
-                            "ava_msg_type": "inbound",
-                            "ava_inbound_id": "not-an-integer",
+                            "meiva_msg_type": "inbound",
+                            "meiva_inbound_id": "not-an-integer",
                         },
                     )
                 ]
@@ -205,15 +205,15 @@ class TestTimelineCompactHistoryHeadNotes(CompactHistoryCases):
         from langchain_core.messages import HumanMessage, SystemMessage
 
         tid = create_agent(db_conn)
-        messages: list[BaseMessage] = [SystemMessage(content="You are Ava.")]
+        messages: list[BaseMessage] = [SystemMessage(content="You are Meiva.")]
         for tag in ("exec_timeout", "timezone", "memory", "agent_id", "agent_memory"):
             messages.append(
                 HumanMessage(
                     content=f"[system] {tag} note",
                     additional_kwargs={
-                        "ava_msg_type": "system_note",
-                        "ava_note_tag": tag,
-                        "ava_created_at": "2026-08-27T00:00:00+00:00",
+                        "meiva_msg_type": "system_note",
+                        "meiva_note_tag": tag,
+                        "meiva_created_at": "2026-08-27T00:00:00+00:00",
                     },
                 )
             )
@@ -222,9 +222,9 @@ class TestTimelineCompactHistoryHeadNotes(CompactHistoryCases):
                 HumanMessage(
                     content=f"user msg {i}",
                     additional_kwargs={
-                        "ava_msg_type": "inbound",
-                        "ava_created_at": f"2026-08-27T00:01:{i:02d}+00:00",
-                        "ava_source": "user",
+                        "meiva_msg_type": "inbound",
+                        "meiva_created_at": f"2026-08-27T00:01:{i:02d}+00:00",
+                        "meiva_source": "user",
                     },
                 )
             )
@@ -259,15 +259,15 @@ class TestTimelineCompactHistoryHeadNotes(CompactHistoryCases):
         from langchain_core.messages import HumanMessage, SystemMessage
 
         tid = create_agent(db_conn)
-        messages: list[BaseMessage] = [SystemMessage(content="You are Ava.")]
+        messages: list[BaseMessage] = [SystemMessage(content="You are Meiva.")]
         for tag in ("exec_timeout", "timezone", "memory", "agent_id", "agent_memory"):
             messages.append(
                 HumanMessage(
                     content=f"[system] {tag} note",
                     additional_kwargs={
-                        "ava_msg_type": "system_note",
-                        "ava_note_tag": tag,
-                        "ava_created_at": "2026-08-27T00:00:00+00:00",
+                        "meiva_msg_type": "system_note",
+                        "meiva_note_tag": tag,
+                        "meiva_created_at": "2026-08-27T00:00:00+00:00",
                     },
                 )
             )
@@ -276,9 +276,9 @@ class TestTimelineCompactHistoryHeadNotes(CompactHistoryCases):
                 HumanMessage(
                     content=f"user msg {i}",
                     additional_kwargs={
-                        "ava_msg_type": "inbound",
-                        "ava_created_at": f"2026-08-27T00:01:{i:02d}+00:00",
-                        "ava_source": "user",
+                        "meiva_msg_type": "inbound",
+                        "meiva_created_at": f"2026-08-27T00:01:{i:02d}+00:00",
+                        "meiva_source": "user",
                     },
                 )
             )
@@ -317,9 +317,9 @@ class TestTimelineCompactHistoryHeadNotes(CompactHistoryCases):
             HumanMessage(
                 content=f"[system] {tag} note",
                 additional_kwargs={
-                    "ava_msg_type": "system_note",
-                    "ava_note_tag": tag,
-                    "ava_created_at": "2026-08-27T00:00:00+00:00",
+                    "meiva_msg_type": "system_note",
+                    "meiva_note_tag": tag,
+                    "meiva_created_at": "2026-08-27T00:00:00+00:00",
                 },
             )
             for tag in ("exec_timeout", "timezone", "memory", "agent_id", "agent_memory")
@@ -368,9 +368,9 @@ class TestTimelineCompactHistoryHeadNotes(CompactHistoryCases):
             HumanMessage(
                 content=f"[system] {tag} note",
                 additional_kwargs={
-                    "ava_msg_type": "system_note",
-                    "ava_note_tag": tag,
-                    "ava_created_at": "2026-08-27T00:00:00+00:00",
+                    "meiva_msg_type": "system_note",
+                    "meiva_note_tag": tag,
+                    "meiva_created_at": "2026-08-27T00:00:00+00:00",
                 },
             )
             for tag in ("exec_timeout", "timezone", "memory", "agent_id", "agent_memory")

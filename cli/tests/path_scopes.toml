@@ -17,7 +17,7 @@
 "base.log.tests.log_records" = [
     "test_plugin_scaffold.py",
 ]
-"ava.tests.fixtures.sdk" = [
+"meiva.tests.fixtures.sdk" = [
     "bootstrap/test_checkout_guard.py",
     "bootstrap/test_dotenv_boot_launcher_context_cli.py",
     "bootstrap/test_init.py",
