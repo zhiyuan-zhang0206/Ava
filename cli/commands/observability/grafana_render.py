@@ -20,15 +20,21 @@ from typing import Any
 
 from base.agents.context.clients import DatabaseFactory
 from base.host.atomic_io import write_text_atomic
+from cli.commands.observability._lgtm_provisioning import (
+    RENDERED_DASHBOARD_REL,
+    record_rendered_hash,
+)
 
 __all__ = ["cmd_grafana_render"]
-
-_DASHBOARD_FILE = "meiva-ops-main.json"
 
 
 def provisioning_dashboard(home: Path) -> Path:
     """The native provisioning copy converge renders into (S3 target)."""
-    return home / "lgtm" / "native" / "config" / "provisioning" / "dashboards" / _DASHBOARD_FILE
+    return home / "lgtm" / "native" / "config" / RENDERED_DASHBOARD_REL
+
+
+def _hashes_path(home: Path) -> Path:
+    return home / "lgtm" / "native" / "config" / "provisioning-hashes.json"
 
 
 def atomic_write(path: Path, content: str) -> None:
@@ -108,6 +114,7 @@ def cmd_grafana_render(*, force: bool, repo_only: bool, database_factory: Databa
     current = target.read_text(encoding="utf-8") if target.is_file() else None
 
     if current == rendered:
+        record_rendered_hash(_hashes_path(meiva_home()), RENDERED_DASHBOARD_REL, _digest(rendered))
         print(
             f"{target.name}: in sync ({len(json.loads(rendered)['panels'])} entries, sha256 {_digest(rendered)[:12]})"
         )
@@ -122,6 +129,7 @@ def cmd_grafana_render(*, force: bool, repo_only: bool, database_factory: Databa
         return 1
 
     atomic_write(target, rendered)
+    record_rendered_hash(_hashes_path(meiva_home()), RENDERED_DASHBOARD_REL, _digest(rendered))
     print(
         f"{target}: written ({len(json.loads(rendered)['panels'])} entries, sha256 {_digest(rendered)[:12]})"
     )
