@@ -52,7 +52,7 @@ def _mark_current(home: Path) -> None:
 
 # The fixed document the S3 dashboard render is stubbed to: these converge
 # tests stay offline (no plugin imports, no registry database).
-_STUB_RENDER = '{"title": "Meiva Ops", "panels": []}\n'
+_STUB_RENDER = '{"uid": "meiva-ops-main", "title": "Meiva Ops", "panels": [{"id": 1}]}\n'
 
 
 @pytest.fixture(autouse=True)
@@ -602,9 +602,9 @@ def test_render_provisioning_dashboard_failure_keeps_the_previous_file(
         "warning",
         "converge",
     )
-    assert event.attributes == {"error": "render exploded"}
+    assert event.attributes == {"error": "render exploded", "outcome": "kept"}
     err = capsys.readouterr().err
-    assert "keeping the previous file" in err
+    assert "keeping the installed dashboard" in err
 
 
 def test_native_listener_ports_are_independent_of_external_query_urls(

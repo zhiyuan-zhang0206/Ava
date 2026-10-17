@@ -1,4 +1,4 @@
-# meiva:ref cli/commands/observability/docs/lgtm.meiva.okf.md#lgtm-native-download-deadline
+# meiva:ref cli/commands/observability/docs/lgtm/lgtm.meiva.okf.md#lgtm-native-download-deadline
 from __future__ import annotations
 
 import hashlib

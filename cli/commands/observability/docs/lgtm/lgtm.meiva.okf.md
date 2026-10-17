@@ -69,4 +69,8 @@ code = ["cli/commands/observability/lgtm_native.py:stream_download", "cli/comman
 tests = ["cli/commands/observability/tests/test_lgtm_download.py::test_a_dripping_mirror_cannot_outlive_the_asset_deadline", "cli/commands/observability/tests/test_lgtm_download.py::test_a_connection_that_never_sends_headers_ends_within_the_socket_guard", "cli/commands/observability/tests/test_lgtm_download.py::test_a_wait_never_runs_past_the_deadline", "cli/commands/observability/tests/test_lgtm_download.py::test_a_retry_wait_is_spent_from_the_same_budget"]
 ```
 
-Operator selection, label verification and replay are in [observability operations](operations.md); local rotation and retention are in [log maintenance](log-maintenance.md).
+Operator selection, label verification and replay are in [observability operations](../operations.md); local rotation and retention are in [log maintenance](../log-maintenance.md).
+
+A dashboard can disappear while every readiness probe still passes: the render fallback
+that keeps `meiva-ops` present, the sidecar it reconciles, and the four-layer check that
+refuses the absence are in [dashboard provisioning](dashboard-provisioning.meiva.okf.md).

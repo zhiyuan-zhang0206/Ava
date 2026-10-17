@@ -82,7 +82,7 @@ class DownloadProgress:
     received: int = 0
 
 
-# meiva:ref cli/commands/observability/docs/lgtm.meiva.okf.md#lgtm-native-download-deadline
+# meiva:ref cli/commands/observability/docs/lgtm/lgtm.meiva.okf.md#lgtm-native-download-deadline
 def stream_download(
     url: str,
     destination: Path,
@@ -153,7 +153,7 @@ def _download_policy(limits: DownloadLimits) -> Policy:
     )
 
 
-# meiva:ref cli/commands/observability/docs/lgtm.meiva.okf.md#lgtm-native-download-deadline
+# meiva:ref cli/commands/observability/docs/lgtm/lgtm.meiva.okf.md#lgtm-native-download-deadline
 def download_with_retry(
     url: str, archive: Path, *, open_url: UrlOpener, timers: Timers, limits: DownloadLimits
 ) -> None:

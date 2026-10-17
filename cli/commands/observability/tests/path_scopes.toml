@@ -16,6 +16,7 @@
     "test_lgtm_station.py",
     "test_lgtm_validation.py",
     "test_grafana_render_cmd.py",
+    "test_lgtm_dashboard_provisioning.py",
     "test_lgtm_native.py",
     "test_observatory_urls.py"
 ]

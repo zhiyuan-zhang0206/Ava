@@ -2,7 +2,7 @@
 
 Current delivery, retention and failure contracts belong to their component owners:
 
-- [Native LGTM lifecycle](lgtm.meiva.okf.md)
+- [Native LGTM lifecycle](lgtm/lgtm.meiva.okf.md)
   and [backend configuration](../../../../deploy/lgtm/README.md).
 - [OTLP producer export](../../../../base/telemetry/otlp/docs/telemetry-otlp/telemetry-otlp.meiva.okf.md),
   [delivery topology and recovery mirror](../../../../base/telemetry/otlp/docs/telemetry-otlp/trace-mirror.meiva.okf.md),
