@@ -108,7 +108,14 @@ __all__ = [
     "OtlpBackend",
     "endpoint_reachable",
     "observability_export_allowed",
+    "remaining_time",
 ]
+
+
+# meiva:ref base/telemetry/otlp/docs/telemetry-otlp/exit-flush.meiva.okf.md#two-wait-classes-one-deadline
+def remaining_time(deadline: float, now: float) -> float:
+    return max(0.0, deadline - now)
+
 
 # ── knobs ─────────────────────────────────────────────────────────────────────
 
@@ -428,7 +435,7 @@ class OtlpBackend:
             raise ValueError("OTLP timeout must be finite and non-negative")
         deadline = time.monotonic() + timeout
         worker, preparation_error = self._close_admission()
-        deferred_finished = self._deferral.stop(timeout=max(0.0, deadline - time.monotonic()))
+        deferred_finished = self._deferral.stop(timeout=remaining_time(deadline, time.monotonic()))
         if self._start_error is not None:
             raise self._start_error
         if worker is None:
@@ -440,7 +447,7 @@ class OtlpBackend:
             return DrainResult(
                 DrainStatus.COMPLETED if completed else DrainStatus.UNFINISHED, DrainPhase.STOP
             )
-        result = worker.stop(timeout=max(0.0, deadline - time.monotonic()))
+        result = worker.stop(timeout=remaining_time(deadline, time.monotonic()))
         if preparation_error is not None:
             raise preparation_error
         if not deferred_finished:
