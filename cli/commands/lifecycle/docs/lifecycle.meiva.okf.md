@@ -91,10 +91,16 @@ mutate the schema. A plane this home owns migrates over the postmaster's own
 owner socket — direct by construction, and it survives a transaction pooler
 because the applier holds a session advisory lock for its whole loop. A plane this
 home does not own is dialed ordinarily: an agent-runner only ever finds nothing
-pending (the mutation authority is checked exactly when something is), and a
-provider-managed plane has no local pooler in front of its URL. The checkpoint
-schema check that follows both branches is a read-only verification, so it dials
-the ordinary access URL as well. `start_generation.record_running_sha` records the running source
+pending, because the mutation authority is checked exactly when something is. A
+provider-managed plane's URL is that provider's only address for us — nothing here
+can tell whether it is a pooler. The applier therefore accepts one residual risk: a
+provider-side transaction pooler would drop the session advisory lock silently. No
+such plane runs in this fleet today; if one is added, point the URL at the
+provider's direct (session-mode) endpoint, or run migrations from a host that can
+prove directness. The checkpoint schema check that follows both branches is a
+read-only verification, so it dials the ordinary access URL as well.
+
+`start_generation.record_running_sha` records the running source
 after a successful start. What start treats as already-up, what it waits for,
 and when an unready service becomes exit code 4:
 [[start-readiness.meiva.okf.md]].
