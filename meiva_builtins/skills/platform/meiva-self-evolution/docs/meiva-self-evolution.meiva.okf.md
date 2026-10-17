@@ -26,6 +26,10 @@ Output data lands in `$MEIVA_HOME/self_evolution/` (per-deployment private), not
 
 ## Record assembly
 
+`collect.py` reads the inbounds and `record.py` assembles the record; what
+counts as a run's task, and which inbounds may be read for it, is the
+[collection contract](collection.meiva.okf.md).
+
 ```meiva-contract
 id = "record-assembly"
 kind = "invariant"
