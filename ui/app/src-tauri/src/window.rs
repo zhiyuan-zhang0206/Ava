@@ -200,6 +200,8 @@ pub const REMOTE_PERMISSIONS: &[&str] = &[
     "allow-app-open-settings",
     "allow-app-notify",
     "allow-app-take-pending-click",
+    "allow-app-check-update",
+    "allow-app-install-update",
 ];
 
 fn capability_identifier(origin: &str) -> String {

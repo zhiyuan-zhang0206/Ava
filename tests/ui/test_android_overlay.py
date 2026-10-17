@@ -110,6 +110,11 @@ def test_adds_the_permissions_the_app_needs(patched: ET.Element) -> None:
     assert "android.permission.INTERNET" in names
 
 
+def test_requests_the_package_install_permission(patched: ET.Element) -> None:
+    names = {_attr(e, "name") for e in patched.findall("uses-permission")}
+    assert "android.permission.REQUEST_INSTALL_PACKAGES" in names
+
+
 def test_declares_the_foreground_service(patched: ET.Element) -> None:
     application = patched.find("application")
     assert application is not None
@@ -215,6 +220,24 @@ def test_apply_copies_the_keystore_sources_into_the_generated_package(tmp_path: 
     package = main / "java" / Path(*overlay.PACKAGE.split("."))
     assert (package / "AvaSecretStore.kt").is_file()
     assert (package / "AvaSecretPlugin.kt").is_file()
+
+
+def test_apply_copies_the_update_installer_plugin_into_the_generated_package(
+    tmp_path: Path,
+) -> None:
+    main = tmp_path / "app" / "src" / "main"
+    main.mkdir(parents=True)
+    (main / "AndroidManifest.xml").write_text(GENERATED_MANIFEST)
+    gradle = tmp_path / "app" / "build.gradle.kts"
+    gradle.write_text(GENERATED_GRADLE)
+
+    overlay.apply(_OVERLAY.parent, tmp_path)
+
+    package = main / "java" / Path(*overlay.PACKAGE.split("."))
+    plugin = (package / "AvaUpdatePlugin.kt").read_text()
+    assert "class AvaUpdatePlugin" in plugin
+    assert "getPackageArchiveInfo" in plugin
+    assert "FileProvider.getUriForFile" in plugin
 
 
 def test_apply_copies_the_cookie_injection_plugin_into_the_generated_package(
