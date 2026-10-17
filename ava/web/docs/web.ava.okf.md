@@ -44,4 +44,20 @@ retry authority. Reader failures and empty model answers still raise `FetchError
 `fetch()` returns LLM-refined answers. For events/versions/releases after training cutoff, verify with `search` + `fetch`—do not rely on time-sensitive information in training data.
 
 ## Structure
-`ava/web/__init__.py` is the namespace module: `search` and `fetch` validate through `plans.py` (no ambient reads), build this process's `WebDeps` in `wiring.py` (the only place that reads the Brave and Jina settings, the fetch model's settings, the model catalog, the provider factory, the network and the injection check) and run the batch in `runner.py`. `brave.py` searches one query and `reader.py` reads one page and answers a prompt about it; both take their configuration (`BraveConfig`, `JinaConfig`, `FetchModel`) and ports from the deps (`deps.py`), so tests hand them a fake network and the values they want instead of patching settings. The implementation modules load at the first call, not at `import ava`.
+`ava/web/__init__.py` is the namespace module: `search` and `fetch` validate through `plans.py` (no ambient reads) and each builds only its own operation's deps in `wiring.py` — `search_deps()` reads the four Brave settings and the network; `fetch_deps()` reads the Jina and fetch-model settings, the model catalog, the model overrides, the provider factory, the network and the injection check — then runs the batch in `runner.py`. `brave.py` searches one query from `SearchDeps`; `reader.py` reads one page and answers a prompt from `FetchDeps`; `deps.py` declares both values and their config records (`BraveConfig`, `JinaConfig`, `FetchModel`). A non-model SDK installation therefore searches without a model catalog, while fetch still refuses one before any request. Tests hand them a fake network and the values they want instead of patching settings. The implementation modules load at the first call, not at `import ava`.
+
+```ava-contract
+id = "webdeps-split"
+kind = "invariant"
+statement = "SearchDeps carries the Brave provider, the URL opener and the content scan; FetchDeps carries the Jina reader, the fetch model with its provider factory, the URL opener, the content scan and the injection check. The search path must never read the model catalog or the model overrides."
+code = ["ava/web/deps.py:<module>", "ava/web/deps.py:SearchDeps", "ava/web/deps.py:FetchDeps", "ava/web/wiring.py:search_deps_for"]
+tests = ["ava/tests/namespaces/web/test_web_search.py::test_search_deps_read_only_brave_fields", "ava/tests/namespaces/web/test_web_search_owner.py::test_search_runs_without_a_model_catalog"]
+```
+
+```ava-contract
+id = "webdeps-fetch-model-boundary"
+kind = "invariant"
+statement = "fetch_deps is the only web dependency constructor that reads the installation's model configuration, and a missing model catalog surfaces as FetchError naming that missing configuration before any network request."
+code = ["ava/web/wiring.py:<module>", "ava/web/wiring.py:fetch_deps"]
+tests = ["ava/tests/namespaces/web/test_web_search_owner.py::test_fetch_reports_a_missing_model_configuration"]
+```
