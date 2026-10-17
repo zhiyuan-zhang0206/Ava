@@ -25,6 +25,10 @@ Health, local cluster status and MCP status report that same image, including
 unknown SHA, without reading a later checkout HEAD. Uvicorn reload children
 capture their own generation in their new process. Startup failures still
 close constructed clients; cleanup errors preserve the original primary.
+The lifespan registers each start-up resource for release as it acquires it and
+unwinds them in reverse order: telemetry flushers, the MCP manager, upload
+recovery, the runtime monitor, HTTP clients and the inspector cache finish
+before the pools close, and one failing release never skips the rest.
 
 The snapshot's required `memory_root` supplies search, graph, note, pool and refresh
 routes. The composition boundary resolves the existing `base.paths.gateway_memory_dir`
