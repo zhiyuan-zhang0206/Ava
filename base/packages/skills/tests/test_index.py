@@ -10,6 +10,7 @@ These tests pin the scan itself: what becomes an entry, the tolerance contract
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 import pytest
@@ -285,3 +286,29 @@ class TestSupplyChainGate:
         entry = index.entries[0]
         assert entry.name == "win-skill"
         assert entry.security_rules == ()
+
+
+def test_scan_skips_a_folder_whose_stat_vanishes(tmp_path: Path) -> None:
+    _write(tmp_path, "keep/SKILL.md", _GOOD)
+    (tmp_path / "vanish").mkdir()
+
+    def stat_of(p: Path) -> os.stat_result | None:
+        return None if p.name == "vanish" else p.stat()
+
+    idx = SkillIndex.build([tmp_path], stat_of=stat_of)
+
+    assert [e.rel for e in idx.entries] == [("keep",)]
+
+
+def test_skill_md_whose_stat_vanishes_is_not_an_entry(tmp_path: Path) -> None:
+    _write(tmp_path, "later/SKILL.md", _GOOD)
+    _write(tmp_path, "stable/SKILL.md", _GOOD)
+
+    def stat_of(p: Path) -> os.stat_result | None:
+        if p.name == "SKILL.md" and p.parent.name == "later":
+            return None
+        return p.stat()
+
+    idx = SkillIndex.build([tmp_path], stat_of=stat_of)
+
+    assert [e.rel for e in idx.entries] == [("stable",)]

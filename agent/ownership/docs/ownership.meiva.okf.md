@@ -28,7 +28,13 @@ A stopping host's release is bounded (`services/agent_runner/agent_host/host.py`
 the database unreachable it fails and the leases expire by TTL.
 
 Lease TTL and renewal ordering live in `base/deploy/progress_timeout.py` and
-`base/deploy/timing.py`. A lease is runtime ownership evidence, not an agent identity
+`base/deploy/timing.py`. The recovery sweep (`settle_stale_running_rows`) runs
+at boot **and on every ownership beat**: a host that dies after boot leaves
+rows whose lease only expires later, and a boot-only sweep never sees them
+(2026-10-17: two rows stayed `running` for 19 minutes). The beat passes its own
+owner as `exclude_owner`, so a transient renewal failure can never settle a
+turn this host is still running — only an unknown or expired **other**
+incarnation's rows are settled. A lease is runtime ownership evidence, not an agent identity
 count: the status page counts non-terminated local identities, including idle
 and maintenance-paused agents. Heartbeat selects eligible idle identities
 without requiring an independently resident agent process.

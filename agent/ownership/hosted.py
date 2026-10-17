@@ -588,26 +588,30 @@ async def settle_and_stamp_turn(
     return TurnSettlement(stamp=stamp, settled=settled)
 
 
-async def settle_stale_running_rows(pool: AsyncConnectionPool, machine: str) -> list[int]:
-    """Restore rows left running by a previous hosted-runner instance.
-
-    A pidless row may belong to another live host instance. Only unknown or
-    expired hosted ownership licenses this atomic startup status settlement.
-    """
+async def settle_stale_running_rows(
+    pool: AsyncConnectionPool,
+    machine: str,
+    *,
+    exclude_owner: UUID | None = None,
+) -> list[int]:
     async with async_write_transaction(pool) as conn:
         rows = await (
             await conn.execute(
                 "UPDATE agents_meta SET status = 'idling' "
                 "WHERE status = 'running' AND pid IS NULL AND machine = %s "
                 "AND (runtime_kind IS NULL OR runtime_kind = 'hosted') "
-                "AND (lease_expires_at IS NULL OR lease_expires_at <= now()) RETURNING id",
-                (machine,),
+                "AND (lease_expires_at IS NULL OR lease_expires_at <= now()) "
+                "AND (%s::uuid IS NULL OR runtime_owner IS NULL OR runtime_owner <> %s) "
+                "RETURNING id",
+                (machine, exclude_owner, exclude_owner),
             )
         ).fetchall()
     settled = [row[0] for row in rows]
-    logger.info(
-        "hosted stale-running settle: settled {n} row(s)",
-        event="host_stale_running_settled",
-        n=len(settled),
-    )
+    if settled:
+        logger.info(
+            "hosted stale-running settle: settled {n} row(s) {ids}",
+            event="host_stale_running_settled",
+            n=len(settled),
+            ids=settled,
+        )
     return settled

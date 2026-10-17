@@ -629,7 +629,9 @@ async def run(
             bus,
             read_alert_seconds=lambda: config.view.daemon.host_admission_wait_alert_seconds,
         )
-        settled = await settle_stale_running_rows(control_pool, local_machine)
+        settled = await settle_stale_running_rows(
+            control_pool, local_machine, exclude_owner=host.runtime_owner
+        )
         logger.info("hosted boot settle: settled {n} stale running row(s)", n=len(settled))
 
         endpoint = _endpoint()
