@@ -56,9 +56,14 @@
     "status-services": "Services",
     "status-gateway": "Gateway",
     "ops-metrics": "Metrics (Grafana)",
-    "alerts": "Alerts"
+    "alerts": "Alerts",
+    "app": "App"
   },
   "title": "Control",
   "backToAgents": "Back to agents",
-  "openOkfGraph": "Open OKF graph"
+  "openOkfGraph": "Open OKF graph",
+  "app": "App",
+  "appDescription": "Settings of the Meiva app on this device: server address and updates.",
+  "appOpenSettings": "Open app settings",
+  "appOpenSettingsFailed": "The app did not open its settings page."
 }
