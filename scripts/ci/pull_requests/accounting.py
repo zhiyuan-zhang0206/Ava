@@ -22,10 +22,8 @@ DEFAULT_REPO = "zhiyuan-zhang0206/Meiva"
 _LEDGER_DIR = Path(__file__).resolve().parents[1] / "ci_usage"
 DEFAULT_LEDGER = _LEDGER_DIR / "ledger.jsonl"
 
-_AGENT_RE = re.compile(r"\[Meiva-(\d+)\]")
 _TASK_RE = re.compile(r"\(task #(\d+)\)")
 _TRUNK_PR_RE = re.compile(r"trunk-merge/pr-(\d+)/")
-_BRANCH_AGENT_RE = re.compile(r"^meiva-(\d+)-")
 
 # meiva:ref scripts/ci/pull_requests/docs/ci-usage.meiva.okf.md#github-page-limit
 _WINDOW_CHUNK_SECONDS = 4 * 3600
@@ -106,11 +104,9 @@ def _pages(
 
 
 def parse_identity(text: str) -> tuple[int | None, int | None]:
-    agent_match = _AGENT_RE.search(text)
     task_match = _TASK_RE.search(text)
-    agent_id = int(agent_match.group(1)) if agent_match else None
     task_id = int(task_match.group(1)) if task_match else None
-    return agent_id, task_id
+    return None, task_id
 
 
 def _pr_title(repo: str, pr_number: int | None, *, host: Host) -> str:
@@ -182,17 +178,13 @@ def _run_identity(
 ) -> tuple[int | None, int | None, int | None]:
     real_pr = _real_pr_of_trunk_branch(str(run.get("head_branch") or ""))
     pr_number, agent_id, task_id = _identity_from_prs(run, repo, real_pr, host=host)
-    if agent_id is None and str(run.get("head_branch") or "") == "main":
+    if pr_number is None and str(run.get("head_branch") or "") == "main":
         merged = _merged_pr_of(run, repo, host=host)
         if merged is not None:
             pr_number = merged
             agent_id, task_id = parse_identity(_pr_title(repo, pr_number, host=host))
-    if agent_id is None:
-        agent_id, task_id = parse_identity(str((run.get("head_commit") or {}).get("message") or ""))
-    if agent_id is None:
-        branch_match = _BRANCH_AGENT_RE.match(str(run.get("head_branch") or ""))
-        if branch_match:
-            agent_id = int(str(branch_match.group(1)))
+    if task_id is None:
+        _, task_id = parse_identity(str((run.get("head_commit") or {}).get("message") or ""))
     return pr_number, agent_id, task_id
 
 

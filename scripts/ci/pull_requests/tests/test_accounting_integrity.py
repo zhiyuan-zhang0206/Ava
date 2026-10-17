@@ -77,7 +77,7 @@ def test_actual_github_envelope_retains_pr_identity() -> None:
         calls,
     )
     [entry] = _collect(host)
-    assert (entry["pr_number"], entry["agent_id"], entry["task_id"]) == (42, 5811, 2571)
+    assert (entry["pr_number"], entry["agent_id"], entry["task_id"]) == (42, None, 2571)
     assert entry["linux_minutes"] == 4
     assert all("--jq" not in args for args in calls if args[1] == "api")
 
