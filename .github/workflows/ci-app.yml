@@ -81,6 +81,11 @@ jobs:
         shell: bash
         run: cargo clippy --all-targets -- -D warnings
 
+      - name: Rust unit tests
+        working-directory: ui/app/src-tauri
+        shell: bash
+        run: cargo test --lib
+
   android:
     name: android (APK smoke)
     runs-on: ubuntu-24.04

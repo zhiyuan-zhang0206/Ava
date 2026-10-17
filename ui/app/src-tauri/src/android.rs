@@ -16,7 +16,7 @@ use tauri::{AppHandle, Manager, Runtime};
 /// Java package the overlay installs the plugin class into. Must match
 /// `identifier` in `tauri.conf.json`, which is what the Android project's
 /// package name is derived from.
-const PLUGIN_PACKAGE: &str = "com.ava.app";
+pub(crate) const PLUGIN_PACKAGE: &str = "com.ava.app";
 const BACKGROUND_PLUGIN_CLASS: &str = "AvaBackgroundPlugin";
 const BACKGROUND_PLUGIN_NAME: &str = "avabackground";
 const SECRET_PLUGIN_CLASS: &str = "AvaSecretPlugin";

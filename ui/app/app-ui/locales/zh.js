@@ -33,5 +33,19 @@ window.AVA_APP_I18N['zh'] =
   "failureHttp": "服务器在线但控制台未启动——请稍后重试",
   "failureAuth": "密钥不正确——重新输入，或清空后到网页登录页输入",
   "failureUpdateWindow": "服务器可能正在升级或回滚，请稍后重试。",
-  "timeoutMessage": "连接超时——请重试。"
+  "timeoutMessage": "连接超时——请重试。",
+  "aboutTitle": "关于",
+  "aboutVersion": "版本",
+  "aboutBuild": "构建号",
+  "checkUpdates": "检查更新",
+  "installUpdate": "安装更新",
+  "openDownloadPage": "打开下载页",
+  "checkingUpdates": "正在检查更新…",
+  "updateCurrent": "当前已是最新构建。",
+  "updateAvailable": "有新版本 Ava {version}（构建 {build}）。",
+  "updateCheckFailed": "检查更新失败。",
+  "updateDownloading": "正在下载并校验更新…",
+  "updateInstallerOpened": "已打开系统安装程序。",
+  "updatePermissionRequired": "请在系统设置中允许 Ava 安装未知应用，然后重试。",
+  "updateInstallFailed": "更新安装失败。"
 };
