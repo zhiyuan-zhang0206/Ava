@@ -46,7 +46,7 @@ import type {
   ShellInfo,
   SystemEvent,
 } from "@/lib/contracts/types";
-import { formatAbsolute, formatRelative, formatShort, formatUptime } from "@/lib/format/time";
+import { formatAbsolute, formatRelative, formatUpcoming, formatUptime } from "@/lib/format/time";
 import { useEventStream } from "@/lib/transport/useEventStream";
 import { cn } from "@/lib/format/utils";
 import { BAR_DIVIDER_CLASS, BAR_HEIGHT_CLASS, FLEX, FLEX_1, FLEX_COL, MIN_H_0, MIN_W_0 } from "@/lib/layout/layout";
@@ -654,10 +654,8 @@ function LivenessSection({ inspect }: { inspect: AgentInspectLive }) {
   const offline = state === "offline";
   const t = useTranslations("inspector");
   const tStatus = useTranslations("agentRow");
-  const next = nextHeartbeatCell(heartbeat, {
-    pending: t("pending"),
-    due: t("due"),
-  });
+  const now = useNow(1_000);
+  const next = nextHeartbeatCell(heartbeat, { pending: t("pending"), due: t("due") }, now);
   const lastPause = heartbeat.last_pause;
   const impersonated =
     inspect.status !== "terminated" &&
@@ -672,7 +670,7 @@ function LivenessSection({ inspect }: { inspect: AgentInspectLive }) {
           label={t("metricBirth")}
           value={`${formatRelative(spawned_at)}, ${formatAbsolute(spawned_at)}`}
         />
-        <Metric label={t("metricNextHeartbeat")} value={next.value} />
+        <Metric label={t("metricNextHeartbeat")} value={next} />
         <Metric
           label={t("metricLastPause")}
           value={
@@ -694,22 +692,16 @@ function LivenessSection({ inspect }: { inspect: AgentInspectLive }) {
 function nextHeartbeatCell(
   hb: HeartbeatInfo,
   labels: { pending: string; due: string },
-): { value: string } {
-  if (hb.paused_until) {
-    return {
-      value: formatShort(hb.paused_until, { includeDate: false }),
-    };
-  }
-  if (hb.heartbeat_pending) {
-    return { value: labels.pending };
-  }
+  now: Date,
+): string {
+  if (hb.paused_until) return formatUpcoming(hb.paused_until, now);
+  if (hb.heartbeat_pending) return labels.pending;
   if (hb.next_at) {
-    const next = new Date(hb.next_at).getTime();
-    return {
-      value: next <= Date.now() ? labels.due : formatRelative(hb.next_at),
-    };
+    return new Date(hb.next_at).getTime() <= now.getTime()
+      ? labels.due
+      : formatUpcoming(hb.next_at, now);
   }
-  return { value: "—" };
+  return "—";
 }
 
 function formatTps(n: number): string {
