@@ -10,7 +10,7 @@ import { readReferences, withReferences } from "@/lib/context/reference-url";
 import { useToUser } from "@/lib/context/use-to-user";
 import { cn } from "@/lib/format/utils";
 import { formatRelative } from "@/lib/format/time";
-import { FLEX, FLEX_1, FLEX_COL, MIN_H_0, MIN_W_0 } from "@/lib/layout/layout";
+import { COLUMN_TITLE_BAR_WRAP_CLASS, FLEX, FLEX_1, FLEX_COL, MIN_H_0, MIN_W_0 } from "@/lib/layout/layout";
 import { API_BASE } from "@/lib/transport/api-base";
 
 const PUSHED_ENTRY = "meivaToUserEntry";
@@ -68,7 +68,7 @@ export function ToUserDocumentView({ agentId, document, failed, pending, refresh
   const byUrl = new Map([...resources.values()].map((resource) => [resource.url, resource]));
   return (
     <section className={cn(FLEX, MIN_H_0, FLEX_1, FLEX_COL)} aria-label={t("title")}>
-      <div className={cn("min-h-9 shrink-0 flex-wrap items-center gap-x-2 gap-y-1 border-b px-3 py-1 text-[11px] text-muted-foreground", FLEX)}>
+      <div data-testid="document-bar" className={cn("shrink-0 flex-wrap items-center gap-x-2 gap-y-1 px-3 py-1 text-[11px] text-muted-foreground", COLUMN_TITLE_BAR_WRAP_CLASS, FLEX)}>
         <button title={t("home")} aria-label={t("home")} className="rounded p-1 hover:bg-accent" onClick={() => { if (references.length) show([], "push"); }}>
           <House className="size-3.5" />
         </button>

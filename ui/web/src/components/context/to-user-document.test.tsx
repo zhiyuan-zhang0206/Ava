@@ -7,6 +7,7 @@ vi.mock("next-intl", () => ({ useTranslations: () => (key: string) => key }));
 vi.mock("@/lib/context/use-to-user", () => ({ useToUser: linkedQuery }));
 vi.mock("@/components/content/python-code", () => ({ PythonCode: () => null }));
 import { preloadChatMarkdown } from "@/components/content/markdown";
+import { BAR_DIVIDER_CLASS, BAR_MIN_HEIGHT_CLASS } from "@/lib/layout/layout";
 import { ToUserDocumentView } from "./to-user-document";
 
 beforeAll(async () => {
@@ -74,6 +75,13 @@ describe("To user Markdown", () => {
     link.addEventListener("click", (event) => event.preventDefault());
     fireEvent.click(link, { ctrlKey: true });
     expect(linkedQuery).toHaveBeenLastCalledWith(null, []);
+  });
+  it("draws the panel title rule on the shared column title bar", () => {
+    show(document("body"));
+    const tokens = screen.getByTestId("document-bar").className.split(/\s+/);
+    expect(tokens).toEqual(expect.arrayContaining(["relative", BAR_MIN_HEIGHT_CLASS]));
+    expect(tokens).toEqual(expect.arrayContaining(BAR_DIVIDER_CLASS.split(" ")));
+    expect(tokens).not.toContain("border-b");
   });
   it("shows migration guidance when only a legacy HTML document remains", () => {
     show({ content: null, version: null, modified_at: null, legacy_html: true });

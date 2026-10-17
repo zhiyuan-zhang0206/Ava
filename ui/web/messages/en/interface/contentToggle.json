@@ -4,5 +4,7 @@
   "last": "Last",
   "none": "None",
   "detailsMode": "Details mode",
-  "detailsLevel": "Details level"
+  "detailsWithValue": "Details: {mode}",
+  "detailsLevel": "Details level",
+  "openSettings": "Change how much detail the timeline shows"
 }

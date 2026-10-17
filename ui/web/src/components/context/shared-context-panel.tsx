@@ -4,7 +4,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import { Bell, ChevronDown, ChevronUp, X } from "lucide-react";
 import dynamic from "next/dynamic";
 import Link from "next/link";
-import { FLEX, FLEX_1, FLEX_COL, MIN_H_0 } from "@/lib/layout/layout";
+import { COLUMN_TITLE_BAR_CLASS, FLEX, FLEX_1, FLEX_COL, MIN_H_0 } from "@/lib/layout/layout";
 import { useTranslations } from "next-intl";
 import { useState } from "react";
 
@@ -43,8 +43,8 @@ export function SharedContextPanel({ agentId, document, notices, noticesFailed, 
       </header>}
       <div data-testid="shared-document" hidden={inspecting} className={cn(MIN_H_0, FLEX_1, FLEX_COL, inspecting ? "hidden" : FLEX)}>
         {noticesFailed && <p role="status" className="px-4 py-2 text-xs text-muted-foreground">{t("noticesUnavailable")}</p>}
-        {notice && <section className="shrink-0 border-b" aria-label={t("notification")}>
-          <div className={cn("h-11 items-center gap-2 px-4 text-xs", FLEX)}>
+        {notice && <section className="shrink-0" aria-label={t("notification")}>
+          <div data-testid="notice-bar" className={cn("items-center gap-2 px-4 text-xs", COLUMN_TITLE_BAR_CLASS, FLEX)}>
             <Bell className="size-3.5 text-amber-600" />
             <span className={cn("font-medium", FLEX_1)}>{notice.require_response ? t("needsReply") : t("notification")}</span>
             <Link href={fleetNoticeHref(notice.id)} className="text-muted-foreground hover:text-foreground">{t("queue", { count: notices.length })}</Link>

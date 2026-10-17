@@ -4,5 +4,7 @@
   "last": "最近",
   "none": "无",
   "detailsMode": "详情模式",
-  "detailsLevel": "详情级别"
+  "detailsWithValue": "详情：{mode}",
+  "detailsLevel": "详情级别",
+  "openSettings": "修改时间线显示的详情程度"
 }
