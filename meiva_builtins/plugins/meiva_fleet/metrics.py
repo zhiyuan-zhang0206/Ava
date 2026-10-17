@@ -45,11 +45,13 @@ _TASK_ATTR = {k: f"attributes_{k}" for k in TASK_UPDATE_KEYS}
 METRICS: tuple[MetricSpec, ...] = (
     MetricSpec(
         name="meiva_fleet_task_done_rate",
-        title="Task completion rate",
+        title="Done share of task status changes",
         description=(
-            "Share of task_update events with status='done' — only updates carrying "
-            "a status count toward the denominator (event_name='task_update', "
-            "category='audit')."
+            "Share of task status changes that are done: numerator = task_update events "
+            "with status='done', denominator = task_update events carrying any status "
+            "(event_name='task_update', category='audit'). This is NOT a backlog "
+            "completion rate — a cluster that closes nothing has no denominator, and "
+            "the panel stays empty."
         ),
         event_name="task_update",
         category="audit",
@@ -59,14 +61,14 @@ METRICS: tuple[MetricSpec, ...] = (
             f"100 * {
                 event_count(
                     'category={category} | ' + _TASK_ATTR['status'] + '="done"',
-                    '5m',
+                    '1h',
                     matchers='event_name={event_name}',
                 )
             }"
             f" / {
                 event_count(
                     'category={category} | ' + _TASK_ATTR['status'] + '!=""',
-                    '5m',
+                    '1h',
                     matchers='event_name={event_name}',
                 )
             }"
