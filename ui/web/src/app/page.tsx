@@ -59,6 +59,7 @@ export default function HomePage() {
   );
 
   return (
+    // meiva:ref ui/web/src/app/docs/layout-chain.meiva.okf.md#stack-wrapper-keeps-the-chain
     <main id="main-content" className={cn(FLEX, FLEX_1, MIN_H_0)}>
       <CodeHighlighterPreloader />
       <div className={cn(FLEX, FLEX_COL, FLEX_1, MIN_H_0, MIN_W_0)}>
