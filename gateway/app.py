@@ -2,7 +2,7 @@ import asyncio
 import logging
 import time
 from collections.abc import AsyncGenerator, Awaitable, Callable
-from contextlib import asynccontextmanager, nullcontext
+from contextlib import AsyncExitStack, asynccontextmanager, nullcontext
 from functools import partial
 from pathlib import Path
 from typing import Any, Literal
@@ -126,14 +126,38 @@ from gateway.upload_delivery.worker import UploadRecovery
 _log = logging.getLogger(__name__)
 
 
-def _build_request_resources(app: FastAPI, config: ConfigBoot) -> None:
+def _closer(resource: Any, method: str) -> Callable[[], Any]:
+    def close() -> Any:
+        return getattr(resource, method)()
+
+    return close
+
+
+@asynccontextmanager
+async def _startup_releases() -> AsyncGenerator[AsyncExitStack]:
+
+    releases = AsyncExitStack()
+    try:
+        yield releases
+    except BaseException as primary:
+        try:
+            await releases.aclose()
+        except BaseException as cleanup:
+            primary.add_note(f"gateway start-up cleanup also failed: {cleanup!r}")
+        raise
+    await releases.aclose()
+
+
+def _build_request_resources(app: FastAPI, config: ConfigBoot, releases: AsyncExitStack) -> None:
 
     machine_token_acceptance: AcceptanceCache = {}
     app.state.machine_token_acceptance = machine_token_acceptance
     app.state.telemetry_staleness = TelemetryStaleness()
     app.state.status_cache = StatusCache()
     app.state.identity_mismatch_log = IdentityMismatchLog()
-    app.state.inspect_query_cache = inspect_router.build_query_cache()
+    inspect_queries: Any = inspect_router.build_query_cache()
+    app.state.inspect_query_cache = inspect_queries
+    releases.push_async_callback(_closer(inspect_queries, "aclose"))
     app.state.timeline_policy = timeline_policy(config)
     app.state.understanding_policy = understanding_policy(config, app.state.config_authority)
     app.state.reply_suggestions = reply_suggestion_service(
@@ -170,7 +194,9 @@ def _build_request_resources(app: FastAPI, config: ConfigBoot) -> None:
         config=LoginRateLimitConfig(),
     )
 
-    app.state.insights_client = insights_router.build_client()
+    insights_client: Any = insights_router.build_client()
+    app.state.insights_client = insights_client
+    releases.push_async_callback(_closer(insights_client, "aclose"))
 
 
 @asynccontextmanager
@@ -194,54 +220,62 @@ async def lifespan(
             pipeline=process.event_pipeline(),
             machine_reader=process.machine.name,
         )
-        app.state.catalog = load_model_catalog(build_model_catalog)
-        app.state.config_authority = ConfigAuthority(
-            runtime=config.view,
-            all_domains=config.view if config.view.profile is None else Settings(profile=None),
-            env_path=paths.ava_home() / ".env",
-        )
-
-        app.state.started_at = time.time()
-        app.state.db = process.database()
-        app.state.bus = EventBus.from_settings()
-        _build_request_resources(app, config)
-        app.state.db_pool = app.state.db.pool(max_size=8)
-        app.state.sessions = SessionStore(app.state.db_pool)
-        app.state.session_keys = SessionKeys()
-        app.state.session_touch = SessionTouchThrottle()
-        app.state.page_host_cache = pages_router.PageHostCache()
-        app.state.telemetry_rate_limiter = frontend_telemetry_router.SessionRateLimiter()
-
-        app.state.control_db_pool = app.state.db.pool(min_size=1, max_size=2, timeout=2.0)
-
-        app.state.grafana_client = grafana_router.build_proxy_client()
-
-        try:
-            await asyncio.to_thread(
-                register_os_cron,
-                enabled_reader=lambda: config.view.general.os_jobs_enabled,
-                host=process.host,
+        async with _startup_releases() as releases:
+            app.state.catalog = load_model_catalog(build_model_catalog)
+            app.state.config_authority = ConfigAuthority(
+                runtime=config.view,
+                all_domains=config.view if config.view.profile is None else Settings(profile=None),
+                env_path=paths.ava_home() / ".env",
             )
-        except Exception:
-            _log.warning("OS health-probe cron registration failed", exc_info=True)
 
-        app.state.runtime_metrics = runtime_metrics.start_runtime_monitor()
-        upload_recovery = UploadRecovery(
-            app.state.db_pool, app.state.db, app.state.bus, machine=process.machine
-        )
+            app.state.started_at = time.time()
+            app.state.db = process.database()
+            app.state.bus = EventBus.from_settings()
+            db_pool: Any = app.state.db.pool(max_size=8)
+            app.state.db_pool = db_pool
+            releases.callback(_closer(db_pool, "close"))
+            app.state.sessions = SessionStore(db_pool)
+            app.state.session_keys = SessionKeys()
+            app.state.session_touch = SessionTouchThrottle()
+            app.state.page_host_cache = pages_router.PageHostCache()
+            app.state.telemetry_rate_limiter = frontend_telemetry_router.SessionRateLimiter()
 
-        app.state.upload_recovery = upload_recovery
+            control_db_pool: Any = app.state.db.pool(min_size=1, max_size=2, timeout=2.0)
+            app.state.control_db_pool = control_db_pool
+            releases.callback(_closer(control_db_pool, "close"))
 
-        async with _background_lifetime(app, upload_recovery):
-            yield
+            _build_request_resources(app, config, releases)
+
+            grafana_client: Any = grafana_router.build_proxy_client()
+            app.state.grafana_client = grafana_client
+            releases.push_async_callback(_closer(grafana_client, "aclose"))
+
+            try:
+                await asyncio.to_thread(
+                    register_os_cron,
+                    enabled_reader=lambda: config.view.general.os_jobs_enabled,
+                    host=process.host,
+                )
+            except Exception:
+                _log.warning("OS health-probe cron registration failed", exc_info=True)
+
+            monitor: Any = runtime_metrics.start_runtime_monitor()
+            app.state.runtime_metrics = monitor
+            releases.callback(_closer(monitor, "stop"))
+
+            upload_recovery = UploadRecovery(
+                app.state.db_pool, app.state.db, app.state.bus, machine=process.machine
+            )
+            app.state.upload_recovery = upload_recovery
+
+            async with _background_lifetime(app, upload_recovery):
+                yield
 
 
 @asynccontextmanager
 async def _background_lifetime(
     app: FastAPI, upload_recovery: UploadRecovery
 ) -> AsyncGenerator[None]:
-
-    inspect_queries = app.state.inspect_query_cache
 
     mcp_manager = None
     config: GatewayConfig = app.state.gateway_config
@@ -271,24 +305,11 @@ async def _background_lifetime(
                 else:
                     yield
             finally:
-                app.state.mcp_manager = None
-                try:
-                    await upload_recovery.close()
-                finally:
-                    app.state.runtime_metrics.stop()
-                    try:
-                        await asyncio.gather(
-                            app.state.grafana_client.aclose(), app.state.insights_client.aclose()
-                        )
-                    finally:
-                        latency_flusher.cancel()
-                        auth401_flusher.cancel()
+                latency_flusher.cancel()
+                auth401_flusher.cancel()
+                await upload_recovery.close()
     finally:
-        try:
-            await inspect_queries.aclose()
-        finally:
-            app.state.db_pool.close()
-            app.state.control_db_pool.close()
+        app.state.mcp_manager = None
 
 
 async def cluster_is_paused(_request: Request) -> bool:
