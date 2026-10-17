@@ -53,7 +53,5 @@ def events_maintenance_db(
     return Database(
         db_config_from_boot(config),
         gate=gate,
-        direct_url=ClusterDirectUrl(
-            local_host, gateway_url_reader=lambda: config.view.gateway.gateway_url
-        ),
+        direct_url=ClusterDirectUrl(local_host),
     )

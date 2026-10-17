@@ -90,9 +90,7 @@ def database_factory(*, config: ConfigBoot, machine: MachineIdentity) -> Databas
         return Database(
             db_config_from_boot(config),
             gate=gate,
-            direct_url=ClusterDirectUrl(
-                machine.host, gateway_url_reader=lambda: config.view.gateway.gateway_url
-            ),
+            direct_url=ClusterDirectUrl(machine.host),
         )
 
     return database

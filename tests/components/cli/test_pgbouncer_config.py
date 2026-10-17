@@ -139,17 +139,12 @@ def test_render_ini_binds_loopback_never_all_interfaces(machine_identity: Machin
 # ── direct-connection exemptions (the admin plane must never route through PgBouncer) ──
 
 
-def test_migrations_apply_uses_direct_unbounded_connection() -> None:
-    """The migration applier holds a SESSION advisory lock across its apply loop; a
-    transaction pooler would drop it. It must open a direct connection, and its
-    DDL may exceed the 60s statement ceiling — the dial must be unbounded too. A
-    remote plane dials its provider URL that way; a local plane dials the owner
-    authority over the postmaster's own socket, which carries no ceiling (proved
-    on real Postgres in tests/components/base/test_pg_owner_authority.py)."""
+def test_migrations_apply_dials_direct_only_where_it_can_apply() -> None:
     from cli.commands.lifecycle import migrations
 
     src = inspect.getsource(migrations.cmd_migrations_apply)
-    assert "connect(direct=True, unbounded=True)" in src
+    assert "connect(unbounded=True)" in src
+    assert "direct=True" not in src
     assert "local_owner_authority(settings.data_plane.db_url, remote_plane=False)" in src
 
 
@@ -214,7 +209,7 @@ def test_base_db_connect_and_pool_dial_one_url_with_direct_escape(
     monkeypatch.setattr(connections, "ConnectionPool", make_pool)
     expected_url = config.db_url.replace(":6433/", ":5433/") if direct else config.db_url
 
-    resolver = ClusterDirectUrl(lambda: "127.0.0.1", gateway_url_reader=lambda: "")
+    resolver = ClusterDirectUrl(lambda: "127.0.0.1")
 
     assert base.db.connect(config=config, gate=gate, direct=direct, direct_url=resolver) is conn
     assert dial.call_args.args == (expected_url,)

@@ -4,13 +4,14 @@ import threading
 from collections.abc import Callable, Generator
 from contextlib import contextmanager
 from pathlib import Path
-from typing import Any, NoReturn
+from typing import NoReturn
 
 import psycopg
 import pytest
 
 from base.db.tests.fakes import patch_database
 from base.deploy.schema import migration_layout
+from cli.database import OperatorDatabaseFactory
 from cli.database.runtime import CommandRuntime
 from cli.database.tests.command_inputs import command_runtime as command_runtime
 from tests.path_scoped.cli_tests import operator_database as operator_database
@@ -108,7 +109,6 @@ def migration_phase(monkeypatch: pytest.MonkeyPatch) -> list[str]:
 
     monkeypatch.setattr(pg_admin, "require_postgres_connection", record_ownership)
     patch_database(monkeypatch, connect=fake_connect)
-    patch_database(monkeypatch, direct_url=lambda: "postgresql://direct/meiva")
 
     def owner_authority(_db_url: str, *, remote_plane: bool) -> pg_admin.OwnerAuthority:
         assert not remote_plane
@@ -130,7 +130,7 @@ def migration_phase(monkeypatch: pytest.MonkeyPatch) -> list[str]:
 
 def test_start_phase_verifies_checkpoint_schema_after_meiva_migrations(
     migration_phase: list[str],
-    operator_database: Callable[[], Any],
+    operator_database: OperatorDatabaseFactory,
     *,
     command_runtime: CommandRuntime,
 ) -> None:
@@ -157,7 +157,7 @@ def test_start_phase_verifies_checkpoint_schema_after_meiva_migrations(
 def test_foreign_connected_postgres_refuses_before_migration_ddl(
     migration_phase: list[str],
     monkeypatch: pytest.MonkeyPatch,
-    operator_database: Callable[[], Any],
+    operator_database: OperatorDatabaseFactory,
     *,
     command_runtime: CommandRuntime,
 ) -> None:
@@ -178,7 +178,7 @@ def test_foreign_connected_postgres_refuses_before_migration_ddl(
 def test_admin_session_without_owner_role_refuses_before_migration_ddl(
     migration_phase: list[str],
     monkeypatch: pytest.MonkeyPatch,
-    operator_database: Callable[[], Any],
+    operator_database: OperatorDatabaseFactory,
     *,
     command_runtime: CommandRuntime,
 ) -> None:
@@ -203,7 +203,7 @@ def test_admin_session_without_owner_role_refuses_before_migration_ddl(
 def test_remote_managed_migration_preserves_explicit_provider_authority(
     migration_phase: list[str],
     monkeypatch: pytest.MonkeyPatch,
-    operator_database: Callable[[], Any],
+    operator_database: OperatorDatabaseFactory,
     *,
     command_runtime: CommandRuntime,
 ) -> None:
@@ -223,9 +223,9 @@ def test_remote_managed_migration_preserves_explicit_provider_authority(
     ) == ["20260823T000000_example"]
     assert migration_phase == [
         "dependency",
-        "connect:{'direct': True, 'unbounded': True}",
+        "connect:{'unbounded': True}",
         "meiva",
-        "checkpoint:postgresql://direct/meiva:{}",
+        "checkpoint:postgresql://owner@db.example/meiva:{}",
     ]
 
 
@@ -258,7 +258,7 @@ def _bind_private_database(conn: psycopg.Connection, monkeypatch: pytest.MonkeyP
 def test_real_start_phase_converges_meiva_then_is_idempotent(
     db_conn: psycopg.Connection,
     monkeypatch: pytest.MonkeyPatch,
-    operator_database: Callable[[], Any],
+    operator_database: OperatorDatabaseFactory,
     *,
     command_runtime: CommandRuntime,
 ) -> None:
@@ -288,7 +288,7 @@ def test_real_start_phase_converges_meiva_then_is_idempotent(
 def test_dependency_drift_fails_before_any_database_change(
     db_conn: psycopg.Connection,
     monkeypatch: pytest.MonkeyPatch,
-    operator_database: Callable[[], Any],
+    operator_database: OperatorDatabaseFactory,
     *,
     command_runtime: CommandRuntime,
 ) -> None:

@@ -21,6 +21,7 @@ from gateway.tests.agents.sdk_support import (
 from gateway.tests.agents.sdk_support import spawn_agent
 from meiva import gateway_client
 from meiva.agents import AgentNotFound, AgentStatus
+from meiva.gateway_client import use_client
 from meiva.sdk_surface.installation import Installation
 from meiva.tests.fixtures.pin_agent import pin_agent
 
@@ -168,7 +169,7 @@ class TestListAgents:
 
         with (
             httpx.Client(base_url="http://gateway", transport=httpx.MockTransport(answer)) as http,
-            meiva.context.clients.using_gateway(http),
+            use_client(http),
         ):
             assert (
                 gateway_client.list_agents(
@@ -282,7 +283,7 @@ class TestListAgents:
 
         with (
             httpx.Client(base_url="http://gateway", transport=httpx.MockTransport(answer)) as http,
-            meiva.context.clients.using_gateway(http),
+            use_client(http),
         ):
             assert meiva.agents.get_status(1) == AgentStatus.TERMINATED
         [request] = calls

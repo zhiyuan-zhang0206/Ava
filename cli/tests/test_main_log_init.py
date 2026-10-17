@@ -419,7 +419,6 @@ def test_quiet_command_does_not_construct_pipeline(
         operator_database_factory(
             local_host=command_runtime.machine.host,
             open_database=open_operator_database,
-            gateway_url_reader=lambda: command_runtime.config.view.gateway.gateway_url,
         ),
         machine=command_runtime.machine,
         home=tmp_path,
@@ -453,7 +452,6 @@ def test_unfinished_command_writer_remains_owned_until_join(
         operator_database_factory(
             local_host=command_runtime.machine.host,
             open_database=open_operator_database,
-            gateway_url_reader=lambda: command_runtime.config.view.gateway.gateway_url,
         ),
         machine=command_runtime.machine,
         home=tmp_path,
@@ -523,11 +521,9 @@ def test_status_handler_body_forwards_the_parsed_namespace(
     def database_owner(
         *,
         local_host: Callable[[], str],
-        gateway_url_reader: Callable[[], str],
         open_database: Callable[..., object],
     ) -> OperatorDatabaseFactory:
         assert callable(local_host)
-        assert callable(gateway_url_reader)
         assert open_database is open_operator_database
         return operator_database
 

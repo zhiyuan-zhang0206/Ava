@@ -36,7 +36,7 @@ def run_schedule(schedule_id: int, revision: int | None = None, *, machine: Mach
     database = partial(
         Database.from_settings,
         gate=gate,
-        direct_url=ClusterDirectUrl(machine.host, gateway_url_reader=lambda: ""),
+        direct_url=ClusterDirectUrl(machine.host),
     )
     with closing(process_clients(database=database, machine=machine)) as clients:
         return engine.run(

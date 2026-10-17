@@ -275,18 +275,14 @@ def main() -> None:
         return Database(
             db_config_from_boot(config),
             gate=gate,
-            direct_url=ClusterDirectUrl(
-                machine.host, gateway_url_reader=lambda: config.view.gateway.gateway_url
-            ),
+            direct_url=ClusterDirectUrl(machine.host),
         )
 
     def database_for_url(url: str) -> Database:
         return Database(
             dataclasses.replace(db_config_from_boot(config), db_url=url),
             gate=gate,
-            direct_url=ClusterDirectUrl(
-                machine.host, gateway_url_reader=lambda: config.view.gateway.gateway_url
-            ),
+            direct_url=ClusterDirectUrl(machine.host),
         )
 
     pipeline = build_pipeline(database=database, machine=machine, home=process_home)
