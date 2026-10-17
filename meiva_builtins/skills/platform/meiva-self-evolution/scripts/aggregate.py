@@ -142,12 +142,17 @@ def main() -> None:
             # with an earlier stamp. For now, just use the gathered scores as "after"
             # and a placeholder baseline.
             skill = state.get("skill", f.stem.rsplit("-", 1)[0])
-            mean = state.get("mean", {})
+            mean = state.get("mean")
+            if mean is None:
+                score_skills.append(
+                    {"skill": skill, "dimensions": [], "n": state.get("n", 0), "unavailable": True}
+                )
+                continue
             dims = compute_score_dimensions(
                 {"completion": 0.70, "efficiency": 0.60, "overall": 0.67},  # placeholder baseline
                 mean,
             )
-            score_skills.append({"skill": skill, "dimensions": dims})
+            score_skills.append({"skill": skill, "dimensions": dims, "n": state.get("n", 0)})
 
     # Failure clusters from mine.py output
     failure_clusters: list[dict[str, Any]] = []

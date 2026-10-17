@@ -83,8 +83,42 @@ def overall(rec: dict[str, Any]) -> float:
     )
 
 
-def scores(rec: dict[str, Any]) -> dict[str, float]:
-    """All three dimensions for one record: {completion, efficiency, overall}."""
+ABSTAIN_NO_TASK = "no_task"
+ABSTAIN_NO_TELEMETRY = "no_telemetry"
+ABSTAIN_NO_TERMINAL = "no_terminal"
+ABSTAIN_INCOMPLETE = "incomplete_evidence"
+
+
+def _has_process_telemetry(rec: dict[str, Any]) -> bool:
+    return bool(
+        rec["turns"]
+        or rec["exec_ok"]
+        or rec["exec_failed"]
+        or rec["compactions"]
+        or rec.get("tools_called")
+    )
+
+
+# meiva:ref meiva_builtins/skills/platform/meiva-self-evolution/docs/meiva-self-evolution.meiva.okf.md#score-abstention
+def abstain_reason(rec: dict[str, Any]) -> str | None:
+    grade = rec.get("evidence_grade")
+    if grade is not None:
+        if grade == "complete":
+            return None
+        return rec.get("unknown_reason") or ABSTAIN_INCOMPLETE
+    if not (rec.get("task_prompt") or "").strip() and not rec.get("followup_prompts"):
+        return ABSTAIN_NO_TASK
+    if not _has_process_telemetry(rec):
+        return ABSTAIN_NO_TELEMETRY
+    if not rec.get("terminated", True):
+        return ABSTAIN_NO_TERMINAL
+    return None
+
+
+def scores(rec: dict[str, Any]) -> dict[str, float | str | None]:
+    reason = abstain_reason(rec)
+    if reason is not None:
+        return {"completion": None, "efficiency": None, "overall": None, "abstain": reason}
     return {
         "completion": completion(rec),
         "efficiency": efficiency(rec),
