@@ -132,3 +132,8 @@ def test_a_tri_state_row_keeps_its_denial_without_a_helper_boolean() -> None:
 def test_the_manual_pass_reaches_a_denied_grant() -> None:
     report = gate.evaluate(_result(accessibility=Grant.DENIED), now=NOW)
     assert [item.id for item in report.requestable()] == ["accessibility"]
+
+
+def test_a_report_never_claims_the_request_channel_by_default() -> None:
+    report = gate.GateReport(state=gate.GateState.COMPLETE, checked_at=NOW, items=())
+    assert report.supports_request is False

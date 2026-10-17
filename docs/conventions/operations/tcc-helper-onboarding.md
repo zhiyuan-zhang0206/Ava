@@ -35,8 +35,9 @@ missing grant in the middle of a task.
 - **One surface.** `meiva permissions status` prints the checklist and exits 1
   while anything is missing; `meiva permissions onboard` raises the dialogs a
   person can still answer and then re-probes; `meiva permissions defer` records
-  "later"; `meiva permissions restart-helper` restarts the helper so a fresh
-  Screen Recording grant is re-read. The console renders the same rows at
+  "later"; `meiva permissions restart-helper` prints how to recreate the helper
+  under custody (`meiva stop`, then `meiva start`) so a fresh Screen Recording
+  grant is re-read -- it runs no process control of its own. The console renders the same rows at
   Control -> Permissions (`GET /api/host/permissions`) and keeps a banner up
   while `state` is restricted.
 

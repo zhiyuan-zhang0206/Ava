@@ -49,7 +49,7 @@ class GateReport:
     items: tuple[ItemStatus, ...]
     diagnostic: str = ""
     helper_reachable: bool = True
-    supports_request: bool = True
+    supports_request: bool = False
 
     def status_for(self, item_id: str) -> ItemStatus | None:
         for status in self.items:

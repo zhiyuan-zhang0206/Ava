@@ -26,12 +26,14 @@ class FakeHelper(PermissionsHelperClient):
         screen: bool = True,
         ax: bool = True,
         request_capable: bool = True,
+        request_fails: bool = False,
     ) -> None:
         super().__init__("/unused.sock")
         self.codes = codes
         self.screen = screen
         self.ax = ax
         self.request_capable = request_capable
+        self.request_fails = request_fails
         self.spawns: list[list[str]] = []
         self.requests = 0
 
@@ -45,6 +47,8 @@ class FakeHelper(PermissionsHelperClient):
 
     def request_grants(self) -> Any:
         self.requests += 1
+        if self.request_fails:
+            raise PermissionsHelperError("socket went away mid-call")
         return {"screen_recording": self.screen, "accessibility": self.ax}
 
     def spawn_process(
@@ -213,3 +217,28 @@ def test_the_summary_names_what_is_missing(tmp_path: Path) -> None:
     assert summary.startswith("3 permission(s) still missing")
     assert "Screen Recording" not in summary
     assert onboarding.observations(report)["desktop-folder"] == "denied"
+
+
+def test_a_stale_helper_is_never_asked_even_by_the_manual_pass(tmp_path: Path) -> None:
+    helper = FakeHelper(_codes(0), screen=False, ax=False)
+    seat = host(tmp_path, client=helper)
+    report = onboarding.onboard(
+        host=seat, now=NOW, automatic=False, sleep=lambda _: None, request_item=_granted
+    )
+    assert helper.requests == 0
+    assert report.grant_for("screen-recording") is Grant.STALE
+
+
+def test_a_failed_request_is_reported_rather_than_crashing_the_start(tmp_path: Path) -> None:
+    helper = FakeHelper(_codes(2), screen=False, ax=False, request_fails=True)
+    seat = host(tmp_path, client=helper)
+    report = onboarding.onboard(host=seat, now=NOW, sleep=lambda _: None, request_item=_granted)
+    assert helper.requests == 1
+    assert "socket went away mid-call" in report.diagnostic
+    assert report.state is gate.GateState.ACTION_REQUIRED
+
+
+def test_the_restart_verb_prints_the_custody_path() -> None:
+    sentence = onboarding.restart_helper()
+    assert "meiva stop" in sentence and "meiva start" in sentence
+    assert "kickstart" in sentence
