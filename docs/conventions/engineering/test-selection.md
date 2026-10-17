@@ -86,10 +86,10 @@ matching row decides.
 | 5 | A collectable test file | TEST | itself and its transitive test consumers |
 | 6a | A root meizel manifest (`meizel.toml`, `meizel.policy.toml`) | MANIFEST | runtime readers, meizel's own tests, every test naming the file and the tests of each source module that names it (below) |
 | 6b | A global path (below) | GLOBAL | full suite |
-| 7a | `.github/`, `.agents/`, `.ava/`, `.trunk/` | TREE_SCAN_ONLY | tree-scan tests plus every collectable test whose source names that top-level directory (below) |
+| 7a | `.github/`, `.agents/`, `.meiva/`, `.trunk/` | TREE_SCAN_ONLY | tree-scan tests plus every collectable test whose source names that top-level directory (below) |
 | 7b | `demos/`, `tests/e2e/`, `.pre-commit-config.yaml`, `.gitignore`, `.gitattributes`, `.gitleaks.toml`, `LICENSE`, `NOTICE` | TREE_SCAN_ONLY | tree-scan tests plus recognized runtime consumers |
 | 8 | A non-Python file under `ui/` | FRONTEND | recognized backend resource consumers, when backend selection runs; the frontend job also owns it |
-| 9 | Any other file under agent/, ava/, ava_builtins/, base/, cli/, gateway/, ops/, schedules/, scripts/, services/, tests/ or ui/ | PACKAGE | transitive runtime consumers plus the owning package's tests |
+| 9 | Any other file under agent/, meiva/, meiva_builtins/, base/, cli/, gateway/, ops/, schedules/, scripts/, services/, tests/ or ui/ | PACKAGE | transitive runtime consumers plus the owning package's tests |
 | 10 | Anything else | UNMAPPED | full suite |
 
 The root meizel manifests are declarations: `[roles]` names the top-level packages the
@@ -106,7 +106,7 @@ Global paths apply to every test: `pyproject.toml`, `uv.lock`, `.python-version`
 under tests/fixtures/, db/, migrations/, deploy/ and commands/. This list and
 the plugin set are the single "global path" concept in the selector.
 
-Tests read `.github/`, `.agents/`, `.ava/` and `.trunk/` by path. Recognized
+Tests read `.github/`, `.agents/`, `.meiva/` and `.trunk/` by path. Recognized
 resource facts reach their transitive consumers. A change there selects, besides the tree-scan tests, every
 collectable test whose source contains the directory as a string literal: the
 unquoted `.github/` (not preceded by a word character or a dot, so the module
@@ -164,7 +164,7 @@ tests/scripts/test_test_selector_contract.py guards completeness and staleness.
 
 The documentation predicate reuses base.deploy.git.repo_change.is_doc_path, the same
 owner as CI's frontend/backend classifier. It recognizes the existing project doc
-axes and top-level Markdown, plus `.ava.okf.md` files in a component's `docs/`
+axes and top-level Markdown, plus `.meiva.okf.md` files in a component's `docs/`
 layer, including under scripts/ and ui/web/. Test data in a `tests/` directory
 does not qualify as a component document. Other nested Markdown, including
 AGENTS.md and SKILL.md, retains its code-directory classification.
@@ -249,7 +249,7 @@ skipped, which counts as satisfied for the required checks, only when all of the
 - the event is a pull request and not a Trunk queue branch (the queue always runs everything);
 - test selection is enforced and its decision is SELECTED;
 - every changed path is a Python file under a package-internal `tests` directory
-  (`<agent|ava|ava_builtins|base|cli|gateway|meizel|ops|scripts|services>/**/tests/**/*.py`).
+  (`<agent|meiva|meiva_builtins|base|cli|gateway|meizel|ops|scripts|services>/**/tests/**/*.py`).
 
 There is no other input: top-level `tests/` (which e2e imports from), manifests, data files
 and product code all keep e2e. An empty output, as after a selector failure, also keeps it.

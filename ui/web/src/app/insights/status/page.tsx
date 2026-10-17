@@ -113,7 +113,7 @@ function machineVerdict(m: MachineStatus): { label: MachineVerdictLabel; tone: S
   if (m.online && m.paused === null) return { label: "statusUnknown", tone: "warn" };
   if (m.online && m.paused === true) return { label: "paused", tone: "warn" };
   if (m.online && m.paused === false) return { label: "running", tone: "ok" };
-  // stopped_at, set by `ava stop` and cleared by `ava start`, separates a
+  // stopped_at, set by `meiva stop` and cleared by `meiva start`, separates a
   // deliberate stop from a crash — the live probe alone can't.
   if (m.stopped_at != null) return { label: "stopped", tone: "muted" };
   return { label: "offline", tone: "error" };

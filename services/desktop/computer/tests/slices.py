@@ -15,5 +15,5 @@ def computer_use_config(**overrides: Any) -> ComputerUseConfig:
 
 
 def short_sock_dir() -> tuple[Path, Path, Any]:
-    d = Path(tempfile.mkdtemp(prefix="ava-cmcp-", dir="/tmp"))
+    d = Path(tempfile.mkdtemp(prefix="meiva-cmcp-", dir="/tmp"))
     return d, d / "computer-mcp.sock", shutil.rmtree

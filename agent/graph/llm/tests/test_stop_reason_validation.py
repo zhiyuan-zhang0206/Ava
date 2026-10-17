@@ -15,7 +15,6 @@ from agent.graph.llm_errors import (
     LLMStreamTruncatedError,
     LLMStreamUnexpectedStopReasonError,
 )
-from ava.tests.fixtures.pin_agent import hosted_resources as hosted_resources
 from base.clock import Clock
 from base.config.tests.configuration import defaults
 from base.db import Database
@@ -24,6 +23,7 @@ from base.events.live.bus import EventBus
 from base.host.env.agent_slices import AgentSlices
 from base.native_process.turn_identity import HostedTurnResources
 from base.packages.plugin_providers import build_model_catalog
+from meiva.tests.fixtures.pin_agent import hosted_resources as hosted_resources
 
 build_model_catalog()
 
@@ -218,7 +218,7 @@ async def test_llm_node_validator_wired(
     from agent.graph.llm.node import llm_attempt
     from agent.hooks.tests.fakes import make_fake_ops_pool
     from agent.state import AgentState
-    from base.agents.context import AvaContext
+    from base.agents.context import MeivaContext
 
     async def _truncated_stream() -> AsyncIterator[AIMessageChunk]:
         yield AIMessageChunk(
@@ -232,7 +232,7 @@ async def test_llm_node_validator_wired(
     fake_llm.astream.return_value = _truncated_stream()
     pub = MagicMock()
     ops_db = make_fake_ops_pool()
-    ctx = AvaContext(
+    ctx = MeivaContext(
         hosted_resources=hosted_resources,
         ops_pool=ops_db,
         llm=fake_llm,
@@ -243,7 +243,7 @@ async def test_llm_node_validator_wired(
         catalog=build_model_catalog(),
         clock_factory=Clock.from_settings,
     )
-    runtime: Runtime[AvaContext] = Runtime(context=ctx)
+    runtime: Runtime[MeivaContext] = Runtime(context=ctx)
     config: RunnableConfig = {"configurable": {"thread_id": "7"}}
     state = AgentState(messages=[HumanMessage(content="hi")], halted=False)
 

@@ -121,7 +121,7 @@ def test_entry_retains_one_gate_for_work_and_lazy_log_database(
     factory()
     gates = [call.kwargs["gate"] for call in create.call_args_list]
     assert len(gates) == 3 and all(gate is gates[0] for gate in gates)
-    assert gates[0].application_name() == f"ava:{logging.call_args.kwargs['name']}:v7"
+    assert gates[0].application_name() == f"meiva:{logging.call_args.kwargs['name']}:v7"
     count.assert_called_once_with(tmp_path, image.sha)
     gates[0].observe_minimum(7)
     assert not gates[0].min_read_due()

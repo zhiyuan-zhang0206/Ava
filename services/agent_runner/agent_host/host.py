@@ -46,7 +46,7 @@ from agent.turn.runloop import (
     emit_error_event,
     graph_config,
 )
-from base.agents.context import AvaContext
+from base.agents.context import MeivaContext
 from base.agents.context.clients import ClientSet
 from base.agents.context.identity import AgentIdentity
 from base.agents.history.delta_read_compat import recovery_reconstruction_scope
@@ -117,10 +117,10 @@ from services.agent_runner.agent_host.stall_guard import (
     run_invocation_with_stall_guard,
 )
 
-_HostGraph = CompiledStateGraph[BaseAgentState, AvaContext, BaseAgentState, BaseAgentState]
+_HostGraph = CompiledStateGraph[BaseAgentState, MeivaContext, BaseAgentState, BaseAgentState]
 
-# The host's whole stop must fit ava-root's TERM window (`stop_timeout_s`, 10 s,
-# `services/supervision/ava_root/supervisor.py`) or root retains custody of it. With Postgres
+# The host's whole stop must fit meiva-root's TERM window (`stop_timeout_s`, 10 s,
+# `services/supervision/meiva_root/supervisor.py`) or root retains custody of it. With Postgres
 # unreachable the release would otherwise wait out the control pool's acquire
 # timeout (30 s). A release that cannot land leaves the leases to expire by TTL.
 RELEASE_OWNER_TIMEOUT_S = 3.0
@@ -153,7 +153,7 @@ class AgentHost:
         self._db = db
         self._catalog = catalog
         self._policy = policy
-        # Shared clients are passed through each turn's explicit `AvaContext`.
+        # Shared clients are passed through each turn's explicit `MeivaContext`.
         self._clients = clients if clients is not None else ClientSet(database=lambda: db)
         self._extensions = extensions
         self._commands = commands
@@ -538,7 +538,7 @@ class AgentHost:
 
     def drop_agent(self, agent_id: int) -> None:
         """Forget an agent's cached runtime — the hosted equivalent of the
-        fresh-process half of `ava.self.restart()`. The checkpointer thread, the
+        fresh-process half of `meiva.self.restart()`. The checkpointer thread, the
         real state, is untouched, exactly as a process restart leaves it."""
         self._runtimes.pop(agent_id, None)
         self.relays.drop(agent_id)
@@ -558,7 +558,7 @@ class AgentHost:
         event_publisher = AgentEventPublisher(
             self._bus.async_redis(), self._bus.channel, agent_id=agent_id
         )
-        ctx = AvaContext(
+        ctx = MeivaContext(
             machine=self._machine_identity,
             ops_pool=self._pool,
             llm=runtime.llm,
@@ -592,7 +592,7 @@ class AgentHost:
         self,
         agent_id: int,
         config: RunnableConfig,
-        ctx: AvaContext,
+        ctx: MeivaContext,
         initial: dict[str, object],
         *,
         graph: _HostGraph | None = None,
@@ -605,13 +605,13 @@ class AgentHost:
             return PendingTurnFailure(exc)
 
     async def _invoke_until_done(
-        self, agent_id: int, ctx: AvaContext, *, checkpoints: TurnCheckpoints | None = None
+        self, agent_id: int, ctx: MeivaContext, *, checkpoints: TurnCheckpoints | None = None
     ) -> TurnOutcome:
         """Invoke each work once; persistence failure never re-enters the graph."""
         checkpoints = checkpoints or TurnCheckpoints(self._checkpointer, self._graph)
         config = graph_config(
             agent_id,
-            ["ava", f"agent-{agent_id}", "hosted"],
+            ["meiva", f"agent-{agent_id}", "hosted"],
             {"agent_id": agent_id, "hosted": True},
             ctx.require_agent().kernel.checkpoint_interval,
         )
@@ -619,7 +619,7 @@ class AgentHost:
         while True:
             turn += 1
             work = NativeWorkContinuation(uuid4(), require_fresh_input=turn == 1)
-            with turn_span(name=f"ava-agent-{agent_id}", session_id=str(agent_id), turn=turn):
+            with turn_span(name=f"meiva-agent-{agent_id}", session_id=str(agent_id), turn=turn):
                 try:
                     prepared = await invoke_prepared_graph(
                         self._control_pool,

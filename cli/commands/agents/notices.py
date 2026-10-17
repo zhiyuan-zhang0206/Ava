@@ -1,4 +1,4 @@
-"""`ava notices` — operator CLI for the agent notification queue (Task #949).
+"""`meiva notices` — operator CLI for the agent notification queue (Task #949).
 
 Thin client over the gateway's notice endpoints: list any agent's open
 notices (both kinds), resolve them one by one, or clear an agent's backlog.
@@ -126,7 +126,7 @@ def cmd_notices_list(
     type_filter: str | None,
     stale: bool = False,
 ) -> int:
-    """`ava notices list` — every open notice across the fleet (or one agent).
+    """`meiva notices list` — every open notice across the fleet (or one agent).
 
     --stale narrows to notices whose agent is terminated: the invalid
     backlog of dead agents, as opposed to live agents' open notices
@@ -150,7 +150,7 @@ def cmd_notices_list(
 
 
 def cmd_notices_resolve(*, notice_id: int, agent_id: int, action: str, reply: str | None) -> int:
-    """`ava notices resolve <id> --agent <id> --action ...` — resolve one notice."""
+    """`meiva notices resolve <id> --agent <id> --action ...` — resolve one notice."""
     if action not in ("answer", "read", "dismiss"):
         print(f"invalid action {action!r} (answer|read|dismiss)")
         return 2
@@ -186,7 +186,7 @@ def _resolve_all(notices: list[dict[str, Any]], base: str, headers: Any, dial_po
 
 
 def cmd_notices_clear(*, agent_id: int | None, force: bool, stale: bool = False) -> int:
-    """`ava notices clear --agent <id>` — resolve every open notice of one agent.
+    """`meiva notices clear --agent <id>` — resolve every open notice of one agent.
 
     FYI notices get read, decisions get dismissed (answers need a human).
     Lists what it will clear and asks for confirmation unless --force.

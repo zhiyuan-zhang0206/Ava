@@ -1,6 +1,6 @@
 """Is the browser on this cluster's CDP port *ours*?
 
-Every other Ava service answers a `/healthz` carrying `name`/`home`/`pid`, and
+Every other Meiva service answers a `/healthz` carrying `name`/`home`/`pid`, and
 `base.daemon.health.probe_daemon` refuses to call a 200 healthy until those
 identify this unit's own daemon. That check exists because a pytest-leaked
 restarter on prod's default port kept a healthcheck green for 98 minutes while
@@ -34,7 +34,7 @@ draws (task #2692).
 
 ## Identity comes from the profile, and the port ties it to the answer
 
-Ava launches Chrome with `--user-data-dir=$AVA_HOME/chrome-profile`, a path
+Meiva launches Chrome with `--user-data-dir=$MEIVA_HOME/chrome-profile`, a path
 minted per cluster under a home that belongs to this install alone.
 `services/desktop/browser/orphan.py` already established that token as a strictly
 positive identifier — no Chrome that is not ours is launched with it — and
@@ -68,11 +68,11 @@ walk so the gain never becomes a dependency.
 
 Only what runs on THIS machine. `find_cluster_chrome` walks this host's process
 table, so the probe is machine-local by construction — which is the right scope
-(`ava status`, the health probe and the watchdog all run beside the browser they
+(`meiva status`, the health probe and the watchdog all run beside the browser they
 are asking about) but means a remote caller cannot use it.
 
 Nothing here supervises. A Chrome that is ours and holds the port can still have
-left the `ava-browser` session on a `SingletonLock` handoff; identity and
+left the `meiva-browser` session on a `SingletonLock` handoff; identity and
 supervision are two questions and `services/supervision/healthchecks/browser.py` asks both.
 """
 
@@ -281,7 +281,7 @@ def _unusable_cdp_verdict(port: int, profile: Path, answer: CdpAnswer) -> Daemon
     assert answer.reason is not None  # noqa: S101
     wait_reason = macos_readiness.degraded_wait_reason()
     prefix = (
-        f"ava-browser waiting for macOS startup readiness: {wait_reason}; "
+        f"meiva-browser waiting for macOS startup readiness: {wait_reason}; "
         if wait_reason is not None
         else ""
     )

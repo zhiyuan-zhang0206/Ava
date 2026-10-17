@@ -12,7 +12,7 @@ pass an explicit `end_time`.
 
 ## Decision
 
-1. `ava.watcher.cron(expr, ..., end_time=None)` defaults `end_time` to now
+1. `meiva.watcher.cron(expr, ..., end_time=None)` defaults `end_time` to now
    (minute-truncated) + 7 days; explicit ends are untouched.
 2. Re-registering the same standing schedule **renews** it: EVERY live twin
    is superseded (new session + fresh end; each old session's deliberate kill
@@ -59,7 +59,7 @@ pass an explicit `end_time`.
 ## Consequences
 
 - Agents that want a schedule longer than 7 days must re-register before
-  expiry (the renewal call) or pass an explicit `end_time`; the ava-watcher
+  expiry (the renewal call) or pass an explicit `end_time`; the meiva-watcher
   skill documents this.
 - A budget-exhausted crash corpse (auto-resurrect gave up) still leaks its
   standing crons — accepted as the price of never racing the resurrect path.

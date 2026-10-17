@@ -35,7 +35,7 @@ def test_codex_refusal_never_falls_back_to_pending(
 
     monkeypatch.setattr(adapters, "live_submit", refuse)
     adapter = adapters.resolve_adapter(
-        "codex", str(THREAD_ID), codex_remote="unix:///tmp/ava-codex.sock"
+        "codex", str(THREAD_ID), codex_remote="unix:///tmp/meiva-codex.sock"
     )
     with pytest.raises(RuntimeError, match="Steer delivery failed"):
         adapter.send("push")
@@ -49,8 +49,8 @@ def test_codex_emitter_delivers_literal_input_to_the_owning_server(
     from base.agents.impersonation import host_transport
 
     attempts: list[tuple[str, str, str]] = []
-    endpoint = "unix:///tmp/ava-codex.sock"
-    message = "Ava push with literal $(no-shell) and `no-shell`"
+    endpoint = "unix:///tmp/meiva-codex.sock"
+    message = "Meiva push with literal $(no-shell) and `no-shell`"
 
     def delivered_live(thread_id: str, text: str, *, endpoint: str) -> None:
         attempts.append((thread_id, text, endpoint))
@@ -90,7 +90,7 @@ def test_controller_adapter_keeps_multiline_unicode_envelopes(
 ) -> None:
     import json
 
-    message = 'Ava message agent=42\n[id=7] kind=chat\nquoted "text" and café'
+    message = 'Meiva message agent=42\n[id=7] kind=chat\nquoted "text" and café'
     adapter = adapters.resolve_adapter(provider, None)
     assert adapter.notify_terminal
     adapter.send(message)
@@ -104,7 +104,7 @@ def test_controller_adapter_keeps_multiline_unicode_envelopes(
 
 def test_codex_terminal_notice_is_left_to_the_native_host() -> None:
     adapter = adapters.resolve_adapter(
-        "codex", str(THREAD_ID), codex_remote="unix:///tmp/ava-codex.sock"
+        "codex", str(THREAD_ID), codex_remote="unix:///tmp/meiva-codex.sock"
     )
     assert not adapter.notify_terminal
     ag = adapters.resolve_adapter("antigravity", str(THREAD_ID))

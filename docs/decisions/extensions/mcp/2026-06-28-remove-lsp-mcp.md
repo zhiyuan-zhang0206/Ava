@@ -1,11 +1,11 @@
 # Remove LSP MCP server
 
 **Date**: 2026-06-28
-**PR**: [#87](https://github.com/ava/ava/pull/87)
+**PR**: [#87](https://github.com/meiva/meiva/pull/87)
 
 ## Decision
 
-Remove all LSP MCP server references from the Ava codebase — source code,
+Remove all LSP MCP server references from the Meiva codebase — source code,
 documentation, tests, eval cases, and provision scripts. Keep only Chrome as
 the default MCP server example.
 
@@ -17,7 +17,7 @@ the default MCP server example.
   per-repo index warm-up, container image bloat, eval complexity) exceeded the
   value after Chrome DevTools MCP became the primary browser integration.
 - The LSP eval cases (`lsp_references.py`, `lsp_references_active.py`) measured
-  whether agents used the right tool — a diagnostic dimension Avas philosophy
+  whether agents used the right tool — a diagnostic dimension Meivas philosophy
   explicitly treats as secondary to "got the right answer." Ripgrep and
   stdlib-based approaches achieve the same result with zero infra.
 - Deployment had already moved on: no machine in the fleet runs LSP, and the
@@ -27,14 +27,14 @@ the default MCP server example.
 
 | Area | Change |
 |------|--------|
-| `ava/_mcps_daemon.py`, `ava/mcps.py` | Docstring / comment: LSP → Chrome / generic |
+| `meiva/_mcps_daemon.py`, `meiva/mcps.py` | Docstring / comment: LSP → Chrome / generic |
 | `docs/current/architecture.md`, `overview.md` | Remove LSP from MCP examples |
 | `future/infra/extensions/mcp-scope-and-bundling.md` | Remove LSP row from survey table + prose |
 | `evals/cases/code/lsp_references*.py` | Deleted (104 lines total) |
 | `evals/driver.py`, `driver_container.py` | Remove LSP from comments, OOM note, mcp.json block |
 | `pyproject.toml` | Remove LSP-related pyright exclude comment |
 | `scripts/provision/lsp.sh` | Deleted (30 lines) |
-| `tests/ava/test_mcps.py` | Replace `lsp` → `chrome` in test fixtures |
+| `tests/meiva/test_mcps.py` | Replace `lsp` → `chrome` in test fixtures |
 
 ## NOT done
 

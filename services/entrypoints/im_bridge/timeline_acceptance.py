@@ -80,14 +80,14 @@ async def accept_timeline(
 def render_item(it: dict[str, Any], agent_id: int | None = None) -> str:
     """One pushed line: the human's own words or the agent's text output,
     tagged so the reader always knows who is speaking (the user's format:
-    ``[User]`` / ``[Ava #<id>]``)."""
+    ``[User]`` / ``[Meiva #<id>]``)."""
 
     payload = (it.get("payload") or "").strip()
     kind = it.get("kind", "")
     if kind == "inbound_chat":
         return f"[User] {payload}"
     if kind == "agent_chat":
-        who = f"Ava #{agent_id}" if agent_id is not None else "Ava"
+        who = f"Meiva #{agent_id}" if agent_id is not None else "Meiva"
         return f"[{who}] {payload}"
     return f"[{kind}] {payload}"
 

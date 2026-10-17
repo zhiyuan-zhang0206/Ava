@@ -19,8 +19,8 @@ from agent.graph.exec.protocol import (
     read_result,
     write_request,
 )
-from ava.sdk_surface import process_context
-from ava.tests.fixtures.pin_agent import exec_context
+from meiva.sdk_surface import process_context
+from meiva.tests.fixtures.pin_agent import exec_context
 
 _AGENT_ID = 424242
 
@@ -81,17 +81,17 @@ def _spawn(
     env = os.environ.copy()
     env.update(
         {
-            "AVA_HOME": str(tmp_path / "home"),
-            "AVA_AGENT_ID": str(_AGENT_ID),
-            "AVA_PROCESS_PROFILE": "agent",
-            "AVA_EXEC_REQUEST_FILE": str(request_path),
-            "AVA_EXEC_RESULT_FILE": str(result_path),
-            "AVA_TELEMETRY_OTLP_ENDPOINT": endpoint,
-            "AVA_TELEMETRY_OTLP_ENABLED": "true",
-            "AVA_EXEC_WATCHDOG_MARGIN_S": "0.5",
+            "MEIVA_HOME": str(tmp_path / "home"),
+            "MEIVA_AGENT_ID": str(_AGENT_ID),
+            "MEIVA_PROCESS_PROFILE": "agent",
+            "MEIVA_EXEC_REQUEST_FILE": str(request_path),
+            "MEIVA_EXEC_RESULT_FILE": str(result_path),
+            "MEIVA_TELEMETRY_OTLP_ENDPOINT": endpoint,
+            "MEIVA_TELEMETRY_OTLP_ENABLED": "true",
+            "MEIVA_EXEC_WATCHDOG_MARGIN_S": "0.5",
         }
     )
-    env.pop("AVA_LOG_DIR", None)
+    env.pop("MEIVA_LOG_DIR", None)
     proc = subprocess.run(
         [sys.executable, "-I", "-X", "utf8", "-m", "agent.execution.child"],
         capture_output=True,
@@ -225,10 +225,10 @@ def test_unfinished_ordinary_delivery_preserves_success_and_attempts_otlp_tail(
 
     from agent.execution import child
     from agent.graph.exec.protocol import ResultPayload, write_result
-    from ava.tests.fixtures.pin_agent import pin_agent
     from base import telemetry
     from base.agents.context.clients import ClientSet
     from base.telemetry.otlp.telemetry_otlp_exporting import ExportingEventPipeline
+    from meiva.tests.fixtures.pin_agent import pin_agent
 
     result_path = str(tmp_path / "result.json")
     payload = ResultPayload(kind="done", code_reached=True)
@@ -284,10 +284,10 @@ def test_owned_writer_failure_rewrites_success_before_child_exit(tmp_path: Path)
     from dataclasses import replace
     from datetime import UTC, datetime
 
-    import ava
+    import meiva
     from agent.execution import child
     from agent.graph.exec.protocol import ResultPayload, read_result, write_result
-    from base.agents.context import AvaContext
+    from base.agents.context import MeivaContext
     from base.agents.context.clients import ClientSet
     from base.telemetry import Event, EventPipeline
 
@@ -298,8 +298,8 @@ def test_owned_writer_failure_rewrites_success_before_child_exit(tmp_path: Path)
 
     pipe = EventPipeline(writer=writer, batch_size=1)
     clients = ClientSet(pipeline_factory=lambda: pipe)
-    prior = getattr(ava, "context", None)
-    process_context.bind_context(replace(prior or AvaContext(), clients=clients))
+    prior = getattr(meiva, "context", None)
+    process_context.bind_context(replace(prior or MeivaContext(), clients=clients))
     result_path = tmp_path / "result.json"
     payload = ResultPayload(kind="done", code_reached=True)
     write_result(result_path, payload)

@@ -1,7 +1,7 @@
 """Agent lifecycle entry surface: the cross-path invariants + the status lookups.
 
 Gateway-internal — agent processes no longer import this module. The agent SDK
-(`ava.agents.*`) calls the gateway over HTTP. `resurrect` remains reachable here
+(`meiva.agents.*`) calls the gateway over HTTP. `resurrect` remains reachable here
 as an internal op used by `resurrect_if_terminated` (no dedicated endpoint).
 
 Agent birth (`create_agent_row`) lives in `base.agents.birth`; the row it creates is

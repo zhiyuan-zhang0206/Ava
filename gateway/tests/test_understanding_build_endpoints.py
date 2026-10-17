@@ -59,9 +59,9 @@ def _turns(tag: str, count: int, *, first_hour: int) -> list[BaseMessage]:
                 content=f"{tag}{i}",
                 id=f"{tag}h{i}",
                 additional_kwargs={
-                    "ava_msg_type": "inbound",
-                    "ava_source": "user",
-                    "ava_created_at": stamp,
+                    "meiva_msg_type": "inbound",
+                    "meiva_source": "user",
+                    "meiva_created_at": stamp,
                 },
             )
         )
@@ -70,7 +70,7 @@ def _turns(tag: str, count: int, *, first_hour: int) -> list[BaseMessage]:
             AIMessage(
                 content="ok",
                 id=f"{tag}a{i}",
-                additional_kwargs={"ava_created_at": stamp},
+                additional_kwargs={"meiva_created_at": stamp},
                 usage_metadata={
                     "input_tokens": tokens,
                     "output_tokens": 10,
@@ -473,9 +473,9 @@ def test_a_process_without_the_agent_domain_reads_the_switch_and_chunk_size_from
     read from the unit's `.env`, the field defaults when it does not set them."""
     agent = _seed_agent(db_conn)
     path = tmp_path / ".env"
-    path.write_text("AVA_UNDERSTANDING_ENABLED=true\nAVA_UNDERSTANDING_CHUNK_RATIO=0.25\n")
+    path.write_text("MEIVA_UNDERSTANDING_ENABLED=true\nMEIVA_UNDERSTANDING_CHUNK_RATIO=0.25\n")
     with _client() as client:
-        monkeypatch.setenv("AVA_PROCESS_PROFILE", "gateway")
+        monkeypatch.setenv("MEIVA_PROCESS_PROFILE", "gateway")
         config = ConfigBoot()
         authority = ConfigAuthority(config.view, Settings(profile=None), path)
         policy = understanding_policy(config, authority)
@@ -495,7 +495,7 @@ def test_history_policies_keep_two_real_config_owners_and_live_overlays(
     """Policy construction is cold; operations read only their captured live owner."""
     from gateway.agents.history.configuration import timeline_policy
 
-    monkeypatch.delenv("AVA_PROCESS_PROFILE", raising=False)
+    monkeypatch.delenv("MEIVA_PROCESS_PROFILE", raising=False)
     first, second = ConfigBoot(), ConfigBoot()
     first.set_field("timeline_default_limit", 11)
     second.set_field("timeline_default_limit", 29)

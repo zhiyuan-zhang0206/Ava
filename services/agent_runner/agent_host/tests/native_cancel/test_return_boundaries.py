@@ -17,7 +17,7 @@ from agent.ownership.tests.test_lifecycle_intent import insert_lifecycle_command
 from agent.startup import wrap_saver_writes_with_nstep_interval
 from agent.state import AgentState
 from agent.tests.claim.test_inbound_ownership import insert
-from base.agents.context import AvaContext
+from base.agents.context import MeivaContext
 from base.agents.history.delta_read_compat import wrap_saver_reads_with_delta_reconstruction
 from base.agents.inbox.native_cancel import accept_native_cancel, observe_native_work
 from base.cluster.machine import MachineIdentity
@@ -168,12 +168,12 @@ async def blocked_host(
     *,
     database_gate: ProcessDbGate,
     machine: MachineIdentity,
-) -> tuple[Any, Any, AgentHost, AvaContext]:
+) -> tuple[Any, Any, AgentHost, MeivaContext]:
     saver = AsyncPostgresSaver(pool)
     await saver.setup()
     wrap_saver_writes_with_nstep_interval(saver, 100)
     wrap_saver_reads_with_delta_reconstruction(saver)
-    builder: Any = StateGraph(AgentState, context_schema=AvaContext)
+    builder: Any = StateGraph(AgentState, context_schema=MeivaContext)
     builder.add_node("claim", claim_node, destinations=("before_llm", "claim", "__end__"))
     builder.add_node("before_llm", model, destinations=("__end__",))
     builder.add_edge(START, "claim")
@@ -189,7 +189,7 @@ async def blocked_host(
         catalog=model_catalog,
         commands=CommandCatalog(skills=list),
     )
-    ctx = AvaContext(
+    ctx = MeivaContext(
         machine=machine,
         ops_pool=pool,
         event_publisher=MagicMock(),

@@ -64,7 +64,7 @@ def _warning_messages(caplog: pytest.LogCaptureFixture) -> list[str]:
         CompactState(version=3, reminder_shown=True, reminder_seen_version=2),
         MemoryState(injected_paths={"a.md", "b.md"}, window=2),
         ContextReset(resume="claim"),
-        CapabilitiesState(indexed={"ava.skills.gmail", "ava.skills.wechat"}),
+        CapabilitiesState(indexed={"meiva.skills.gmail", "meiva.skills.wechat"}),
         SkillRecallState(prompted={"web-ai:deep-research"}, window=2),
     ],
 )

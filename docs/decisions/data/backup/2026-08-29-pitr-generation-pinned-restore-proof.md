@@ -2,7 +2,7 @@
 
 ## Decision
 
-A physical base candidate becomes protected only after Ava downloads every
+A physical base candidate becomes protected only after Meiva downloads every
 input by exact GCS object name and generation, verifies size, CRC32C and the
 complete immutable metadata map, and restores it in an owned sibling directory.
 The restore reader has a viewer-only credential distinct from the uploader
@@ -15,7 +15,7 @@ and publishes the immutable protected manifest. A controller crash resumes the
 same pending payload, keeping create-only retries byte-for-byte equivalent.
 
 The multi-GiB base ciphertext is downloaded once into a 0700 quarantine after
-a same-filesystem capacity preflight. Ava authenticates the local ciphertext in
+a same-filesystem capacity preflight. Meiva authenticates the local ciphertext in
 one complete AES-GCM pass, then reopens the same owned object for a second local
 authenticated pass through the safe tar extractor. This avoids a second
 cross-region download while preserving the rule that unauthenticated bytes are
@@ -45,7 +45,7 @@ recovery claim, not merely evidence that PostgreSQL accepted a connection.
 
 ## Rollout boundary
 
-`AVA_PITR_RESTORE_PROOF_ENABLED` is independently default-off and requires the
+`MEIVA_PITR_RESTORE_PROOF_ENABLED` is independently default-off and requires the
 WAL and base-candidate gates. This change does not enable `archive_mode`, delete
 remote objects, implement N=2 retention, deploy configuration, or replace any
 logical dump. The first rollout therefore remains protected by the existing

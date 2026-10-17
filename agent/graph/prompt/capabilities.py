@@ -1,4 +1,4 @@
-# ava:ref agent/graph/prompt/docs/composition.ava.okf.md#capabilities-index
+# meiva:ref agent/graph/prompt/docs/composition.meiva.okf.md#capabilities-index
 import logging
 from collections.abc import Sequence
 from typing import Any, NamedTuple
@@ -14,7 +14,7 @@ _DESC_MAX_CHARS = 300
 def disabled_by_sdk_config(path: str, sdk_disable_config: Sequence[str]) -> bool:
     if any(path == entry or path.startswith(entry + ".") for entry in sdk_disable_config):
         return True
-    from ava.sdk_surface import sdk_disable
+    from meiva.sdk_surface import sdk_disable
 
     return any(
         path == entry or path.startswith(entry + ".") for entry in sdk_disable.applied_entries()
@@ -43,9 +43,9 @@ def resolve_prompt_skills(
     if not wanted:
         return []
 
-    import ava
+    import meiva
 
-    loaded: list[Any] = ava.skills.names()
+    loaded: list[Any] = meiva.skills.names()
     if "*" in wanted:
         skills = loaded
     else:
@@ -82,7 +82,7 @@ def _index_description(skill: Any) -> str | None:
 
 
 def index_entry(path: str, description: str) -> str:
-    return f"- `ava.skills.{path}` — {description}"
+    return f"- `meiva.skills.{path}` — {description}"
 
 
 def _index_line(skill: Any) -> str:
@@ -90,8 +90,8 @@ def _index_line(skill: Any) -> str:
     description = _index_description(skill)
     if description is None:
         return (
-            f"- `ava.skills.{path}` — [security-flagged] description withheld "
-            f"(load the body with `ava.help(ava.skills.{path})` and judge it yourself)"
+            f"- `meiva.skills.{path}` — [security-flagged] description withheld "
+            f"(load the body with `meiva.help(meiva.skills.{path})` and judge it yourself)"
         )
     return index_entry(path, description)
 
@@ -137,7 +137,9 @@ def _skill_index_lines(prompt: Prompt) -> list[str]:
         skill = by_path[path]
         line = _index_line(skill)
         if count:
-            line += f" ({count} sub-skills; inspect with `ava.help(ava.skills.{target(skill)})`)"
+            line += (
+                f" ({count} sub-skills; inspect with `meiva.help(meiva.skills.{target(skill)})`)"
+            )
         lines.append(line)
     return lines
 
@@ -167,7 +169,7 @@ def index_drift(known: set[str], prompt: Prompt) -> IndexDrift:
 _NEW_SKILLS_FRAMING = (
     "Additional skills are now available beyond those listed in `# Capabilities`. "
     "The descriptions below are summaries; load a skill's full instructions "
-    "with `ava.help(ava.skills.<path>)` before using it."
+    "with `meiva.help(meiva.skills.<path>)` before using it."
 )
 
 
@@ -180,7 +182,7 @@ def new_skills_note_text(skills: list[Any]) -> str:
     if len(skills) > len(listed):
         lines.append(
             f"- … and {len(skills) - len(listed)} more — "
-            "`ava.help(ava.skills)` enumerates the full catalog"
+            "`meiva.help(meiva.skills)` enumerates the full catalog"
         )
     return _NEW_SKILLS_FRAMING + "\n\n" + "\n".join(lines)
 
@@ -188,13 +190,13 @@ def new_skills_note_text(skills: list[Any]) -> str:
 def _mcp_index_lines(sdk_disable_config: Sequence[str]) -> list[str]:
     if disabled_by_sdk_config("mcps", sdk_disable_config):
         return []
-    import ava
+    import meiva
 
     lines: list[str] = []
-    for server in ava.mcps.servers():
-        desc = ava.mcps.description(server)
+    for server in meiva.mcps.servers():
+        desc = meiva.mcps.description(server)
         lines.append(
-            f"- `ava.mcps.{server}` — {_one_line(desc)}" if desc else f"- `ava.mcps.{server}`"
+            f"- `meiva.mcps.{server}` — {_one_line(desc)}" if desc else f"- `meiva.mcps.{server}`"
         )
     return lines
 
@@ -203,19 +205,19 @@ _WHAT_SKILLS = "reusable skills (playbooks)"
 _WHAT_MCPS = "live MCP tool servers"
 
 _SKILLS_HOWTO = (
-    "Before using a skill, load its full body with `ava.help(ava.skills.<path>)` "
+    "Before using a skill, load its full body with `meiva.help(meiva.skills.<path>)` "
     "with a path exactly as the skill list gives it, e.g. "
-    "`ava.skills.web_ai.deep_research`; the render also names the skill's "
+    "`meiva.skills.web_ai.deep_research`; the render also names the skill's "
     "directory, where its other files live. "
     "This listing may be a subset of what is installed — "
-    "`ava.help(ava.skills)` enumerates the full catalog, and an unlisted skill "
+    "`meiva.help(meiva.skills)` enumerates the full catalog, and an unlisted skill "
     "is still reachable by name. Entry skills group their sub-skills: inspect "
     "the matching entry to discover specialized playbooks before choosing one."
 )
 
 _MCP_HOWTO = (
-    "`ava.mcps.servers()` lists every configured server and "
-    "`ava.help(ava.mcps.<server>)` lists one server's tools."
+    "`meiva.mcps.servers()` lists every configured server and "
+    "`meiva.help(meiva.mcps.<server>)` lists one server's tools."
 )
 
 _MATCH_EVERY_TASK = (
@@ -254,7 +256,7 @@ def capabilities_section(slices: AgentSlices) -> str:
         parts.append("**Skills** — reusable playbooks:\n" + "\n".join(skill_lines))
     if mcp_lines:
         parts.append(
-            "**MCP servers** — live tools, call `ava.mcps.<server>.<tool>(...)`:\n"
+            "**MCP servers** — live tools, call `meiva.mcps.<server>.<tool>(...)`:\n"
             + "\n".join(mcp_lines)
         )
     return "\n\n".join(parts)

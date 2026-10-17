@@ -22,14 +22,14 @@ deploy lease also froze admission cluster-wide.
    disconnecting them. `-m immediate` stays unreachable: an incomplete stop is
    reported (with per-phase accounting), never escalated into force.
 2. **A failed data-plane stop compensates.** Only a failure inside the
-   data-plane phase gets the bounded internal `ava start`
+   data-plane phase gets the bounded internal `meiva start`
    (`--persist-services`; preserved sessions arrive as transient skips, and
    `ensure_pgbouncer`'s degraded-restart branch revives the half-shut pooler).
    A failure before the phase cannot present the half-shut shape, and after
    `_mark_stopped` the destructive work is done — both stay report-only. The
    outcome (`compensated` / report-only) lands in the stop report and journal.
 3. **The quiesced window is `drained` .. `ready`.** From drain completion
-   until `ava start` releases the hold, background database writers hold:
+   until `meiva start` releases the hold, background database writers hold:
    ownership renewal, page reconciliation, close-notice flush. Agent-row
    leases lapse with their TTL; the first beat after resume refreshes every
    row this host still owns.

@@ -151,7 +151,7 @@ def degraded_wait_reason() -> str | None:
     try:
         readiness = probe_startup_readiness()
     except Exception:  # Healthchecks must not turn an unknown readiness state into a crash loop.
-        _log.exception("ava-browser: startup readiness probe failed")
+        _log.exception("meiva-browser: startup readiness probe failed")
         if is_macos():
             return "macOS startup readiness could not be probed"
         return None
@@ -173,7 +173,7 @@ def wait_for_browser_startup_readiness() -> None:
         now = time.monotonic()
         if reason != last_reason or now - last_reported_at >= _READINESS_REPORT_INTERVAL_S:
             _log.warning(
-                "ava-browser DEGRADED: %s; waiting before Chrome launch and retrying every %.0fs",
+                "meiva-browser DEGRADED: %s; waiting before Chrome launch and retrying every %.0fs",
                 reason,
                 READINESS_RETRY_S,
             )

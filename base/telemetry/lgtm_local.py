@@ -99,7 +99,7 @@ def storage_dir(home: Path) -> Path:
 
 
 def service_argv(home: Path, name: str) -> tuple[str, ...]:
-    """One native invocation, launched only as an ava-root unit."""
+    """One native invocation, launched only as an meiva-root unit."""
     native = home.resolve() / "lgtm/native"
     spec = NATIVE_SERVICES[name]
     if spec.uses_run_script:

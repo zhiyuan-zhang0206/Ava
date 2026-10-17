@@ -404,8 +404,8 @@ def test_explicit_repository_root_reaches_budget_scope(
     "scope",
     [
         "agent",
-        "ava",
-        "ava_builtins",
+        "meiva",
+        "meiva_builtins",
         "gateway",
         "base",
         "services",

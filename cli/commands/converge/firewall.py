@@ -11,7 +11,7 @@ never existed — and retry through `sudo -n` on releases that still require
 elevation.
 
 A plain `sudo` would prompt for a password, and converge runs unattended from
-`ava start`, the watchdog, and the fleet update. A prompt in that path does
+`meiva start`, the watchdog, and the fleet update. A prompt in that path does
 not degrade to "unfixed"; it hangs the bring-up, which is strictly worse than the
 defect it was trying to repair, and on a headless host it hangs it invisibly.
 `sudo -n` either runs the fallback mutation or fails immediately, and a failure
@@ -19,7 +19,7 @@ degrades to the historical behavior — print the exact manual commands for the
 operator. See `base.host.system.macos_firewall` for the platform compatibility contract.
 
 Because it reports rather than enforces, it warns and returns instead of raising:
-a missing firewall rule does not stop this host serving loopback, `ava start`
+a missing firewall rule does not stop this host serving loopback, `meiva start`
 is how an operator recovers, and a converge step that blocked the recovery path
 over something it cannot fix would be its own outage.
 """
@@ -34,12 +34,12 @@ from base.cluster.machine import MachineIdentity, MachineNameMissing
 from base.host.system import macos_firewall as fw
 from base.host.system.hostport import Host
 from base.host.system.macos_firewall import FirewallAudit, FirewallVerdict, audit_allowlist
-from base.paths import ava_home
+from base.paths import meiva_home
 from cli.commands.converge.spec import ConvergeCtx
 
 
 def configured_machine_name(machine: MachineIdentity) -> str | None:
-    """The configured Ava machine name (``AVA_MACHINE_NAME``), or None when unset."""
+    """The configured Meiva machine name (``MEIVA_MACHINE_NAME``), or None when unset."""
     with contextlib.suppress(MachineNameMissing):
         return machine.name()
     return None
@@ -53,7 +53,7 @@ def serving_binaries(roles: frozenset[str], *, home: Path) -> tuple[Path, ...]:
     where the fragility lives: both are version-stamped, so both orphan their ALF
     rule on a version bump. `sys.executable` is the version-stamped uv interpreter
     (`.../cpython-3.12.11-macos-aarch64-none/bin/python3.12`); `pg_tool` prefers
-    the equally version-stamped vendored tree (`~/.ava/runtime/pg/17.11.0/bin`).
+    the equally version-stamped vendored tree (`~/.meiva/runtime/pg/17.11.0/bin`).
 
     The interpreter is audited for **either** capability, not just `gateway`. A
     gateway serves the HTTP port every runner dials (issue #949's symptom), and an
@@ -73,7 +73,7 @@ def serving_binaries(roles: frozenset[str], *, home: Path) -> tuple[Path, ...]:
     if "gateway" in roles:
         candidates.append(pg_tool("postgres"))
         # A gateway with a cluster secret serves the collector's authenticated
-        # remote OTLP receiver on AVA_MACHINE_HOST. Auditing it unconditionally
+        # remote OTLP receiver on MEIVA_MACHINE_HOST. Auditing it unconditionally
         # for gateway capability is harmless on a loopback-only single box (the
         # host-level audit exits before reading ALF there) and prevents a hybrid
         # gateway+runner from silently accepting only local telemetry.
@@ -86,12 +86,12 @@ def audit_this_host(
 ) -> FirewallAudit:
     """Audit this host's own serving binaries. The one entry point every caller shares.
 
-    Converge calls it to report proactively; `ava firewall status` / `sync` call
+    Converge calls it to report proactively; `meiva firewall status` / `sync` call
     it on demand. Same detector, so they can never disagree about whether the
     firewall is the cause.
     """
 
-    required = serving_binaries(roles, home=ava_home())
+    required = serving_binaries(roles, home=meiva_home())
     if not required:
         return FirewallAudit(
             FirewallVerdict.ALLOWED, "no serving binary resolved on this host to audit"

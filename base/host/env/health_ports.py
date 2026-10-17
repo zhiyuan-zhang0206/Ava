@@ -37,7 +37,7 @@ def health_port(name: str, *, read_field: Callable[[str], int | None]) -> int:
     """Resolve a daemon's registered health port through the caller's config reader.
 
     First reads ``settings.<name>_health_port`` (overridable by env
-    ``AVA_<NAME>_HEALTH_PORT``); falls back to ``DEFAULT_PORTS``; if
+    ``MEIVA_<NAME>_HEALTH_PORT``); falls back to ``DEFAULT_PORTS``; if
     the name is not registered, raises ``KeyError`` (fail fast; new
     daemons must register a port first; silent fallback is not
     allowed).

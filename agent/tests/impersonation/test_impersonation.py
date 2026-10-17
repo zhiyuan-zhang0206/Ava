@@ -20,8 +20,7 @@ from agent.graph.exec._result import lifecycle_exception_from_name
 from agent.graph.exec.protocol import read_request, write_request
 from agent.hooks.tests.fakes import placeholder_runtime
 from agent.state import BaseAgentState
-from ava.tests.fixtures.pin_agent import exec_context, pin_agent
-from base.agents.context import AvaContext
+from base.agents.context import MeivaContext
 from base.agents.impersonation import relay
 from base.agents.impersonation.notes import HandoffNotes
 from base.agents.lifecycle import AgentImpersonation
@@ -38,6 +37,7 @@ from base.host.env.agent_slices import AgentSlices
 from base.native_process.runtime_incarnation import RuntimeIncarnation
 from base.packages.composer_commands import CommandCatalog
 from base.packages.plugin_providers import build_model_catalog
+from meiva.tests.fixtures.pin_agent import exec_context, pin_agent
 
 
 def _notes() -> HandoffNotes:
@@ -55,9 +55,9 @@ def gate_ctx(
     event_bus: EventBus,
     relays: RelaySupervision,
     machine_identity: MachineIdentity,
-) -> AvaContext:
+) -> MeivaContext:
     config = snapshot_process_config()
-    return AvaContext(
+    return MeivaContext(
         db=database,
         bus=event_bus,
         machine=machine_identity,
@@ -72,7 +72,7 @@ def gate_ctx(
 
 
 @pytest.fixture
-def native_gate_ctx(gate_ctx: AvaContext, incarnation: RuntimeIncarnation) -> AvaContext:
+def native_gate_ctx(gate_ctx: MeivaContext, incarnation: RuntimeIncarnation) -> MeivaContext:
     return replace(gate_ctx, original_incarnation=incarnation)
 
 
@@ -111,7 +111,7 @@ def _session(status: str = "active", **values: Any) -> dict[str, Any]:
 async def test_hold_ends_before_claim_or_compaction(
     monkeypatch: pytest.MonkeyPatch,
     status: str,
-    gate_ctx: AvaContext,
+    gate_ctx: MeivaContext,
     *,
     database_gate: ProcessDbGate,
 ) -> None:
@@ -130,7 +130,7 @@ async def test_hold_ends_before_claim_or_compaction(
     hook.assert_not_awaited()
 
 
-# ava:ref agent/tests/impersonation/docs/checkpoint-receipt.ava.okf.md#checkpoint-receipt-retry
+# meiva:ref agent/tests/impersonation/docs/checkpoint-receipt.meiva.okf.md#checkpoint-receipt-retry
 async def test_checkpoint_receipt_prevents_reapplying_non_idempotent_delta(
     monkeypatch: pytest.MonkeyPatch,
     incarnation: RuntimeIncarnation,
@@ -201,7 +201,7 @@ def test_accept_stops_exec_and_uses_captured_incarnation(
     incarnation: RuntimeIncarnation,
     machine_identity: MachineIdentity,
 ) -> None:
-    from ava.impersonation import accept
+    from meiva.impersonation import accept
 
     accepted = Mock()
     monkeypatch.setattr(agents_impersonation, "accept", accepted)
@@ -471,7 +471,7 @@ def test_establish_relay_codex_readiness_timeout_rolls_back(
 
 async def test_missing_snapshot_cannot_kill_a_replacement_relay(
     monkeypatch: pytest.MonkeyPatch,
-    gate_ctx: AvaContext,
+    gate_ctx: MeivaContext,
 ) -> None:
     monkeypatch.setattr(impersonation, "native_status", AsyncMock(return_value=None))
     process = MagicMock()
@@ -499,7 +499,7 @@ async def test_missing_snapshot_cannot_kill_a_replacement_relay(
 @pytest.mark.parametrize("same_lease", [False, True])
 async def test_delayed_snapshot_cannot_retire_replacement_sender(
     monkeypatch: pytest.MonkeyPatch,
-    gate_ctx: AvaContext,
+    gate_ctx: MeivaContext,
     same_lease: bool,
     machine_identity: MachineIdentity,
 ) -> None:
@@ -527,7 +527,7 @@ async def test_delayed_snapshot_cannot_retire_replacement_sender(
 async def test_claim_gate_records_a_stale_relay_as_degraded_and_never_replaces_it(
     monkeypatch: pytest.MonkeyPatch,
     incarnation: RuntimeIncarnation,
-    native_gate_ctx: AvaContext,
+    native_gate_ctx: MeivaContext,
     owned: bool,
     running: bool,
 ) -> None:
@@ -569,7 +569,7 @@ async def test_claim_gate_records_a_stale_relay_as_degraded_and_never_replaces_i
 async def test_startup_grace_does_not_degrade_a_fresh_child(
     monkeypatch: pytest.MonkeyPatch,
     incarnation: RuntimeIncarnation,
-    native_gate_ctx: AvaContext,
+    native_gate_ctx: MeivaContext,
 ) -> None:
     session = _relay_session("active")
     child = MagicMock()
@@ -588,7 +588,7 @@ async def test_startup_grace_does_not_degrade_a_fresh_child(
 async def test_confirmed_child_exit_is_degraded_at_once_without_replacement(
     monkeypatch: pytest.MonkeyPatch,
     incarnation: RuntimeIncarnation,
-    native_gate_ctx: AvaContext,
+    native_gate_ctx: MeivaContext,
 ) -> None:
     from agent.nodes import END
 
@@ -619,7 +619,7 @@ async def test_confirmed_child_exit_is_degraded_at_once_without_replacement(
 async def test_stale_session_relay_retains_authority_with_visible_unsupported_recovery(
     monkeypatch: pytest.MonkeyPatch,
     incarnation: RuntimeIncarnation,
-    native_gate_ctx: AvaContext,
+    native_gate_ctx: MeivaContext,
 ) -> None:
     session = _relay_session("active", provider="claude")
     monkeypatch.setattr(impersonation, "native_status", AsyncMock(return_value=session))
@@ -638,7 +638,7 @@ async def test_stale_session_relay_retains_authority_with_visible_unsupported_re
 async def test_unknown_relay_exit_evidence_degrades_only_when_the_heartbeat_is_stale(
     monkeypatch: pytest.MonkeyPatch,
     incarnation: RuntimeIncarnation,
-    native_gate_ctx: AvaContext,
+    native_gate_ctx: MeivaContext,
     fresh: bool,
 ) -> None:
     from base.native_process.ownership import OwnedProcess

@@ -24,7 +24,7 @@ from base.paths import chrome_mcp_socket
 
 @pytest.fixture
 def home(tmp_path: Path) -> Path:
-    return Path(tempfile.mkdtemp(prefix="ava-mcp-home-", dir="/tmp"))
+    return Path(tempfile.mkdtemp(prefix="meiva-mcp-home-", dir="/tmp"))
 
 
 _FAKE_UPSTREAM = r"""
@@ -122,22 +122,22 @@ def _fake_bin(tmp_path: Path, mode: str) -> tuple[Path, Path]:
 def _daemon_env(home: Path, bin_dir: Path, chrome: _ChromeFake, mode: str) -> dict[str, str]:
     home.mkdir(parents=True, exist_ok=True)
     (home / ".env").write_text(
-        f"AVA_BROWSER_CDP_PORT={chrome.port}\nAVA_MCP_CONNECT_TIMEOUT_SECONDS=120\n"
-        "AVA_MACHINE_NAME=browser-mcp-test\n",
+        f"MEIVA_BROWSER_CDP_PORT={chrome.port}\nMEIVA_MCP_CONNECT_TIMEOUT_SECONDS=120\n"
+        "MEIVA_MACHINE_NAME=browser-mcp-test\n",
         encoding="utf-8",
     )
     env = dict(os.environ)
     env.update(
         {
-            "AVA_HOME": str(home),
+            "MEIVA_HOME": str(home),
             "FAKE_UPSTREAM_MODE": mode,
             "PATH": f"{bin_dir}:{env['PATH']}",
         }
     )
     for key in (
-        "AVA_CONFIG_FETCH",
-        "AVA_GATEWAY_URL",
-        "AVA_CLUSTER",
+        "MEIVA_CONFIG_FETCH",
+        "MEIVA_GATEWAY_URL",
+        "MEIVA_CLUSTER",
     ):
         env.pop(key, None)
     return env

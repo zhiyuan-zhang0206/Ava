@@ -11,8 +11,8 @@ from services.backup.artifact import offsite
 from services.backup.artifact.names import REMOTE_ROOT
 from services.backup.artifact.tests.oss_fake import FakeOssBucket, chain_etag, md5_hex
 
-_NAME = "ava-20260916T030000Z.dump.enc"
-_METADATA = {"ava-artifact-kind": "logical-backup"}
+_NAME = "meiva-20260916T030000Z.dump.enc"
+_METADATA = {"meiva-artifact-kind": "logical-backup"}
 
 
 def _artifact(tmp_path: Path, data: bytes = b"encrypted artifact") -> Path:
@@ -45,7 +45,7 @@ def test_publish_streams_a_multipart_object_and_verifies_it(
     assert published == f"{REMOTE_ROOT}/{_NAME}"
     stored = bucket.files[f"{REMOTE_ROOT}/{_NAME}"]
     assert stored["data"] == b"encrypted artifact"
-    assert stored["headers"] == {"x-oss-meta-ava-artifact-kind": "logical-backup"}
+    assert stored["headers"] == {"x-oss-meta-meiva-artifact-kind": "logical-backup"}
     assert stored["etag"] == chain_etag([b"encrypted artifact"])
     assert bucket.aborted == []
     [ack_line] = [r.getMessage() for r in caplog.records if "off-site published" in r.getMessage()]
@@ -145,7 +145,7 @@ def test_an_occupied_name_with_a_different_etag_chain_is_not_adopted(
 
 def test_an_occupied_name_with_different_metadata_is_not_adopted(tmp_path: Path) -> None:
     bucket = FakeOssBucket()
-    bucket.seed(f"{REMOTE_ROOT}/{_NAME}", [b"encrypted artifact"], {"ava-artifact-kind": "other"})
+    bucket.seed(f"{REMOTE_ROOT}/{_NAME}", [b"encrypted artifact"], {"meiva-artifact-kind": "other"})
 
     with pytest.raises(offsite.OffsiteError, match="differs from the local artifact"):
         offsite.put_if_absent(bucket, _artifact(tmp_path), f"{REMOTE_ROOT}/{_NAME}", _METADATA)
@@ -206,14 +206,14 @@ def test_the_root_is_a_parameter(tmp_path: Path) -> None:
 
     published = offsite.publish(
         _artifact(tmp_path),
-        root="ava-pitr-scratch/t1",
+        root="meiva-pitr-scratch/t1",
         bucket=bucket,
         endpoint_reader=lambda: settings.services.backup_offsite_endpoint,
         bucket_reader=lambda: settings.services.backup_offsite_bucket,
         credentials_file_reader=lambda: settings.services.backup_offsite_credentials_file,
     )
 
-    assert published == f"ava-pitr-scratch/t1/{_NAME}"
+    assert published == f"meiva-pitr-scratch/t1/{_NAME}"
     assert list(bucket.files) == [published]
 
 
@@ -243,7 +243,7 @@ def test_unconfigured_publish_skips_with_one_info_line(
     [record] = caplog.records
     assert (record.levelno, record.exc_info) == (logging.INFO, None)
     for key in ("ENDPOINT", "BUCKET", "CREDENTIALS_FILE"):
-        assert f"AVA_BACKUP_OFFSITE_{key}" in record.getMessage()
+        assert f"MEIVA_BACKUP_OFFSITE_{key}" in record.getMessage()
 
 
 def test_a_partly_configured_destination_skips_naming_the_unset_keys(
@@ -266,9 +266,9 @@ def test_a_partly_configured_destination_skips_naming_the_unset_keys(
 
     [record] = caplog.records
     assert record.levelno == logging.INFO
-    assert "AVA_BACKUP_OFFSITE_BUCKET" in record.getMessage()
-    assert "AVA_BACKUP_OFFSITE_CREDENTIALS_FILE" in record.getMessage()
-    assert "AVA_BACKUP_OFFSITE_ENDPOINT" not in record.getMessage()
+    assert "MEIVA_BACKUP_OFFSITE_BUCKET" in record.getMessage()
+    assert "MEIVA_BACKUP_OFFSITE_CREDENTIALS_FILE" in record.getMessage()
+    assert "MEIVA_BACKUP_OFFSITE_ENDPOINT" not in record.getMessage()
 
 
 def test_a_configured_destination_publishes_to_the_opened_bucket(

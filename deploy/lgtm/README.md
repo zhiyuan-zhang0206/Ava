@@ -3,7 +3,7 @@
 The LGTM host is the cluster's observability backend for logs, metrics, traces,
 and the Grafana UI. It is required while the gateway serves `/ops` and the
 inspect endpoints: gateway read paths query Loki and Prometheus, Grafana
-evaluates alert rules, the events-maintenance rollup reads Loki, and `ava
+evaluates alert rules, the events-maintenance rollup reads Loki, and `meiva
 cluster health` audits Loki event history.
 
 ## Lifecycle ownership
@@ -12,23 +12,23 @@ The observability station owns its native services by home path. Default
 ports preserve the single-station layout; isolated homes require explicit,
 non-overlapping native listen ports. Provider identity has two equivalent forms:
 
-- **`$AVA_HOME/lgtm-host` marker** (legacy): `ava lgtm on` writes the marker and
-  enables the three backend services through normal `ava start`, whose converge
+- **`$MEIVA_HOME/lgtm-host` marker** (legacy): `meiva lgtm on` writes the marker and
+  enables the three backend services through normal `meiva start`, whose converge
   installs any missing pinned native binaries.
 - **`observability-station` unit capability** (declarative): a machine that
-  declares the capability (`ava init --serve-observability-station`, or
-  `AVA_MACHINE_SERVE_OBSERVABILITY_STATION` in the home's `.env`) converges the full
+  declares the capability (`meiva init --serve-observability-station`, or
+  `MEIVA_MACHINE_SERVE_OBSERVABILITY_STATION` in the home's `.env`) converges the full
   native set — pinned binaries, rendered configs, storage dirs — with no marker, and its
   producer OTLP export, collector lifecycle, and Loki read
   gates all treat it as the station. The capability is orthogonal to
-  `AVA_OBSERVABILITY_URL`: the role decides who PROVIDES the stack, the switch
+  `MEIVA_OBSERVABILITY_URL`: the role decides who PROVIDES the stack, the switch
   decides where CONSUMERS point.
 
-With either form present, Loki, Prometheus, and Grafana are ordinary `ava-root`
+With either form present, Loki, Prometheus, and Grafana are ordinary `meiva-root`
 services on Darwin arm64 and Linux amd64: the ops roster defines their commands
 and readiness, and every converge prepares the binaries and rendered
 configuration of the selected backends without registering any OS job. A probe
-never restarts a backend. `ava lgtm status` and `ava status` show each backend's
+never restarts a backend. `meiva lgtm status` and `meiva status` show each backend's
 root-owned readiness verdict. A home with neither form never installs or runs
 these backends.
 
@@ -40,22 +40,22 @@ capability.
 
 | Backend | Delivery | Version / limit | Port | Role |
 |---|---|---|---|---|
-| Loki | native, `ava-root` service | 3.7.6 / `GOMEMLIMIT=2GiB` | 3100 | log backend, filesystem storage, 84h retention |
-| Prometheus | native, `ava-root` service | 3.13.2 / `GOMEMLIMIT=1GiB` | 9090 | metrics and OTLP receiver |
-| Tempo | remote per cluster config | host-managed on the station; this repository carries no Tempo configuration | configured by `AVA_TELEMETRY_TEMPO_ENDPOINT` | trace backend |
-| Grafana | native, `ava-root` service | 13.2.3 | 3003 | anonymous read-only UI |
+| Loki | native, `meiva-root` service | 3.7.6 / `GOMEMLIMIT=2GiB` | 3100 | log backend, filesystem storage, 84h retention |
+| Prometheus | native, `meiva-root` service | 3.13.2 / `GOMEMLIMIT=1GiB` | 9090 | metrics and OTLP receiver |
+| Tempo | remote per cluster config | host-managed on the station; this repository carries no Tempo configuration | configured by `MEIVA_TELEMETRY_TEMPO_ENDPOINT` | trace backend |
+| Grafana | native, `meiva-root` service | 13.2.3 | 3003 | anonymous read-only UI |
 
 The pinned release assets and SHA256 values live in
 [`native/versions.yml`](native/versions.yml). Converge verifies an archive
 before extraction, writes each executable or release tree under
-`$AVA_HOME/lgtm/native/`, and records per-backend version and platform markers. A copied Darwin
+`$MEIVA_HOME/lgtm/native/`, and records per-backend version and platform markers. A copied Darwin
 installation cannot reuse its executable markers on Linux. Pinned assets
 support Darwin arm64 and Linux amd64; unsupported platforms warn and skip.
 
 Native templates in `native/config/` are rendered on every converge into
-`$AVA_HOME/lgtm/native/config/`, including Grafana's INI, runtime environment,
+`$MEIVA_HOME/lgtm/native/config/`, including Grafana's INI, runtime environment,
 and launch script. Native backend listen hosts are config
-knobs (`AVA_LGTM_LISTEN_HOST`, `AVA_LGTM_GRAFANA_LISTEN_HOST`): Loki and
+knobs (`MEIVA_LGTM_LISTEN_HOST`, `MEIVA_LGTM_GRAFANA_LISTEN_HOST`): Loki and
 Prometheus default to loopback, Grafana defaults to all interfaces, and native
 Grafana dials Loki, Prometheus, and Postgres on the host loopback.
 
@@ -68,11 +68,11 @@ and hold the process past the unit's shutdown deadline (2026-09-10 #2048).
 If a plugin ever becomes required, provision it deliberately at converge time;
 do not re-enable background installation.
 
-The observation data volume is a per-machine knob: `AVA_LGTM_STORAGE_DIR`
-(empty default = `$AVA_HOME/lgtm/native/data`, byte-identical to the historical
+The observation data volume is a per-machine knob: `MEIVA_LGTM_STORAGE_DIR`
+(empty default = `$MEIVA_HOME/lgtm/native/data`, byte-identical to the historical
 layout) moves the Loki filesystem store and the Prometheus TSDB to a configured
 path — e.g. a dedicated data volume on a station host. Grafana's own data and
-the native logs stay under `$AVA_HOME/lgtm/native` regardless. Switching the
+the native logs stay under `$MEIVA_HOME/lgtm/native` regardless. Switching the
 knob does NOT migrate existing data: the new path starts empty, so move the old
 store yourself (`rsync` the previous data dir to the new location before the
 first start on the new path) or accept the history loss.
@@ -80,21 +80,21 @@ first start on the new path) or accept the history loss.
 
 ### Isolated listeners
 
-The three backends are `ava-root` services of the home that owns them, started
-and stopped only by that home's `ava start` and `ava stop` (see Start, stop, and
+The three backends are `meiva-root` services of the home that owns them, started
+and stopped only by that home's `meiva start` and `meiva stop` (see Start, stop, and
 rollback below). Converge registers no launchd job, systemd unit, or other OS
 job for them, and nothing enumerates or retires another home's processes.
-`ava lgtm on` does not configure boot orchestration; the application root's boot
+`meiva lgtm on` does not configure boot orchestration; the application root's boot
 job is separate.
 
 Host-scoped ports default to the existing values:
 
 | Setting | Default |
 |---|---:|
-| `AVA_LGTM_LOKI_PORT` | 3100 |
-| `AVA_LGTM_LOKI_GRPC_PORT` | 9095 |
-| `AVA_LGTM_PROMETHEUS_PORT` | 9090 |
-| `AVA_LGTM_GRAFANA_PORT` | 3003 |
+| `MEIVA_LGTM_LOKI_PORT` | 3100 |
+| `MEIVA_LGTM_LOKI_GRPC_PORT` | 9095 |
+| `MEIVA_LGTM_PROMETHEUS_PORT` | 9090 |
+| `MEIVA_LGTM_GRAFANA_PORT` | 3003 |
 
 An isolated acceptance home must set all four to unused ports, and point its
 consumer query URLs at those listeners. The regular cluster port registry
@@ -122,16 +122,16 @@ archive-stream exception, and keeps bounded query splitting, fan-out, and
 embedded result caches. Prometheus retains data for 15 days or 8GB, whichever
 limit is reached first. Tempo's block retention is set in its host-managed
 configuration (168 hours). Each native backend's
-stdout and stderr go to `$AVA_HOME/run/ava-root/logs/<name>/output.log` (`<name>`
+stdout and stderr go to `$MEIVA_HOME/run/meiva-root/logs/<name>/output.log` (`<name>`
 is `loki`, `prometheus`, or `grafana`); Grafana's own log files are written to
-`$AVA_HOME/lgtm/native/logs/`.
+`$MEIVA_HOME/lgtm/native/logs/`.
 
 All unauthenticated backend APIs remain loopback-only: Loki 3100, Prometheus
 9090, Tempo 3200 and 14318. Grafana 3003 is the intended wider,
 anonymous-but-read-only surface; its listen host is the
-`AVA_LGTM_GRAFANA_LISTEN_HOST` knob, whose `0.0.0.0` default is the historical
+`MEIVA_LGTM_GRAFANA_LISTEN_HOST` knob, whose `0.0.0.0` default is the historical
 all-interfaces form. Widening a listen host past loopback requires the
-matching `AVA_TELEMETRY_*_URL` for remote consumers and Prometheus scrape
+matching `MEIVA_TELEMETRY_*_URL` for remote consumers and Prometheus scrape
 targets; converge warns on a listen/read mismatch. Local health probes instead
 use the native bind settings and bypass HTTP proxy variables. A remote HTTPS
 query URL is never interpreted as a local bind address or port.
@@ -154,7 +154,7 @@ costs memory, so a delay beyond 6h should be investigated before increasing
 it again. This is an operations setting in
 `deploy/lgtm/native/config/prometheus.yml`, not a framework constant.
 
-The `ava-ops-prom-too-old-samples` rule fires on any increase in the counter
+The `meiva-ops-prom-too-old-samples` rule fires on any increase in the counter
 over 10m. That counter covers both the whole-batch HTTP 400 path and a silent
 partial-drop path with no HTTP 400 or collector log line. Once the 6h window
 covers the known replay pattern, the rule should remain silent; a firing
@@ -170,7 +170,7 @@ First, after converge and restart, read back the rendered native config and
 confirm `out_of_order_time_window: 6h`:
 
 ```bash
-grep 'out_of_order_time_window: 6h' "$AVA_HOME/lgtm/native/config/prometheus.yml"
+grep 'out_of_order_time_window: 6h' "$MEIVA_HOME/lgtm/native/config/prometheus.yml"
 ```
 
 Then confirm the running Prometheus loaded the same value from its status API:
@@ -210,11 +210,11 @@ the window before changing anything.
 ## Start, stop, and rollback
 
 ```bash
-ava stop -y                  # planned shutdown before changing the root generation
-ava lgtm on                  # enable backend intent and invoke normal start
-ava lgtm status              # root-owned protocol readiness
-ava stop -y
-ava lgtm off                 # disable backend intent; preserve data and other choices
+meiva stop -y                  # planned shutdown before changing the root generation
+meiva lgtm on                  # enable backend intent and invoke normal start
+meiva lgtm status              # root-owned protocol readiness
+meiva stop -y
+meiva lgtm off                 # disable backend intent; preserve data and other choices
 ```
 
 All three local backends are ordinary root services. Converge prepares assets and
@@ -228,17 +228,17 @@ protocol response. A response from an unrelated process or an HTTP 503 cannot
 certify readiness. The local Loki write/read diagnostic is separate from process
 lifecycle and never launches or restarts the stack.
 
-Tempo is remote and selected by `AVA_TELEMETRY_TEMPO_ENDPOINT`; native Grafana
-and Prometheus use `AVA_TELEMETRY_TEMPO_QUERY_URL` for queries and scraping.
+Tempo is remote and selected by `MEIVA_TELEMETRY_TEMPO_ENDPOINT`; native Grafana
+and Prometheus use `MEIVA_TELEMETRY_TEMPO_QUERY_URL` for queries and scraping.
 The local lifecycle neither probes nor manages Tempo. The collector's filelog
 receivers ship session logs directly to Loki.
 
 ## Session logs in Loki
 
 The collector splits raw output into disjoint receivers. `filelog/sessions`
-admits only `$AVA_HOME/logs/ava-agent-*-shell-*.out.log` transcripts;
+admits only `$MEIVA_HOME/logs/meiva-agent-*-shell-*.out.log` transcripts;
 `filelog/services` admits the broad `*.out.log` service set but excludes every
-`ava-agent-*` file and the collector's own output. Agent main stdout is
+`meiva-agent-*` file and the collector's own output. Agent main stdout is
 banner-only on this surface, and its structured records already arrive through
 OTLP, so excluding it loses no diagnostic stream while avoiding
 content-fingerprint collisions.
@@ -248,16 +248,16 @@ metadata and cap discovery at 200 concurrent files. The slower poll cuts discove
 lets a returning EOF file reuse its reader metadata, and the cap bounds the
 discovered set. File names become resource
 `service.name`, which Loki exposes as `service_name`; read offsets persist under
-`$AVA_HOME/otel-collector/log-offsets`, so a restart does not replay history.
-Local cleanup is explicit and converge-owned: a daily 04:40 job runs `ava logs
-rotate` and then `ava logs retention --family-days ...`. Rotation copytruncates
+`$MEIVA_HOME/otel-collector/log-offsets`, so a restart does not replay history.
+Local cleanup is explicit and converge-owned: a daily 04:40 job runs `meiva logs
+rotate` and then `meiva logs retention --family-days ...`. Rotation copytruncates
 service `.out.log` files and native backend logs at each UTC-day boundary or
 when they reach the 64 MiB trigger, so writers keep their open file descriptor;
 zero-byte files are skipped, so a stale log is not re-archived every day.
 Retention prunes the resulting archives using agent 15d, named PTY shell and
 computer-use snapshots 7d, gateway/ops/watchdog 30d, and other/native archives
 3d. With neither age flag, the legacy global threshold remains
-`AVA_LOG_RETENTION_DAYS` (14d fallback), and `--older-than` remains its mutually
+`MEIVA_LOG_RETENTION_DAYS` (14d fallback), and `--older-than` remains its mutually
 exclusive global override. Rotation stays top-level-only; retention reads the
 top-level roots plus the fixed nested snapshot dir. Neither follows symlinks,
 and retention excludes files held open by a process. Structured agent logs
@@ -271,14 +271,14 @@ Copy `.env.example` to `.env` only when an override is needed.
 |---|---|---|
 | `GRAFANA_ROOT_URL` | `http://localhost:3003` | Grafana redirect URL |
 | `GRAFANA_PROVISIONING_PATH` | checkout provisioning directory | Rendered by converge for native Grafana; do not set it in `.env` |
-| `AVA_TELEMETRY_LOKI_URL` / `AVA_TELEMETRY_PROMETHEUS_URL` | `http://127.0.0.1:3100` / `http://127.0.0.1:9090` | Datasource URLs, expanded by Grafana from `$__env{}` references in the provisioning files. Native converge renders the two-state values (observatory base when `AVA_OBSERVABILITY_URL` is set) |
-| `AVA_PG_URL` | Derived from the direct DB URL (legacy default `127.0.0.1:5433`) | Native converge renders the cluster data plane's scheme-less host:port, resolving a local registered PgBouncer port to PostgreSQL; it never follows the observatory host. A remote pooler with no local registry mapping retains the configured endpoint with the existing direct-URL warning. |
-| `AVA_ALERTS_WEBHOOK_URL` | Loopback plus `AVA_GATEWAY_PORT` and `/api/alerts` (default port 8000) | Native converge keeps local Grafana traffic on loopback. With `AVA_OBSERVABILITY_URL` set, it uses `AVA_GATEWAY_URL`, preserving scheme, port and proxy path; a legacy empty URL uses the gateway's reachable host and configured bind port. |
-| `AVA_TELEMETRY_TEMPO_ENDPOINT` | `http://127.0.0.1:14318` | Tempo OTLP intake URL for trace export |
-| `AVA_TELEMETRY_TEMPO_QUERY_URL` | `http://127.0.0.1:3200` | Tempo query/metrics URL rendered into native Grafana and Prometheus; when Tempo is remote, this host-scoped setting must name its remote query endpoint (writable through the config API), and converge warns when it conflicts with the intake topology |
-| `AVA_LGTM_LISTEN_HOST` | `127.0.0.1` | Listen host for the native Loki (HTTP+gRPC) and Prometheus (web) listeners; `0.0.0.0` or a tailnet IP is the external-migration form — the matching `AVA_TELEMETRY_LOKI_URL` / `AVA_TELEMETRY_PROMETHEUS_URL` must follow (converge warns otherwise) |
-| `AVA_LGTM_GRAFANA_LISTEN_HOST` | `0.0.0.0` | Listen host for native Grafana's HTTP listener (the historical all-interfaces form); narrow it to `127.0.0.1` or a tailnet IP to restrict the anonymous read-only UI — a specific non-loopback address requires `AVA_TELEMETRY_GRAFANA_URL` to follow (converge warns otherwise) |
-| `AVA_TELEMETRY_OTLP_PORT` | `4318` | The OTLP/HTTP ingress port — single source (WP3, task #1945) for the sidecar receiver endpoint, the gateway's authenticated remote receiver + pure-runner relay endpoint, and the roster/healthcheck port probes. Deviating from 4318 also requires `AVA_TELEMETRY_OTLP_ENDPOINT` (the agents' full export URL) to follow |
+| `MEIVA_TELEMETRY_LOKI_URL` / `MEIVA_TELEMETRY_PROMETHEUS_URL` | `http://127.0.0.1:3100` / `http://127.0.0.1:9090` | Datasource URLs, expanded by Grafana from `$__env{}` references in the provisioning files. Native converge renders the two-state values (observatory base when `MEIVA_OBSERVABILITY_URL` is set) |
+| `MEIVA_PG_URL` | Derived from the direct DB URL (legacy default `127.0.0.1:5433`) | Native converge renders the cluster data plane's scheme-less host:port, resolving a local registered PgBouncer port to PostgreSQL; it never follows the observatory host. A remote pooler with no local registry mapping retains the configured endpoint with the existing direct-URL warning. |
+| `MEIVA_ALERTS_WEBHOOK_URL` | Loopback plus `MEIVA_GATEWAY_PORT` and `/api/alerts` (default port 8000) | Native converge keeps local Grafana traffic on loopback. With `MEIVA_OBSERVABILITY_URL` set, it uses `MEIVA_GATEWAY_URL`, preserving scheme, port and proxy path; a legacy empty URL uses the gateway's reachable host and configured bind port. |
+| `MEIVA_TELEMETRY_TEMPO_ENDPOINT` | `http://127.0.0.1:14318` | Tempo OTLP intake URL for trace export |
+| `MEIVA_TELEMETRY_TEMPO_QUERY_URL` | `http://127.0.0.1:3200` | Tempo query/metrics URL rendered into native Grafana and Prometheus; when Tempo is remote, this host-scoped setting must name its remote query endpoint (writable through the config API), and converge warns when it conflicts with the intake topology |
+| `MEIVA_LGTM_LISTEN_HOST` | `127.0.0.1` | Listen host for the native Loki (HTTP+gRPC) and Prometheus (web) listeners; `0.0.0.0` or a tailnet IP is the external-migration form — the matching `MEIVA_TELEMETRY_LOKI_URL` / `MEIVA_TELEMETRY_PROMETHEUS_URL` must follow (converge warns otherwise) |
+| `MEIVA_LGTM_GRAFANA_LISTEN_HOST` | `0.0.0.0` | Listen host for native Grafana's HTTP listener (the historical all-interfaces form); narrow it to `127.0.0.1` or a tailnet IP to restrict the anonymous read-only UI — a specific non-loopback address requires `MEIVA_TELEMETRY_GRAFANA_URL` to follow (converge warns otherwise) |
+| `MEIVA_TELEMETRY_OTLP_PORT` | `4318` | The OTLP/HTTP ingress port — single source (WP3, task #1945) for the sidecar receiver endpoint, the gateway's authenticated remote receiver + pure-runner relay endpoint, and the roster/healthcheck port probes. Deviating from 4318 also requires `MEIVA_TELEMETRY_OTLP_ENDPOINT` (the agents' full export URL) to follow |
 
 `.env` holds live secrets and is gitignored; never commit it. Converge renders
 the native Grafana provisioning path and runtime configuration; `.env` supplies
@@ -291,17 +291,17 @@ exports it with the `http://localhost:3003` default; `grafana.ini` consumes it
 via `$__env{GRAFANA_ROOT_URL}` with `serve_from_sub_path = true`). It is the
 base Grafana uses to build redirects and absolute links (login, dashboard
 sharing, alert links) — NOT the listener address (that is
-`AVA_LGTM_GRAFANA_LISTEN_HOST` + the fixed `3003` http_port).
+`MEIVA_LGTM_GRAFANA_LISTEN_HOST` + the fixed `3003` http_port).
 
 The default stays loopback because the gateway proxies Grafana through its
 authenticated `/grafana/` route, so the browser never dials `:3003` directly.
 When the observatory moves to a remote station (stage C of the observatory
-migration, `AVA_OBSERVABILITY_URL` set), the *rendered* Grafana is what
+migration, `MEIVA_OBSERVABILITY_URL` set), the *rendered* Grafana is what
 migrates: point `GRAFANA_ROOT_URL` at the station's browser-reachable URL
 (e.g. the gateway proxy base or the station's tailnet address, keeping
 `serve_from_sub_path` semantics) so redirects survive the move. The alert webhook
-and datasource URLs are separate settings (`AVA_ALERTS_WEBHOOK_URL` /
-`AVA_TELEMETRY_LOKI_URL` / `AVA_TELEMETRY_PROMETHEUS_URL`) — they follow the
+and datasource URLs are separate settings (`MEIVA_ALERTS_WEBHOOK_URL` /
+`MEIVA_TELEMETRY_LOKI_URL` / `MEIVA_TELEMETRY_PROMETHEUS_URL`) — they follow the
 observatory independently, per the two-state rules above.
 
 ### Localhost-assumption inventory (task #1945, WP3)
@@ -311,13 +311,13 @@ on this surface. Status of each, as of WP3:
 
 | Assumption | Where | Status |
 |---|---|---|
-| Sidecar OTLP receiver `127.0.0.1:4318` | `deploy/otel-collector/otel-collector.yaml` | Parameterized — `AVA_TELEMETRY_OTLP_PORT` (single source, task #1945) |
+| Sidecar OTLP receiver `127.0.0.1:4318` | `deploy/otel-collector/otel-collector.yaml` | Parameterized — `MEIVA_TELEMETRY_OTLP_PORT` (single source, task #1945) |
 | Gateway OTLP ingress + runner relay `:4318` | `cli/commands/observability/otel_collector.py` | Parameterized — same setting |
 | Roster gate + healthcheck probes `:4318` | `services/supervision/roster/spec.py`, `services/supervision/healthchecks/otel_collector.py` | Parameterized — same setting |
-| Agent export endpoint default `http://127.0.0.1:4318` | `base/config/domains/observability/settings.py` | Default derived from the same constant; the full URL stays a separate override (`AVA_TELEMETRY_OTLP_ENDPOINT`) |
+| Agent export endpoint default `http://127.0.0.1:4318` | `base/config/domains/observability/settings.py` | Default derived from the same constant; the full URL stays a separate override (`MEIVA_TELEMETRY_OTLP_ENDPOINT`) |
 | Loki/Prometheus/Grafana readiness | `base/telemetry/lgtm_local.py` | Local native listen settings; external query URLs do not select process ownership. |
 | Grafana `root_url` `http://localhost:3003` | `deploy/lgtm/native/config/run.sh` | Deliberately NOT parameterized into a converge render: it is the browser-facing redirect base, resolved at runtime from `GRAFANA_ROOT_URL` (migration section above). Rendered run.sh is asserted byte-identical in `cli/commands/observability/tests/test_converge_lgtm.py` |
-| Test pins `http://127.0.0.1:3200` / `http://127.0.0.1:14318` / `localhost` / `AVA_TELEMETRY_OTLP_PORT=4318` | `tests/fixtures/env_bootstrap.py` | Reviewed WP3: every pin exists to neutralize the operator's ambient `.env` on a dev box (login-shell leak class) and is asserted against both env and settings so a weakened pin fails loudly. `GRAFANA_ROOT_URL` is deliberately not pinned — it never reaches renders (script-level default), only runtime Grafana |
+| Test pins `http://127.0.0.1:3200` / `http://127.0.0.1:14318` / `localhost` / `MEIVA_TELEMETRY_OTLP_PORT=4318` | `tests/fixtures/env_bootstrap.py` | Reviewed WP3: every pin exists to neutralize the operator's ambient `.env` on a dev box (login-shell leak class) and is asserted against both env and settings so a weakened pin fails loudly. `GRAFANA_ROOT_URL` is deliberately not pinned — it never reaches renders (script-level default), only runtime Grafana |
 
 Everything host-visible on the OTLP/LGTM surface now derives from settings;
 the one intentional literal left is the Grafana redirect base (runtime env

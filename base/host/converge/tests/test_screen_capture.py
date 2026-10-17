@@ -68,7 +68,7 @@ class TestScreenCaptureStatus:
 
 class TestStatusFile:
     def test_write_read_clear_cycle(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
-        monkeypatch.setattr(screen_capture, "ava_home", lambda: tmp_path)
+        monkeypatch.setattr(screen_capture, "meiva_home", lambda: tmp_path)
         write_status(ScreenCaptureStatus(state=ScreenCaptureState.NO_GRANT, diagnostic="test"))
 
         assert status_file_path().exists()

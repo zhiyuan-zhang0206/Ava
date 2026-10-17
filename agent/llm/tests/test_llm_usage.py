@@ -247,12 +247,12 @@ def test_log_llm_usage_emits_agent_billing_span(
     assert len(tracer.spans) == 1
     span = tracer.spans[0]
     assert span.start_time == 3_765_500_000
-    assert span.attributes["ava.billing.vendor"] == "deepseek"
-    assert span.attributes["ava.billing.usage_kind"] == "agent"
-    assert span.attributes["ava.billing.tokens_in"] == 1_000
-    assert span.attributes["ava.billing.tokens_out"] == 100
-    assert span.attributes["ava.billing.cache_read_tokens"] == 800
-    assert span.attributes["ava.billing.cost"] == round(expected.cost_usd, 6)
+    assert span.attributes["meiva.billing.vendor"] == "deepseek"
+    assert span.attributes["meiva.billing.usage_kind"] == "agent"
+    assert span.attributes["meiva.billing.tokens_in"] == 1_000
+    assert span.attributes["meiva.billing.tokens_out"] == 100
+    assert span.attributes["meiva.billing.cache_read_tokens"] == 800
+    assert span.attributes["meiva.billing.cost"] == round(expected.cost_usd, 6)
     assert loguru_records[0]["extra"]["cost_usd"] == pytest.approx(expected.cost_usd)  # pyright: ignore[reportUnknownMemberType]
 
 
@@ -360,7 +360,7 @@ def test_message_is_stamped_with_exactly_the_logged_figures(loguru_records):
     )
     log_llm_usage(msg, agent_id=7, model="claude-opus-5", catalog=build_model_catalog())
     event = cast("dict[str, Any]", loguru_records[0]["extra"])  # pyright: ignore[reportUnknownArgumentType]
-    stamped: dict[str, Any] = msg.additional_kwargs["ava_usage"]
+    stamped: dict[str, Any] = msg.additional_kwargs["meiva_usage"]
     assert stamped["cost_usd"] > 0
     assert (stamped["cache_write_5m"], stamped["cache_write_1h"]) == (400, 100)
     for key in _EVENT_KEYS:
@@ -376,7 +376,7 @@ def test_non_agent_logging_does_not_stamp(loguru_records):
         usage_metadata={"input_tokens": 10, "output_tokens": 1, "total_tokens": 11},
     )
     log_usage_from_message(msg, "claude-opus-5", usage_kind="label", catalog=build_model_catalog())
-    assert "ava_usage" not in msg.additional_kwargs
+    assert "meiva_usage" not in msg.additional_kwargs
 
 
 def test_main_conversation_usage_refuses_missing_identity() -> None:

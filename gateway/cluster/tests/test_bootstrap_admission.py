@@ -23,15 +23,15 @@ from base.lm.catalog import ModelCatalog
 from gateway.cluster.bootstrap import router
 
 _SECRET = "bootstrap-admission-test"  # noqa: S105 — isolated test credential
-_TURN_LIMIT = "AVA_HOST_MAX_CONCURRENT_TURNS"
+_TURN_LIMIT = "MEIVA_HOST_MAX_CONCURRENT_TURNS"
 
 
 @pytest.fixture
 def gateway_snapshot(
     monkeypatch: pytest.MonkeyPatch, config_authority: ConfigAuthority
 ) -> dict[str, str]:
-    aliases = {"AVA_DB_URL": str(config.settings.data_plane.db_url)}
-    for alias in (_TURN_LIMIT, "AVA_HOST_DB_POOL_MAX_SIZE", "AVA_HOST_CONTROL_POOL_MAX_SIZE"):
+    aliases = {"MEIVA_DB_URL": str(config.settings.data_plane.db_url)}
+    for alias in (_TURN_LIMIT, "MEIVA_HOST_DB_POOL_MAX_SIZE", "MEIVA_HOST_CONTROL_POOL_MAX_SIZE"):
         aliases.pop(alias, None)
 
     def read_aliases(owner: ConfigAuthority) -> dict[str, str]:
@@ -55,8 +55,8 @@ def runner_token(
     home = (tmp_path / "gateway-home").resolve()
     home.mkdir(mode=0o700)
     token = seed_write_generation(home).api.runner
-    monkeypatch.setattr(paths, "ava_home", lambda: home)
-    monkeypatch.setitem(os.environ, "AVA_API_TOKEN", token)
+    monkeypatch.setattr(paths, "meiva_home", lambda: home)
+    monkeypatch.setitem(os.environ, "MEIVA_API_TOKEN", token)
     return token
 
 
@@ -89,8 +89,8 @@ def test_bootstrap_serves_turn_limit_verbatim(
     assert response.status_code == 200
     served = response.json()
     assert served[_TURN_LIMIT] == (raw if raw is not None else "0")
-    assert served["AVA_HOST_DB_POOL_MAX_SIZE"] == "64"
-    assert served["AVA_HOST_CONTROL_POOL_MAX_SIZE"] == "8"
+    assert served["MEIVA_HOST_DB_POOL_MAX_SIZE"] == "64"
+    assert served["MEIVA_HOST_CONTROL_POOL_MAX_SIZE"] == "8"
 
 
 @pytest.mark.parametrize("secret", [None, "wrong-secret"])
@@ -110,12 +110,12 @@ def test_runner_fetch_replaces_stale_admission(
     runner_token: str,
 ) -> None:
     del runner_token
-    monkeypatch.setenv("AVA_HOME", str(tmp_path))  # the snapshot lives under this home
+    monkeypatch.setenv("MEIVA_HOME", str(tmp_path))  # the snapshot lives under this home
     env = {
-        "AVA_GATEWAY_URL": "http://gateway",
+        "MEIVA_GATEWAY_URL": "http://gateway",
         _TURN_LIMIT: "16",
-        "AVA_HOST_DB_POOL_MAX_SIZE": "20",
-        "AVA_HOST_CONTROL_POOL_MAX_SIZE": "4",
+        "MEIVA_HOST_DB_POOL_MAX_SIZE": "20",
+        "MEIVA_HOST_CONTROL_POOL_MAX_SIZE": "4",
     }
     monkeypatch.setattr(bootstrap, "os", SimpleNamespace(**{**vars(bootstrap.os), "environ": env}))
     requests: list[str] = []
@@ -131,8 +131,8 @@ def test_runner_fetch_replaces_stale_admission(
     # The fetch requests no projection: bootstrap serves configuration only.
     assert urlsplit(requests[0]).query == ""
     assert env[_TURN_LIMIT] == "0"
-    assert env["AVA_HOST_DB_POOL_MAX_SIZE"] == "64"
-    assert env["AVA_HOST_CONTROL_POOL_MAX_SIZE"] == "8"
+    assert env["MEIVA_HOST_DB_POOL_MAX_SIZE"] == "64"
+    assert env["MEIVA_HOST_CONTROL_POOL_MAX_SIZE"] == "8"
 
 
 @pytest.mark.parametrize("age_seconds", [1.0, 10_000.0], ids=["fresh", "stale"])
@@ -145,8 +145,8 @@ def test_runner_refreshes_an_outdated_admission_snapshot(
     runner_token: str,
 ) -> None:
     del runner_token
-    monkeypatch.setenv("AVA_HOME", str(tmp_path))
-    env = {"AVA_GATEWAY_URL": "http://gateway"}
+    monkeypatch.setenv("MEIVA_HOME", str(tmp_path))
+    env = {"MEIVA_GATEWAY_URL": "http://gateway"}
     snapshot = tmp_path / "run" / "bootstrap-snapshot.json"
     snapshot.parent.mkdir()
     snapshot.write_text(

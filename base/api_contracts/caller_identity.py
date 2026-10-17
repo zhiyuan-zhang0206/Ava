@@ -1,6 +1,6 @@
 """Asserted external-agent provenance, never an authentication or authorization principal.
 
-An external agent (Claude Code, Codex, ...) that messages an Ava agent declares
+An external agent (Claude Code, Codex, ...) that messages an Meiva agent declares
 who it is as ``external_agent:<subject>[:<instance>]``. The declaration is
 self-asserted: no caller-supplied field grants authority.
 """

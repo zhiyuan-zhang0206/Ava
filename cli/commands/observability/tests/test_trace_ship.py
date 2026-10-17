@@ -1,4 +1,4 @@
-"""Tests for `ava trace ship` — replay the local trace mirror to a viewer."""
+"""Tests for `meiva trace ship` — replay the local trace mirror to a viewer."""
 
 from __future__ import annotations
 
@@ -132,7 +132,7 @@ def test_ship_disabled_raises(
 ):
     """The OTLP kill switch off -> fail fast, the shipper is unconfigured."""
     monkeypatch.setattr(config.settings.observability, "telemetry_otlp_enabled", False)
-    with pytest.raises(TraceShipError, match="AVA_TELEMETRY_OTLP_ENABLED"):
+    with pytest.raises(TraceShipError, match="MEIVA_TELEMETRY_OTLP_ENABLED"):
         cmd_trace_ship(
             since=None,
             until=None,

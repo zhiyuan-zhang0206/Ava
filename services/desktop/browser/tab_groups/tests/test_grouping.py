@@ -102,7 +102,7 @@ class ChromeModel:
         }
 
     def _evaluate(self, params: dict[str, Any]) -> dict[str, Any]:
-        if params["expression"] == "typeof avaGroup":
+        if params["expression"] == "typeof meivaGroup":
             if self.script_delay > 0:
                 self.script_delay -= 1
                 return {"result": {"type": "string", "value": "undefined"}}
@@ -184,7 +184,7 @@ def _warnings(records: list[dict[str, Any]]) -> list[str]:
 
 
 def test_group_title_identifies_the_agent_and_only_the_agent() -> None:
-    assert group_title(405) == "Ava #405"
+    assert group_title(405) == "Meiva #405"
     assert len({group_title(i) for i in range(1, 50)}) == 49  # unique per agent id
 
 
@@ -270,7 +270,7 @@ async def test_group_new_page_files_the_new_target_into_the_agent_group(
         "Extensions.loadUnpacked",
         "Target.getTargets",
         "Target.attachToTarget",
-        "Runtime.evaluate",  # waits for the worker script to define avaGroup
+        "Runtime.evaluate",  # waits for the worker script to define meivaGroup
         "Runtime.evaluate",
     ]
     assert ws.sent[1]["params"] == {"path": str(EXTENSION_DIR)}
@@ -278,7 +278,7 @@ async def test_group_new_page_files_the_new_target_into_the_agent_group(
     evaluate = ws.sent[5]
     assert evaluate["sessionId"] == "S1"
     assert evaluate["params"] == {
-        "expression": 'avaGroup("T2", "Ava #7")',
+        "expression": 'meivaGroup("T2", "Meiva #7")',
         "awaitPromise": True,
         "returnByValue": True,
     }
@@ -289,7 +289,7 @@ async def test_waits_for_the_worker_script_to_run_after_a_fresh_load(
     monkeypatch: pytest.MonkeyPatch, loguru_records: list[dict[str, Any]]
 ) -> None:
     """On first load the worker target can be attachable before its script ran
-    (measured: `avaGroup is not defined`), so the call waits for it."""
+    (measured: `meivaGroup is not defined`), so the call waits for it."""
     model = ChromeModel(script_delay=3)
     chrome = FakeChrome(monkeypatch, model.handlers())
     chrome.listings.append([_page("T1"), _page("T2")])
@@ -297,7 +297,7 @@ async def test_waits_for_the_worker_script_to_run_after_a_fresh_load(
     evaluations = [
         r["params"]["expression"] for r in chrome.ws.sent if r["method"] == "Runtime.evaluate"
     ]
-    assert evaluations == ["typeof avaGroup"] * 4 + ['avaGroup("T2", "Ava #7")']
+    assert evaluations == ["typeof meivaGroup"] * 4 + ['meivaGroup("T2", "Meiva #7")']
     assert _warnings(loguru_records) == []
 
 
@@ -309,7 +309,7 @@ async def test_a_worker_that_never_defines_the_function_warns(
     chrome.listings.append([_page("T1"), _page("T2")])
     await _group(_groups(), 7, frozenset({"T1"}))
     messages = _warnings(loguru_records)
-    assert len(messages) == 1 and "did not define avaGroup" in messages[0]
+    assert len(messages) == 1 and "did not define meivaGroup" in messages[0]
 
 
 async def test_a_live_worker_is_used_without_reloading_the_extension(
@@ -420,7 +420,7 @@ async def test_ambiguous_diff_warns_and_groups_nothing(
 
 
 def _evaluate_throws(params: dict[str, Any]) -> dict[str, Any]:
-    if params["expression"] == "typeof avaGroup":
+    if params["expression"] == "typeof meivaGroup":
         return {"result": {"type": "string", "value": "function"}}
     return {
         "result": {"type": "object"},
@@ -468,7 +468,7 @@ async def test_cdp_failure_warns_with_cause_and_never_raises(
 
     messages = _warnings(loguru_records)
     assert len(messages) == 1
-    assert needle in messages[0] and "Ava #7" in messages[0]
+    assert needle in messages[0] and "Meiva #7" in messages[0]
     assert "still open" in messages[0]  # tells the reader the page itself is fine
 
 
@@ -607,7 +607,7 @@ async def test_cancelling_and_failing_groupings_leave_no_unretrieved_exception(
 
 
 class RacyWorkerWS(FakeCdpWS):
-    """A worker whose `avaGroup` is not atomic, like the real one: it looks the group
+    """A worker whose `meivaGroup` is not atomic, like the real one: it looks the group
     up by title, and creates it only after an await. Two groupings running at the
     same time both find nothing and both create."""
 
@@ -621,7 +621,7 @@ class RacyWorkerWS(FakeCdpWS):
         await super().send(data)
         request = json.loads(data)
         match = re.fullmatch(
-            r'avaGroup\("[^"]+", "([^"]+)"\)', request["params"].get("expression", "")
+            r'meivaGroup\("[^"]+", "([^"]+)"\)', request["params"].get("expression", "")
         )
         if request["method"] == "Runtime.evaluate" and match:
             self._title = match.group(1)
@@ -665,4 +665,4 @@ async def test_back_to_back_pages_of_one_agent_make_one_group(
     assert len(groups._tasks) == 2  # both in flight together
     await asyncio.gather(*groups._tasks)
 
-    assert created == ["Ava #7"]
+    assert created == ["Meiva #7"]

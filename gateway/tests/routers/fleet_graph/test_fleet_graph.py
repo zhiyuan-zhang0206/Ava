@@ -1,6 +1,6 @@
 """GET /api/fleet/graph integration tests.
 
-FastAPI TestClient + real ava_test DB. The SQL is the one place a column-name /
+FastAPI TestClient + real meiva_test DB. The SQL is the one place a column-name /
 cast / filter typo passes the frontend tests (which feed mock data) but breaks
 live, so it is exercised against a real DB here. Covers:
 - `total_tokens` — per-agent retained-window (7d) in+out llm_usage sums, read from
@@ -114,7 +114,7 @@ def test_decay_lambda_comes_from_display_config(
     db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """Omitted `?decay_lambda=` is settings.display.fleet_graph_decay_lambda
-    (``AVA_FLEET_GRAPH_DECAY_LAMBDA``); the literal 0.5 is only that field's
+    (``MEIVA_FLEET_GRAPH_DECAY_LAMBDA``); the literal 0.5 is only that field's
     default, not a hard-coded decay constant. A zero decay keeps an old message
     edge above the 0.01 drop threshold."""
     from base.config import settings

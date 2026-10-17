@@ -1,7 +1,7 @@
 """Gateway Grafana reverse-proxy tests.
 
 `/grafana/*` forwards to a co-located Grafana instance (host/port from
-AVA_GRAFANA_HOST / AVA_GRAFANA_PORT) behind the cluster auth middleware,
+MEIVA_GRAFANA_HOST / MEIVA_GRAFANA_PORT) behind the cluster auth middleware,
 streaming the upstream response. Covers:
 - disabled by default: 404 on /grafana/*, nothing else changes
 - enabled: GET root + nested path + query string forwarded
@@ -100,7 +100,7 @@ def _enable(monkeypatch: pytest.MonkeyPatch, port: int) -> None:
 
 
 def test_proxy_disabled_by_default(grafana_server: int, monkeypatch: pytest.MonkeyPatch) -> None:
-    """The proxy is off unless AVA_GRAFANA_PROXY_ENABLED — a cluster without
+    """The proxy is off unless MEIVA_GRAFANA_PROXY_ENABLED — a cluster without
     Grafana gets 404 on /grafana/* and nothing else."""
     monkeypatch.setattr(config.settings.gateway, "grafana_proxy_enabled", False)
     with gateway_test_client() as client:
@@ -218,7 +218,7 @@ def test_proxy_cookie_post_from_gateway_origin_passes(
 ) -> None:
     """End-to-end guard for the reported 403: a browser session (cookie)
     POSTing Grafana's datasource query from the gateway's own origin — the
-    page is served at AVA_GATEWAY_URL — must reach the proxy, not be rejected
+    page is served at MEIVA_GATEWAY_URL — must reach the proxy, not be rejected
     by the exact-origin check. The derived allowlist used to carry the
     frontend port on the gateway host, so the gateway's own origin never
     matched and every same-origin data POST died with 403."""

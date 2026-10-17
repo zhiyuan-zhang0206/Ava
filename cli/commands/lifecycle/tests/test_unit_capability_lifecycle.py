@@ -16,10 +16,10 @@ from cli.commands.lifecycle.start_generation import write_generation
 def test_a_pure_runners_launcher_delivers_the_installed_capability(
     runner_boot: unit.UnitCapability, runner_home: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    monkeypatch.setenv("AVA_HOME", str(runner_home))
+    monkeypatch.setenv("MEIVA_HOME", str(runner_home))
     monkeypatch.setattr(bootstrap, "config_source_is_local", lambda: False)
     assert bringup.db_delivery("runner", remote_data_plane=False) == {
-        "AVA_DB_URL": runner_boot.dsn,
+        "MEIVA_DB_URL": runner_boot.dsn,
         delivery.GENERATION_ENV: "0",
     }
     with pytest.raises(RuntimeError, match="cannot launch a gateway-class"):

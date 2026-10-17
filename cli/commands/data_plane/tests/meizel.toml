@@ -9,12 +9,12 @@ exports = ["data_plane_records.py"]
 "test_storage_ownership_data_plane.py" = ["data_plane_records.py"]
 
 [debt.env-patch]
-"test_pg_stop_escalation.py#monkeypatch.setenv os.environ.AVA_HOME" = 1
+"test_pg_stop_escalation.py#monkeypatch.setenv os.environ.MEIVA_HOME" = 1
 "test_pg_stop_escalation.py#patch.dict os.environ" = 1
 "test_pgbouncer_reachable_bind_wait.py#monkeypatch.setenv os.environ" = 1
-"test_pgbouncer_stop_isolation.py#monkeypatch.setenv os.environ.AVA_HOME" = 2
-"test_pooler_stop.py#monkeypatch.setenv os.environ.AVA_HOME" = 1
-"test_storage_ownership_data_plane.py#monkeypatch.setenv os.environ.AVA_HOME" = 1
+"test_pgbouncer_stop_isolation.py#monkeypatch.setenv os.environ.MEIVA_HOME" = 2
+"test_pooler_stop.py#monkeypatch.setenv os.environ.MEIVA_HOME" = 1
+"test_storage_ownership_data_plane.py#monkeypatch.setenv os.environ.MEIVA_HOME" = 1
 
 [debt.first-party-patch]
 "test_maintenance_stop_clients.py#monkeypatch.setattr base.cluster.dataplane.pooler.clients" = 1
@@ -26,7 +26,7 @@ exports = ["data_plane_records.py"]
 "test_native_storage_diagnostics.py#monkeypatch.setattr base.config.settings.data_plane.redis_url" = 2
 "test_native_storage_diagnostics.py#monkeypatch.setattr base.host.db_authority.delivery.read_pooler_admin" = 1
 "test_pg_socket_dir.py#monkeypatch.setattr base.cluster.dataplane.pg_admin.pg_socket_dir" = 1
-"test_pg_socket_dir.py#monkeypatch.setattr cli.commands.data_plane.cluster_instance.ava_home" = 3
+"test_pg_socket_dir.py#monkeypatch.setattr cli.commands.data_plane.cluster_instance.meiva_home" = 3
 "test_pg_socket_dir.py#monkeypatch.setattr cli.commands.data_plane.pgbouncer.pg_socket_dir" = 1
 "test_pg_stop_escalation.py#monkeypatch.setattr base.telemetry.emit" = 1
 "test_pg_stop_escalation.py#monkeypatch.setattr cli.commands.data_plane.cluster_instance.archive_pg_args" = 1
@@ -49,7 +49,7 @@ exports = ["data_plane_records.py"]
 "test_pgbouncer_stop_isolation.py#monkeypatch.setattr cli.commands.data_plane.pgbouncer.OwnedPooler.stop" = 1
 "test_pgbouncer_stop_isolation.py#monkeypatch.setattr cli.commands.data_plane.pgbouncer.ownership.pooler" = 1
 "test_pgbouncer_stop_isolation.py#monkeypatch.setattr cli.commands.data_plane.pgbouncer.write_config" = 1
-"test_pooler_stop.py#monkeypatch.setattr base.cluster.dataplane.pooler.ava_home" = 1
+"test_pooler_stop.py#monkeypatch.setattr base.cluster.dataplane.pooler.meiva_home" = 1
 "test_pooler_stop.py#monkeypatch.setattr base.cluster.port_preflight.require_listener" = 3
 "test_pooler_stop.py#monkeypatch.setattr base.cluster.port_preflight.strict_listeners_on" = 2
 "test_pooler_stop.py#monkeypatch.setattr base.config.settings.data_plane.db_url" = 1
@@ -96,7 +96,7 @@ exports = ["data_plane_records.py"]
 "test_status_data_plane.py#monkeypatch.setattr cli.commands.data_plane.bringup.remote_redis_reachable" = 1
 "test_status_data_plane.py#monkeypatch.setattr cli.commands.data_plane.cluster_instance.pg_running" = 4
 "test_status_data_plane.py#monkeypatch.setattr cli.commands.data_plane.cluster_instance.redis_reachable" = 4
-"test_storage_ownership_data_plane.py#monkeypatch.setattr base.cluster.dataplane.pooler.ava_home" = 2
+"test_storage_ownership_data_plane.py#monkeypatch.setattr base.cluster.dataplane.pooler.meiva_home" = 2
 "test_storage_ownership_data_plane.py#monkeypatch.setattr base.cluster.dataplane.pooler.pgbouncer_bin" = 2
 "test_storage_ownership_data_plane.py#monkeypatch.setattr base.cluster.dataplane.pooler.pgbouncer_public_listener_reachable" = 1
 "test_storage_ownership_data_plane.py#monkeypatch.setattr base.cluster.ownership.RedisConnectionCustody.capture" = 1

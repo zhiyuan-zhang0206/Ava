@@ -27,7 +27,7 @@ class ShellCaptureResponse(BaseModel):
     TTL deadline from `agent_shell_ttls` — None when the session has no TTL
     row (page and schedule sessions carry their own lifecycle).
     `renewals` / `last_renewed_at` carry the
-    row's explicit-renewal facts (ava.shell.sessions.renew); the monitor page
+    row's explicit-renewal facts (meiva.shell.sessions.renew); the monitor page
     shows a renewed-count badge so an extension is visible, never silent.
     Together they let the monitor page's title bar render runtime + TTL
     without a second probe."""

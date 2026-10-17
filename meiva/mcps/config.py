@@ -1,0 +1,367 @@
+"""Shared MCP server config loader.
+
+Both the in-process tool surface (`meiva.mcps`) and the long-lived connection
+process read MCP server definitions through this one loader, so they always
+agree on the same merged server set.
+
+The merged map has four layers, applied in this order (later wins on a name
+collision):
+
+1. built-in — `<repo>/meiva_builtins/mcps/<name>/.mcp.json`, the servers that ship with the
+   repo (currently just `chrome`).
+2. plugin-bundled — a plugin ships its own server defaults at its root
+   (built-in `<repo>/meiva_builtins/plugins/<name>/.mcp.json`, then installed
+   `$MEIVA_HOME/plugins/<name>/.mcp.json`).
+3. installed — `$MEIVA_HOME/mcps/<name>/.mcp.json`, MCP packages added via
+   `meiva mcp install`, each a self-contained dir gated by the install registry
+   (`base.packages.extensions.install_registry`, `type="mcp"`). An installed server's command is
+   a relative `.venv/bin/python …` resolved against that dir (see
+   `installed_mcp_dir`), so its deps stay isolated from core.
+4. machine — `$MEIVA_HOME/mcp.json`, applied last, so a hand-added machine entry
+   overrides any same-named default.
+
+Each file declares servers under an `mcpServers` object (Claude Code's layout);
+a file lacking that section contributes nothing. A per-host enable overlay
+(`mcp_enabled.json`) then drops disabled servers, uniformly across all layers.
+"""
+
+from __future__ import annotations
+
+import errno
+import json
+from pathlib import Path
+from typing import Any, TypedDict, cast
+
+from base.host.runtime_interpreter import external_plugin_read_root
+from base.host.system.hostport import Host
+from base.host.system.probes import display_available
+from base.paths import mcps_dir, meiva_home, repo_root
+
+
+class MCPError(Exception):
+    """Base class for `meiva.mcps` failures."""
+
+
+class MCPServerNotFound(MCPError):  # noqa: N818 — same naming convention as FileNotFoundError
+    pass
+
+
+class MCPConnectError(MCPError):
+    pass
+
+
+class MCPToolNotFound(MCPError):  # noqa: N818
+    pass
+
+
+class MCPCallError(MCPError):
+    pass
+
+
+class ToolInfo(TypedDict):
+    name: str
+    description: str
+    input_schema: dict[str, Any]
+
+
+def validate_requirements(spec: dict[str, Any]) -> dict[str, bool]:
+    """Validate optional host requirements without probing this host.
+
+    Missing or null requirements mean no preconditions. Otherwise only boolean
+    values for display are accepted; invalid declarations raise
+    MCPError rather than becoming a host-capability verdict.
+    """
+    requires = spec.get("requires")
+    if requires is None:
+        return {}
+    if not isinstance(requires, dict):
+        raise MCPError("server 'requires' must be an object or null")
+    validated: dict[str, bool] = {}
+    for key, want in cast(dict[object, object], requires).items():
+        if not isinstance(key, str) or key != "display":
+            raise MCPError(f"unknown requires key {key!r} in MCP server config")
+        if not isinstance(want, bool):
+            raise MCPError(f"requires {key!r} must be a boolean")
+        validated[key] = want
+    return validated
+
+
+def assert_requirements(spec: dict[str, Any], *, host: Host) -> None:
+    """Evaluate a server entry's optional `requires` preconditions before connect.
+
+    Raises MCPError with an actionable message if a precondition is unmet, so the
+    agent gets a clear capability error instead of the underlying tool's opaque
+    failure (e.g. chrome-devtools-mcp's bare "connection refused" on a host with
+    no display). Unknown requirement keys fail fast.
+
+    One host capability is recognized: `display`, what a headed browser draws on.
+    """
+    requires = validate_requirements(spec)
+    for key, want in requires.items():
+        if key == "display" and want and not display_available(host=host):
+            raise MCPError(
+                "MCP server requires a display, but this host has none (headless server)"
+            )
+
+
+def server_capability(spec: dict[str, Any], *, host: Host) -> tuple[bool, str | None]:
+    """Validate requirements and return this host's capability verdict.
+
+    Mirrors assert_requirements but returns (ok, reason) instead of raising, for
+    a "can this host enable it?" UI gate. `display` is statically checkable
+    here. Invalid declarations raise MCPError, matching
+    connect-time validation; only an unavailable host capability returns false.
+    """
+    requires = validate_requirements(spec)
+    if requires.get("display") and not display_available(host=host):
+        return (False, "requires a display, but this host has none")
+    return (True, None)
+
+
+def server_url(spec: dict[str, Any]) -> str | None:
+    """The server's remote Streamable HTTP endpoint, or None for a stdio server.
+
+    A `url` entry declares a remote server — no child process: the daemon dials
+    the endpoint over Streamable HTTP (the 2026-07-28 protocol revision is
+    stateless there, so one endpoint serves every agent connection). Static
+    headers (API keys) ride in `headers`; OAuth flows are not supported — a
+    server that requires one fails fast at connect.
+
+    Validation is fail-fast (fail on unknown shapes, never guess):
+    - `url` must be an http(s) string
+    - `url` and `command` are mutually exclusive — a server is either local
+      stdio or remote HTTP, never both
+    - `headers`, when present, must be a dict of str -> str
+
+    Raises:
+        MCPError: the entry's url/headers shape is invalid.
+    """
+    url = spec.get("url")
+    if url is None:
+        return None
+    if not isinstance(url, str) or not url.startswith(("http://", "https://")):
+        raise MCPError(f"server 'url' must be an http(s) endpoint, got {url!r} (expected a string)")
+    if spec.get("command") is not None:
+        raise MCPError("server declares both 'url' and 'command' — pick one transport")
+    headers = spec.get("headers")
+    if headers is not None and not (
+        isinstance(headers, dict)
+        and all(isinstance(k, str) and isinstance(v, str) for k, v in headers.items())
+    ):
+        raise MCPError(f"server 'headers' must be a dict of str -> str, got {headers!r}")
+    oauth = spec.get("oauth")
+    if oauth is not None and not isinstance(oauth, bool):
+        raise MCPError(f"server 'oauth' must be a boolean, got {oauth!r}")
+    if oauth and headers:
+        raise MCPError("server declares both 'oauth' and 'headers' — pick one auth mode")
+    return url
+
+
+def machine_config_path() -> Path:
+    """`mcp.json` path — goes through `meiva_home()` so MEIVA_HOME env injection takes effect.
+
+    Avoids a module-level constant: in docker / eval scenarios MEIVA_HOME may
+    change after import (a per-task temporary config directory).
+    """
+    return meiva_home() / "mcp.json"
+
+
+def read_servers(path: Path) -> dict[str, dict[str, Any]]:
+    """Read the `mcpServers` section of one JSON config file.
+
+    Missing file or missing `mcpServers` section → empty dict (tolerates a
+    generic settings file that carries no MCP section).
+
+    Raises:
+        MCPError: the file fails to parse, or its `mcpServers` field is present
+            but not an object.
+    """
+    if not path.is_file():
+        return {}
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError) as e:
+        raise MCPError(f"Failed to read {path}: {type(e).__name__}: {e}") from e
+    if not isinstance(data, dict):
+        raise MCPError(f"`{path}` is not a JSON object (got {type(data).__name__})")
+    section = data.get("mcpServers")
+    if section is None:
+        return {}
+    if not isinstance(section, dict):
+        raise MCPError(f"`{path}` mcpServers field is not a dict (got {type(section).__name__})")
+    return section
+
+
+def builtin_mcp_paths() -> list[Path]:
+    """Built-in MCP declarations shipped in the repo's `meiva_builtins/mcps/` folder
+    (`<repo>/meiva_builtins/mcps/*/.mcp.json`), sorted by name. Symmetric with built-in skills
+    (`meiva_builtins/skills/`) and plugins (`meiva_builtins/plugins/`)."""
+    root = Path(__file__).resolve().parents[2] / "meiva_builtins" / "mcps"
+    if not root.is_dir():
+        return []
+    paths: list[Path] = []
+    for entry in sorted(root.iterdir()):
+        mcp_json = entry / ".mcp.json"
+        if mcp_json.is_file():
+            paths.append(mcp_json)
+    return paths
+
+
+def _installed_mcp_paths() -> list[Path]:
+    """Installed-MCP `.mcp.json` files under `$MEIVA_HOME/mcps/<name>/`, one per
+    registry-tracked `type="mcp"` package, sorted by name.
+
+    Only registry-tracked dirs contribute — a stray dir left under the load dir
+    is ignored (mirrors the skill scanner's registry-gated load). `meiva mcp
+    install` writes the dir and the registry row together; `meiva mcp uninstall`
+    removes both.
+    """
+    from base.packages.extensions.install_registry import installed_mcp_names
+
+    root = mcps_dir(meiva_home())
+    if not root.is_dir():
+        return []
+    paths: list[Path] = []
+    for name in sorted(installed_mcp_names()):
+        mcp_json = root / name / ".mcp.json"
+        if mcp_json.is_file():
+            paths.append(mcp_json)
+    return paths
+
+
+def installed_mcp_dir(name: str) -> Path | None:
+    """The subprocess cwd for an installed MCP server, or None for a built-in /
+    plugin / machine server (which keep the daemon's own cwd, the repo root).
+
+    An installed server's `.mcp.json` command is a relative `.venv/bin/python
+    -m <module>`; spawning it with cwd=`$MEIVA_HOME/mcps/<name>/` resolves that
+    relative path to the package's own isolated venv, so its deps never touch
+    core. Returns the dir only when the server truly comes from the installed
+    layer: it must be registry-tracked, carry a `.mcp.json`, and not be shadowed
+    by a same-named machine-config entry (the one layer above installed — that
+    entry would be spawned from the daemon cwd instead).
+    """
+    from base.packages.extensions.install_registry import installed_mcp_names
+
+    if name not in installed_mcp_names():
+        return None
+    if name in read_servers(machine_config_path()):
+        return None
+    d = mcps_dir(meiva_home()) / name
+    return d if (d / ".mcp.json").is_file() else None
+
+
+def server_cwd(name: str) -> Path | None:
+    """Working directory for spawning `name`'s server, or None to inherit the
+    daemon's own cwd. Resolved by which layer actually provides the server.
+
+    Both layers we own use a **relative** interpreter path in their `.mcp.json`
+    (`.venv/bin/python`), never `uv run` — a resident wrapper process per agent,
+    which at high agent density is pure overhead. A relative argv[0] is resolved
+    against the spawned child's cwd, so pinning cwd is what makes those commands
+    portable (no machine-specific absolute path in a committed file):
+
+    - installed (`$MEIVA_HOME/mcps/<name>/`) → that package dir, so its
+      `.venv/bin/python` is the package's own isolated venv.
+    - built-in (`<repo>/meiva_builtins/mcps/<name>/`) → the repo root, so `.venv/bin/python` is
+      the repo venv and `-m <pkg>` finds the repo's top-level packages. Pinning
+      it also removes the built-ins' former reliance on whatever cwd the agent
+      process happened to have.
+    - plugin / machine → None: those entries carry a third party's own command
+      line (absolute or PATH-resolved), so we must not reinterpret it.
+    """
+    # Machine config is the top layer — the user's own command line.
+    if name in read_servers(machine_config_path()):
+        return None
+    installed = installed_mcp_dir(name)
+    if installed is not None:
+        return installed
+    for path in plugin_config_paths():
+        if name in read_servers(path):
+            return None
+    for path in builtin_mcp_paths():
+        if name in read_servers(path):
+            return repo_root()
+    return None
+
+
+def plugin_config_paths() -> list[Path]:
+    """Plugin-bundled `.mcp.json` files, in apply order.
+
+    Built-in plugins (`<repo>/meiva_builtins/plugins/*/.mcp.json`) first, then installed ones
+    (retained generation in wheel mode, `$MEIVA_HOME/plugins` in source mode);
+    each group is sorted by plugin name. Release preparation separately refuses
+    an undeclared MCP executable closure rather than treating config as proof.
+    """
+    paths: list[Path] = []
+    repo_plugins = Path(__file__).resolve().parents[2] / "meiva_builtins" / "plugins"
+    for root in (repo_plugins, external_plugin_read_root()):
+        if not root.is_dir():
+            continue
+        for plugin_dir in sorted(root.iterdir()):
+            if plugin_dir.name.startswith("."):
+                continue  # staging/backup residue — never a real plugin
+            mcp_json = plugin_dir / ".mcp.json"
+            if mcp_json.is_file():
+                paths.append(mcp_json)
+    return paths
+
+
+def load_mcp_config(*, include_disabled: bool = False) -> dict[str, dict[str, Any]]:
+    """Merged MCP server map: built-in `meiva_builtins/mcps/` < plugin `.mcp.json` < machine config.
+
+    Returns an empty dict when nothing is configured.
+
+    A per-host overlay records individual servers as disabled. By default a
+    disabled server is dropped from the returned map (what the running surfaces
+    consume). Pass include_disabled=True to get the full merged map with the
+    overlay state ignored — for callers that need to show disabled servers and
+    cross-reference the overlay themselves. A server absent from the overlay
+    stays (default-on).
+
+    Raises:
+        MCPError: any source file fails to parse or has a non-dict `mcpServers`.
+        McpEnabledConfigError: the enabled-server overlay cannot be read or validated.
+    """
+    merged: dict[str, dict[str, Any]] = {}
+    for path in builtin_mcp_paths():
+        merged.update(read_servers(path))
+    for path in plugin_config_paths():
+        merged.update(read_servers(path))
+    for path in _installed_mcp_paths():
+        merged.update(read_servers(path))
+    merged.update(read_servers(machine_config_path()))
+    if include_disabled:
+        return merged
+    from base.packages.plugins.mcp_enabled import read_enabled
+
+    enabled = read_enabled()
+    return {k: v for k, v in merged.items() if enabled.get(k, True)}
+
+
+def is_transport_error(exc: BaseException) -> bool:
+    """True when `exc` means the MCP server process / transport died.
+
+    A caller may reconnect for its next request. It may retry this request
+    only if it was not a side-effectful tool call already in flight.
+
+    Shared by the MCP daemon and the in-process SDK so both sides agree on
+    the retry seam. Lazy dependency imports keep config discovery lightweight;
+    dependency failures propagate instead of changing the retry policy.
+    """
+    from anyio import BrokenResourceError, ClosedResourceError
+    from mcp import MCPError as MCPProtocolError
+    from mcp.types import CONNECTION_CLOSED, REQUEST_TIMEOUT
+
+    if isinstance(exc, (BrokenResourceError, ClosedResourceError, TimeoutError)):
+        return True
+    if isinstance(exc, OSError):
+        return isinstance(exc, (BrokenPipeError, ConnectionResetError, ConnectionRefusedError)) or (
+            exc.errno in (errno.EPIPE, errno.ECONNRESET, errno.ECONNREFUSED)
+        )
+    if isinstance(exc, MCPProtocolError):
+        if exc.code in (CONNECTION_CLOSED, REQUEST_TIMEOUT):
+            return True
+        if exc.__cause__ is not None:
+            return is_transport_error(exc.__cause__)
+    return False

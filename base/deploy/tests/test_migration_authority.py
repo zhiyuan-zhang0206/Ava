@@ -1,20 +1,20 @@
 """`_assert_migration_authority` — only a cluster's gateway unit may migrate it.
 
 The 2026-07-31 wedge: an agent-runner sharing the central DB pulled main ahead of
-the gateway, and `ava start` step 2.5 applied the pending migrations to prod. The
+the gateway, and `meiva start` step 2.5 applied the pending migrations to prod. The
 gateway, still pinned at the older commit, then failed its own startup schema
 check and rejected every agent boot.
 
 The identity the DB carries is `machine_units` (gateway-capable rows, written by
 `register_self`); the identity the executing side claims is
-its home (`resolve_ava_home()`) together with the rule that a home carrying its
+its home (`resolve_meiva_home()`) together with the rule that a home carrying its
 own `<home>/source` checkout is changed only by that checkout: a worktree process
-that inherited `AVA_HOME=~/.ava` has a prod DB URL *and* a prod-looking
-`ava_home()`, so the checkout rule is what separates them.
+that inherited `MEIVA_HOME=~/.meiva` has a prod DB URL *and* a prod-looking
+`meiva_home()`, so the checkout rule is what separates them.
 
 The exemptions that must keep working are covered here too: a fresh birth (no
 identity recorded yet), and a non-gateway host whose apply is a no-op (an
-agent-runner's ordinary `ava start`).
+agent-runner's ordinary `meiva start`).
 """
 
 from __future__ import annotations
@@ -33,9 +33,9 @@ from base.deploy.schema import migration_layout
 from base.deploy.schema.migrations import MigrationAuthorityMismatch, apply_pending_migrations
 
 # This host is the gateway of the DB under test in the "matching" cases.
-_GATEWAY = ("gateway-host", "/Users/ava/.ava")
+_GATEWAY = ("gateway-host", "/Users/meiva/.meiva")
 # A different unit of the same cluster — the agent-runner that caused the wedge.
-_RUNNER = ("runner-a", "/home/ava/.ava")
+_RUNNER = ("runner-a", "/home/meiva/.meiva")
 
 _SYN = "29991231T235959_synthetic-authority"
 
@@ -94,7 +94,7 @@ def _claim_checkout(
 ) -> None:
     """Make the executing process claim `machine:home`."""
     identity.set(name=machine)
-    monkeypatch.setenv("AVA_HOME", home)
+    monkeypatch.setenv("MEIVA_HOME", home)
 
 
 def _as_git_worktree(tmp_path: Path) -> None:
@@ -151,8 +151,8 @@ def test_refuses_when_another_unit_owns_the_cluster(
 
     # The message must name both identities — the operator's first question is
     # "which host am I on, and which one owns this DB".
-    assert "runner-a:/home/ava/.ava" in str(exc.value)
-    assert "gateway-host:/Users/ava/.ava" in str(exc.value)
+    assert "runner-a:/home/meiva/.meiva" in str(exc.value)
+    assert "gateway-host:/Users/meiva/.meiva" in str(exc.value)
     assert not _synthetic_table_exists(), "refusal must not have touched the schema"
 
 
@@ -161,7 +161,7 @@ def test_allows_a_fresh_birth_with_no_recorded_identity(
     tmp_path: Path,
     machine_identity: MachineIdentity,
 ) -> None:
-    """A brand-new cluster migrates at `ava start` step 2.5, before step 3 writes
+    """A brand-new cluster migrates at `meiva start` step 2.5, before step 3 writes
     machine_units — an empty table means "no owner yet", not "not you"."""
     _claim_checkout(monkeypatch, machine_identity, *_RUNNER)
     _pending_migration(monkeypatch, tmp_path)
@@ -192,7 +192,7 @@ def test_allows_a_non_gateway_host_with_nothing_to_apply(
     tmp_path: Path,
     machine_identity: MachineIdentity,
 ) -> None:
-    """An agent-runner's ordinary `ava start` calls this against the central DB
+    """An agent-runner's ordinary `meiva start` calls this against the central DB
     and legitimately applies nothing. Authority is checked only when something
     would actually be written, so the guard must not turn every runner start into
     a hard failure.
@@ -215,10 +215,10 @@ def test_refuses_a_foreign_checkout_even_at_the_owning_home(
     tmp_path: Path,
     machine_identity: MachineIdentity,
 ) -> None:
-    """A dev worktree that inherited the gateway's `AVA_HOME` resolves the very
+    """A dev worktree that inherited the gateway's `MEIVA_HOME` resolves the very
     home the database names, yet its `migrations/` are not the ones the home's own
     `source` checkout carries. The checkout rule alone must refuse — this is the
-    inherited-`AVA_HOME` path that reaches prod with a worktree's migrations."""
+    inherited-`MEIVA_HOME` path that reaches prod with a worktree's migrations."""
     home = tmp_path / "gateway-home"
     (home / "source").mkdir(parents=True)
     _register_gateway_unit(_GATEWAY[0], str(home))

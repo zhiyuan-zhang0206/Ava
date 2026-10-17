@@ -294,7 +294,7 @@ def test_failed_launch_never_becomes_serving(
     )
 
     def failed(roster: tuple[ServiceSpec, ...], *_a: object, **_kw: object) -> LaunchOutcome:
-        return LaunchOutcome(roster, ("ava-gateway",))
+        return LaunchOutcome(roster, ("meiva-gateway",))
 
     monkeypatch.setattr(_root_driver_commands, "launch_service_tree", failed)
     assert (

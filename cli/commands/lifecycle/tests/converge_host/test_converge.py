@@ -40,24 +40,24 @@ from tests.path_scoped.cli_tests import operator_database as operator_database
 from tests.path_scoped.cli_tests import operator_pipeline as operator_pipeline
 
 
-def test_ensure_ava_on_path_links_bare_ava_to_this_checkouts_cli(
+def test_ensure_meiva_on_path_links_bare_meiva_to_this_checkouts_cli(
     home: Path,
     tmp_path: Path,
     operator_database: Callable[[], Any],
     operator_pipeline: Callable[[], EventPipeline],
 ) -> None:
-    link = home / ".local" / "bin" / "ava"
+    link = home / ".local" / "bin" / "meiva"
     link.parent.mkdir(parents=True)
     repo = tmp_path / "repo"
-    link.symlink_to(repo / "scripts" / "ava-launcher.sh")  # the retired launcher link
-    converge_host.ensure_ava_on_path(
+    link.symlink_to(repo / "scripts" / "meiva-launcher.sh")  # the retired launcher link
+    converge_host.ensure_meiva_on_path(
         _ctx(repo, home, operator_database=operator_database, producer=operator_pipeline)
     )
-    assert link.readlink() == repo / ".venv" / "bin" / "ava"
-    converge_host.ensure_ava_on_path(
+    assert link.readlink() == repo / ".venv" / "bin" / "meiva"
+    converge_host.ensure_meiva_on_path(
         _ctx(repo, home, operator_database=operator_database, producer=operator_pipeline)
     )  # idempotent
-    assert link.readlink() == repo / ".venv" / "bin" / "ava"
+    assert link.readlink() == repo / ".venv" / "bin" / "meiva"
 
 
 def test_ensure_local_bin_on_path_block_is_idempotent(
@@ -79,33 +79,33 @@ def test_ensure_local_bin_on_path_block_is_idempotent(
     assert str(home / ".local" / "bin") in text  # pyright: ignore[reportUnknownArgumentType]
 
 
-def test_ensure_ava_home_dirs(
+def test_ensure_meiva_home_dirs(
     home: Path,
     tmp_path: Path,
     operator_database: Callable[[], Any],
     operator_pipeline: Callable[[], EventPipeline],
 ):
-    ava_home = tmp_path / "avahome"
-    converge_host.ensure_ava_home_dirs(
-        _ctx(tmp_path, ava_home, operator_database=operator_database, producer=operator_pipeline)
+    meiva_home = tmp_path / "meivahome"
+    converge_host.ensure_meiva_home_dirs(
+        _ctx(tmp_path, meiva_home, operator_database=operator_database, producer=operator_pipeline)
     )
     for sub in ("logs", "configs", "secrets"):
-        assert (ava_home / sub).is_dir()
+        assert (meiva_home / sub).is_dir()
     # Exclude rotating logs from Spotlight; mds_stores otherwise consumes GBs of memory.
-    assert (ava_home / "logs" / ".metadata_never_index").is_file()
+    assert (meiva_home / "logs" / ".metadata_never_index").is_file()
 
 
-def test_ensure_ava_home_dirs_recursively_converges_private_data_trees(
+def test_ensure_meiva_home_dirs_recursively_converges_private_data_trees(
     home: Path,
     tmp_path: Path,
     operator_database: Callable[[], Any],
     operator_pipeline: Callable[[], EventPipeline],
 ):
-    ava_home = tmp_path / "avahome"
+    meiva_home = tmp_path / "meivahome"
     targets = (
-        ava_home / "logs" / "daemon" / "current.log",
-        ava_home / "workspaces" / "7" / "download.txt",
-        ava_home / "memory" / ".git" / "config",
+        meiva_home / "logs" / "daemon" / "current.log",
+        meiva_home / "workspaces" / "7" / "download.txt",
+        meiva_home / "memory" / ".git" / "config",
     )
     for target in targets:
         target.parent.mkdir(parents=True)
@@ -114,8 +114,8 @@ def test_ensure_ava_home_dirs_recursively_converges_private_data_trees(
         for parent in (target.parent, target.parent.parent):
             parent.chmod(0o755)
 
-    converge_host.ensure_ava_home_dirs(
-        _ctx(tmp_path, ava_home, operator_database=operator_database, producer=operator_pipeline)
+    converge_host.ensure_meiva_home_dirs(
+        _ctx(tmp_path, meiva_home, operator_database=operator_database, producer=operator_pipeline)
     )
 
     for target in targets:
@@ -125,7 +125,7 @@ def test_ensure_ava_home_dirs_recursively_converges_private_data_trees(
 
 
 @pytest.mark.skipif(os.name == "nt", reason="unix sockets are POSIX-only")
-def test_ensure_ava_home_dirs_survives_a_workspace_socket(
+def test_ensure_meiva_home_dirs_survives_a_workspace_socket(
     tmp_path: Path,
     operator_database: Callable[[], Any],
     operator_pipeline: Callable[[], EventPipeline],
@@ -136,43 +136,46 @@ def test_ensure_ava_home_dirs_survives_a_workspace_socket(
     import socket
     import tempfile
 
-    root = Path(tempfile.mkdtemp(prefix="ava-converge-hd-", dir="/tmp"))
-    ava_home = root / "avahome"
-    socket_dir = ava_home / "workspaces" / "6063" / "f13b-poc"
+    root = Path(tempfile.mkdtemp(prefix="meiva-converge-hd-", dir="/tmp"))
+    meiva_home = root / "meivahome"
+    socket_dir = meiva_home / "workspaces" / "6063" / "f13b-poc"
     socket_dir.mkdir(parents=True)
     server = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
     try:
         socket_path = socket_dir / "app.sock"
         server.bind(str(socket_path))
 
-        converge_host.ensure_ava_home_dirs(
-            _ctx(root, ava_home, operator_database=operator_database, producer=operator_pipeline)
+        converge_host.ensure_meiva_home_dirs(
+            _ctx(root, meiva_home, operator_database=operator_database, producer=operator_pipeline)
         )
 
         assert stat.S_ISSOCK(socket_path.lstat().st_mode)  # left in place
-        assert stat.S_IMODE((ava_home / "workspaces").stat().st_mode) == 0o700
-        assert (ava_home / "logs" / ".metadata_never_index").exists()
+        assert stat.S_IMODE((meiva_home / "workspaces").stat().st_mode) == 0o700
+        assert (meiva_home / "logs" / ".metadata_never_index").exists()
     finally:
         server.close()
         shutil.rmtree(root)
 
 
-def test_ensure_ava_home_dirs_rejects_logs_symlink_before_writing_marker(
+def test_ensure_meiva_home_dirs_rejects_logs_symlink_before_writing_marker(
     home: Path,
     tmp_path: Path,
     operator_database: Callable[[], Any],
     operator_pipeline: Callable[[], EventPipeline],
 ):
-    ava_home = tmp_path / "avahome"
+    meiva_home = tmp_path / "meivahome"
     outside = tmp_path / "outside"
     outside.mkdir()
-    ava_home.mkdir()
-    (ava_home / "logs").symlink_to(outside, target_is_directory=True)
+    meiva_home.mkdir()
+    (meiva_home / "logs").symlink_to(outside, target_is_directory=True)
 
     with pytest.raises(RuntimeError, match=r"logs.*symlink"):
-        converge_host.ensure_ava_home_dirs(
+        converge_host.ensure_meiva_home_dirs(
             _ctx(
-                tmp_path, ava_home, operator_database=operator_database, producer=operator_pipeline
+                tmp_path,
+                meiva_home,
+                operator_database=operator_database,
+                producer=operator_pipeline,
             )
         )
 
@@ -186,7 +189,7 @@ def test_host_wiring_leaves_existing_editable_install_unchanged(
     source = tmp_path / "source"
     site = source / ".venv" / "lib" / "python3.12" / "site-packages"
     site.mkdir(parents=True)
-    pointer = site / "_editable_impl_ava.pth"
+    pointer = site / "_editable_impl_meiva.pth"
     pointer.write_text(str(tmp_path / "deleted-checkout"))
     scripts = source / ".venv" / "bin"
     scripts.mkdir()
@@ -208,11 +211,11 @@ def test_host_wiring_leaves_existing_editable_install_unchanged(
         for step in converge_host.CONVERGE_STEPS
         if step.host_global and step.apply.__module__ == _steps.__name__
     )
-    converge(source, None, ava_home=home, steps=steps, services=frozenset())
+    converge(source, None, meiva_home=home, steps=steps, services=frozenset())
     assert {path: path.read_bytes() for path in files} == files
     assert {path: stat.S_IMODE(path.stat().st_mode) for path in modes} == modes
-    assert not (scripts / "ava").exists()
-    assert (home / ".local" / "bin" / "ava").is_symlink()
+    assert not (scripts / "meiva").exists()
+    assert (home / ".local" / "bin" / "meiva").is_symlink()
 
 
 def test_permissions_helper_step_refuses_when_this_process_cannot_sign(
@@ -283,8 +286,8 @@ def test_cmd_converge_unconfigured_returns_zero(
 
     repo = tmp_path / "repo"
     (repo / ".venv" / "bin").mkdir(parents=True)
-    (repo / ".venv" / "bin" / "ava").write_text("#!/bin/sh\n")
-    monkeypatch.setenv("AVA_HOME", str(home / "avahome"))
+    (repo / ".venv" / "bin" / "meiva").write_text("#!/bin/sh\n")
+    monkeypatch.setenv("MEIVA_HOME", str(home / "meivahome"))
     # Seed installed Postgres binaries; their download has a dedicated contract test.
     seeded_bin = rb.vendored_pg_dir() / "bin"
     seeded_bin.mkdir(parents=True)
@@ -333,7 +336,7 @@ def test_cmd_converge_unconfigured_returns_zero(
         )
     assert rc == 0
     assert helper_calls == []
-    assert (home / ".local" / "bin" / "ava").is_symlink()  # pyright: ignore[reportUnknownMemberType]
+    assert (home / ".local" / "bin" / "meiva").is_symlink()  # pyright: ignore[reportUnknownMemberType]
 
 
 def test_frontend_env_override_guard_passes_clean(
@@ -344,13 +347,13 @@ def test_frontend_env_override_guard_passes_clean(
     repo = tmp_path / "repo"
     (repo / "ui" / "web").mkdir(parents=True)
     (repo / "ui" / "web" / ".env.development").write_text("# tracked, next-dev-only\n")
-    ava_home = tmp_path / "avahome"
-    ava_home.mkdir()
-    # A unit .env carrying only AVA_* vars (the legitimate case) must pass.
-    (ava_home / ".env").write_text("AVA_GATEWAY_PORT=8800\nAVA_CLUSTER=main\n")
+    meiva_home = tmp_path / "meivahome"
+    meiva_home.mkdir()
+    # A unit .env carrying only MEIVA_* vars (the legitimate case) must pass.
+    (meiva_home / ".env").write_text("MEIVA_GATEWAY_PORT=8800\nMEIVA_CLUSTER=main\n")
 
     _fe_env.ensure_no_frontend_env_overrides(
-        _ctx(repo, ava_home, operator_database=operator_database, producer=operator_pipeline)
+        _ctx(repo, meiva_home, operator_database=operator_database, producer=operator_pipeline)
     )  # must not raise
 
 
@@ -379,16 +382,16 @@ def test_frontend_env_override_guard_rejects_next_public_in_unit_env(
     operator_pipeline: Callable[[], EventPipeline],
 ):
     """The 2026-06-23 outage baked a stale unit-env port into the bundle.
-    load_ava_env exports every key; NEXT_PUBLIC_* belongs only on the build command."""
+    load_meiva_env exports every key; NEXT_PUBLIC_* belongs only on the build command."""
     repo = tmp_path / "repo"
     (repo / "ui" / "web").mkdir(parents=True)
-    ava_home = tmp_path / "avahome"
-    ava_home.mkdir()
-    (ava_home / ".env").write_text("AVA_GATEWAY_PORT=8000\nNEXT_PUBLIC_GATEWAY_PORT=8800\n")
+    meiva_home = tmp_path / "meivahome"
+    meiva_home.mkdir()
+    (meiva_home / ".env").write_text("MEIVA_GATEWAY_PORT=8000\nNEXT_PUBLIC_GATEWAY_PORT=8800\n")
 
     with pytest.raises(RuntimeError, match="NEXT_PUBLIC_GATEWAY_PORT"):
         _fe_env.ensure_no_frontend_env_overrides(
-            _ctx(repo, ava_home, operator_database=operator_database, producer=operator_pipeline)
+            _ctx(repo, meiva_home, operator_database=operator_database, producer=operator_pipeline)
         )
 
 
@@ -402,7 +405,7 @@ def test_frontend_env_override_guard_rejects_next_public_in_unit_env(
 )
 def test_next_public_keys_detects_assignment_shapes(tmp_path: Path, line):
     env = tmp_path / ".env"
-    env.write_text(f"AVA_CLUSTER=main\n{line}\n")
+    env.write_text(f"MEIVA_CLUSTER=main\n{line}\n")
     assert _fe_env.next_public_keys_in_env_file(env)
 
 
@@ -412,7 +415,7 @@ def test_next_public_keys_ignores_comments_and_substrings(tmp_path: Path):
     env.write_text(
         "# NEXT_PUBLIC_GATEWAY_PORT=8800\n"  # comment, not an assignment
         "MY_NEXT_PUBLIC_THING=1\n"  # substring, not a NEXT_PUBLIC_* key
-        "AVA_GATEWAY_PORT=8000\n"
+        "MEIVA_GATEWAY_PORT=8000\n"
     )
     assert _fe_env.next_public_keys_in_env_file(env) == []
 
@@ -421,8 +424,8 @@ def test_next_public_keys_absent_file_is_empty(tmp_path: Path):
     assert _fe_env.next_public_keys_in_env_file(tmp_path / "nope.env") == []
 
 
-_DIRECT_URL = "postgresql://ava_main:sek@127.0.0.1:5433/ava_main"
-_POOLED_URL = "postgresql://ava_main:sek@127.0.0.1:6433/ava_main"
+_DIRECT_URL = "postgresql://meiva_main:sek@127.0.0.1:5433/meiva_main"
+_POOLED_URL = "postgresql://meiva_main:sek@127.0.0.1:6433/meiva_main"
 
 
 def test_ensure_pgbouncer_step_migrates_direct_url_to_pooler_when_enabled(
@@ -442,7 +445,7 @@ def test_ensure_pgbouncer_step_migrates_direct_url_to_pooler_when_enabled(
     )
     converge_host.ensure_pgbouncer_step(ctx)
     env = (tmp_path / ".env").read_text()
-    assert "AVA_DB_URL=" + _POOLED_URL in env  # the record's pooler 6433
+    assert "MEIVA_DB_URL=" + _POOLED_URL in env  # the record's pooler 6433
 
 
 def test_ensure_pgbouncer_step_leaves_remote_url_untouched(
@@ -452,7 +455,7 @@ def test_ensure_pgbouncer_step_leaves_remote_url_untouched(
     operator_pipeline: Callable[[], EventPipeline],
 ):
     """Remote data planes retain their provider URL and skip local binary preflight (#1752)."""
-    remote_url = "postgresql://ava:sek@10.9.8.7:5432/ava"
+    remote_url = "postgresql://meiva:sek@10.9.8.7:5432/meiva"
     ctx = _pgbouncer_ctx(
         tmp_path,
         monkeypatch,
@@ -465,7 +468,7 @@ def test_ensure_pgbouncer_step_leaves_remote_url_untouched(
     monkeypatch.setattr(settings.data_plane, "redis_url", "rediss://10.9.8.7:6380/0")
     converge_host.ensure_pgbouncer_step(ctx)
     env = (tmp_path / ".env").read_text()
-    assert "AVA_DB_URL=" + remote_url in env, "the remote URL must pass through byte-identical"
+    assert "MEIVA_DB_URL=" + remote_url in env, "the remote URL must pass through byte-identical"
     # The pooler port normalization is skipped wholesale on the remote branch —
     # the URL's port is the provider's.
 
@@ -488,7 +491,7 @@ def test_ensure_pgbouncer_step_rewrites_pooler_url_back_to_direct_when_disabled(
     )
     converge_host.ensure_pgbouncer_step(ctx)
     env = (tmp_path / ".env").read_text()
-    assert "AVA_DB_URL=" + _DIRECT_URL in env
+    assert "MEIVA_DB_URL=" + _DIRECT_URL in env
 
 
 def test_ensure_pgbouncer_step_leaves_matching_url_untouched(
@@ -509,7 +512,7 @@ def test_ensure_pgbouncer_step_leaves_matching_url_untouched(
     )
     converge_host.ensure_pgbouncer_step(ctx)
     env = (tmp_path / ".env").read_text()
-    assert "AVA_DB_URL=" + _POOLED_URL in env
+    assert "MEIVA_DB_URL=" + _POOLED_URL in env
 
 
 def test_ensure_pgbouncer_step_leaves_operator_standin_untouched(
@@ -523,14 +526,14 @@ def test_ensure_pgbouncer_step_leaves_operator_standin_untouched(
     ctx = _pgbouncer_ctx(
         tmp_path,
         monkeypatch,
-        db_url="postgresql://ava:dev@localhost:5432/ava",
+        db_url="postgresql://meiva:dev@localhost:5432/meiva",
         enabled=True,
         operator_database=operator_database,
         producer=operator_pipeline,
     )
     converge_host.ensure_pgbouncer_step(ctx)
     env = (tmp_path / ".env").read_text()
-    assert "AVA_DB_URL=postgresql://ava:dev@localhost:5432/ava" in env
+    assert "MEIVA_DB_URL=postgresql://meiva:dev@localhost:5432/meiva" in env
 
 
 def test_ensure_pgbouncer_step_without_env_writes_nothing(
@@ -559,9 +562,9 @@ def _rw_url(pw: str, *, host: str, user: str = "") -> str:
     return f"redis://{user}:{pw}@{host}/0"
 
 
-def _rw_pg_url(pw: str, *, host: str, user: str = "ava_main") -> str:
+def _rw_pg_url(pw: str, *, host: str, user: str = "meiva_main") -> str:
     """The postgresql twin of _rw_url (parts-built, scanner-safe)."""
-    return f"postgresql://{user}:{pw}@{host}/ava_main"
+    return f"postgresql://{user}:{pw}@{host}/meiva_main"
 
 
 # --- health-port backfill value decoding (#2704) ---------------------------

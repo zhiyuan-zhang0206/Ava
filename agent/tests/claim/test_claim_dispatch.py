@@ -10,7 +10,7 @@ from langgraph.graph import END
 from langgraph.types import Command
 from psycopg_pool import AsyncConnectionPool
 
-import ava
+import meiva
 from agent.graph import claim_node
 from agent.graph.claim.tests.claim_support import insert_inbound_kind, make_runtime, thread_config
 from agent.graph.claim.tests.cursor_fixture import fresh_snapshot_cursor as fresh_snapshot_cursor
@@ -131,7 +131,7 @@ async def test_claim_inbound_batch_stamps_claimed_at(
     db_conn.commit()
 
     rows = await claim_inbound_batch(
-        aops_pool, tid, incarnation=ava.context.require_original_incarnation(tid), work=None
+        aops_pool, tid, incarnation=meiva.context.require_original_incarnation(tid), work=None
     )
     by_id = {r.id: r for r in rows}
     assert set(by_id) == {term_id}
@@ -613,7 +613,7 @@ async def test_claim_chat_message_carries_source_metadata(
     """chat dispatch passes source=item.source to inbound_message helper, cannot be None.
 
     Lock down mutant_76: `source=item.source` → `source=None`. Verify message's
-    additional_kwargs.ava_source equals original item.source ('user'), preventing None leak."""
+    additional_kwargs.meiva_source equals original item.source ('user'), preventing None leak."""
     tid = spawn_agent(
         catalog=model_catalog,
         authority=config_authority,
@@ -632,7 +632,7 @@ async def test_claim_chat_message_carries_source_metadata(
     msgs = cmd.update["messages"]  # type: ignore[index]
     chat_msg = msgs[0]
     assert isinstance(chat_msg, HumanMessage)
-    assert chat_msg.additional_kwargs.get("ava_source") == "user"  # pyright: ignore[reportUnknownMemberType]
+    assert chat_msg.additional_kwargs.get("meiva_source") == "user"  # pyright: ignore[reportUnknownMemberType]
 
 
 async def test_claim_node_wrapper_returns_underlying_command(

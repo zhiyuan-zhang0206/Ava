@@ -13,7 +13,7 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any, NoReturn, cast
 
-ROOT_SOCKET = "ava-root.sock"
+ROOT_SOCKET = "meiva-root.sock"
 ROOT_WAIT_S = 30.0
 _POLL_S = 0.25
 UNIT_IDS = ("heartbeat", "heartbeat-b", "heartbeat-c")

@@ -11,7 +11,7 @@ a capability does not exist.
 
 But the index is rendered into the SystemMessage, and `init_context` lays that
 message down only when a context window is established — an agent's first wake,
-and the turn after each compaction. `ava.skills._names()` underneath it is an
+and the turn after each compaction. `meiva.skills._names()` underneath it is an
 uncached filesystem scan, re-read on every call. The two age differently and
 nothing compared them, so a skill installed mid-window was reachable by name and
 absent from the listing the agent had been told to trust, until a compaction
@@ -50,7 +50,7 @@ four hand-maintained copies of the establishment order into one. A head that
 mutates per turn gives that ownership back up to buy a property the diff already
 provides.
 
-**Emit an event from the install site.** `ava skill install` knows exactly when
+**Emit an event from the install site.** `meiva skill install` knows exactly when
 the catalog moved, so have it tell the agents. Rejected: the installer is almost
 never the agent's process — another agent on the box, an operator's shell, a
 plugin's `scaffold()` during converge — so this needs a new cross-process channel
@@ -72,7 +72,7 @@ already the only moment the answer is consumed, so a poll can only be more work
 for a staler result.
 
 **Announce removals as well as additions.** Rejected: a vanished skill leaves the
-standing index over-promising, and `ava.skills.<name>` already fails fast on it —
+standing index over-promising, and `meiva.skills.<name>` already fails fast on it —
 which is the fail-fast answer. Membership is replaced rather than unioned, so a
 skill removed and reinstalled does announce again.
 

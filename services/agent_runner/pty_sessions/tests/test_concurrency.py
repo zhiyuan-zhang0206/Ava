@@ -38,7 +38,7 @@ _PING_BUDGET_S = 1.5
 
 
 def _start_streaming(home: Path) -> list[str]:
-    streaming = [f"ava-stress-stream-{i}" for i in range(_STREAMING)]
+    streaming = [f"meiva-stress-stream-{i}" for i in range(_STREAMING)]
     for name in streaming:
         new(name, home)
     for name in streaming[:_WITH_SCREEN]:
@@ -82,7 +82,7 @@ def _allocate_concurrently(home: Path) -> tuple[dict[str, bool], list[BaseExcept
 
     def allocate(worker: int) -> None:
         for index in range(_PER_THREAD):
-            name = f"ava-stress-new-{worker}-{index}"
+            name = f"meiva-stress-new-{worker}-{index}"
             try:
                 result = new(name, home)
             except BaseException as exc:  # reported by the caller's assertion

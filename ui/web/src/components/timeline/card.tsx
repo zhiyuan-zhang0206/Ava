@@ -106,7 +106,7 @@ function agentChatTitle(item: BackendTimelineItem): {
       ? " (streaming…)"
       : "";
   return {
-    title: `Ava ▸${suffix}`,
+    title: `Meiva ▸${suffix}`,
     titleKey: "agentChat",
     titleValues: { suffixKey },
   };
@@ -176,7 +176,7 @@ export function messageCardConfig(
       };
     }
     case "attach":
-      // Attached media (ava.self.attach) — open by default so the image
+      // Attached media (meiva.self.attach) — open by default so the image
       // thumbnails are visible without a click once the card is revealed
       // (user ruling 2026-08-26; kept open when the 2026-08-30 ruling folded
       // it into the details block).
@@ -433,11 +433,11 @@ export function MessageCard({
 function cardTitle(config: CardConfig, t: ReturnType<typeof useTranslations>): string {
   if (!config.titleKey) return config.title ?? "";
   const suffixKey = config.titleValues?.suffixKey;
-  // Always pass `suffix` to the message: the agent-chat title is "Ava ▸{suffix}",
+  // Always pass `suffix` to the message: the agent-chat title is "Meiva ▸{suffix}",
   // and next-intl renders the raw key when an interpolation variable is
   // missing (MissingValueError → key fallback), which leaked "timeline.agentChat"
   // for plain (non-interrupted, non-partial) chat messages. Empty suffix is a
-  // valid value — it renders the bare "Ava ▸".
+  // valid value — it renders the bare "Meiva ▸".
   const values = suffixKey
     ? { ...config.titleValues, suffix: t(suffixKey as Parameters<typeof t>[0]) }
     : { ...config.titleValues, suffix: "" };

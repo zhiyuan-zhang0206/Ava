@@ -193,8 +193,8 @@ def test_pipeline_exports_to_otlp(otlp_backend) -> None:
     assert attrs["event_name"] == "llm_usage"
 
     metrics = collected_metrics(metric_reader)
-    assert metrics["ava_llm_usage_in_total"].data.data_points[0].value == 7
-    assert metrics["ava_llm_usage_latency"].data.data_points[0].sum == 1.5
+    assert metrics["meiva_llm_usage_in_total"].data.data_points[0].value == 7
+    assert metrics["meiva_llm_usage_latency"].data.data_points[0].sum == 1.5
 
 
 def test_pipeline_mirror_survives_otlp_failure(
@@ -229,9 +229,9 @@ def test_pipeline_mirror_survives_otlp_failure(
 
 
 def test_handshake_env_no_longer_gates_export(monkeypatch: pytest.MonkeyPatch) -> None:
-    """The AVA_EXEC_REQUEST_FILE handshake was the old child-export gate; it
+    """The MEIVA_EXEC_REQUEST_FILE handshake was the old child-export gate; it
     must no longer disable OTLP — the export flag is the only authority."""
-    monkeypatch.setenv("AVA_EXEC_REQUEST_FILE", "request.json")
+    monkeypatch.setenv("MEIVA_EXEC_REQUEST_FILE", "request.json")
     monkeypatch.setattr(config.settings.observability, "telemetry_otlp_enabled", True)
     assert telemetry_otlp.OtlpBackend(export_allowed=lambda: True)._enabled() is True
 
@@ -316,8 +316,8 @@ def test_queue_loss_metric_survives_full_log_lane(
     assert mirrors[0].event_name == "event_log_drop"
     assert mirrors[0].attributes["n"] == 2
     metrics = collected_metrics(reader)
-    assert metrics["ava_event_log_drop_n"].data.data_points[0].value == 2
-    assert metrics["ava_event_log_drop_last_dropped_at"].data.data_points[0].value > 0
+    assert metrics["meiva_event_log_drop_n"].data.data_points[0].value == 2
+    assert metrics["meiva_event_log_drop_last_dropped_at"].data.data_points[0].value > 0
 
 
 def test_real_otel_sdk_queue_overflow_is_observed_without_log_recursion(
@@ -389,5 +389,5 @@ def test_delayed_loss_summary_cannot_rewind_newer_loss_metric(otlp_backend: Any)
             )
         )
     metrics = collected_metrics(reader)
-    assert metrics["ava_event_log_drop_last_dropped_at"].data.data_points[0].value == 2000.0
-    assert metrics["ava_event_log_drop_n"].data.data_points[0].value == 2
+    assert metrics["meiva_event_log_drop_last_dropped_at"].data.data_points[0].value == 2000.0
+    assert metrics["meiva_event_log_drop_n"].data.data_points[0].value == 2

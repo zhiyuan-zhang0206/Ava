@@ -1,21 +1,21 @@
-"""`ava.state` / `ava.state_update` / `ava.state.<plugin>` namespace view behavior guard.
+"""`meiva.state` / `meiva.state_update` / `meiva.state.<plugin>` namespace view behavior guard.
 
 Plugin <-> framework IPC channel — `agent/graph/exec/node.py:_exec_node_impl` runs the
-exec in one disposable subprocess: the child rebuilds `ava.state` from the
+exec in one disposable subprocess: the child rebuilds `meiva.state` from the
 request-envelope snapshot. Inside the exec the plugin reads
-ava.state and writes ava.state_update through the SDK; at the end of the turn
-ava.state_update is merged into Command(update=...).
+meiva.state and writes meiva.state_update through the SDK; at the end of the turn
+meiva.state_update is merged into Command(update=...).
 Commit entry validates keys — must be prefixed fields declared in a plugin's `state` contribution,
 not base field names, not unregistered typos.
 
-Reading ava.state goes through namespace view: `ava.state.<plugin_name>.<field>` auto
-de-prefix (`build_agent_state.__getattr__`); writing ava.state_update still uses prefixed
+Reading meiva.state goes through namespace view: `meiva.state.<plugin_name>.<field>` auto
+de-prefix (`build_agent_state.__getattr__`); writing meiva.state_update still uses prefixed
 keys (`"<plugin>__<field>"`) because state_update is the LangGraph reducer input.
 
 Test coverage:
 - Unit: state.<plugin> namespace view auto strips prefix; unregistered plugin name → AttributeError;
   base fields (messages/halted) do not enter namespace.
-- Unit: deepcopy isolation — mutating ava.state.field (list/dict/set/nested) does not affect the original state.
+- Unit: deepcopy isolation — mutating meiva.state.field (list/dict/set/nested) does not affect the original state.
 - Integration: runs the real _exec_node_impl path ——
   * happy path: state_update fields go into Command.update
   * cancel path: state_update still merges (load-bearing, T1)
@@ -24,7 +24,7 @@ Test coverage:
   * plugin writes base field → ValueError (T5, C1)
   * plugin writes unregistered key → ValueError (C2)
   * multiple plugins different keys all merge (T6)
-  * plugin accidentally sets ava.state_update = None → TypeError (C3)
+  * plugin accidentally sets meiva.state_update = None → TypeError (C3)
   * plugin mutating namespace view does not persist (T7)
 """
 
@@ -41,7 +41,7 @@ from langgraph.graph.message import REMOVE_ALL_MESSAGES, add_messages
 from langgraph.runtime import Runtime
 from pydantic import BaseModel, Field
 
-import ava
+import meiva
 from agent.graph.exec.node import _exec_node_impl
 from agent.messages.guard import MessagesMutationError
 from agent.state import (
@@ -49,9 +49,7 @@ from agent.state import (
     PluginStateHandle,
     build_agent_state,
 )
-from ava.boot import process_clients
-from ava.sdk_surface import process_context
-from base.agents.context import AvaContext
+from base.agents.context import MeivaContext
 from base.agents.context.identity import AgentIdentity
 from base.clock import Clock
 from base.config.tests.configuration import defaults
@@ -61,6 +59,8 @@ from base.events.live.bus import EventBus
 from base.host.env.agent_slices import AgentSlices
 from base.packages.plugin_providers import build_model_catalog
 from base.packages.plugins.extensions import ExtensionRegistry, PluginContributions
+from meiva.boot import process_clients
+from meiva.sdk_surface import process_context
 
 assert (
     asyncio
@@ -102,17 +102,17 @@ def test_handle_update_accumulates_reducer_deltas_within_turn():
 
     handle = PluginStateHandle(_PluginState, "delta_test")
 
-    ava.state = MagicMock()
-    ava.state_update = {}
+    meiva.state = MagicMock()
+    meiva.state_update = {}
     # Model the working copy the exec node installed: channel key
     # "delta_test__seen" starts as the checkpoint value.
-    ava.state.delta_test__seen = set()
+    meiva.state.delta_test__seen = set()
 
     handle.update({"seen": {"a"}})
     handle.update({"seen": {"b"}})
 
     assert handle.read().seen == {"a", "b"}  # working copy sees both
-    assert ava.state_update["delta_test__seen"] == {"a", "b"}, (
+    assert meiva.state_update["delta_test__seen"] == {"a", "b"}, (
         "committed delta must carry every update of the turn, not just the last"
     )
 
@@ -126,14 +126,14 @@ def test_handle_update_last_value_field_still_collapses_to_latest():
 
     handle = PluginStateHandle(_PluginState, "delta_test")
 
-    ava.state = MagicMock()
-    ava.state_update = {}
-    ava.state.delta_test__counter = 0
+    meiva.state = MagicMock()
+    meiva.state_update = {}
+    meiva.state.delta_test__counter = 0
 
     handle.update({"counter": 1})
     handle.update({"counter": 2})
 
-    assert ava.state_update["delta_test__counter"] == 2
+    assert meiva.state_update["delta_test__counter"] == 2
     assert handle.read().counter == 2
 
 
@@ -156,10 +156,10 @@ def test_handle_update_rejects_targeted_removal_of_checkpoint_message():
 
     handle = PluginStateHandle(_PluginState, "delta_test")
 
-    ava.state = MagicMock()
-    ava.state_update = {}
+    meiva.state = MagicMock()
+    meiva.state_update = {}
     # Checkpoint value the exec node installed into the working copy.
-    ava.state.messages = [m1, m2]
+    meiva.state.messages = [m1, m2]
 
     # Appending is fine...
     handle.update({"messages": [HumanMessage(content="c", id="m3")]})
@@ -185,14 +185,14 @@ def test_handle_update_remove_all_marker_survives_accumulation():
 
     handle = PluginStateHandle(_PluginState, "delta_test")
 
-    ava.state = MagicMock()
-    ava.state_update = {}
-    ava.state.messages = [m1, m2]
+    meiva.state = MagicMock()
+    meiva.state_update = {}
+    meiva.state.messages = [m1, m2]
 
     handle.update({"messages": [m3]})
     handle.update({"messages": [RemoveMessage(id=REMOVE_ALL_MESSAGES)]})
 
-    acc = ava.state_update["messages"]
+    acc = meiva.state_update["messages"]
     assert acc == [m3, RemoveMessage(id=REMOVE_ALL_MESSAGES)], (
         "REMOVE_ALL must ride along in the accumulated delta"
     )
@@ -213,14 +213,14 @@ def test_handle_update_add_messages_plain_appends_unchanged():
 
     handle = PluginStateHandle(_PluginState, "delta_test")
 
-    ava.state = MagicMock()
-    ava.state_update = {}
-    ava.state.messages = []
+    meiva.state = MagicMock()
+    meiva.state_update = {}
+    meiva.state.messages = []
 
     handle.update({"messages": [m1]})
     handle.update({"messages": [m2]})
 
-    acc = ava.state_update["messages"]
+    acc = meiva.state_update["messages"]
     assert acc == [m1, m2]
     assert handle.read().messages == [m1, m2]
     assert add_messages([], acc) == [m1, m2]
@@ -290,9 +290,9 @@ async def test_exec_node_merges_plugin_messages_with_framework_toolmessage(
     state_cls = build_agent_state(_registry(delta_test=_MessagesPluginState))
 
     code = (
-        "import ava\n"
+        "import meiva\n"
         "from langchain_core.messages import HumanMessage\n"
-        "ava.state_update['messages'] = [HumanMessage(content='plugin note', id='p1')]\n"
+        "meiva.state_update['messages'] = [HumanMessage(content='plugin note', id='p1')]\n"
     )
     plugin_fields: dict[str, Any] = {"delta_test__sentinel": True}
     state = state_cls(messages=[ai_message_with_code(code)], halted=False, **plugin_fields)
@@ -313,28 +313,28 @@ async def test_exec_node_merges_plugin_messages_with_framework_toolmessage(
 
 
 def test_namespace_view_strips_prefix():
-    """ava.state.<plugin_name> exposes `<plugin>__field` de-prefixed to `.field`,
-    base fields (messages/halted) do not enter namespace (they are read directly via ava.state)."""
+    """meiva.state.<plugin_name> exposes `<plugin>__field` de-prefixed to `.field`,
+    base fields (messages/halted) do not enter namespace (they are read directly via meiva.state)."""
 
-    class AvaCode(BaseModel):
+    class MeivaCode(BaseModel):
         injected_paths: set[str] = Field(default_factory=set)
         token_count: int = 0
 
     class OtherPlugin(BaseModel):
         data: str = ""
 
-    state_cls = build_agent_state(_registry(ava_code=AvaCode, other_plugin=OtherPlugin))
+    state_cls = build_agent_state(_registry(meiva_code=MeivaCode, other_plugin=OtherPlugin))
     # dynamic AgentState fields (`<plugin>__<field>`) are generated at runtime by build_agent_state,
     # pyright statically sees state_cls as BaseAgentState — use dict[Any, Any] + **spread to bypass
     # pyright keyword-arg check.
     plugin_fields: dict = {
-        "ava_code__injected_paths": {"/a/AGENTS.md", "/b/AGENTS.md"},
-        "ava_code__token_count": 42,
+        "meiva_code__injected_paths": {"/a/AGENTS.md", "/b/AGENTS.md"},
+        "meiva_code__token_count": 42,
         "other_plugin__data": "x",
     }
-    ava.state = state_cls(messages=[], halted=False, **plugin_fields)  # pyright: ignore[reportUnknownArgumentType]
+    meiva.state = state_cls(messages=[], halted=False, **plugin_fields)  # pyright: ignore[reportUnknownArgumentType]
 
-    ns = ava.state.ava_code  # type: ignore[attr-defined]
+    ns = meiva.state.meiva_code  # type: ignore[attr-defined]
     assert ns.injected_paths == {"/a/AGENTS.md", "/b/AGENTS.md"}  # pyright: ignore[reportUnknownMemberType]
     assert ns.token_count == 42  # pyright: ignore[reportUnknownMemberType]
     # other_plugin's fields do not appear (cross-plugin isolation)
@@ -355,32 +355,32 @@ def test_namespace_view_typo_name_raises_attribute_error():
     class Bar(BaseModel):
         y: str = ""
 
-    state_cls = build_agent_state(_registry(ava_code=Foo, other=Bar))
-    ava.state = state_cls(messages=[], halted=False)
+    state_cls = build_agent_state(_registry(meiva_code=Foo, other=Bar))
+    meiva.state = state_cls(messages=[], halted=False)
 
-    with pytest.raises(AttributeError, match=r"ava_code.*other"):
-        _ = ava.state.nonexistent  # type: ignore[attr-defined]
+    with pytest.raises(AttributeError, match=r"meiva_code.*other"):
+        _ = meiva.state.nonexistent  # type: ignore[attr-defined]
 
 
 def test_namespace_view_mutation_does_not_persist():
     """namespace is a by-value SimpleNamespace copy — mutating ns.field does not reflect to
-    ava.state, nor commit into the next turn. To persist must use ava.state_update[...]."""
+    meiva.state, nor commit into the next turn. To persist must use meiva.state_update[...]."""
 
     class P(BaseModel):
         counter: int = 0
 
     state_cls = build_agent_state(_registry(plugin=P))
     plugin_fields: dict = {"plugin__counter": 1}
-    ava.state = state_cls(messages=[], halted=False, **plugin_fields)  # pyright: ignore[reportUnknownArgumentType]
+    meiva.state = state_cls(messages=[], halted=False, **plugin_fields)  # pyright: ignore[reportUnknownArgumentType]
 
-    ns = ava.state.plugin  # type: ignore[attr-defined]
+    ns = meiva.state.plugin  # type: ignore[attr-defined]
     assert ns.counter == 1  # pyright: ignore[reportUnknownMemberType]
     ns.counter = 999  # mutate namespace by-value copy
     # original state unchanged (namespace and state are independent Python objects)
-    assert ava.state.plugin.counter == 1  # type: ignore[attr-defined]
-    assert ava.state.plugin__counter == 1  # type: ignore[attr-defined]
+    assert meiva.state.plugin.counter == 1  # type: ignore[attr-defined]
+    assert meiva.state.plugin__counter == 1  # type: ignore[attr-defined]
     # state_update also not auto-chased — plugin must be explicit
-    assert ava.state_update is None
+    assert meiva.state_update is None
 
 
 # ── Unit: deepcopy isolation (list / dict / set / nested) ───────────────────────
@@ -445,8 +445,8 @@ def test_deepcopy_isolates_nested_pydantic_model():
 
 def make_runtime_and_config(
     redis_client: AsyncMock, pins: dict[str, Any] | None = None, *, database_gate: ProcessDbGate
-) -> tuple[Runtime[AvaContext], RunnableConfig]:
-    ctx = AvaContext(
+) -> tuple[Runtime[MeivaContext], RunnableConfig]:
+    ctx = MeivaContext(
         ops_pool=None,
         llm=MagicMock(),
         event_publisher=MagicMock(),
@@ -481,13 +481,13 @@ def ai_message_with_code(code: str) -> AIMessage:
 async def test_exec_node_merges_plugin_state_update_into_command(
     fake_cancel_event, database_gate: ProcessDbGate
 ):
-    """user code writes ava.state_update[key]=value → Command(update) contains key:value."""
+    """user code writes meiva.state_update[key]=value → Command(update) contains key:value."""
 
     class _StateWithPlugin(BaseAgentState):
         plugin__counter: int = 0
 
     state = _StateWithPlugin(
-        messages=[ai_message_with_code("import ava\nava.state_update['plugin__counter'] = 7")],
+        messages=[ai_message_with_code("import meiva\nmeiva.state_update['plugin__counter'] = 7")],
         halted=False,
         plugin__counter=0,
     )
@@ -507,7 +507,9 @@ async def test_exec_node_commits_the_skill_reads_the_sdk_writes(
     """`skill_reads` is a core channel the SDK itself writes (the skills module notes each body it
     hands over): no plugin declares it and it still passes the key guard into Command(update)."""
     state = BaseAgentState(
-        messages=[ai_message_with_code("import ava\nava.state_update['skill_reads'] = ['alpha']")],
+        messages=[
+            ai_message_with_code("import meiva\nmeiva.state_update['skill_reads'] = ['alpha']")
+        ],
         halted=False,
     )
     runtime, config = make_runtime_and_config(AsyncMock(), database_gate=database_gate)
@@ -521,7 +523,7 @@ async def test_exec_node_never_binds_the_slot_in_the_parent(
     fake_cancel_event, database_gate: ProcessDbGate
 ):
     """The exec runs in a child process: the parent (host) process never has a bound slot,
-    and reading `ava.state` there raises rather than returning None."""
+    and reading `meiva.state` there raises rather than returning None."""
     state = BaseAgentState(messages=[ai_message_with_code("pass")], halted=False)
     runtime, config = make_runtime_and_config(AsyncMock(), database_gate=database_gate)
 
@@ -545,13 +547,13 @@ async def test_exec_node_leaves_parent_unbound_even_on_crash(
     assert not process_context.in_exec_turn()
 
 
-async def test_plugin_cannot_overwrite_base_field_via_ava_state(
+async def test_plugin_cannot_overwrite_base_field_via_meiva_state(
     fake_cancel_event, database_gate: ProcessDbGate
 ):
-    """plugin changing ava.state.halted = True only affects the deepcopy copy — the real
+    """plugin changing meiva.state.halted = True only affects the deepcopy copy — the real
     LangGraph state is unchanged, Command.update.halted is calculated by the framework
     (this _ExecDone case). The focus is not "halted is specially protected" but
-    "all writes through ava.state do not persist — through ava.state writing does not enter
+    "all writes through meiva.state do not persist — through meiva.state writing does not enter
     the next turn"."""
 
     class _StateWithSentinel(BaseAgentState):
@@ -559,10 +561,10 @@ async def test_plugin_cannot_overwrite_base_field_via_ava_state(
 
     code = (
         # plugin changes deepcopy copy — does not persist
-        "import ava\n"
-        "ava.state.halted = True\n"
+        "import meiva\n"
+        "meiva.state.halted = True\n"
         # plugin explicitly writes state_update[sentinel] — this one commits
-        "ava.state_update['plugin__sentinel'] = True\n"
+        "meiva.state_update['plugin__sentinel'] = True\n"
     )
     state = _StateWithSentinel(
         messages=[ai_message_with_code(code)],
@@ -602,7 +604,7 @@ async def test_state_update_base_field_key_raises(
     this turn, silently losing exec output or disrupting compact state machine."""
 
     state = BaseAgentState(
-        messages=[ai_message_with_code(f"import ava\nava.state_update[{base_field!r}] = 'X'")],
+        messages=[ai_message_with_code(f"import meiva\nmeiva.state_update[{base_field!r}] = 'X'")],
         halted=False,
     )
     runtime, config = make_runtime_and_config(AsyncMock(), database_gate=database_gate)
@@ -619,7 +621,7 @@ async def test_state_update_unknown_key_raises(fake_cancel_event, database_gate:
         plugin__known: int = 0
 
     state = _State(
-        messages=[ai_message_with_code("import ava\nava.state_update['plugin__typo'] = 1")],
+        messages=[ai_message_with_code("import meiva\nmeiva.state_update['plugin__typo'] = 1")],
         halted=False,
         plugin__known=0,
     )
@@ -638,7 +640,7 @@ async def test_state_update_multiple_plugins_no_conflict(
         plugin_a__x: int = 0
         plugin_b__y: str = ""
 
-    code = "import ava\nava.state_update['plugin_a__x'] = 10\nava.state_update['plugin_b__y'] = 'hello'\n"
+    code = "import meiva\nmeiva.state_update['plugin_a__x'] = 10\nmeiva.state_update['plugin_b__y'] = 'hello'\n"
     state = _State(messages=[ai_message_with_code(code)], halted=False)
     runtime, config = make_runtime_and_config(AsyncMock(), database_gate=database_gate)
 
@@ -652,23 +654,23 @@ async def test_state_update_multiple_plugins_no_conflict(
 async def test_state_update_non_dict_raises_type_error(
     fake_cancel_event, database_gate: ProcessDbGate
 ):
-    """plugin inside the exec child sets ava.state_update to None / list /
+    """plugin inside the exec child sets meiva.state_update to None / list /
     str → TypeError, not silent (`or {}` fallback against AGENTS.md fail-fast)."""
 
     state = BaseAgentState(
-        messages=[ai_message_with_code("import ava\nava.state_update = None")],
+        messages=[ai_message_with_code("import meiva\nmeiva.state_update = None")],
         halted=False,
     )
     runtime, config = make_runtime_and_config(AsyncMock(), database_gate=database_gate)
 
-    with pytest.raises(TypeError, match=r"plugin tampered with ava.state_update"):
+    with pytest.raises(TypeError, match=r"plugin tampered with meiva.state_update"):
         await _exec_node_impl(state, runtime, config)
 
 
 # ── Integration: cancel / lifecycle paths state_update still merges ──────────
 #
 # load-bearing invariant——the state delta a plugin writes during a cancel / terminate / restart
-# turn (e.g. ava_code__cwd halfway set to another location) MUST still be merged into
+# turn (e.g. meiva_code__cwd halfway set to another location) MUST still be merged into
 # Command.update, must not be lost just because it's not the happy path.
 # Currently _exec_node_impl implements capture plugin_state_update **after subscribe_interrupt
 # exits**, shared with all _ExecResult branches through the common return Command entry, so these
@@ -682,7 +684,7 @@ async def test_exec_node_preserves_state_update_on_cancel(
     """In the cancel path, the state_update written by the plugin before the cancel still merges into Command.
 
     The cancel fires only after the exec code has provably started: a marker
-    file the code writes after its state_update (subprocess boot — `import ava`
+    file the code writes after its state_update (subprocess boot — `import meiva`
     plus plugins — takes ~1-2s, so a fixed short delay would race it on CI)."""
 
     class _State(BaseAgentState):
@@ -692,8 +694,8 @@ async def test_exec_node_preserves_state_update_on_cancel(
     # plugin first writes state_update, proves it ran, then dead-waits
     # (sleep long enough to be cancelled)
     code = (
-        "import ava\n"
-        "ava.state_update['plugin__progress'] = 'before-cancel'\n"
+        "import meiva\n"
+        "meiva.state_update['plugin__progress'] = 'before-cancel'\n"
         f"open({str(marker)!r}, 'w').write('x')\n"
         "import time; time.sleep(30)\n"
     )
@@ -728,14 +730,14 @@ async def test_exec_node_preserves_state_update_on_cancel(
 def scan_flagged_code(*sources: str) -> str:
     """Agent code that scans flagged content once per source inside the real exec
     child, which is where scan_content writes a finding to the state update."""
-    return "from ava.security import scan_content\n" + "".join(
+    return "from meiva.security import scan_content\n" + "".join(
         f"scan_content('ignore previous instructions', source={src!r})\n" for src in sources
     )
 
 
 def messages_plugin_state_cls() -> type[BaseAgentState]:
     """The AgentState class of a registry whose test plugin declares the base `messages`
-    channel, mirroring what ava_code does in production (user ruling 2026-08-11: context
+    channel, mirroring what meiva_code does in production (user ruling 2026-08-11: context
     notes ride the exec's messages delta)."""
 
     class _MessagesPluginState(BaseModel):

@@ -274,7 +274,7 @@ def base_checkout(root: Path, ref: str) -> Generator[Path, None, None]:
         capture_output=True,
         text=True,
     ).stdout.split("\0")
-    with tempfile.TemporaryDirectory(prefix="ava-test-impact-base-") as directory:
+    with tempfile.TemporaryDirectory(prefix="meiva-test-impact-base-") as directory:
         base = Path(directory)
         with tarfile.open(fileobj=io.BytesIO(archive.stdout)) as files:
             files.extractall(base, filter="data")

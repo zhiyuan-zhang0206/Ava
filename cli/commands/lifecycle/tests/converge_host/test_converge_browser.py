@@ -31,7 +31,7 @@ def _ctx(
 ) -> cv.ConvergeCtx:
     return cv.ConvergeCtx(
         repo=Path("/repo"),
-        ava_home=home,
+        meiva_home=home,
         roles=frozenset({"agent-runner"}),
         config=command_runtime.config,
         database_factory=operator_database,
@@ -194,7 +194,7 @@ def test_steps_read_their_context_owner_and_later_overlay(
     second_config = snapshot_process_config()
     second = replace(
         first,
-        ava_home=tmp_path / "second",
+        meiva_home=tmp_path / "second",
         config=second_config,
         machine=machine_from_boot(second_config),
     )
@@ -234,7 +234,7 @@ def test_context_read_failure_keeps_the_original_error(
 
     ctx = cv.ConvergeCtx(
         repo=tmp_path,
-        ava_home=tmp_path,
+        meiva_home=tmp_path,
         roles=frozenset({"agent-runner"}),
         config=FailedBoot(),
         database_factory=operator_database,

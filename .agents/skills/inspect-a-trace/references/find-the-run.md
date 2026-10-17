@@ -5,7 +5,7 @@ Come here when you need the messages themselves, or an agent's own history.
 
 ## Getting a psql prompt
 
-There is no `ava psql` verb. `AVA_DB_URL` normally points at the cluster's
+There is no `meiva psql` verb. `MEIVA_DB_URL` normally points at the cluster's
 PgBouncer listener, which is transaction-pooled — fine for a one-shot query,
 hostile to interactive exploration (`SET`, prepared statements, advisory locks
 all misbehave). Derive the direct URL the way the admin plane does:
@@ -41,7 +41,7 @@ LangGraph's `PostgresSaver` creates them at runtime, so they are **not** in
 Facts that shape every query:
 
 - **`thread_id` is `str(agents.id)`** — the decimal agent id as TEXT.
-- **`checkpoint_ns` is always `''`** in Ava.
+- **`checkpoint_ns` is always `''`** in Meiva.
 - **`checkpoint_id` is a UUIDv6**, so it sorts lexicographically by time:
   `ORDER BY checkpoint_id DESC` is newest-first, everywhere.
 - **`messages` is a channel, and it is msgpack in `checkpoint_blobs.blob`.**
@@ -128,7 +128,7 @@ GET /api/agents/{agent_id}/traces/{trace_id}/messages
 GET /api/agents/{agent_id}/messages
 ```
 
-Bearer `AVA_API_TOKEN` (or, on the gateway, `AVA_CLUSTER_SECRET`) when the
+Bearer `MEIVA_API_TOKEN` (or, on the gateway, `MEIVA_CLUSTER_SECRET`) when the
 cluster authenticates; gateway is on port 8000.
 `pruned: true` is the trimmed-checkpoint shape, not an error; 404 means the
 agent is gone. `scripts/read_trace.py --with-content` calls this for you.

@@ -20,7 +20,7 @@ def _forbid_snapshot_reads(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 class _RecordingBus:
-    channel = "ava:test-events"
+    channel = "meiva:test-events"
 
     def __init__(self) -> None:
         self.published: list[tuple[str, str]] = []

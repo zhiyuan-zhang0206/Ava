@@ -125,13 +125,13 @@ async def test_generate_summary_emits_agent_billing_span(
 
     assert len(tracer.spans) == 1
     span = tracer.spans[0]
-    assert span.name == "ava.billing.call"
-    assert span.attributes["ava.billing.model"] == "deepseek-flash"
-    assert span.attributes["ava.billing.vendor"] == "deepseek"
-    assert span.attributes["ava.billing.usage_kind"] == "agent"
-    assert span.attributes["ava.billing.tokens_in"] == 1_000
-    assert span.attributes["ava.billing.tokens_out"] == 100
-    assert span.attributes["ava.billing.cache_read_tokens"] == 800
+    assert span.name == "meiva.billing.call"
+    assert span.attributes["meiva.billing.model"] == "deepseek-flash"
+    assert span.attributes["meiva.billing.vendor"] == "deepseek"
+    assert span.attributes["meiva.billing.usage_kind"] == "agent"
+    assert span.attributes["meiva.billing.tokens_in"] == 1_000
+    assert span.attributes["meiva.billing.tokens_out"] == 100
+    assert span.attributes["meiva.billing.cache_read_tokens"] == 800
     [record] = [record for record in loguru_records if record["extra"].get("event") == "llm_usage"]
     assert record["extra"]["usage_kind"] == "agent"
 

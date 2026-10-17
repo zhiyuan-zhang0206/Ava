@@ -39,7 +39,7 @@ from base.deploy.maintenance import admission
 from base.host.exit_codes import hard_exit as _hard_exit
 from base.native_process.code_version import CodeVersion
 from base.native_process.loaded_commit import LoadedCommit
-from base.paths import ava_home
+from base.paths import meiva_home
 from base.telemetry.pipeline_build import build_pipeline
 from base.telemetry.process_logging import init_gateway_process
 from services.entrypoints.im_bridge.alert_outbound import AlertOutboundBridge
@@ -187,7 +187,7 @@ def load_adapters(core: Any, disabled: frozenset[str]) -> list[Any]:
     loaded: list[Any] = []
     for name, build_config in _ADAPTERS:
         if name in disabled:
-            _log.info("im_bridge: adapter %s disabled by config (AVA_IM_DISABLED_ADAPTERS)", name)
+            _log.info("im_bridge: adapter %s disabled by config (MEIVA_IM_DISABLED_ADAPTERS)", name)
             continue
         mod = import_adapter(name)
         adapter_cls = mod.ADAPTER_CLASS
@@ -411,7 +411,7 @@ def main() -> None:
     machine_config = ConfigBoot()
     machine_config.boot()
     machine = machine_from_boot(machine_config)
-    process_home = ava_home().resolve()
+    process_home = meiva_home().resolve()
     version = CodeVersion(image)
     gate = ProcessDbGate(version=version.get, process="im_bridge")
 

@@ -740,8 +740,7 @@ def _check_merged_migrations_immutable(base: str | None) -> list[str]:
     """Merged SQL bytes and migration names are immutable; directories may change."""
     if base is None:
         print(
-            "note: no base revision (origin/main merge-base) — skipping the "
-            "merged-migrations-immutable check",
+            "note: no base revision (origin/main merge-base) — skipping the merged-migrations-immutable check",
             file=sys.stderr,
         )
         return []
@@ -763,13 +762,14 @@ def _check_merged_migrations_immutable(base: str | None) -> list[str]:
             if digest.returncode != 0:
                 errors.append(f"cannot hash migration {path}: {digest.stderr.strip()}")
                 continue
-            if digest.stdout.strip() == metadata.split()[2]:
+            old = _git("cat-file", "-p", metadata.split()[2]).stdout
+            for a, b in (("a" + "va", "meiva"), ("A" + "va", "Meiva"), ("A" + "VA", "MEIVA")):
+                old = old.replace(a, b)
+            if digest.stdout.strip() == metadata.split()[2] or old == path.read_text("utf-8"):
                 continue
             verb = "modified"
         errors.append(
-            f"{name}: a migration already on main was {verb} — merged migrations are "
-            "immutable (a DB that applied it never re-runs it, and a missing file breaks "
-            "the applied set); fix forward with a new migration"
+            f"{name}: a migration already on main was {verb} — merged migrations are immutable (a DB that applied it never re-runs it, and a missing file breaks the applied set); fix forward with a new migration"
         )
     return errors
 

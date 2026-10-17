@@ -16,14 +16,14 @@ it after services are stopped. This keeps the recovery anchor available while
 the data plane is still live and makes the commit path contain only pause,
 stop, checkout/sync/start, readiness, and Phase B.
 
-`ava cluster update --dry-run` performs only the read-only target/Phase-0 and
+`meiva cluster update --dry-run` performs only the read-only target/Phase-0 and
 prepare checks. It neither writes a baseline file nor captures a snapshot,
 acquires a rollout lease, changes pause posture, stops services, advances the
 pin, or checks out code.
 
 The maintenance estimate is the p95 of the ten most recent values for exactly
 `stop_the_world`, `local_leg`, `readiness`, and `phase_b`, stored in
-`$AVA_HOME/update-baseline.json`. A missing baseline records the planned stage
+`$MEIVA_HOME/update-baseline.json`. A missing baseline records the planned stage
 targets but returns a conservative 110-second first estimate until a real
 rollout contributes measured data: the four seeded stage targets are summed and
 a 25-second margin is added, reported as `no baseline — seeded + 25s margin`.

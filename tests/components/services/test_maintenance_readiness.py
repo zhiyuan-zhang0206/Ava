@@ -122,7 +122,7 @@ def test_held_health_exemption_preserves_authentication(
 def _authenticated(monkeypatch: pytest.MonkeyPatch) -> str:
     secret = uuid4().hex
     monkeypatch.setattr(settings.data_plane, "cluster_secret", secret)
-    monkeypatch.setattr("base.paths.ava_home", dotenv_file.unit_home)
+    monkeypatch.setattr("base.paths.meiva_home", dotenv_file.unit_home)
     return secret
 
 
@@ -139,8 +139,8 @@ def test_held_gateway_serves_bootstrap_only_to_an_authenticated_caller(
         assert client.get("/api/agents", headers=runner).status_code == 503
     assert served.status_code == 200, served.text
     body: dict[str, str] = served.json()
-    assert urlsplit(body["AVA_DB_URL"]).password is None
-    assert not {"AVA_RUNNER_DB_PASSWORD", "AVA_REDIS_ADMIN_PASSWORD"} & set(body)
+    assert urlsplit(body["MEIVA_DB_URL"]).password is None
+    assert not {"MEIVA_RUNNER_DB_PASSWORD", "MEIVA_REDIS_ADMIN_PASSWORD"} & set(body)
     payload = "".join(body.values())
     for role in (served_gateway_home.roles.runner, served_gateway_home.roles.gateway):
         assert role.name not in payload and role.password not in payload
@@ -172,7 +172,7 @@ def test_a_runners_first_join_reaches_a_held_gateway(
                 binding.key_env for binding in build_model_catalog().bindings.values()
             ),
             plugin_cluster_config=plugin_bootstrap_config(),
-        )["AVA_DB_URL"],
+        )["MEIVA_DB_URL"],
         cluster_secret=secret,
         ttl_s=600,
     )
@@ -190,7 +190,7 @@ def test_a_runners_first_join_reaches_a_held_gateway(
         monkeypatch.setattr(bootstrap, "dial_get", dial)
         os.environ[unit.CAPABILITY_KEY_ENV] = issued.transport_key
         unit_join.join_gateway(
-            {"AVA_GATEWAY_URL": gateway, "AVA_MACHINE_NAME": "mini"}, runner, str(bundle)
+            {"MEIVA_GATEWAY_URL": gateway, "MEIVA_MACHINE_NAME": "mini"}, runner, str(bundle)
         )
     installed = unit.require_unit_capability(runner)
     assert installed.api is not None and not bundle.exists()

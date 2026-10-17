@@ -50,9 +50,9 @@ def gateway_unit(
 
 @pytest.fixture
 def sdk_via_gateway(gateway_unit: TestClient) -> Iterator[TestClient]:
-    """The gateway unit with the SDK's gateway client pointed at it: `ava.agents.*` calls land
+    """The gateway unit with the SDK's gateway client pointed at it: `meiva.agents.*` calls land
     in the in-process app. Undone at teardown."""
-    from ava.gateway_client import use_client
+    from meiva.gateway_client import use_client
 
     with use_client(gateway_unit):
         yield gateway_unit

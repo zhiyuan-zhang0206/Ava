@@ -36,14 +36,14 @@ _HOST_FIELD: Any = {
 class PackagesSettings(EnvSettings):
     refresh_enabled: bool = Field(
         default=True,
-        alias="AVA_PACKAGES_REFRESH_ENABLED",
-        description="Master switch for the content-refresh channel (core skills fast lane): the converge step registers the 15-min OS job only when on, and a job run no-ops when off. Manual `ava packages refresh` always works.",
+        alias="MEIVA_PACKAGES_REFRESH_ENABLED",
+        description="Master switch for the content-refresh channel (core skills fast lane): the converge step registers the 15-min OS job only when on, and a job run no-ops when off. Manual `meiva packages refresh` always works.",
         json_schema_extra=_HOST_FIELD,
     )
 
     refresh_default_mode: UpdateModeSetting = Field(
         default="auto",
-        alias="AVA_PACKAGES_REFRESH_DEFAULT_MODE",
+        alias="MEIVA_PACKAGES_REFRESH_DEFAULT_MODE",
         description="Update policy a channel-backed package resolves to at first sight when its registry row carries no explicit mode: auto (check + apply), notify (check, record, never apply), off.",
         json_schema_extra=_HOST_FIELD,
     )
@@ -51,7 +51,7 @@ class PackagesSettings(EnvSettings):
     refresh_default_interval_seconds: int = Field(
         default=86400,
         gt=0,
-        alias="AVA_PACKAGES_REFRESH_DEFAULT_INTERVAL_SECONDS",
+        alias="MEIVA_PACKAGES_REFRESH_DEFAULT_INTERVAL_SECONDS",
         description="Check interval a channel-backed package resolves to at first sight when its row carries none. 24h is the user's standing ruling (2026-09-11): one cadence for every channel-backed package.",
         json_schema_extra=_HOST_FIELD,
     )
@@ -59,7 +59,7 @@ class PackagesSettings(EnvSettings):
     refresh_tick_seconds: int = Field(
         default=900,
         gt=0,
-        alias="AVA_PACKAGES_REFRESH_TICK_SECONDS",
+        alias="MEIVA_PACKAGES_REFRESH_TICK_SECONDS",
         description="Base tick of the per-machine refresh OS job (seconds). Per-package intervals are registry data, so the tick only bounds granularity — one job, no re-registration when a policy changes.",
         json_schema_extra=_HOST_FIELD,
     )
@@ -67,7 +67,7 @@ class PackagesSettings(EnvSettings):
     refresh_budget_seconds: float = Field(
         default=120.0,
         gt=0,
-        alias="AVA_PACKAGES_REFRESH_BUDGET_SECONDS",
+        alias="MEIVA_PACKAGES_REFRESH_BUDGET_SECONDS",
         description="Wall-clock budget for one refresh pass (seconds). The pass stops taking new work when it is spent and records what it skipped; a later pass picks the rest up.",
         json_schema_extra=_HOST_FIELD,
     )
@@ -75,7 +75,7 @@ class PackagesSettings(EnvSettings):
     refresh_max_applies: int = Field(
         default=10,
         gt=0,
-        alias="AVA_PACKAGES_REFRESH_MAX_APPLIES",
+        alias="MEIVA_PACKAGES_REFRESH_MAX_APPLIES",
         description="Upper bound on staged applies in one refresh pass, so a large backlog cannot land all at once.",
         json_schema_extra=_HOST_FIELD,
     )
@@ -83,7 +83,7 @@ class PackagesSettings(EnvSettings):
     refresh_network_timeout_seconds: float = Field(
         default=30.0,
         gt=0,
-        alias="AVA_PACKAGES_REFRESH_NETWORK_TIMEOUT_SECONDS",
+        alias="MEIVA_PACKAGES_REFRESH_NETWORK_TIMEOUT_SECONDS",
         description="Timeout for one git network operation (ls-remote / fetch) during refresh (seconds). A timeout is a recorded error + backoff, never a retry loop.",
         json_schema_extra=_HOST_FIELD,
     )

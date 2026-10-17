@@ -69,14 +69,14 @@ def _find_free_port() -> int:
 
 def test_module_entrypoint_runs_the_scheduler(tmp_path: Path) -> None:
     (tmp_path / ".env").write_text(
-        "AVA_DB_URL=postgresql://ava:test@127.0.0.1:1/ava\n"
-        "AVA_REDIS_URL=redis://ava:test@127.0.0.1:1/0\n"
+        "MEIVA_DB_URL=postgresql://meiva:test@127.0.0.1:1/meiva\n"
+        "MEIVA_REDIS_URL=redis://meiva:test@127.0.0.1:1/0\n"
     )
     env = dict(os.environ)
     env.update(
         {
-            "AVA_HOME": str(tmp_path),
-            "AVA_CONFIG_FETCH": "skip",
+            "MEIVA_HOME": str(tmp_path),
+            "MEIVA_CONFIG_FETCH": "skip",
         }
     )
     result = subprocess.run(
@@ -406,7 +406,7 @@ async def test_invalid_local_restore_marker_reports_failure_without_running_rest
 def _staged_dump(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> tuple[Path, Path, str]:
     from services.backup import dump as backup
 
-    staged = tmp_path / "controls" / "ava-20260926T000000Z.dump.enc"
+    staged = tmp_path / "controls" / "meiva-20260926T000000Z.dump.enc"
     staged.parent.mkdir()
     staged.write_bytes(b"encrypted")
     published = tmp_path / "db"

@@ -30,14 +30,14 @@ def scratch_tmpfs(monkeypatch: pytest.MonkeyPatch) -> Iterator[Path]:
     be short (same constraint as base/cluster/dataplane/tests/test_pg_throwaway_sweep.py).
     Teardown force-stops anything still running under the root and deletes
     it, so a failing test cannot leak a cluster."""
-    root = Path(tempfile.mkdtemp(prefix="ava-pglog-", dir="/tmp"))
+    root = Path(tempfile.mkdtemp(prefix="meiva-pglog-", dir="/tmp"))
     monkeypatch.setattr(pg_throwaway_base, "default_base", lambda: root)
     # Pin the other throwaway roots the same way (the sweep runs over all of them):
     # the disk fallback at this scratch dir and the override cleared, so a host's
     # configured base cannot redirect an instance out from under the teardown.
     monkeypatch.setattr(pg_throwaway_base, "disk_fallback_base", lambda: root)
     yield root
-    for data in root.glob("ava-pg-*/data"):
+    for data in root.glob("meiva-pg-*/data"):
         if (data / "PG_VERSION").is_file():
             subprocess.run(  # noqa: S603 — argv is the resolved pg_ctl path + this test's own dir
                 [pg_tools.pg_tool("pg_ctl"), "-D", str(data), "-m", "immediate", "stop"],
@@ -77,7 +77,7 @@ def test_failed_start_preserves_pg_log_into_artifacts(
         assert "pg.log artifact" in str(excinfo.value)
         assert "Address already in use" in str(excinfo.value)
     # The instance dir itself is gone (teardown rmtree ran)…
-    assert list(scratch_tmpfs.glob("ava-pg-*")) == []
+    assert list(scratch_tmpfs.glob("meiva-pg-*")) == []
     # …but its pg.log was copied out before that.
     saved = list(artifact_dir.glob("*.pg.log"))
     assert len(saved) == 1

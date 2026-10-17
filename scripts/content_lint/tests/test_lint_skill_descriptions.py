@@ -31,7 +31,7 @@ description: A description: with an unquoted colon.
 def test_three_deep_skill_with_bad_frontmatter_is_rejected(tmp_path: Path) -> None:
     _write(
         tmp_path,
-        "ava_builtins/skills/practice/ava-serious-research/practices/reproduce/SKILL.md",
+        "meiva_builtins/skills/practice/meiva-serious-research/practices/reproduce/SKILL.md",
         _BAD_FM,
     )
     assert lint.main(repo_root=tmp_path) == 1
@@ -40,7 +40,7 @@ def test_three_deep_skill_with_bad_frontmatter_is_rejected(tmp_path: Path) -> No
 def test_three_deep_skill_with_good_frontmatter_passes(tmp_path: Path) -> None:
     _write(
         tmp_path,
-        "ava_builtins/skills/practice/ava-serious-research/principles/falsifiability/SKILL.md",
+        "meiva_builtins/skills/practice/meiva-serious-research/principles/falsifiability/SKILL.md",
         _GOOD_FM,
     )
     assert lint.main(repo_root=tmp_path) == 0
@@ -82,7 +82,7 @@ def test_missing_required_field_is_rejected(tmp_path: Path) -> None:
 def test_frontmatter_name_not_folding_to_dir_rejected(tmp_path: Path) -> None:
     _write(
         tmp_path,
-        "ava_builtins/skills/page-ocr/SKILL.md",
+        "meiva_builtins/skills/page-ocr/SKILL.md",
         "---\nname: page\ndescription: d\n---\n",
     )
     assert lint.main(repo_root=tmp_path) == 1
@@ -91,8 +91,8 @@ def test_frontmatter_name_not_folding_to_dir_rejected(tmp_path: Path) -> None:
 def test_plugin_root_skill_folds_against_plugin_name(tmp_path: Path) -> None:
     _write(
         tmp_path,
-        "ava_builtins/plugins/ava_memory/skills/SKILL.md",
-        "---\nname: ava-memory\ndescription: d\n---\n",
+        "meiva_builtins/plugins/meiva_memory/skills/SKILL.md",
+        "---\nname: meiva-memory\ndescription: d\n---\n",
     )
     assert lint.main(repo_root=tmp_path) == 0
 
@@ -100,7 +100,7 @@ def test_plugin_root_skill_folds_against_plugin_name(tmp_path: Path) -> None:
 def test_dash_dir_and_dash_frontmatter_pass(tmp_path: Path) -> None:
     _write(
         tmp_path,
-        "ava_builtins/skills/coordination/ava-goal/SKILL.md",
-        "---\nname: ava-goal\ndescription: d\n---\n",
+        "meiva_builtins/skills/coordination/meiva-goal/SKILL.md",
+        "---\nname: meiva-goal\ndescription: d\n---\n",
     )
     assert lint.main(repo_root=tmp_path) == 0

@@ -34,7 +34,7 @@ def test_unset_means_off(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Non
 
     assert walg_config.configured_path(path_reader=lambda: settings.walg.walg_config_file) is None
     assert walg_config.enabled(path_reader=lambda: settings.walg.walg_config_file) is False
-    with pytest.raises(walg_config.WalgConfigError, match="AVA_WALG_CONFIG_FILE is not set"):
+    with pytest.raises(walg_config.WalgConfigError, match="MEIVA_WALG_CONFIG_FILE is not set"):
         walg_config.load_walg_config(path_reader=lambda: settings.walg.walg_config_file)
 
 
@@ -42,7 +42,7 @@ def test_a_valid_configuration_loads_and_exposes_only_non_secret_facts(sandbox: 
     config = walg_config.load_walg_config(path_reader=lambda: settings.walg.walg_config_file)
 
     assert config.path == sandbox.config_file
-    assert config.prefix == "oss://ava-backups/ava-walg/test-home/pg17/gen1/"
+    assert config.prefix == "oss://meiva-backups/meiva-walg/test-home/pg17/gen1/"
     assert config.key_path == sandbox.key_file
     assert len(config.key_fingerprint) == 16
     assert not any(secret in repr(config) for secret in SECRETS)
@@ -98,11 +98,11 @@ def test_wal_overwrite_prevention_accepts_what_wal_g_reads_as_true(
 @pytest.mark.parametrize(
     ("prefix", "why"),
     [
-        ("s3://bucket/ava-walg/", "oss://<bucket>/<path>"),
+        ("s3://bucket/meiva-walg/", "oss://<bucket>/<path>"),
         ("oss://bucket", "bucket root"),
         ("oss://bucket/", "bucket root"),
-        ("oss://bucket/ava-logical/x/", "ava-logical/"),
-        ("oss://bucket/ava-pitr-scratch/walg/", "ava-pitr-scratch/"),
+        ("oss://bucket/meiva-logical/x/", "meiva-logical/"),
+        ("oss://bucket/meiva-pitr-scratch/walg/", "meiva-pitr-scratch/"),
     ],
 )
 def test_the_prefix_cannot_overlap_another_backup_namespace(
@@ -166,7 +166,7 @@ def test_no_refusal_ever_contains_a_secret(sandbox: Sandbox) -> None:
     messages: list[str] = []
     for overrides in (
         {"WALG_LIBSODIUM_KEY_TRANSFORM": "base64"},
-        {"WALG_OSS_PREFIX": "oss://bucket/ava-logical/"},
+        {"WALG_OSS_PREFIX": "oss://bucket/meiva-logical/"},
         {"WALG_PREVENT_WAL_OVERWRITE": "false"},
         {"OSS_REGION": None},
     ):

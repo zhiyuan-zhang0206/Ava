@@ -1,4 +1,4 @@
-"""`ava start`'s gateway data-plane dispatch brings up this cluster's own instance.
+"""`meiva start`'s gateway data-plane dispatch brings up this cluster's own instance.
 
 Every cluster owns its Postgres+Redis; `ensure_gateway_data_plane` reads the
 cluster's registry record and starts the per-cluster instance on the record's
@@ -50,8 +50,8 @@ def test_gateway_data_plane_brings_up_own_instance(
     monkeypatch.setattr(cluster, "redis_password_from_env", lambda: "redis-runtime")
     data_plane_config = dataclasses.replace(
         data_plane_config,
-        db_url="postgresql://ava_main:sek@127.0.0.1:23011/ava_main",
-        redis_url="redis://ava:sek@127.0.0.1:23012/0",
+        db_url="postgresql://meiva_main:sek@127.0.0.1:23011/meiva_main",
+        redis_url="redis://meiva:sek@127.0.0.1:23012/0",
     )
     own_calls: list[dict[str, object]] = []
     stored_with: list[DataPlaneConfig] = []
@@ -74,16 +74,16 @@ def test_gateway_data_plane_brings_up_own_instance(
     )
     # The root that holds the secret published the telemetry token the station probe reads.
     from base.host.db_authority.api import read_telemetry_token, telemetry_token
-    from base.paths import ava_home
+    from base.paths import meiva_home
 
-    assert read_telemetry_token(ava_home().resolve()) == telemetry_token("bearer")
+    assert read_telemetry_token(meiva_home().resolve()) == telemetry_token("bearer")
     # The identity comes from the db_url username, not any name derivation.
     assert own_calls == [
         {
             "pg_port": 23011,
             "redis_port": 23012,
             "redis_password": "redis-runtime",
-            "redis_user": "ava",
+            "redis_user": "meiva",
             "retained_children": [],
             "machine": command_runtime.machine,
         }
@@ -174,13 +174,13 @@ def test_gateway_hint_names_where_the_web_login_password_lives(
     *,
     command_runtime: CommandRuntime,
 ) -> None:
-    """A browser logs in with the cluster secret, which `ava init` minted into the home's
+    """A browser logs in with the cluster secret, which `meiva init` minted into the home's
     `.env`: the ready output says where, without printing the secret."""
-    from base.paths import ava_home
+    from base.paths import meiva_home
 
     monkeypatch.setattr(settings.data_plane, "cluster_secret", "never-printed-secret")
     _start.print_gateway_hint(machine=command_runtime.machine)
     out = capsys.readouterr().out
-    assert "web login password" in out and "AVA_CLUSTER_SECRET" in out
-    assert str(ava_home() / ".env") in out
+    assert "web login password" in out and "MEIVA_CLUSTER_SECRET" in out
+    assert str(meiva_home() / ".env") in out
     assert "never-printed-secret" not in out

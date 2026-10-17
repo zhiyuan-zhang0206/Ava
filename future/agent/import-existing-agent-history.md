@@ -1,4 +1,4 @@
-# Import an existing agent's history into Ava (onboarding demo)
+# Import an existing agent's history into Meiva (onboarding demo)
 
 Roadmap item, unbuilt. Gated on going public — it only pays off when there are new
 users to onboard.
@@ -7,7 +7,7 @@ users to onboard.
 
 A new user arriving from Claude Code / Codex already has months of accumulated
 context: transcripts, `CLAUDE.md` / `AGENTS.md` conventions, per-project preferences,
-hard-won operational facts. Today Ava starts them at zero and asks them to re-teach
+hard-won operational facts. Today Meiva starts them at zero and asks them to re-teach
 all of it by hand — the worst possible first hour, and the point where most people
 decide the migration isn't worth it.
 
@@ -17,8 +17,8 @@ show: *the system already knows your setup.*
 
 ## Shape
 
-A **demo script**, not framework code — it should be an Ava agent doing a task with
-the SDK it already has, so the whole thing reads as an example of what Ava is.
+A **demo script**, not framework code — it should be an Meiva agent doing a task with
+the SDK it already has, so the whole thing reads as an example of what Meiva is.
 
 - Point it at the local history directory (`~/.claude/`, `~/.codex/`, …).
 - It reads, distills, and writes into the memory pool: durable user preferences, per-

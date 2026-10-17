@@ -50,11 +50,11 @@ def cluster_credential(
     """
     from base.host.db_authority.api import acceptance, bearer_class
     from base.host.net.auth import verify_bearer
-    from base.paths import ava_home
+    from base.paths import meiva_home
 
     if verify_bearer(authorization, secret):
         return "cluster_bearer"
-    cls = bearer_class(authorization, acceptance(ava_home().resolve(), cache=cache))
+    cls = bearer_class(authorization, acceptance(meiva_home().resolve(), cache=cache))
     return None if cls is None else f"machine_token:{cls}"
 
 
@@ -139,9 +139,9 @@ def login_mint(
     a browser in. Mints this gateway's session key on first use.
     """
     from base.host.db_authority.api import acceptance, bearer_class, token_digest
-    from base.paths import ava_home
+    from base.paths import meiva_home
 
-    home = ava_home().resolve()
+    home = meiva_home().resolve()
     if secret and hmac.compare_digest(password, secret):
         kind, digest = "human", token_digest(secret)
     else:
@@ -165,9 +165,9 @@ def session_mints(
     exists; the runner mint is absent while no generation is active (a fence).
     """
     from base.host.db_authority.api import acceptance, token_digest
-    from base.paths import ava_home
+    from base.paths import meiva_home
 
-    home = ava_home().resolve()
+    home = meiva_home().resolve()
     key = keys.key(home, create=False)
     if key is None:
         return {}

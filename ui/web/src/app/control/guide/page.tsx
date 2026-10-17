@@ -1,7 +1,7 @@
 "use client";
 
-// /control#guide — the Ava Guide entry. Describe an operations task in natural
-// language and it spawns an ava-guide agent (POST /api/keyed/v1/guide/draft), then jumps
+// /control#guide — the Meiva Guide entry. Describe an operations task in natural
+// language and it spawns an meiva-guide agent (POST /api/keyed/v1/guide/draft), then jumps
 // to that conversation to finish it. Mirrors the Schedules page's writer entry:
 
 import { useMutation } from "@tanstack/react-query";

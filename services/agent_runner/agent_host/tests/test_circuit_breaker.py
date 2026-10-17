@@ -20,7 +20,7 @@ from agent.graph.claim.tests.claim_support import (
 from agent.graph.llm_errors import FatalLLMStreamError, FatalProviderError
 from agent.state import AgentState, CircuitState
 from agent.turn.runloop import _handle_fatal_llm_error
-from base.agents.context import AvaContext
+from base.agents.context import MeivaContext
 from base.agents.tests.units import spawn_agent
 from base.cluster.machine import MachineIdentity
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
@@ -103,7 +103,7 @@ async def test_fatal_provider_error_emits_blocked_recovery_details(
     permanent provider rejection look like an ordinary runnable idle state.
     """
     publisher = RecordingPublisher()
-    ctx = AvaContext(
+    ctx = MeivaContext(
         ops_pool=None,
         llm=MagicMock(),
         event_publisher=cast(AgentEventPublisher, publisher),
@@ -202,7 +202,7 @@ async def test_permanent_provider_error_reports_metadata_to_nearest_alive_ancest
     occurred_at = datetime(2026, 9, 3, 8, 0, tzinfo=UTC)
     await _handle_fatal_llm_error(
         exc,
-        AvaContext(
+        MeivaContext(
             ops_pool=aops_pool,
             llm=MagicMock(),
             event_publisher=MagicMock(),
@@ -281,7 +281,7 @@ async def test_context_overflow_halts_background_wakes_and_reports_to_an_ancesto
             status=400,
             context_overflow=True,
         ),
-        AvaContext(
+        MeivaContext(
             ops_pool=aops_pool,
             llm=MagicMock(),
             event_publisher=MagicMock(),
@@ -419,7 +419,7 @@ async def test_chat_cobatched_with_open_breaker_heartbeat_reaches_llm(
     assert len(messages) == 1  # pyright: ignore[reportUnknownArgumentType]
     assert isinstance(messages[0], HumanMessage)
     assert "real user work" in messages[0].content  # pyright: ignore[reportUnknownMemberType]
-    assert messages[0].additional_kwargs["ava_inbound_id"] == inbound_ids["chat"]  # pyright: ignore[reportUnknownMemberType]
+    assert messages[0].additional_kwargs["meiva_inbound_id"] == inbound_ids["chat"]  # pyright: ignore[reportUnknownMemberType]
     assert "Heartbeat." not in messages[0].content  # pyright: ignore[reportUnknownMemberType]
     fake_llm.bind_tools.return_value.ainvoke.assert_not_called()
 

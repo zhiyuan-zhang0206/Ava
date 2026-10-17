@@ -463,7 +463,7 @@ class IMBridgeCore(SpawnMenuMixin):
         return Reply("\n".join(lines))
 
     def _cmd_help(self) -> Reply:
-        """The IM's own commands. /commands carries the full Ava
+        """The IM's own commands. /commands carries the full Meiva
         slash-command catalog (skills and prompt templates); the persistent
         command menu (setMyCommands) mirrors the IM set, and tapping one
         autofills the input box."""
@@ -471,7 +471,7 @@ class IMBridgeCore(SpawnMenuMixin):
         return Reply(copy.HELP_TEXT)
 
     async def _cmd_commands(self, channel: str) -> Reply | list[Reply]:
-        """/commands — the Ava slash-command catalog: every active skill is
+        """/commands — the Meiva slash-command catalog: every active skill is
         a command (``/audio-transcribe …``), plus project/user/plugin prompt
         templates. On button channels every command is a tap target (the tap
         runs it, so the agent can ask for the missing instruction);
@@ -594,7 +594,7 @@ class IMBridgeCore(SpawnMenuMixin):
         self, state: ChatState, prev_agent: int | None = None, *, catch_up: bool = False
     ) -> None:
         if state.channel in self._disabled_channels:
-            return  # channel disabled (AVA_IM_DISABLED_ADAPTERS): no pushes
+            return  # channel disabled (MEIVA_IM_DISABLED_ADAPTERS): no pushes
         key = (state.channel, state.chat_id)
         existing = self._subscriptions.get(key)
         if existing is not None and not existing.done():

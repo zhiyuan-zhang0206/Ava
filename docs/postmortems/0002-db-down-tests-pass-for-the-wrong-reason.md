@@ -11,7 +11,7 @@ fixtures), `tests/conftest.py:_provisioned_db`, `tests/_containers.py`,
 
 Two regression tests were written to prove that the restarter's healthcheck no
 longer reaches the database on its alive and revived paths. They faked "the DB is
-down" by monkeypatching the single `shared.db` helper the *new* code calls. Ava's
+down" by monkeypatching the single `shared.db` helper the *new* code calls. Meiva's
 suite provisions a real throwaway Postgres per session, so every other route to
 that database stayed live — and the deleted implementation had reached it through
 the *other* helper, `connect`, which ran happily against an empty `agents_meta`.
@@ -75,7 +75,7 @@ The escape analysis:
   under test picked — and naming only today's helper would let the next
   implementation reintroduce the coupling through the other door.
 - **CI cannot reach a real data plane by accident.** `.github/workflows/ci.yml`
-  points `AVA_DB_URL` / `AVA_REDIS_URL` at unreachable sentinel ports on purpose,
+  points `MEIVA_DB_URL` / `MEIVA_REDIS_URL` at unreachable sentinel ports on purpose,
   so a test that quietly dials a real data plane fails with a connection error
   instead of passing quietly. That is the same defense one level up: it makes an
   unintended live connection loud rather than green.

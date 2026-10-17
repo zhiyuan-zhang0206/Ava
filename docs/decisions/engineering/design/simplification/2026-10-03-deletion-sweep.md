@@ -23,10 +23,10 @@ a future/decisions or backup-recovery role was graded down to a decision, not de
      documents use, stays).
    - `cluster health-probe`'s `--agent-min` / `--crash-loop-max-restarts` /
      `--crash-loop-window-minutes` and `health-probe-register --interval` had no setter; the
-     defaults are the contract (the `AVA_HEALTH_PROBE_AGENT_MIN` config key stays), and the
+     defaults are the contract (the `MEIVA_HEALTH_PROBE_AGENT_MIN` config key stays), and the
      `--no-crash-loop-check` / `--no-schema-check` operator flags stay.
 2. Dead read endpoints are deleted with their readers and tests:
-   - `GET /api/agents/{id}/activity` + `select_activity_trail`: the writer (`ava.self.log`) went
+   - `GET /api/agents/{id}/activity` + `select_activity_trail`: the writer (`meiva.self.log`) went
      in 2026-08-02 and the reader had no consumer; the `agent_activity` table drop is a separate
      migration. This overturns the 2026-08-02-notice-sdk-slimming note that the activity
      endpoints "remain (history)" — history nobody reads is not a read surface.
@@ -42,17 +42,17 @@ a future/decisions or backup-recovery role was graded down to a decision, not de
    removed by the 2026-10-03 telemetry-readers-on-postgres move. What stays is deploy-config
    pinning (`validate_loki_deploy_config` and its chain, `ARCHIVE_FREEZE_AT` for events
    maintenance).
-4. The mcp-daemon pre-rename compatibility (`ava._mcps_daemon`) is deleted: its own delete
+4. The mcp-daemon pre-rename compatibility (`meiva._mcps_daemon`) is deleted: its own delete
    condition is satisfied — a four-machine process census (ubuntu / macmini / company-mini /
-   company-air) shows zero pre-rename processes and one `python -m ava.mcps._daemon` per host.
-5. `AVA_RUNNER_MODE` is deleted from its last settings (the visual-baselines workflow env and
+   company-air) shows zero pre-rename processes and one `python -m meiva.mcps._daemon` per host.
+5. `MEIVA_RUNNER_MODE` is deleted from its last settings (the visual-baselines workflow env and
    the lazy-import tests' clean-env strips): nothing reads it. The config registry's negative
    assertion stays as the retirement pin.
 6. Stale docs are corrected in the same change: the stranded-hold-recovery tombstone node is
    deleted with its one incoming wikilink; the host-deploy-state Notes no longer wait for a
    cleanup that shipped; renamed modules are spelled as they are (`group_closure`, the
    observation package); the tests doc's `tests/plugins/` contents and a retired test name are
-   corrected; six mis-pathed wikilinks are fixed; `lint_ava_okf` now exempts inline code spans
+   corrected; six mis-pathed wikilinks are fixed; `lint_meiva_okf` now exempts inline code spans
    and fenced blocks from the wikilink scan (matching `check_doc_references`), so the syntax
    samples in the content-lint docs stop reporting.
 7. Retained deliberately: `event-resolutions` (the dismissal is netted by the alert card), auth
@@ -71,7 +71,7 @@ a future/decisions or backup-recovery role was graded down to a decision, not de
   record ("these things no longer exist"); the decisions/ axis carries removal facts, and the
   state node described nothing the system still has.
 - **Rename `pause_owner` / strip the word "pause".** The word names live machinery (the
-  maintenance hold, the `paused` posture, heartbeat pause); only the `ava pause` verb was
+  maintenance hold, the `paused` posture, heartbeat pause); only the `meiva pause` verb was
   deleted (2026-10-03).
 
 ## Consequences
@@ -86,7 +86,7 @@ a future/decisions or backup-recovery role was graded down to a decision, not de
 
 The user ruled (2026-10-04, through the CC -> #405 -> task #4962 line): `POST /api/work-failed`
 is deleted. The SDK+HTTP inventory (C6) found no producer in the repository, on any machine's
-`~/.ava`, or in the production window, and the ruling chose deletion over keeping a dead
+`~/.meiva`, or in the production window, and the ruling chose deletion over keeping a dead
 ingest. One change removes the router and its schemas, the route's tests and doc page, the app
 wiring (import, `include_router`, the pause-exempt set), the contract entry, the package
 docstrings that listed it, and the route reference in the routers doc.

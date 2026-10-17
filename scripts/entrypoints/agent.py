@@ -1,6 +1,6 @@
 """dev startup entry — spawn a root agent process and print its id.
 
-Production spawn goes through the SDK (`ava.agents.spawn(...)`) or the
+Production spawn goes through the SDK (`meiva.agents.spawn(...)`) or the
 gateway endpoint; this script is the "first time starting up / no root
 agent running" bootstrap entry (chicken-and-egg solution — how do you
 start the first agent when the agents_meta table is empty).

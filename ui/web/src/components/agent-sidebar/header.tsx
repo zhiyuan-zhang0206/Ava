@@ -150,7 +150,7 @@ export function SidebarHeader({
         FLEX
       )}
     >
-      <h1 className="text-base font-semibold tracking-wide">Ava</h1>
+      <h1 className="text-base font-semibold tracking-wide">Meiva</h1>
       <div className={cn("items-center gap-1.5", FLEX)}>{trailing}</div>
     </header>
   );

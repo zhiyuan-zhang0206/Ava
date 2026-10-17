@@ -19,7 +19,7 @@ from langgraph.types import Command
 from agent.hooks import Hook, make_hook_runner
 from agent.hooks.tests.fakes import make_fake_ops_pool
 from agent.state import AgentState
-from base.agents.context import AvaContext
+from base.agents.context import MeivaContext
 from base.clock import Clock
 from base.config.tests.configuration import defaults
 from base.db import Database
@@ -73,9 +73,9 @@ def _empty_state() -> AgentState:
     return AgentState(messages=[], halted=False)
 
 
-def _empty_runtime(database_gate: ProcessDbGate) -> Runtime[AvaContext]:
-    """Test runtime — AvaContext fields are all mocks, hook doesn't touch them is fine."""
-    ctx = AvaContext(
+def _empty_runtime(database_gate: ProcessDbGate) -> Runtime[MeivaContext]:
+    """Test runtime — MeivaContext fields are all mocks, hook doesn't touch them is fine."""
+    ctx = MeivaContext(
         ops_pool=make_fake_ops_pool(),
         llm=MagicMock(),
         event_publisher=MagicMock(),

@@ -161,7 +161,7 @@ class TestRouting:
         set_machine_identity: MachineIdentitySetter,
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
-        """A spawn targeting a PAUSED machine (operator `ava cluster pause`) is
+        """A spawn targeting a PAUSED machine (operator `meiva cluster pause`) is
         refused with 409 + reason='machine_paused' before any forward — the
         paused machine is deliberately out of the cluster (agents terminated,
         ops server may be unreachable), so a spawn would fail at dial time
@@ -260,10 +260,10 @@ class TestRouting:
         self, _force_local_machine: MachineIdentity, db_conn: psycopg.Connection
     ) -> None:
         """A target not in the machines table → the pre-dispatch lookup_role raises
-        MachineNotRegistered → the app's AvaAgentError handler emits 404 + reason
+        MachineNotRegistered → the app's MeivaAgentError handler emits 404 + reason
         (no opaque 502 from dialing a non-existent ops server).
 
-        Wire protocol: AvaAgentError subclass → JSONResponse status=cls.http_status,
+        Wire protocol: MeivaAgentError subclass → JSONResponse status=cls.http_status,
         body={detail, reason}. MachineNotRegistered.http_status=404.
         """
         with gateway_test_client(machine=_force_local_machine) as client:

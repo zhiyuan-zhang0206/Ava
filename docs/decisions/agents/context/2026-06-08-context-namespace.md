@@ -2,7 +2,7 @@
 
 ## Context
 
-An agent's context is scarce. Everything Ava exposes — skills, commands, MCP
+An agent's context is scarce. Everything Meiva exposes — skills, commands, MCP
 tools, the SDK surface — competes for it. A flat catalog of capabilities means
 every capability's description is resident in context at once; the surface grows,
 and the agent pays for the whole plane even to find the one thing it needs.
@@ -39,7 +39,7 @@ Concretely:
   namespace tree, to any depth. A `SKILL.md` is a leaf; the folders above it are
   its namespace. The repo's skills mount at the root (top-level skills stay bare);
   a plugin's skills mount under the plugin's name. So `skills/coding/tdd/` →
-  `ava.skills.coding.tdd`, and a vendored plugin's skills nest under its name.
+  `meiva.skills.coding.tdd`, and a vendored plugin's skills nest under its name.
   Two renderings of one location: a `.`-joined identifier for `/`-commands and
   listings, and a `.`-joined attribute path for Python access.
 - **The agent sees a skill tree, not plugins.** Provenance surfaces as *location

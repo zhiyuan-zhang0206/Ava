@@ -118,7 +118,7 @@ def _synthetic_recovery_saver() -> tuple[AsyncPostgresSaver, list[tuple[str, str
     saver.aget_delta_channel_history = history  # type: ignore[method-assign]
     saver.aput = write  # type: ignore[method-assign]
     saver.aput_writes = write  # type: ignore[method-assign]
-    saver._ava_nstep_flush = flush  # type: ignore[attr-defined]
+    saver._meiva_nstep_flush = flush  # type: ignore[attr-defined]
     wrap_saver_reads_with_delta_reconstruction(saver)
     return saver, walks, pending
 
@@ -171,7 +171,7 @@ async def test_recovery_cache_exact_key_and_invalidation() -> None:
         isolated = cast(CheckpointTuple, await reader.aget_tuple(first))
         assert isolated.checkpoint["channel_values"]["messages"][0].content != "changed on hit"
 
-        await saver._ava_nstep_flush("thread-a")  # type: ignore[attr-defined]
+        await saver._meiva_nstep_flush("thread-a")  # type: ignore[attr-defined]
         await reader.aget_tuple(first)
         assert len(walks) == 2
         await saver.aput_writes(first, [], "task")
@@ -219,7 +219,7 @@ async def test_recovery_cache_write_commit_revokes_fill_and_flush_reuse(operatio
     elif operation == "aput_writes":
         saver.aput_writes = write  # type: ignore[method-assign]
     else:
-        saver._ava_nstep_flush = write  # type: ignore[attr-defined]
+        saver._meiva_nstep_flush = write  # type: ignore[attr-defined]
     with recovery_reconstruction_scope(saver, "thread-a") as scope:
         assert scope is not None
         reader = scope.reader()
@@ -230,7 +230,7 @@ async def test_recovery_cache_write_commit_revokes_fill_and_flush_reuse(operatio
         elif operation == "aput_writes":
             writer = asyncio.create_task(saver.aput_writes(config, [], "task"))
         else:
-            writer = asyncio.create_task(saver._ava_nstep_flush("thread-a"))  # type: ignore[attr-defined]
+            writer = asyncio.create_task(saver._meiva_nstep_flush("thread-a"))  # type: ignore[attr-defined]
         await entered.wait()
         during = cast(CheckpointTuple, await reader.aget_tuple(config))
         generation_during_write = scope.generation

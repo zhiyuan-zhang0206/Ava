@@ -54,7 +54,7 @@ _COUNTER_JOB = (
 def test_a_session_outlives_the_process_that_created_it(unit_home: Path) -> None:
     """Kill the creating process outright (an agent host restarting): the session is
     still there, its job still runs, and the next client's call succeeds."""
-    name = "ava-agent-987-shell-1-survivor"
+    name = "meiva-agent-987-shell-1-survivor"
     counter = unit_home / "count"
     script = unit_home / "counter.py"
     script.write_text(_COUNTER_JOB, encoding="utf-8")
@@ -93,7 +93,7 @@ def test_a_backend_session_outlives_the_process_that_created_it(unit_home: Path)
     process succeeds against the same shell."""
     from base.sessions.backend import PtySessionBackend
 
-    name = "ava-agent-987-shell-2-backend"
+    name = "meiva-agent-987-shell-2-backend"
     host = subprocess.Popen(  # noqa: S603 — repo-internal interpreter + inline program
         [sys.executable, str(_CHILD), "backend_host", name, str(unit_home)],
         cwd=REPO,
@@ -117,7 +117,7 @@ def test_a_backend_session_outlives_the_process_that_created_it(unit_home: Path)
 
 @pytest.mark.usefixtures("pty_service")
 def test_a_session_outlives_every_client_restarting_in_turn(unit_home: Path) -> None:
-    name = "ava-agent-987-shell-1-reconnect"
+    name = "meiva-agent-987-shell-1-reconnect"
     new(name, unit_home)
     (first,) = client.list_sessions()
     for generation in range(3):
@@ -145,8 +145,8 @@ def test_stopping_the_service_closes_its_sessions_and_removes_the_socket(
 ) -> None:
     """SIGTERM is the roster stop: the service closes what is still alive (a job that
     ignores HUP and TERM is SIGKILLed) and exits clean, leaving no socket."""
-    shell = jobs.start("ava-agent-987-shell-3-stop", unit_home, jobs.STUBBORN)
-    output_until("ava-agent-987-shell-3-stop", "stubborn-ready")
+    shell = jobs.start("meiva-agent-987-shell-3-stop", unit_home, jobs.STUBBORN)
+    output_until("meiva-agent-987-shell-3-stop", "stubborn-ready")
     (job,) = jobs.live_children(shell)
 
     pty_service.signal(signal.SIGTERM)
@@ -164,7 +164,7 @@ def test_a_crashed_service_sweeps_known_shells_without_discovering_jobs(
     pty_service: PtyServiceProcess, unit_home: Path
 ) -> None:
     """A shell-only ledger does not promise recovery of an unrecorded job."""
-    name = "ava-agent-987-shell-4-orphan"
+    name = "meiva-agent-987-shell-4-orphan"
     shell = jobs.start(name, unit_home, jobs.STUBBORN)
     output_until(name, "stubborn-ready")
     (job,) = jobs.live_children(shell)
@@ -187,14 +187,14 @@ def test_a_crashed_service_sweeps_known_shells_without_discovering_jobs(
 def test_a_crashed_services_stale_socket_is_replaced_by_the_next_start(
     pty_service: PtyServiceProcess, unit_home: Path
 ) -> None:
-    new("ava-agent-987-shell-6-stale", unit_home)
+    new("meiva-agent-987-shell-6-stale", unit_home)
     pty_service.signal(signal.SIGKILL)
     pty_service.wait()
 
     pty_service.start()
 
     assert client.request("ping")["pid"] == pty_service.pid
-    assert not client.has_session("ava-agent-987-shell-6-stale")
+    assert not client.has_session("meiva-agent-987-shell-6-stale")
 
 
 def test_the_sweep_closes_the_members_a_dead_shell_left_and_reports_the_busy_session(
@@ -223,7 +223,7 @@ def test_the_sweep_closes_the_members_a_dead_shell_left_and_reports_the_busy_ses
     job_pid = int(leader.stdout.readline())
     shell = OwnedProcess.capture(psutil.Process(leader.pid))
     job = OwnedProcess.capture(psutil.Process(job_pid))
-    ledger.write(path, [closure.Target("ava-agent-1-shell-1-swept", shell, (job,))])
+    ledger.write(path, [closure.Target("meiva-agent-1-shell-1-swept", shell, (job,))])
     leader.kill()
     leader.wait(timeout=10)
     assert psutil.pid_exists(job_pid), "precondition: the job outlives its session leader"
@@ -234,7 +234,7 @@ def test_the_sweep_closes_the_members_a_dead_shell_left_and_reports_the_busy_ses
 
     assert time.monotonic() - started < ledger.SWEEP_HANGUP_WAIT_S + 3 * ledger.SWEEP_KILL_S
     assert jobs.wait_exit(job_pid, timeout=5), "the sweep left the job running"
-    assert [closed.name for closed in outcome.closed] == ["ava-agent-1-shell-1-swept"]
+    assert [closed.name for closed in outcome.closed] == ["meiva-agent-1-shell-1-swept"]
     assert outcome.survivors == ()
     assert ledger.read(path) == [], "the ledger is cleared once swept"
 
@@ -246,7 +246,7 @@ def test_a_surviving_shell_remains_recorded_for_the_next_sweep(
     child = subprocess.Popen(["sleep", "300"], start_new_session=True)
     path = tmp_path / "ledger.json"
     identity = OwnedProcess.capture(psutil.Process(child.pid))
-    target = closure.Target("ava-agent-1-shell-retry", identity)
+    target = closure.Target("meiva-agent-1-shell-retry", identity)
     attempts: list[tuple[tuple[OwnedProcess, ...], int]] = []
 
     def record_without_signalling(identities: Iterable[OwnedProcess], sig: int) -> None:
@@ -283,7 +283,7 @@ def test_a_known_job_only_survivor_does_not_retain_a_terminal_gate(
     path = tmp_path / "ledger.json"
     job = OwnedProcess.capture(psutil.Process(child.pid))
     shell = _exited_process()
-    target = closure.Target("ava-agent-1-shell-job-only", shell, (job,))
+    target = closure.Target("meiva-agent-1-shell-job-only", shell, (job,))
 
     def leave_known_targets_alive(identities: Iterable[OwnedProcess], sig: int) -> None:
         tuple(identities)
@@ -312,7 +312,7 @@ def test_the_sweep_never_signals_a_pid_that_is_no_longer_the_recorded_process(
             real.pid, real.birth - 1000.0, None if real.starttime is None else real.starttime - 1
         )
         path = tmp_path / "ledger.json"
-        ledger.write(path, [closure.Target("ava-agent-1-shell-2-recycled", stale, ())])
+        ledger.write(path, [closure.Target("meiva-agent-1-shell-2-recycled", stale, ())])
 
         outcome = ledger.sweep(path)
 
@@ -348,14 +348,14 @@ def test_the_sweep_reports_a_busy_session_the_crash_ended_whole(tmp_path: Path) 
     ledger.write(
         path,
         [
-            closure.Target("ava-agent-1-shell-3-busy", busy_shell, (busy_shell, busy_job)),
-            closure.Target("ava-agent-1-shell-4-idle", idle_shell, (idle_shell,)),
+            closure.Target("meiva-agent-1-shell-3-busy", busy_shell, (busy_shell, busy_job)),
+            closure.Target("meiva-agent-1-shell-4-idle", idle_shell, (idle_shell,)),
         ],
     )
 
     outcome = ledger.sweep(path)
 
-    assert [closed.name for closed in outcome.closed] == ["ava-agent-1-shell-3-busy"]
+    assert [closed.name for closed in outcome.closed] == ["meiva-agent-1-shell-3-busy"]
     assert outcome.closed[0].shell == busy_shell
     assert outcome.survivors == ()
     assert ledger.read(path) == []
@@ -373,11 +373,11 @@ def test_the_sweep_never_reports_a_busy_session_whose_shell_is_still_running(
         stale = OwnedProcess(
             real.pid, real.birth - 1000.0, None if real.starttime is None else real.starttime - 1
         )
-        ledger.write(path, [closure.Target("ava-agent-1-shell-5-recycled", stale, (stale, real))])
+        ledger.write(path, [closure.Target("meiva-agent-1-shell-5-recycled", stale, (stale, real))])
 
         outcome = ledger.sweep(path)
 
-        assert [closed.name for closed in outcome.closed] == ["ava-agent-1-shell-5-recycled"]
+        assert [closed.name for closed in outcome.closed] == ["meiva-agent-1-shell-5-recycled"]
     finally:
         bystander.kill()
         bystander.wait(timeout=10)
@@ -396,10 +396,10 @@ def test_a_crashed_service_keeps_local_evidence_without_notifying_or_replaying(
     db_conn.commit()
     # A reachable database must not turn a sweep into an automatic notification.
     (unit_home / ".env").write_text(
-        f"AVA_MACHINE_NAME=crash-box\nAVA_DB_URL={db_url}\nAVA_REDIS_URL={os.environ['AVA_REDIS_URL']}\n",
+        f"MEIVA_MACHINE_NAME=crash-box\nMEIVA_DB_URL={db_url}\nMEIVA_REDIS_URL={os.environ['MEIVA_REDIS_URL']}\n",
         encoding="utf-8",
     )
-    name = f"ava-agent-{owner}-shell-7-crashed"
+    name = f"meiva-agent-{owner}-shell-7-crashed"
     shell = jobs.start(name, unit_home, jobs.TERM_OK)
     output_until(name, "job-ready")
 
@@ -439,10 +439,10 @@ def test_a_crash_sweep_with_an_unreachable_database_still_serves_new_sessions(
 ) -> None:
     """Restart does not stage a notice or require database connectivity."""
     (unit_home / ".env").write_text(
-        "AVA_MACHINE_NAME=crash-box\nAVA_DB_URL=postgresql://nobody:nothing@127.0.0.1:1/none\n",
+        "MEIVA_MACHINE_NAME=crash-box\nMEIVA_DB_URL=postgresql://nobody:nothing@127.0.0.1:1/none\n",
         encoding="utf-8",
     )
-    name = "ava-agent-987-shell-8-lost"
+    name = "meiva-agent-987-shell-8-lost"
     jobs.start(name, unit_home, jobs.TERM_OK)
     output_until(name, "job-ready")
     shell = support.shell_process(name)
@@ -458,5 +458,5 @@ def test_a_crash_sweep_with_an_unreachable_database_still_serves_new_sessions(
 
     assert client.request("ping")["pid"] == pty_service.pid
     assert not (unit_home / "run" / "pty-close-notices.json").exists()
-    new("ava-agent-987-shell-9-after", unit_home)
-    assert client.has_session("ava-agent-987-shell-9-after")
+    new("meiva-agent-987-shell-9-after", unit_home)
+    assert client.has_session("meiva-agent-987-shell-9-after")

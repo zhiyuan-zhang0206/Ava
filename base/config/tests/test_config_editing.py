@@ -228,9 +228,9 @@ def test_coerce_scalar_forms() -> None:
 
 
 _AUTHORITY_KEYS = {
-    "cluster_secret": "AVA_CLUSTER_SECRET",
-    "webhook_token": "AVA_ALERTS_WEBHOOK_TOKEN",
-    "mcp_endpoint_enabled": "AVA_MCP_ENDPOINT_ENABLED",
+    "cluster_secret": "MEIVA_CLUSTER_SECRET",
+    "webhook_token": "MEIVA_ALERTS_WEBHOOK_TOKEN",
+    "mcp_endpoint_enabled": "MEIVA_MCP_ENDPOINT_ENABLED",
 }
 _OUTBOUND_CREDENTIALS = {
     "ANTHROPIC_API_KEY",
@@ -243,9 +243,9 @@ _OUTBOUND_CREDENTIALS = {
     "MIMO_API_KEY",
     "MOONSHOT_API_KEY",
     "OPENAI_API_KEY",
-    "AVA_FEISHU_APP_SECRET",
-    "AVA_TELEGRAM_BOT_TOKEN",
-    "AVA_BACKUP_OFFSITE_CREDENTIALS_FILE",
+    "MEIVA_FEISHU_APP_SECRET",
+    "MEIVA_TELEGRAM_BOT_TOKEN",
+    "MEIVA_BACKUP_OFFSITE_CREDENTIALS_FILE",
 }
 
 

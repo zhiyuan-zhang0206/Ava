@@ -9,7 +9,7 @@ three are files or reads of the checkout:
 |---|---|
 | `head_sha` | `git rev-parse HEAD` in the checkout, right now |
 | `installed_sha` | file — what `uv sync` + migrate last completed against |
-| `running_sha` | file — written by `ava start` right before it launches services |
+| `running_sha` | file — written by `meiva start` right before it launches services |
 
 `running_sha` was the one the roster displayed as the live process's commit,
 and `cli/commands/cluster.py:_code_cell` was built to flag `running_sha !=
@@ -29,7 +29,7 @@ never had.
 
 Found while diagnosing a Windows unit that reported `serve_gateway: true` for
 two days after the file that value derives from was changed to `false`. The
-daemon had cached its capability set at boot; `ava start` skipped it because it
+daemon had cached its capability set at boot; `meiva start` skipped it because it
 was running, and rewrote the bookmark anyway. `head_sha`, `running_sha`, and
 the start command's own `[✓ aligned]` all agreed the node was current.
 
@@ -44,7 +44,7 @@ process's `main()`. `get()` returns only what `freeze()` stored and has no git
 call of its own; a process that never froze reports unknown.
 
 Status surfaces read `process_sha.get()`. The `running_sha` file keeps its
-remaining and legitimate job: the baseline `ava update` diffs against, where
+remaining and legitimate job: the baseline `meiva update` diffs against, where
 "what did we last deliberately start from" is the right question.
 
 Each daemon also publishes its capture on its own `/healthz`, alongside the
@@ -86,7 +86,7 @@ is a policy change that deserves its own decision.
   commit is on its own `/healthz`. Aggregating the per-daemon view into a single
   machine-level verdict is left open.
 - Processes that come up outside the supervised path, and dev gateways under
-  `AVA_GATEWAY_RELOAD=1` (uvicorn re-imports in a spawned worker), report
+  `MEIVA_GATEWAY_RELOAD=1` (uvicorn re-imports in a spawned worker), report
   unknown and render `—`. For hot-reload that is the honest answer: the running
   code is not a commit.
 - One `git rev-parse` per gateway-style process boot, bounded and non-fatal —

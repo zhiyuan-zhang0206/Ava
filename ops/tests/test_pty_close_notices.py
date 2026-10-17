@@ -29,7 +29,7 @@ def _notice(
 ) -> notices.ClosureNotice:
     built = notices.closure_notice(
         machine="macmini",
-        name=f"ava-agent-{agent_id}-shell-{session_id}-report",
+        name=f"meiva-agent-{agent_id}-shell-{session_id}-report",
         shell_pid=9090,
         shell_birth=birth,
         operation="local-pause:macmini:1:uuid",
@@ -85,7 +85,7 @@ def test_closure_notice_rejects_non_agent_shell_names() -> None:
     assert (
         notices.closure_notice(
             machine="macmini",
-            name="ava-gateway",
+            name="meiva-gateway",
             shell_pid=1,
             shell_birth="birth:1.0",
             operation="local-pause:macmini:1:uuid",
@@ -117,7 +117,7 @@ def test_a_live_owner_gets_one_system_inbound(
     assert len(rows) == 1
     content, source, payload = rows[0]
     assert source == "system"
-    assert "closed by an operator stop (ava stop)" in content
+    assert "closed by an operator stop (meiva stop)" in content
     assert "id 11" in content and "macmini" in content
     closure_payload = json.loads(payload)["closure"]
     assert closure_payload["agent_id"] == aid and closure_payload["session_id"] == 11
@@ -313,7 +313,7 @@ def test_the_connection_is_the_one_asked_for_and_is_closed(
 
 def _ended(agent_id: int, session_id: int = 11, starttime: int = 4242) -> closure.ClosedSession:
     return closure.ClosedSession(
-        f"ava-agent-{agent_id}-shell-{session_id}-crashed", OwnedProcess(9090, 1.0, starttime)
+        f"meiva-agent-{agent_id}-shell-{session_id}-crashed", OwnedProcess(9090, 1.0, starttime)
     )
 
 
@@ -343,7 +343,7 @@ def test_notices_for_skips_a_session_that_is_not_an_agent_shell(
     *, machine_identity: MachineIdentity
 ) -> None:
     sessions = [
-        closure.ClosedSession("ava-gateway", OwnedProcess(1, 1.0, 1)),
+        closure.ClosedSession("meiva-gateway", OwnedProcess(1, 1.0, 1)),
         _ended(5),
     ]
 

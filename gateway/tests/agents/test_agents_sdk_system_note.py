@@ -5,9 +5,7 @@ from uuid import uuid4
 import psycopg
 import pytest
 
-import ava
-from ava.agents import AgentNotFound
-from ava.tests.fixtures.pin_agent import pin_agent
+import meiva
 from base.cluster.machine import MachineIdentity
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from base.config.service_read import ConfigAuthority
@@ -16,6 +14,8 @@ from gateway.tests.agents.sdk_support import (
     sdk_via_gateway as sdk_via_gateway,
 )
 from gateway.tests.agents.sdk_support import spawn_agent
+from meiva.agents import AgentNotFound
+from meiva.tests.fixtures.pin_agent import pin_agent
 
 
 class TestSendSystemNote:
@@ -36,9 +36,9 @@ class TestSendSystemNote:
                 local_machine=machine_identity,
             )
         )
-        peer_id = ava.agents.spawn(idempotency_key=str(uuid4()))
+        peer_id = meiva.agents.spawn(idempotency_key=str(uuid4()))
 
-        inbound_id = ava.agents.send_system_note(
+        inbound_id = meiva.agents.send_system_note(
             peer_id,
             'Task #1 "t" is now assigned to you (by agent #1).',
             idempotency_key=str(uuid4()),
@@ -54,7 +54,7 @@ class TestSendSystemNote:
         assert len(rows) == 1
         content, kind, source, payload = rows[0]
         assert kind == "system_note"
-        assert source == f"agent:{ava.self.AGENT_ID}"
+        assert source == f"agent:{meiva.self.AGENT_ID}"
         assert "assigned to you" in content
         assert payload == {"note_tag": "task", "delivery_resurrect": True}
 
@@ -73,7 +73,7 @@ class TestSendSystemNote:
                 local_machine=machine_identity,
             )
         )
-        peer_id = ava.agents.spawn(idempotency_key=str(uuid4()))
+        peer_id = meiva.agents.spawn(idempotency_key=str(uuid4()))
         with db_conn.cursor() as cur:
             cur.execute(
                 "INSERT INTO agent_tasks (title, description, created_by, owner) "
@@ -85,7 +85,7 @@ class TestSendSystemNote:
         task_id = row[0]
         db_conn.commit()
 
-        ava.agents.send_system_note(
+        meiva.agents.send_system_note(
             peer_id,
             'Task #42 "t" is now assigned to you.',
             task_id=task_id,
@@ -116,12 +116,12 @@ class TestSendSystemNote:
                 local_machine=machine_identity,
             )
         )
-        peer_id = ava.agents.spawn(idempotency_key=str(uuid4()))
+        peer_id = meiva.agents.spawn(idempotency_key=str(uuid4()))
         with db_conn.cursor() as cur:
             cur.execute("UPDATE agents_meta SET status = 'terminated' WHERE id = %s", (peer_id,))
         db_conn.commit()
 
-        inbound_id = ava.agents.send_system_note(
+        inbound_id = meiva.agents.send_system_note(
             peer_id, 'Task #1 "t" is now assigned to you.', idempotency_key=str(uuid4())
         )
         assert isinstance(inbound_id, int)
@@ -147,12 +147,12 @@ class TestSendSystemNote:
                 local_machine=machine_identity,
             )
         )
-        peer_id = ava.agents.spawn(idempotency_key=str(uuid4()))
+        peer_id = meiva.agents.spawn(idempotency_key=str(uuid4()))
 
         # Runtime value of `("Task #1 is now " "assigned to you.",)`: implicit
         # concatenation plus trailing comma.
         content: object = ("Task #1 is now assigned to you.",)
-        inbound_id = ava.agents.send_system_note(peer_id, content, idempotency_key=str(uuid4()))  # pyright: ignore[reportArgumentType]
+        inbound_id = meiva.agents.send_system_note(peer_id, content, idempotency_key=str(uuid4()))  # pyright: ignore[reportArgumentType]
         assert isinstance(inbound_id, int)
         with db_conn.cursor() as cur:
             cur.execute("SELECT content FROM inbound_messages WHERE agent_id = %s", (peer_id,))
@@ -176,11 +176,11 @@ class TestSendSystemNote:
                 local_machine=machine_identity,
             )
         )
-        peer_id = ava.agents.spawn(idempotency_key=str(uuid4()))
+        peer_id = meiva.agents.spawn(idempotency_key=str(uuid4()))
 
         content: object = ("Task #1 is now ", "assigned to you.")
         with pytest.raises(TypeError, match="content must be a string"):
-            ava.agents.send_system_note(peer_id, content, idempotency_key=str(uuid4()))  # pyright: ignore[reportArgumentType]
+            meiva.agents.send_system_note(peer_id, content, idempotency_key=str(uuid4()))  # pyright: ignore[reportArgumentType]
 
     def test_send_system_note_to_nonexistent_raises(
         self,
@@ -198,4 +198,4 @@ class TestSendSystemNote:
             )
         )
         with pytest.raises(AgentNotFound):
-            ava.agents.send_system_note(9999, "ghost", idempotency_key=str(uuid4()))
+            meiva.agents.send_system_note(9999, "ghost", idempotency_key=str(uuid4()))

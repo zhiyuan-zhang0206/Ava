@@ -129,7 +129,7 @@ Why each safety net missed it:
 
 ## Guardrails added
 
-- `ava_builtins/skills/ava-serious-engineering/practices/design/SKILL.md` gains:
+- `meiva_builtins/skills/meiva-serious-engineering/practices/design/SKILL.md` gains:
   - a core principle, "Prior Art and the Simplest Sufficient Design First";
   - a checklist item;
   - an anti-pattern, "Reinventing the Commodity Layer".
@@ -137,7 +137,7 @@ Why each safety net missed it:
   "Complexity must name the failure it prevents".
 - Unguarded: no lint or test can enforce any of this. It relies on design
   documents and reviews applying the rule. A full-repository audit against the
-  same rule was commissioned from an Ava agent. Its findings are the input for
+  same rule was commissioned from an Meiva agent. Its findings are the input for
   deciding what else to delete.
 
 ## Lessons

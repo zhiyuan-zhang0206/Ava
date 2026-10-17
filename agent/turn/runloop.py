@@ -22,7 +22,7 @@ from agent.state_channels import (
     CIRCUIT_REASON_SCHEMA,
     CircuitState,
 )
-from base.agents.context import AvaContext
+from base.agents.context import MeivaContext
 from base.events.live.bus import EventBus
 from base.events.live.projection import Error
 from base.log import logger
@@ -38,7 +38,7 @@ _RECURSION_LIMIT_INF = 2**31 - 1
 
 
 def emit_error_event(
-    ctx: AvaContext,
+    ctx: MeivaContext,
     agent_id: int,
     content: str,
     *,
@@ -116,7 +116,7 @@ def _provider_recovery(reason: str) -> str:
     return "Choose a different model overlay or resolve the provider policy rejection, then send a new message."
 
 
-def _model_vendor(ctx: AvaContext) -> str | None:
+def _model_vendor(ctx: MeivaContext) -> str | None:
     """Vendor key of this turn's model — the account a failure bills to.
 
     The classifier stamps the same read onto the ``llm_provider_error`` log's
@@ -132,7 +132,7 @@ def _model_vendor(ctx: AvaContext) -> str | None:
 
 
 async def _record_permanent_reject_outcome(
-    ctx: AvaContext,
+    ctx: MeivaContext,
     agent_id: int,
     exc: FatalProviderError,
     reason: str,
@@ -267,7 +267,7 @@ async def _breaker_already_open(
 
 
 async def _open_breaker(
-    ctx: AvaContext,
+    ctx: MeivaContext,
     agent_id: int,
     exc: FatalProviderError,
     reason: str,
@@ -310,7 +310,7 @@ async def _open_breaker(
 
 async def _apply_provider_failure(
     input_update: dict[str, object],
-    ctx: AvaContext,
+    ctx: MeivaContext,
     agent_id: int,
     exc: FatalProviderError,
     reason: str,
@@ -344,7 +344,7 @@ async def _apply_provider_failure(
 
 async def _handle_fatal_llm_error(
     exc: FatalLLMStreamError | FatalProviderError,
-    ctx: AvaContext,
+    ctx: MeivaContext,
     agent_id: int,
     circuit_reader: Callable[[], Awaitable[CircuitState | None]] | None = None,
     *,
@@ -418,7 +418,7 @@ def graph_config(
     return {
         "configurable": {"thread_id": str(agent_id), CHECKPOINT_INTERVAL_KEY: checkpoint_interval},
         "recursion_limit": _RECURSION_LIMIT_INF,
-        "run_name": f"ava-agent-{agent_id}",
+        "run_name": f"meiva-agent-{agent_id}",
         "metadata": metadata,
         "tags": tags,
     }
@@ -435,10 +435,10 @@ class PendingTurnFailure:
 
 
 async def settle_turn_failure(
-    graph: CompiledStateGraph[BaseAgentState, AvaContext, BaseAgentState, BaseAgentState],
+    graph: CompiledStateGraph[BaseAgentState, MeivaContext, BaseAgentState, BaseAgentState],
     checkpointer: object,
     config: RunnableConfig,
-    ctx: AvaContext,
+    ctx: MeivaContext,
     agent_id: int,
     pending: PendingTurnFailure,
 ) -> None:

@@ -40,7 +40,7 @@ sandbox and returns stdout/stderr.
 
 The model still writes Python; Python is now the tool's argument instead of message content.
 The agent's mental model is nearly unchanged — capabilities remain exposed through the
-`ava.*` Python namespace inside the tool body.
+`meiva.*` Python namespace inside the tool body.
 
 SDK surface collapses accordingly: "speaking" is just `AIMessage.content` (delete the
 explicit send call); "stop turn" is empty `tool_calls` (delete the explicit idle call).

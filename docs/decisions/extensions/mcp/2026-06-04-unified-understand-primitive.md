@@ -1,9 +1,9 @@
-# Unified `ava.understand` multimodal primitive
+# Unified `meiva.understand` multimodal primitive
 
 ## Context
 
 The agent is CodeAct: its one tool is `execute_code`, and capabilities are
-Python functions under `ava`. The move "have an LLM look at some material and
+Python functions under `meiva`. The move "have an LLM look at some material and
 answer a question" was hard-coded in two narrow spots — a vision helper
 (image/video) and `web.fetch`'s internal page-answer step — with no way to apply
 it to an arbitrary blob: a long text the agent already holds, a downloaded PDF,
@@ -25,17 +25,17 @@ reads the key from settings; the agent's CodeAct never touches a key.
 
 ## Decision
 
-Add `ava.understand(input, prompt) -> str`, a single top-level SDK function that
+Add `meiva.understand(input, prompt) -> str`, a single top-level SDK function that
 answers a prompt over almost any material — literal text, text files, images,
 video, audio, PDF. It replaces the narrower vision helper (deleted) and becomes
 the answer engine that `web.fetch` delegates to.
 
-- **Top-level callable**, not `ava.understand.understand()`. Implementation
-  lives in a private `_understand.py` so the *function* `ava.understand` and a
+- **Top-level callable**, not `meiva.understand.understand()`. Implementation
+  lives in a private `_understand.py` so the *function* `meiva.understand` and a
   same-named *submodule* don't ambiguously bind.
-- **`UnderstandError` hangs off the function** (`ava.understand.UnderstandError`),
+- **`UnderstandError` hangs off the function** (`meiva.understand.UnderstandError`),
   since a top-level function has no namespace to host its exception. Named in the
-  docstring's Raises section; the catch form is discoverable via `help(ava)`.
+  docstring's Raises section; the catch form is discoverable via `help(meiva)`.
 - **One `input` arg disambiguated by `Path(input).is_file()`**: an existing file
   is read, otherwise the string *is* the material.
 - **Routing by suffix**: known media suffixes (image/video/audio/PDF) are read as
@@ -64,8 +64,8 @@ the answer engine that `web.fetch` delegates to.
   vanishingly rare since material is usually far longer than a path.
 - **Text-only, caller pre-reads files** — would drop binary media entirely,
   defeating the multimodal goal.
-- **`ava.understand.understand()` submodule form** — the flatter call site was
-  chosen deliberately; the submodule form also broke `import ava.understand as
+- **`meiva.understand.understand()` submodule form** — the flatter call site was
+  chosen deliberately; the submodule form also broke `import meiva.understand as
   mod` against the function binding.
 - **A single multimodal model with high thinking for everything** — revised to a
   modality split: the text provider has no vision and is strong/cheap on text;
@@ -86,7 +86,7 @@ the answer engine that `web.fetch` delegates to.
   sub-agent" — cheap, zero context pollution.
 - The exception lives on a function attribute rather than in a module namespace —
   an accepted ergonomic cost of the flat call site, mitigated by docstring and
-  `help(ava)` discoverability.
+  `help(meiva)` discoverability.
 - The modality split is locked structurally (which client handles which kind),
   while the specific models and media-quality knobs stay tunable, so model
   upgrades don't require touching the routing logic.

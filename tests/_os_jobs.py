@@ -5,12 +5,12 @@ import subprocess
 from pathlib import Path
 
 _CRON_MARKERS = (
-    "# ava-health-probe",
-    "# ava-autostart",
-    "# ava-logs-maintenance",
-    "# ava-packages-refresh",
-    "# ava-pr-flow",
-    "# ava-walg",
+    "# meiva-health-probe",
+    "# meiva-autostart",
+    "# meiva-logs-maintenance",
+    "# meiva-packages-refresh",
+    "# meiva-pr-flow",
+    "# meiva-walg",
 )
 
 
@@ -24,7 +24,7 @@ def _launchd_jobs() -> set[str]:
         return set()
     return {
         f"launchd:{p.name}@{hashlib.sha256(p.read_bytes()).hexdigest()[:12]}"
-        for p in agents.glob("com.ava.*.plist")
+        for p in agents.glob("com.meiva.*.plist")
     }
 
 
@@ -42,5 +42,5 @@ def crontab_jobs() -> set[str]:
     }
 
 
-def host_ava_os_jobs() -> frozenset[str]:
+def host_meiva_os_jobs() -> frozenset[str]:
     return frozenset(_launchd_jobs() | crontab_jobs())

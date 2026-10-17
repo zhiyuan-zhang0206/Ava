@@ -133,7 +133,7 @@ function Chips({ heading, nodes, onSelect }: { heading: string; nodes: RunTimeli
   );
 }
 
-// ava:ref ui/web/src/docs/frontend-components/run-timeline/details-panel.ava.okf.md#selected-message-parts
+// meiva:ref ui/web/src/docs/frontend-components/run-timeline/details-panel.meiva.okf.md#selected-message-parts
 export function NodeDetail({
   agentId,
   snapshot,
@@ -174,7 +174,7 @@ export function NodeDetail({
   );
 }
 
-// ava:ref ui/web/src/docs/frontend-components/run-timeline/details-panel.ava.okf.md#selected-message-parts
+// meiva:ref ui/web/src/docs/frontend-components/run-timeline/details-panel.meiva.okf.md#selected-message-parts
 export function UnitDetail({
   agentId,
   snapshot,

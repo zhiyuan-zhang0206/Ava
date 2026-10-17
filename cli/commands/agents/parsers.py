@@ -1,4 +1,4 @@
-"""`ava agents` + `ava notices` — agent lifecycle and the notification queue.
+"""`meiva agents` + `meiva notices` — agent lifecycle and the notification queue.
 
 Thin clients over the gateway's /api/agents + /api/notices surfaces: builders
 plus their `_h_*` handlers. Handlers lazy-import their `cmd_*` implementation
@@ -60,7 +60,7 @@ def h_agents_send(args: argparse.Namespace) -> int:
             completion=args.completion,
         )
     except ProvenanceError as exc:
-        print(f"ava: {exc}", file=sys.stderr)
+        print(f"meiva: {exc}", file=sys.stderr)
         return 2
 
 
@@ -82,7 +82,7 @@ def _h_agents_restart(args: argparse.Namespace) -> int:
     try:
         return cmd_agents_restart(args.agent_id, args.config, source=args.source)
     except ProvenanceError as exc:
-        print(f"ava: {exc}", file=sys.stderr)
+        print(f"meiva: {exc}", file=sys.stderr)
         return 2
 
 
@@ -92,7 +92,7 @@ def _h_agents_resurrect(args: argparse.Namespace) -> int:
     try:
         return cmd_agents_resurrect(args.agent_id, source=args.source)
     except ProvenanceError as exc:
-        print(f"ava: {exc}", file=sys.stderr)
+        print(f"meiva: {exc}", file=sys.stderr)
         return 2
 
 
@@ -106,7 +106,7 @@ def _h_agents_terminate(args: argparse.Namespace) -> int:
             kill_all_shell_sessions=args.kill_all_shell_sessions,
         )
     except ProvenanceError as exc:
-        print(f"ava: {exc}", file=sys.stderr)
+        print(f"meiva: {exc}", file=sys.stderr)
         return 2
 
 
@@ -120,7 +120,7 @@ def h_agents_kill(args: argparse.Namespace) -> int:
             kill_all_shell_sessions=args.kill_all_shell_sessions,
         )
     except ProvenanceError as exc:
-        print(f"ava: {exc}", file=sys.stderr)
+        print(f"meiva: {exc}", file=sys.stderr)
         return 2
 
 
@@ -220,9 +220,9 @@ def _add_compact_parser(sub: argparse._SubParsersAction[argparse.ArgumentParser]
 
 
 def add_agents_parser(sub: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
-    # `ava agents` — operator lifecycle ops (thin client over the gateway's
+    # `meiva agents` — operator lifecycle ops (thin client over the gateway's
     # creation + observed native control routes). Handlers defer runtime imports so
-    # `ava --help` builds the parser without a configured .env. Verbs are ordered
+    # `meiva --help` builds the parser without a configured .env. Verbs are ordered
     # by escalating force (cancel < restart < terminate < kill) plus ls.
     agents_p = sub.add_parser(
         "agents",

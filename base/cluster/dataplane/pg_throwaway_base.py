@@ -26,7 +26,7 @@ not a size guarantee (the restore drill's `_SCRATCH_SPACE_FACTOR`): on
 did not — the same death mid-restore — so a capacity-declaring caller now takes
 the durable base outright instead of betting the estimate on a RAM-sized one.
 
-The root parses the host-scoped `AVA_PG_THROWAWAY_BASE` value once and passes
+The root parses the host-scoped `MEIVA_PG_THROWAWAY_BASE` value once and passes
 `ThrowawayConfig` through the whole cluster lifecycle. This module never reads
 Settings; minimal contexts (test fixtures, smokes) supply their own explicit value.
 """
@@ -70,7 +70,7 @@ class ThrowawayConfig:
 
 
 def configured_base(raw: str) -> Path | None:
-    """Parse the root's explicit `AVA_PG_THROWAWAY_BASE` value; blank means no override."""
+    """Parse the root's explicit `MEIVA_PG_THROWAWAY_BASE` value; blank means no override."""
     raw = raw.strip()
     return Path(raw) if raw else None
 
@@ -112,7 +112,7 @@ def throwaway_roots(override: Path | None) -> tuple[Path, ...]:
 def select_throwaway_base(required_bytes: int | None = None, *, override: Path | None) -> Path:
     """Pick the base directory for a throwaway cluster's data dir.
 
-    Order: the configured override (`AVA_PG_THROWAWAY_BASE`) when set — used as-is,
+    Order: the configured override (`MEIVA_PG_THROWAWAY_BASE`) when set — used as-is,
     with a warning when `required_bytes` clearly exceeds its free space; otherwise
     the caller's base:
 
@@ -139,7 +139,7 @@ def select_throwaway_base(required_bytes: int | None = None, *, override: Path |
     if override is not None:
         if not override.is_dir():
             raise RuntimeError(
-                f"AVA_PG_THROWAWAY_BASE={override} is not an existing directory — "
+                f"MEIVA_PG_THROWAWAY_BASE={override} is not an existing directory — "
                 "point it at a directory on a volume with room for scratch clusters"
             )
         if required_bytes is not None and free_bytes(override) < required_bytes:
@@ -167,5 +167,5 @@ def select_throwaway_base(required_bytes: int | None = None, *, override: Path |
     )
     raise InsufficientThrowawaySpaceError(
         f"throwaway Postgres needs {format_bytes(required_bytes)} free on a durable base — "
-        f"{offered}. Free space, or point AVA_PG_THROWAWAY_BASE at a larger volume."
+        f"{offered}. Free space, or point MEIVA_PG_THROWAWAY_BASE at a larger volume."
     )

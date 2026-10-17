@@ -1,20 +1,20 @@
-# Ava / Ava Code prompt architecture
+# Meiva / Meiva Code prompt architecture
 
 Living doc (opened 2026-06-01). Where coding-agent behavioral guidance belongs —
-the Ava-core vs `ava_code` split, and the mechanics-vs-behavior axis under it.
+the Meiva-core vs `meiva_code` split, and the mechanics-vs-behavior axis under it.
 **Most of the inventory below has since shipped**; see "Status / next" for what is
 actually left.
 
 ## Why this doc
 
-Benchmarking Ava's prompt against the current Claude Code (Opus 4.8) and Codex
+Benchmarking Meiva's prompt against the current Claude Code (Opus 4.8) and Codex
 (GPT-5.5) prompts surfaced two questions:
 
-1. Several behavioral dimensions those agents spell out, Ava's prompt is silent
+1. Several behavioral dimensions those agents spell out, Meiva's prompt is silent
    on. Which are real gaps worth closing, and which are deliberately stripped or
    covered elsewhere (`AGENTS.md`, skills)?
-2. When we do add guidance, where does it live — the Ava **core** system prompt,
-   or the **`ava_code`** plugin section?
+2. When we do add guidance, where does it live — the Meiva **core** system prompt,
+   or the **`meiva_code`** plugin section?
 
 This doc answers (2) as a standing principle and records (1) as an inventory.
 
@@ -28,18 +28,18 @@ framework sections are grouped into four buckets and registered in this reading
 order. The grouping is **reading-order + a placement rule for new sections, not
 nested headings** — nesting (an umbrella `#` with child `##`) is deferred until
 the flat `#` list outgrows legibility; until then each section stays a flat `#`
-block with its own `AVA_SYSTEM_PROMPT_*` toggle.
+block with its own `MEIVA_SYSTEM_PROMPT_*` toggle.
 
 1. **Identity & action model** — who you are + the `execute_code` contract.
    Lives in the base prompt, always first.
 2. **SDK detail** — full contracts (signatures + docstrings) for the configured
    namespaces, rendered directly after the SDK overview so the agent calls them
-   without a drill-down turn. Config-selected (`AVA_SDK_EXPAND`), default
+   without a drill-down turn. Config-selected (`MEIVA_SDK_EXPAND`), default
    `shell,files,agents,tasks` = the stable production P95 module set.
    Explicit `*` expands all public
-   namespaces except the capability surfaces (`ava.skills`, `ava.mcps`).
+   namespaces except the capability surfaces (`meiva.skills`, `meiva.mcps`).
    The frequency-driven subset keeps common contracts resident, leaving rare
-   ones to progressive disclosure via `ava.help`. The two-bucket split is
+   ones to progressive disclosure via `meiva.help`. The two-bucket split is
    load-bearing: this bucket carries **call
    contracts**, Capabilities carries **what you can do**. Skills and MCP servers
    are members of a capability surface rather than SDK API, so expanding them
@@ -53,29 +53,29 @@ block with its own `AVA_SYSTEM_PROMPT_*` toggle.
 
 A new behavioral section goes into the bucket it fits and is registered next to
 its bucket-mates in `system_prompt.py` (bucket-comment markers delimit them).
-Note "tool calling" is **not** a peer bucket for Ava the way it is for a
-multi-tool agent (e.g. Claude Code's per-tool `##` catalog): Ava has one tool
-(`execute_code`) and exposes capability through the `ava.*` namespace, so tool
+Note "tool calling" is **not** a peer bucket for Meiva the way it is for a
+multi-tool agent (e.g. Claude Code's per-tool `##` catalog): Meiva has one tool
+(`execute_code`) and exposes capability through the `meiva.*` namespace, so tool
 guidance is the *spine* (base + SDK overview + plugin sections), folded into
 Capabilities rather than standing as its own section.
 
 - **Core base prompt** — `agent/graph/prompt/_base_prompt.py:BASE_SYSTEM_PROMPT`: the
   code-as-action contract (`execute_code`, speak via text content, empty
-  tool-call = idle) plus the `help(ava)` SDK overview. Its `_CODE_ACTION_PREAMBLE`
+  tool-call = idle) plus the `help(meiva)` SDK overview. Its `_CODE_ACTION_PREAMBLE`
   is also the bare identity when the SDK overview is disabled. The preamble's
   `_SEQUENTIAL_TOOL_CALLS_NOTE` (several calls in one response run sequentially
   and an error does not stop later ones) is **off by default** via
   `settings.agent.prompt_sequential_tool_calls_enabled` (env
-  `AVA_SYSTEM_PROMPT_SEQUENTIAL_TOOL_CALLS`, per-agent overlay): production
+  `MEIVA_SYSTEM_PROMPT_SEQUENTIAL_TOOL_CALLS`, per-agent overlay): production
   histories from 2026-09-28 to 2026-10-10 showed no cross-call dependency failures
   for `deepseek-flash`, and other models are enabled per agent while they are evaluated.
 - **Core expanded SDK reference** — `agent/graph/prompt/system_prompt.py:sdk_expand_section`,
   rendering `effective_sdk_expand()`: plugin registrations
-  (a plugin's declared `sdk_namespaces(expand=True)` / `sdk_expansions`, e.g. ava_code's `cwd`) first, then
-  `settings.sdk_expand_in_system_prompt` (env `AVA_SDK_EXPAND`, default `shell,files,agents,tasks`),
-  deduped keep-first — full `ava.help(ava.<path>)` stubs right after the
+  (a plugin's declared `sdk_namespaces(expand=True)` / `sdk_expansions`, e.g. meiva_code's `cwd`) first, then
+  `settings.sdk_expand_in_system_prompt` (env `MEIVA_SDK_EXPAND`, default `shell,files,agents,tasks`),
+  deduped keep-first — full `meiva.help(meiva.<path>)` stubs right after the
   overview. `*` recursively expands public namespaces (discovered from
-  `__all_for_ava__`, sorted; top-level functions like `help`/`understand` are skipped
+  `__all_for_meiva__`, sorted; top-level functions like `help`/`understand` are skipped
   — the overview already prints them in full; `skills` / `mcps` are skipped as
   capability surfaces, `_CAPABILITY_SURFACES`; naming a surface explicitly
   overrides, but a path INSIDE one — `skills.gmail`, `mcps.chrome` — is refused
@@ -83,21 +83,21 @@ Capabilities rather than standing as its own section.
   SKILL.md body / that server's tool schemas into every prompt and records a
   bogus `loaded` attribution; a skill body belongs in
   `skills_to_expand_at_start`) and merges with any explicit
-  entries; an explicit nested path already included by `*` is deduplicated. AVA_SDK_DISABLE
+  entries; an explicit nested path already included by `*` is deduplicated. MEIVA_SDK_DISABLE
   is consulted before resolution (a disabled entry is skipped unconditionally
   and silently, and excluded from `*`); any other resolution miss warns. The
-  `ava_code` plugin's `_coding_tools_section` consults the same effective view
+  `meiva_code` plugin's `_coding_tools_section` consults the same effective view
   and skips a module already expanded (exact path match) — the P95 default
   expands files and shell, and the plugin promotes cwd,
   so the coding section stays preamble-only.
 - **Core prefer-SDK nudge** — `agent/graph/prompt/system_prompt.py:_prefer_sdk_section`,
   on by default via `settings.prompt_prefer_sdk_enabled` (env
-  `AVA_SYSTEM_PROMPT_PREFER_SDK`): one line steering the agent to `ava.*` tools over
+  `MEIVA_SYSTEM_PROMPT_PREFER_SDK`): one line steering the agent to `meiva.*` tools over
   plain-Python / raw-shell equivalents. Deliberately example-free — specific
   misuse patterns get addressed if logs show them.
 - **Core CodeAct batching** — `agent/graph/prompt/_codeact.py:codeact_section` (registered by `system_prompt.py`),
   **on by default** via `settings.agent.prompt_codeact_enabled` (env
-  `AVA_SYSTEM_PROMPT_CODEACT`): pack several operations into one `execute_code`
+  `MEIVA_SYSTEM_PROMPT_CODEACT`): pack several operations into one `execute_code`
   call when no intermediate review is needed. The prompt states no separate
   split rule; that condition already implies it. The user ruling on 2026-10-07 changed the
   repository default to on; cluster settings and per-agent overlays can disable it.
@@ -105,8 +105,8 @@ Capabilities rather than standing as its own section.
   always-on name + one-line description of the capabilities the agent already
   has, under one `# Capabilities` heading — the prompt's ONE skill index.
   Two halves: injected skills (`_skill_index_lines`, keyed by
-  `ava.skills.<...>` path, bodies load on demand) and configured MCP tool
-  servers (`_mcp_index_lines`, keyed by `ava.mcps.<server>`, descriptions from
+  `meiva.skills.<...>` path, bodies load on demand) and configured MCP tool
+  servers (`_mcp_index_lines`, keyed by `meiva.mcps.<server>`, descriptions from
   each server's optional `description` field in its `.mcp.json`). Both keys use
   the same form the expanded-SDK section uses.
   `skills_to_inject_into_system_prompt` defaults to `*`: the selected catalog is
@@ -114,7 +114,7 @@ Capabilities rather than standing as its own section.
   real ancestor skills, with a count and an inspection path. Namespace-only
   folders keep their leaf entries visible. Bodies remain on demand. An
   explicit list narrows one agent's index — hiding entries from this listing
-  only, which is why the header says so and points at `ava.help(ava.skills)`.
+  only, which is why the header says so and points at `meiva.help(meiva.skills)`.
   The section tells the agent to match every task against the index before
   rebuilding something it already has. It does not ask for a skill-selection
   report in the final answer. The delegation check still makes consultation
@@ -130,29 +130,29 @@ Capabilities rather than standing as its own section.
   Automated wakes and peer messages do not require courtesy replies or closing summaries.
 - **Core communication style** — `agent/graph/prompt/system_prompt.py:communication_style_section`,
   selected by `settings.agent.agent_communication_style` (env
-  `AVA_AGENT_COMMUNICATION_STYLE`, default `off`): how much the agent narrates
+  `MEIVA_AGENT_COMMUNICATION_STYLE`, default `off`): how much the agent narrates
   while it works — `oriented` selects live pairing with substantive checkpoints,
   `concise` keeps progress updates to one or two sentences, `silent` works quietly
   and reports once for human-requested work, `off` omits only the optional style
   section. The core language and milestone policy remains active. General-agent behavior
   (see the section below for the deliberate restraint vs Codex).
-- **`ava_memory` behavior** — `ava_builtins/plugins/ava_memory/plugin.py:memory_discipline_section()`
+- **`meiva_memory` behavior** — `meiva_builtins/plugins/meiva_memory/plugin.py:memory_discipline_section()`
   (declared in the plugin's `contribute()`; the old `agent/graph/prompt/system_prompt.py:_memory_behavior_section`
   moved out of core with the plugin split),
   on by default via `settings.agent.prompt_memory_behavior_enabled` (env
-  `AVA_SYSTEM_PROMPT_MEMORY`): the *when / what to remember* behavioral layer over the
-  `ava.memory` pool — including memory-maintenance priority: a stale or wrong note
+  `MEIVA_SYSTEM_PROMPT_MEMORY`): the *when / what to remember* behavioral layer over the
+  `meiva.memory` pool — including memory-maintenance priority: a stale or wrong note
   is corrected first, before the agent continues the task it was on. The *how*
-  (read/write/search/commit) stays in the `ava.memory` SDK docstrings — this
+  (read/write/search/commit) stays in the `meiva.memory` SDK docstrings — this
   section does not repeat it. Auto-suppressed when both memory stores are
   switched off, so bench agents drop it without a bench-specific toggle.
 - **Core output shape** — `agent/graph/prompt/system_prompt.py:_output_conciseness_section`,
   on by default via `settings.prompt_output_conciseness_enabled` (env
-  `AVA_SYSTEM_PROMPT_CONCISENESS`): reply matched to the task, answer-first, reference
+  `MEIVA_SYSTEM_PROMPT_CONCISENESS`): reply matched to the task, answer-first, reference
   paths/lines instead of pasting output back. General-agent behavior.
 - **Core UI delivery** — `agent/graph/prompt/system_prompt.py:ui_delivery_section`,
   on by default via `settings.prompt_ui_delivery_enabled` (env
-  `AVA_SYSTEM_PROMPT_UI_DELIVERY`): content for the user goes through the UI,
+  `MEIVA_SYSTEM_PROMPT_UI_DELIVERY`): content for the user goes through the UI,
   never as a bare path to a Markdown file; files keep their role as persistence
   and cross-agent handoff. Deliberately example-free — a semantic rule, not an
   API list (signatures drift; the SDK overview / expanded reference carry the
@@ -160,33 +160,33 @@ Capabilities rather than standing as its own section.
   with *where the deliverable lands*.
 - **Core future signals** — `agent/graph/prompt/system_prompt.py:invest_in_the_future_section`,
   on by default via `settings.agent.prompt_invest_future_enabled` (env
-  `AVA_SYSTEM_PROMPT_INVEST_FUTURE`): the framework's one cross-domain
+  `MEIVA_SYSTEM_PROMPT_INVEST_FUTURE`): the framework's one cross-domain
   future-signal rule. It requires the smallest closing action for a signal that
   could improve later work and preserves worthwhile follow-ups at task close.
 - **Core reporting honesty** — `agent/graph/prompt/system_prompt.py:_outcome_reporting_section`,
   on by default via `settings.prompt_outcome_reporting_enabled` (env
-  `AVA_SYSTEM_PROMPT_REPORTING`): state outcomes as they are, don't round a partial
+  `MEIVA_SYSTEM_PROMPT_REPORTING`): state outcomes as they are, don't round a partial
   result up to success.
 - **Core action caution** — `agent/graph/prompt/system_prompt.py:_action_caution_section`,
   on by default via `settings.prompt_action_caution_enabled` (env
-  `AVA_SYSTEM_PROMPT_CAUTION`): confirm before hard-to-reverse / outward-facing actions
+  `MEIVA_SYSTEM_PROMPT_CAUTION`): confirm before hard-to-reverse / outward-facing actions
   (one approval ≠ standing license), and treat sending to an external service as
   publishing. Combines the irreversible-action and external-send-privacy gaps.
 - **Core align-before-action** — `agent/graph/prompt/system_prompt.py:align_before_action_section`,
   on by default via `settings.prompt_align_before_action_enabled` (env
-  `AVA_SYSTEM_PROMPT_ALIGN`): resolve unsettled material outcome, cost, autonomy,
+  `MEIVA_SYSTEM_PROMPT_ALIGN`): resolve unsettled material outcome, cost, autonomy,
   and authority choices; recommend concrete trade-offs and respect existing
   consent rather than reapprove settled work after exploration or planning. A
   general-agent behavior, distinct from action-caution (which gates individual
   irreversible ops, not the direction of substantial work).
-- **`ava_code` plugin sections** — both in `ava_builtins/plugins/ava_code/plugin.py`:
-  - `_coding_tools_section`: "prefer `ava.cwd`/`files`/`shell`", set cwd first,
+- **`meiva_code` plugin sections** — both in `meiva_builtins/plugins/meiva_code/plugin.py`:
+  - `_coding_tools_section`: "prefer `meiva.cwd`/`files`/`shell`", set cwd first,
     read `AGENTS.md` before reading code, then the promoted module stubs. Its
     always-on preamble also carries the coding conventions: worktree+PR flow and
     verify-before-done (run the narrow check, then widen).
   - `_engineering_workflow_section`: the reproduce-then-map-the-failure-space
-    debugging mindset, opt-in by adding `ava_code_workflow` to
-    `settings.agent.system_prompt_extra` (env `AVA_SYSTEM_PROMPT_EXTRA`).
+    debugging mindset, opt-in by adding `meiva_code_workflow` to
+    `settings.agent.system_prompt_extra` (env `MEIVA_SYSTEM_PROMPT_EXTRA`).
     Coding-specific, so it is owned by the plugin rather than the core prompt.
 - **Efficient long-running operation** — core `_long_running_operation_section`,
   always present, including without fleet. Owns lifecycle and cost principles;
@@ -195,12 +195,12 @@ Capabilities rather than standing as its own section.
   updates, commitments, receipt boundaries, and deduplicated delivery, including
   generated watchers and schedules. Independent of the human guidance toggle.
 - **Reduce context switch for the human** —
-  `ava_builtins/plugins/ava_fleet/agent_runtime.py:reduce_context_switch_section`,
+  `meiva_builtins/plugins/meiva_fleet/agent_runtime.py:reduce_context_switch_section`,
   on by default via the Fleet `reduce_context_switch` config image field
   (user ruling 2026-09-20): the human-attention default
   every fleet agent carries — essential delivery and interruption semantics.
   Detailed label, task, delegation, lifecycle, cadence and roll-up procedures
-  belong to `ava-fleet/reference/operating-contract.md`, loaded through the
+  belong to `meiva-fleet/reference/operating-contract.md`, loaded through the
   Fleet skill only when using those capabilities. Plugin-owned: a deployment that disables the fleet
   surface (no human supervision) drops it with the rest of that surface. The
   `reduce-context-switch-for-human` skill stays as the deep playbook and no longer
@@ -217,9 +217,9 @@ invoking it. General agents expose entry skills; specialist agents can supply an
 explicit `skills_to_inject_into_system_prompt` list. Root selection should follow
 the work, not alphabetical truncation:
 
-- `ava-workflow` selects methods for non-trivial work. Alignment, calibration,
+- `meiva-workflow` selects methods for non-trivial work. Alignment, calibration,
   planning and evaluation guides are discovered through it.
-- `ava-guide` routes Ava operations; engineering and research root skills route
+- `meiva-guide` routes Meiva operations; engineering and research root skills route
   their own domain practices. Their individual sub-skills do not need independent
   permanent descriptions.
 - Goal pursuit, dynamic orchestration and long-running operation are available
@@ -241,7 +241,7 @@ from representative runners, with an explicit `--start`, `--end` and
 observed-agent reach, and recommends whole modules covering at least 70% of
 eligible call volume. Top-level functions are already in the overview; skills
 and MCPs belong in the capability index. Review workload mix and missing mirrors
-before applying its suggested `AVA_SDK_EXPAND` list. Plugin-declared expansions
+before applying its suggested `MEIVA_SDK_EXPAND` list. Plugin-declared expansions
 still apply. The report never changes configuration, and an empty sample yields
 no recommendation. The shipped SDK default is `shell,files,agents,tasks`:
 these whole modules cover 95.410% of 134,744 eligible agent-attributed calls in the production
@@ -250,26 +250,26 @@ SDK records span 2026-09-26 through 2026-10-03; subsequent SDK events were not
 persisted. This is a fixed default selected from recorded evidence, not an
 adaptive per-agent percentile. `*`, explicit lists and empty overrides retain
 their meanings. Nested namespaces such as `shell.sessions` remain available
-through `ava.help` unless explicitly expanded. Existing configured overrides
+through `meiva.help` unless explicitly expanded. Existing configured overrides
 are preserved; changing the source default does not redeploy a running cluster.
 
-## Responsibility split: Ava core vs ava_code
+## Responsibility split: Meiva core vs meiva_code
 
 Rule of thumb:
 
-- **General-agent behavior → Ava core.** If any Ava agent (life helper, inbox
+- **General-agent behavior → Meiva core.** If any Meiva agent (life helper, inbox
   sweeper, a non-coding session) would also benefit, it belongs in the core
   prompt. Examples: how to narrate progress, output conciseness, when to ask vs
   act, caution around irreversible actions in general.
-- **Coding-specific behavior → `ava_code` plugin.** If it only matters when
+- **Coding-specific behavior → `meiva_code` plugin.** If it only matters when
   writing or running code, consolidate it into the plugin section so non-coding
   agents never carry it. Examples: worktree workflow, running/locating tests,
   editing discipline (don't revert the user's unrelated working-tree changes,
   prefer minimal focused diffs), reading `AGENTS.md`.
-- **Memory: Ava core, and only Ava core. `ava_code` gets no memory layer of its
+- **Memory: Meiva core, and only Meiva core. `meiva_code` gets no memory layer of its
   own — rejected, not deferred.** Memory is a cross-cutting capability owned by
   the cluster's memory plugin; it does not hang off any one vertical scenario, and
-  "coding" is not special enough to earn a private one. Giving `ava_code` its own
+  "coding" is not special enough to earn a private one. Giving `meiva_code` its own
   memory layer would be a layering error: a second memory system, shaped by one
   use case, sitting beside the general one.
 
@@ -281,17 +281,17 @@ Rule of thumb:
   start of a session is **not a defect** to be optimized away with a memory cache.
 
   So the general memory model (what to persist across sessions, user
-  profile/preferences) lives with Ava core as `memory_discipline_section`, and that
-  is the whole story. Do not re-propose a per-repo `ava_code` memory layer.
+  profile/preferences) lives with Meiva core as `memory_discipline_section`, and that
+  is the whole story. Do not re-propose a per-repo `meiva_code` memory layer.
 
-The test for any new guidance: "would a non-coding Ava agent want this?" Yes →
-core. Only-when-coding → `ava_code`.
+The test for any new guidance: "would a non-coding Meiva agent want this?" Yes →
+core. Only-when-coding → `meiva_code`.
 
 ### SDK docstring vs system prompt — where guidance lives
 
-A second axis runs orthogonal to core-vs-`ava_code`: **mechanics vs behavior.**
+A second axis runs orthogonal to core-vs-`meiva_code`: **mechanics vs behavior.**
 
-- **SDK docstrings** (`ava.*`) answer *how to use a capability* — the call
+- **SDK docstrings** (`meiva.*`) answer *how to use a capability* — the call
   signature, what it returns, how to commit a memory note, how `search` ranks.
   This is reference the agent pulls up while acting.
 - **The system prompt** answers *when / whether to do something* — a behavioral
@@ -299,10 +299,10 @@ A second axis runs orthogonal to core-vs-`ava_code`: **mechanics vs behavior.**
   user preferences across sessions" is a convention; it does not belong in a
   function docstring.
 
-So memory splits cleanly: the `ava.memory` docstrings already carry the
+So memory splits cleanly: the `meiva.memory` docstrings already carry the
 mechanics (commit-yourself, header-stamp, search→read, pull-rebase on miss), and
 `memory_discipline_section` carries only the when/what. The prompt section
-deliberately does not restate the mechanics, and defers to `ava.memory` for
+deliberately does not restate the mechanics, and defers to `meiva.memory` for
 them.
 
 ## Section ownership: framework vs plugin
@@ -314,10 +314,10 @@ using that plugin's store, task surface, or hook.
 
 | section | owner | toggle | unique content |
 |---|---|---|---|
-| `# Invest in the future` | framework | `AVA_SYSTEM_PROMPT_INVEST_FUTURE` (default on) | The ONE cross-domain future-signal rule: trigger, three closing actions, over-capture bias, and closing presentation. |
-| `# Remembering across sessions` | `ava_memory` plugin | `AVA_SYSTEM_PROMPT_MEMORY` | Durable-knowledge domain instance: dual stores, fix stale, format, and verification; no generic rule restatement. |
-| `## Reduce context switch for the human` | `ava_fleet` plugin | Fleet `reduce_context_switch` (default on) | Human-attention default: queue-never-push + emergency-only push, one notice per manager updated in place, milestone cadence, decision/progress bisection. |
-| Fleet task-interaction instance (PR2) | `ava_fleet` plugin | plugin enabled | Lands separately with task-specific interaction guidance. |
+| `# Invest in the future` | framework | `MEIVA_SYSTEM_PROMPT_INVEST_FUTURE` (default on) | The ONE cross-domain future-signal rule: trigger, three closing actions, over-capture bias, and closing presentation. |
+| `# Remembering across sessions` | `meiva_memory` plugin | `MEIVA_SYSTEM_PROMPT_MEMORY` | Durable-knowledge domain instance: dual stores, fix stale, format, and verification; no generic rule restatement. |
+| `## Reduce context switch for the human` | `meiva_fleet` plugin | Fleet `reduce_context_switch` (default on) | Human-attention default: queue-never-push + emergency-only push, one notice per manager updated in place, milestone cadence, decision/progress bisection. |
+| Fleet task-interaction instance (PR2) | `meiva_fleet` plugin | plugin enabled | Lands separately with task-specific interaction guidance. |
 
 Review every section with these questions:
 
@@ -357,10 +357,10 @@ style text is owned by the same `agent/graph/prompt/conversation.py` module.
 An explicitly selected live-pairing style can add more frequent substantive
 updates, but every message must remain self-contained and useful to the user.
 
-A lightweight conversation section lives in the **Ava core** prompt
+A lightweight conversation section lives in the **Meiva core** prompt
 (`_communication_style_section`) — it is general-agent behavior, not
 coding-specific. It is selected by an enum, `settings.agent.agent_communication_style`,
-env `AVA_AGENT_COMMUNICATION_STYLE`, one of `off` (**the default**) / `oriented` /
+env `MEIVA_AGENT_COMMUNICATION_STYLE`, one of `off` (**the default**) / `oriented` /
 `concise` / `silent`. These select subsequent narration volume; `off` omits only
 that optional section. Reply routing and the initial-response rule are always
 present alongside language and milestone rules, owned by
@@ -385,7 +385,7 @@ Deliberately **not** as prescriptive as Codex. We do **not** want:
 
 The milestone policy serves the user, without a clock-driven reporting cadence.
 Peer communication remains separate: Fleet owns directed delivery through
-`ava.agents.send_message`. `ava.agents.get_last_message` is a fallback read of
+`meiva.agents.send_message`. `meiva.agents.get_last_message` is a fallback read of
 the latest output when an agent forgets to send a peer message; it does not
 define the audience of ordinary assistant text or prove completion or freshness.
 
@@ -400,90 +400,90 @@ instructions; model adherence needs actual model runs.
 
 ## Gap inventory vs Claude Code + Codex
 
-Dimensions the upstream prompts cover that Ava's is silent on, classified.
+Dimensions the upstream prompts cover that Meiva's is silent on, classified.
 
 ### Genuine gaps worth considering (model won't reliably self-correct, AGENTS.md doesn't cover)
 
 | Dimension | Lands in | Status |
 |-----------|----------|--------|
-| Progress narration / interleaved updates | Ava core (config-selected style) | ✅ `_communication_style_section` |
-| Tone / candor toward the user (honesty over flattery, directness, no condescension) | Ava core (per-model family gradient) | ✅ `_user_tone_section` |
-| Output conciseness + final-answer shape (don't dump files, reference paths) | Ava core | ✅ `_output_conciseness_section` |
-| Verify-before-claiming-done (run the narrow test, then widen) | `ava_code` | ✅ `_coding_tools_section` preamble |
-| Editing discipline (minimal focused diffs, comment-only-when-why, don't revert working-tree changes) | — | ❌ dropped — the model already self-applies these, and Ava rarely edits a human-authored working tree; not worth prompt weight |
-| Faithful outcome reporting (say so if tests failed / a step was skipped) | Ava core | ✅ `_outcome_reporting_section` |
-| Caution before irreversible / outward-facing actions; external-send = publishing | Ava core | ✅ `_action_caution_section` (the two combined) |
-| Resolve material direction and authority choices; respect settled instructions and user working preferences | Ava core | ✅ `_align_before_action_section` |
-| Malicious-code refusal / security gating | Ava core | ⬜ open — Ava is the user's private agent, not a public product; a refusal stance could get in the way. Deferred pending a threat-model call |
+| Progress narration / interleaved updates | Meiva core (config-selected style) | ✅ `_communication_style_section` |
+| Tone / candor toward the user (honesty over flattery, directness, no condescension) | Meiva core (per-model family gradient) | ✅ `_user_tone_section` |
+| Output conciseness + final-answer shape (don't dump files, reference paths) | Meiva core | ✅ `_output_conciseness_section` |
+| Verify-before-claiming-done (run the narrow test, then widen) | `meiva_code` | ✅ `_coding_tools_section` preamble |
+| Editing discipline (minimal focused diffs, comment-only-when-why, don't revert working-tree changes) | — | ❌ dropped — the model already self-applies these, and Meiva rarely edits a human-authored working tree; not worth prompt weight |
+| Faithful outcome reporting (say so if tests failed / a step was skipped) | Meiva core | ✅ `_outcome_reporting_section` |
+| Caution before irreversible / outward-facing actions; external-send = publishing | Meiva core | ✅ `_action_caution_section` (the two combined) |
+| Resolve material direction and authority choices; respect settled instructions and user working preferences | Meiva core | ✅ `_align_before_action_section` |
+| Malicious-code refusal / security gating | Meiva core | ⬜ open — Meiva is the user's private agent, not a public product; a refusal stance could get in the way. Deferred pending a threat-model call |
 
 ### Deliberately stripped / covered elsewhere (not real gaps)
 
 - Git/PR protocol, scope discipline, doc discipline — live in `AGENTS.md`, loaded
   at runtime. Codex bakes an `AGENTS.md` *spec* (scope/precedence/nesting) into
-  its prompt; Ava could add a one-liner about nesting precedence if it proves
+  its prompt; Meiva could add a one-liner about nesting precedence if it proves
   necessary, but the bulk stays in `AGENTS.md`.
 - Long-term memory **mechanics**, skill catalog — [`philosophy.md`](../../docs/conventions/philosophy.md)
-  lists memory as a removable layer; the mechanics stay in the `ava.memory` SDK
+  lists memory as a removable layer; the mechanics stay in the `meiva.memory` SDK
   docstrings, not the framework prompt. (The memory **behavior** layer — when /
   what to remember — did land in core as `memory_discipline_section`; see the
   mechanics-vs-behavior split above.)
 
-### Capability-dependent (only if/when Ava exposes the capability)
+### Capability-dependent (only if/when Meiva exposes the capability)
 
 - Frontend "avoid AI slop" design guidance, browser automation, sub-agent/team
-  dispatch, security-refusal posture. Add to `ava_code` (or the relevant plugin)
+  dispatch, security-refusal posture. Add to `meiva_code` (or the relevant plugin)
   only when the matching capability is surfaced.
 
 ## Status / next
 
 Landed so far:
 
-- The `_engineering_workflow_section` move into `ava_code` (responsibility split).
+- The `_engineering_workflow_section` move into `meiva_code` (responsibility split).
 - The core conversation section, since generalized from an on/off progress-narration
-  toggle into a four-way communication style (`AVA_AGENT_COMMUNICATION_STYLE`:
+  toggle into a four-way communication style (`MEIVA_AGENT_COMMUNICATION_STYLE`:
   `off` (default) / `oriented` / `concise` / `silent`, with `off` omitting the section
   entirely).
-- The core user-tone section (`AVA_SYSTEM_PROMPT_USER_TONE`, default on), with a
+- The core user-tone section (`MEIVA_SYSTEM_PROMPT_USER_TONE`, default on), with a
   per-family strength gradient and the Claude family defaulting off.
-- The `ava_memory` behavior section (`AVA_SYSTEM_PROMPT_MEMORY`, default on) —
+- The `meiva_memory` behavior section (`MEIVA_SYSTEM_PROMPT_MEMORY`, default on) —
   the durable-knowledge "when / what to remember" layer.
 - The merged `# Invest in the future` section
-  (`AVA_SYSTEM_PROMPT_INVEST_FUTURE`, default on), replacing the independent
+  (`MEIVA_SYSTEM_PROMPT_INVEST_FUTURE`, default on), replacing the independent
   Beyond section; `agent_reflection_enabled` is retired.
-- The core output-shape section (`AVA_SYSTEM_PROMPT_CONCISENESS`, default on).
-- A verify-before-done convention in the `ava_code` `_coding_tools_section`
+- The core output-shape section (`MEIVA_SYSTEM_PROMPT_CONCISENESS`, default on).
+- A verify-before-done convention in the `meiva_code` `_coding_tools_section`
   preamble. (Editing-discipline guidance was considered and dropped — the model
-  self-applies it and Ava rarely edits a human working tree.)
-- Core reporting-honesty (`AVA_SYSTEM_PROMPT_REPORTING`) and action-caution
-  (`AVA_SYSTEM_PROMPT_CAUTION`, the irreversible-action + external-send-privacy gaps
+  self-applies it and Meiva rarely edits a human working tree.)
+- Core reporting-honesty (`MEIVA_SYSTEM_PROMPT_REPORTING`) and action-caution
+  (`MEIVA_SYSTEM_PROMPT_CAUTION`, the irreversible-action + external-send-privacy gaps
   combined), both default on. Kept deliberately short — this guidance is likely
   already baked into the model, so the sections are a light nudge, not a spec.
-- Core align-before-action (`AVA_SYSTEM_PROMPT_ALIGN`, default on) — confirm scope +
+- Core align-before-action (`MEIVA_SYSTEM_PROMPT_ALIGN`, default on) — confirm scope +
   approach before large / ambiguous / hard-to-redo work, especially right after
   exploring or planning; the user pins or defers the working rhythm. Distinct
   from action-caution: the direction of substantial work, not individual
   irreversible ops.
-- Expanded SDK reference (`AVA_SDK_EXPAND`, default `shell,files,agents,tasks`) —
+- Expanded SDK reference (`MEIVA_SDK_EXPAND`, default `shell,files,agents,tasks`) —
   full contracts after the overview.
 - One skill index and a mandatory step that reads it: `# Capabilities` lists
   the whole catalog (`skills_to_inject_into_system_prompt` default `*`), and
   the expanded SDK reference no longer renders a second copy. The first step of
   the delegation check
-  (`AVA_SYSTEM_PROMPT_DELEGATION_CHECK`, default on) still requires matching the
+  (`MEIVA_SYSTEM_PROMPT_DELEGATION_CHECK`, default on) still requires matching the
   task against that index and loading the covering skill before acting.
 
-- A one-sentence cross-machine delegation hint (`AVA_SYSTEM_PROMPT_CROSS_MACHINE_DELEGATION`,
+- A one-sentence cross-machine delegation hint (`MEIVA_SYSTEM_PROMPT_CROSS_MACHINE_DELEGATION`,
   default on) rendered right after the delegation check: when work spans
   machines, spawn an agent on the target machine so it can use that machine's
   resources directly. Semantic steer only — no API detail, so it cannot go
   stale. User-finalized wording, shipped verbatim.
-- A CodeAct batching section (`AVA_SYSTEM_PROMPT_CODEACT`, **on by default**):
+- A CodeAct batching section (`MEIVA_SYSTEM_PROMPT_CODEACT`, **on by default**):
   pack several operations into one `execute_code` call to save LLM API calls
   (default-on user ruling 2026-10-07, superseding the 2026-08-26 opt-in default).
 
 Closed without building:
 
-- `ava_code`-specific memory layer — **rejected.** Memory is the memory plugin's
+- `meiva_code`-specific memory layer — **rejected.** Memory is the memory plugin's
   cross-cutting capability, not something a vertical scenario layers its own copy
   of; repo facts belong in that repo's `AGENTS.md`. See the responsibility-split
   section above for the full reasoning.
@@ -491,7 +491,7 @@ Closed without building:
 Remaining:
 
 1. Malicious-code refusal / security stance — open, pending a threat-model call
-   (Ava is a private agent, not a public product).
+   (Meiva is a private agent, not a public product).
 2. (minor) Load-bearing-whitespace nudge for agent-authored text — decorative
    blank lines in the docstrings / prompts the agent writes are a model style
    prior (most pronounced in the Claude family). Evidence says it is *not* worth
@@ -504,7 +504,7 @@ Remaining:
 
 ## Ablation
 
-Every behavioral section above is a `bool` config toggle (the `AVA_SYSTEM_PROMPT_*`
+Every behavioral section above is a `bool` config toggle (the `MEIVA_SYSTEM_PROMPT_*`
 envs), default on. `bench-entrypoint.sh` turns the whole general-agent set off
 (progress, reporting, caution, conciseness, align; memory auto-suppresses via the
 SDK disable) so bench is a clean baseline with none of them — comparable to
@@ -516,14 +516,14 @@ ablation design is TBD, but the on/off surface is already in place to run it.
 
 The workspace guidance explains that `to_user.md` is continuously displayed beside messages.
 Markdown links may refer to relative, absolute or home-relative files on the agent's machine;
-Ava serves those references without a publication step. Legacy HTML context must be
+Meiva serves those references without a publication step. Legacy HTML context must be
 rewritten into Markdown, and raw HTML is not rendered.
 It imposes no document schema. The agent-ID context note includes the current file
 contents when a context is created or compacted; forks read their own workspace.
 Invalid or unreadable documents produce a repair note rather than preventing the
 agent from starting. The workspace-section switch gates both guidance and loading.
 
-A soft limit nudges maintenance without a schema: the `ava_to_user` plugin's after-exec
+A soft limit nudges maintenance without a schema: the `meiva_to_user` plugin's after-exec
 check measures a written panel in CJK-aware words (one per CJK character, one per
 Latin/digit run) against `to_user_soft_limit_words` (1500 by default) and adds one
 reminder note when it is over — throttled by `to_user_limit_reminder_cadence`

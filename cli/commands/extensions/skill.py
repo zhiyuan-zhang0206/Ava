@@ -1,6 +1,6 @@
-"""`ava skill` subcommands — install into, and toggle entries in, the skills load dir.
+"""`meiva skill` subcommands — install into, and toggle entries in, the skills load dir.
 
-installed (the dir exists under `$AVA_HOME/skills/`) and enabled (the skill
+installed (the dir exists under `$MEIVA_HOME/skills/`) and enabled (the skill
 scanner loads it) are orthogonal: the scanner loads only directories the
 install registry tracks as enabled, so a hand-copied dir is invisible until
 registered and a disabled one stays on disk but out of every agent's tree.
@@ -9,7 +9,7 @@ registered and a disabled one stays on disk but out of every agent's tree.
   URL or a local directory (layout detection in `skill_package.py`).
 - `enable <name>` / `disable <name>` — flip the registry toggle (any tracked
   package: converged repo/plugin skills, user installs, plugin namespaces).
-- `register <name>`  — start tracking a dir already under `$AVA_HOME/skills/`
+- `register <name>`  — start tracking a dir already under `$MEIVA_HOME/skills/`
   as a user package (origin="user", so converge never touches it).
 - `scan <name-or-path>` — re-run the supply-chain scan and print the report.
 - `trust <name>`     — record that a human read this package (tier "reviewed").
@@ -20,7 +20,7 @@ install outright and `--accept-risk` is the recorded override. Nothing here
 promotes a package's trust tier on its own — a clean scan means "no rule
 matched", which is why `trust` is a separate verb a person runs.
 
-Removing a package is `ava plugins uninstall`; `ava plugins install` is the
+Removing a package is `meiva plugins uninstall`; `meiva plugins install` is the
 sibling entry point for a Claude Code *plugin* bundle (agents / commands /
 `.mcp.json`, of which skills are one part). The converge that populates the
 load dir from repo + plugin sources is `cli/commands/extensions/skills_sync.py`.
@@ -37,7 +37,7 @@ from base.agents.context.clients import DatabaseFactory
 from base.cluster.machine import MachineIdentity
 from base.config import ConfigBoot
 from base.packages.extensions import install_registry as reg
-from base.paths import ava_home
+from base.paths import meiva_home
 from cli.commands.extensions.skills_sync import Source
 
 _REFUSAL_ADVICE = (
@@ -59,9 +59,9 @@ def cmd_skill_install(
     database_factory: DatabaseFactory,
     machine: MachineIdentity,
 ) -> int:
-    """`ava skill install <git-url-or-local-path> [--ref REF] [--path SUBDIR]
+    """`meiva skill install <git-url-or-local-path> [--ref REF] [--path SUBDIR]
     [--accept-risk] [--update-mode auto|notify|off] [--check-every DUR]` —
-    install Agent Skills standard skill package(s) into `$AVA_HOME/skills/`.
+    install Agent Skills standard skill package(s) into `$MEIVA_HOME/skills/`.
 
     The source is used as published: a bare skill folder, a repo of skills under
     `skills/` or `.claude/skills/`, or a pile of skill folders all install
@@ -79,18 +79,18 @@ def cmd_skill_install(
     try:
         interval = parse_duration(check_every) if check_every else None
     except ValueError as exc:
-        print(f"[ava skill install] {exc}", file=sys.stderr)
+        print(f"[meiva skill install] {exc}", file=sys.stderr)
         return 1
     try:
         acquired = acquire_source(source, ref)
     except (subprocess.CalledProcessError, SourcePathNotFoundError) as e:
         detail = e.stderr.strip() if isinstance(e, subprocess.CalledProcessError) else str(e)
-        print(f"[ava skill install] {detail}", file=sys.stderr)
+        print(f"[meiva skill install] {detail}", file=sys.stderr)
         return 1
     try:
         root = acquired.root / path if path else acquired.root
         if not root.is_dir():
-            print(f"[ava skill install] path '{path}' not found in source.", file=sys.stderr)
+            print(f"[meiva skill install] path '{path}' not found in source.", file=sys.stderr)
             return 1
         from cli.commands.extensions._manifest_gate import gate_refuses
 
@@ -111,17 +111,17 @@ def cmd_skill_install(
                 machine=machine,
             )
         except SkillScanRefused as e:
-            print("[ava skill install] security scan found critical patterns:", file=sys.stderr)
+            print("[meiva skill install] security scan found critical patterns:", file=sys.stderr)
             print(e.report, file=sys.stderr)
             print(_REFUSAL_ADVICE, file=sys.stderr)
             return 1
         except SkillPackageError as e:
-            print(f"[ava skill install] {e}", file=sys.stderr)
+            print(f"[meiva skill install] {e}", file=sys.stderr)
             return 1
         for pkg, (dest, report) in zip(packages, results, strict=True):
-            print(f"[ava skill install] installed skill '{pkg.name}' -> {dest}")
+            print(f"[meiva skill install] installed skill '{pkg.name}' -> {dest}")
             print(report)
-        print("  trust=unreviewed — `ava skill trust <name>` once a person has read it.")
+        print("  trust=unreviewed — `meiva skill trust <name>` once a person has read it.")
         print("  active on the next skill scan; no restart needed.")
         return 0
     finally:
@@ -129,10 +129,10 @@ def cmd_skill_install(
 
 
 def cmd_skill_scan(target: str) -> int:
-    """`ava skill scan <name-or-path>` — print the supply-chain scan report for
+    """`meiva skill scan <name-or-path>` — print the supply-chain scan report for
     an installed package or any directory on disk.
 
-    The read-it-before-you-trust-it companion to `ava skill trust`, and the way
+    The read-it-before-you-trust-it companion to `meiva skill trust`, and the way
     to re-scan an installed package after the rule table grows. Exit code 2 on
     critical findings, so a caller can gate on it; 0 when only notices remain.
     """
@@ -142,17 +142,17 @@ def cmd_skill_scan(target: str) -> int:
 
     root = Path(target).expanduser()
     if not root.is_dir():
-        root = paths.skills_dir(paths.ava_home()) / target
+        root = paths.skills_dir(paths.meiva_home()) / target
     if not root.is_dir():
         print(
-            f"[ava skill scan] no directory at '{target}' nor {paths.skills_dir(paths.ava_home()) / target}.",
+            f"[meiva skill scan] no directory at '{target}' nor {paths.skills_dir(paths.meiva_home()) / target}.",
             file=sys.stderr,
         )
         return 1
     findings = scan.scan_package(root)
     entry = install_registry.get(root.name)
     tier = entry.trust if entry is not None else "untracked"
-    print(f"[ava skill scan] {root} (trust={tier})")
+    print(f"[meiva skill scan] {root} (trust={tier})")
     print(scan.render(findings, package=root.name))
     if entry is not None and entry.accepted_findings:
         print(f"  previously accepted: {', '.join(entry.accepted_findings)}")
@@ -160,25 +160,25 @@ def cmd_skill_scan(target: str) -> int:
 
 
 def cmd_skill_trust(name: str, *, revoke: bool = False) -> int:
-    """`ava skill trust <name> [--revoke]` — record that a human read this
+    """`meiva skill trust <name> [--revoke]` — record that a human read this
     package's content and vouches for it (tier "reviewed"), or take that back.
 
     Deliberately not something an install can do for you: "reviewed" is the one
     tier that asserts a person looked, and it is what the recall layer consults
     before pulling a skill's text into an agent's context unprompted. Read the
-    package (`ava skill scan <name>` shows what the scanner saw) first.
+    package (`meiva skill scan <name>` shows what the scanner saw) first.
     """
     from base.packages.extensions import install_registry
 
     entry = install_registry.get(name)
     if entry is None:
         print(
-            f"[ava skill trust] '{name}' is not tracked in the install registry.", file=sys.stderr
+            f"[meiva skill trust] '{name}' is not tracked in the install registry.", file=sys.stderr
         )
         return 1
     if entry.trust == "builtin":
         print(
-            f"[ava skill trust] '{name}' is builtin (converge-managed from this checkout); "
+            f"[meiva skill trust] '{name}' is builtin (converge-managed from this checkout); "
             "its trust tier is not yours to set.",
             file=sys.stderr,
         )
@@ -186,17 +186,17 @@ def cmd_skill_trust(name: str, *, revoke: bool = False) -> int:
     entry.trust = "unreviewed" if revoke else "reviewed"
     entry.updated_at = datetime.now(UTC).isoformat(timespec="seconds")
     install_registry.register(entry)
-    print(f"[ava skill trust] {name} -> trust={entry.trust}.")
+    print(f"[meiva skill trust] {name} -> trust={entry.trust}.")
     return 0
 
 
 def cmd_skill_enable(name: str) -> int:
-    """`ava skill enable <name>` — surface a tracked package to the skill scanner."""
+    """`meiva skill enable <name>` — surface a tracked package to the skill scanner."""
     return _set_enabled(name, enabled=True)
 
 
 def cmd_skill_disable(name: str) -> int:
-    """`ava skill disable <name>` — hide a tracked package (stays on disk)."""
+    """`meiva skill disable <name>` — hide a tracked package (stays on disk)."""
     return _set_enabled(name, enabled=False)
 
 
@@ -214,26 +214,26 @@ def _set_enabled(name: str, *, enabled: bool) -> int:
         if entry is None:
             known = ", ".join(sorted(p.name for p in registry.packages)) or "(none)"
             print(
-                f"[ava skill {verb}] '{name}' is not tracked (known: {known}). "
-                f"An untracked dir under the skills dir needs `ava skill register {name}` first.",
+                f"[meiva skill {verb}] '{name}' is not tracked (known: {known}). "
+                f"An untracked dir under the skills dir needs `meiva skill register {name}` first.",
                 file=sys.stderr,
             )
             return 1
         entry.enabled = enabled
-    print(f"[ava skill {verb}] {name} {verb}d.")
+    print(f"[meiva skill {verb}] {name} {verb}d.")
     print("  takes effect on the next skill scan; no restart needed.")
     return 0
 
 
 def cmd_skill_register(name: str, *, accept_risk: bool = False) -> int:
-    """`ava skill register <name> [--accept-risk]` — track
-    `$AVA_HOME/skills/<name>/` as a user package so the scanner loads it. The
+    """`meiva skill register <name> [--accept-risk]` — track
+    `$MEIVA_HOME/skills/<name>/` as a user package so the scanner loads it. The
     dir must already exist and every SKILL.md inside must parse (fail here, not
     in every agent's scan).
 
     A hand-copied dir is third-party content that never passed the install gate,
-    so it is scanned here — otherwise `cp -r && ava skill register` would be the
-    way around every check `ava skill install` makes.
+    so it is scanned here — otherwise `cp -r && meiva skill register` would be the
+    way around every check `meiva skill install` makes.
     """
     from base import paths
     from base.packages.extensions import install_registry
@@ -246,7 +246,7 @@ def cmd_skill_register(name: str, *, accept_risk: bool = False) -> int:
     # `name` is both a registry key and a path segment, so it has to become the
     # directory's REAL spelling before either use: the caller may type the
     # canonical dash form at a directory that is still `foo_bar/` on disk.
-    skills_root = paths.skills_dir(paths.ava_home())
+    skills_root = paths.skills_dir(paths.meiva_home())
     on_disk = (
         find(name, (p.name for p in skills_root.iterdir() if p.is_dir()))
         if skills_root.is_dir()
@@ -254,30 +254,30 @@ def cmd_skill_register(name: str, *, accept_risk: bool = False) -> int:
     )
     d = skills_root / (on_disk or name)
     if not d.is_dir():
-        print(f"[ava skill register] no dir at {d}.", file=sys.stderr)
+        print(f"[meiva skill register] no dir at {d}.", file=sys.stderr)
         return 1
     name = d.name
     if install_registry.get(name) is not None:
         print(
-            f"[ava skill register] '{name}' is already tracked; "
-            f"`ava skill enable {name}` if it is disabled.",
+            f"[meiva skill register] '{name}' is already tracked; "
+            f"`meiva skill enable {name}` if it is disabled.",
             file=sys.stderr,
         )
         return 1
     skill_mds = sorted(d.rglob("SKILL.md"))
     if not skill_mds:
-        print(f"[ava skill register] no SKILL.md anywhere under {d}.", file=sys.stderr)
+        print(f"[meiva skill register] no SKILL.md anywhere under {d}.", file=sys.stderr)
         return 1
     for skill_md in skill_mds:
         try:
             _parse_frontmatter(skill_md.read_text(encoding="utf-8"))
         except SkillFormatError as e:
-            print(f"[ava skill register] bad {skill_md}: {e}", file=sys.stderr)
+            print(f"[meiva skill register] bad {skill_md}: {e}", file=sys.stderr)
             return 1
     try:
         report, accepted = scan_report(d, name, accept_risk=accept_risk)
     except SkillScanRefused as e:
-        print("[ava skill register] security scan found critical patterns:", file=sys.stderr)
+        print("[meiva skill register] security scan found critical patterns:", file=sys.stderr)
         print(e.report, file=sys.stderr)
         print(_REFUSAL_ADVICE.replace("install", "register"), file=sys.stderr)
         return 1
@@ -293,7 +293,7 @@ def cmd_skill_register(name: str, *, accept_risk: bool = False) -> int:
             accepted_findings=accepted,
         )
     )
-    print(f"[ava skill register] '{name}' registered (origin=user, trust=unreviewed).")
+    print(f"[meiva skill register] '{name}' registered (origin=user, trust=unreviewed).")
     print(report)
     print("  active on the next skill scan; no restart needed.")
     return 0
@@ -304,11 +304,11 @@ def cmd_skill_register(name: str, *, accept_risk: bool = False) -> int:
 
 def _repo_native_sources(repo: Path | None = None) -> list[Source]:
     """The repo-native skill sources of the running checkout (builtin skills
-    from `ava_builtins/skills/` and builtin-plugin skills) — the set `ava
+    from `meiva_builtins/skills/` and builtin-plugin skills) — the set `meiva
     skill update` syncs. `.agents/skills/` project skills are excluded (they
     reach agents through the project-local mount, not the load dir; issue
     #146). Installed-plugin skills are excluded too (they update via
-    `ava plugins upgrade`)."""
+    `meiva plugins upgrade`)."""
     from cli.commands._repo import repo_root
     from cli.commands.extensions.skills_sync import iter_sources
 
@@ -457,7 +457,7 @@ def _update_one(
         policy = reg.resolved_policy(entry, defaults_reader=lambda: config.view.packages)
         if policy.channel == "core" and policy.mode != "off":
             # Channel-managed (design §5.7-1; tasks #2915/#3267): the content
-            # channel (`ava packages refresh`) owns this package's revision —
+            # channel (`meiva packages refresh`) owns this package's revision —
             # applying the checkout's copy here could downgrade a revision the
             # channel already applied. An explicit `mode=off` keeps this path.
             skipped.append(s.name)
@@ -465,7 +465,7 @@ def _update_one(
 
     if entry is not None and entry.origin == "user":
         if entry.source and entry.source.startswith(
-            (".agents/skills/", ".claude/skills/", ".ava/skills/")
+            (".agents/skills/", ".claude/skills/", ".meiva/skills/")
         ):
             _adopt_user_residue(
                 s,
@@ -484,7 +484,7 @@ def _update_one(
             return
         # A genuinely third-party or hand-registered package: converge shadows
         # it, and so does update.
-        print(f"[ava skill update] '{s.name}' is a user-installed package; not updated.")
+        print(f"[meiva skill update] '{s.name}' is a user-installed package; not updated.")
         return
 
     if not dest.exists():
@@ -498,8 +498,8 @@ def _update_one(
             unchanged.append(s.name)
         else:
             print(
-                f"[ava skill update] '{s.name}': untracked dir {dest} shadows the repo "
-                f"source (content differs); not updated (`ava skill register {s.name}` "
+                f"[meiva skill update] '{s.name}': untracked dir {dest} shadows the repo "
+                f"source (content differs); not updated (`meiva skill register {s.name}` "
                 f"to keep yours).",
                 file=sys.stderr,
             )
@@ -529,9 +529,9 @@ def _selected_sources(repo: Path, names: list[str] | None) -> list[Source]:
         missing = wanted - {s.name for s in sources}
         for m in sorted(missing):
             print(
-                f"[ava skill update] '{m}' is not a repo-native skill of this checkout "
+                f"[meiva skill update] '{m}' is not a repo-native skill of this checkout "
                 f"(repo/plugin builtins are; a user install would be "
-                f"`ava skill upgrade {m}`).",
+                f"`meiva skill upgrade {m}`).",
                 file=sys.stderr,
             )
     return sources
@@ -548,17 +548,17 @@ def _report_update(
 ) -> int:
     if skipped:
         print(
-            f"[ava skill update] {len(skipped)} channel-managed package(s) skipped — "
-            "`ava packages refresh` owns their updates (see `ava packages status`)."
+            f"[meiva skill update] {len(skipped)} channel-managed package(s) skipped — "
+            "`meiva packages refresh` owns their updates (see `meiva packages status`)."
         )
     for name in landed:
-        print(f"[ava skill update] landed '{name}' -> {skills_root / name}")
+        print(f"[meiva skill update] landed '{name}' -> {skills_root / name}")
     for name in updated:
-        print(f"[ava skill update] updated '{name}'")
+        print(f"[meiva skill update] updated '{name}'")
     for name in unchanged:
-        print(f"[ava skill update] '{name}' up to date")
+        print(f"[meiva skill update] '{name}' up to date")
     for note in replaced:
-        print(f"[ava skill update] note: {note}")
+        print(f"[meiva skill update] note: {note}")
     print("  active on the next skill scan; no restart needed.")
     return 0
 
@@ -566,7 +566,7 @@ def _report_update(
 def cmd_skill_update(
     names: list[str] | None, *, config: ConfigBoot, repo: Path | None = None
 ) -> int:
-    """`ava skill update [name ...]` — bring repo-native skills (from this
+    """`meiva skill update [name ...]` — bring repo-native skills (from this
     checkout) into the load dir.
 
     The explicit update for repo-native skills (R5 ruling: converge only lands
@@ -594,13 +594,13 @@ def cmd_skill_update(
 
     repo = repo or repo_root()
     try:
-        assert_repo_source_bound(repo, ava_home())
+        assert_repo_source_bound(repo, meiva_home())
     except RuntimeError as e:
-        print(f"[ava skill update] {e}", file=sys.stderr)
+        print(f"[meiva skill update] {e}", file=sys.stderr)
         return 1
 
     sources = _selected_sources(repo, names)
-    skills_root = paths.skills_dir(paths.ava_home())
+    skills_root = paths.skills_dir(paths.meiva_home())
     skills_root.mkdir(parents=True, exist_ok=True)
     now = datetime.now(UTC).isoformat(timespec="seconds")
     landed: list[str] = []
@@ -633,7 +633,7 @@ def cmd_skill_update(
 
 
 def cmd_skill_upgrade(name: str) -> int:
-    """`ava skill upgrade <name>` — re-fetch an installed skill package
+    """`meiva skill upgrade <name>` — re-fetch an installed skill package
     from its recorded git source (a private skills repo and other user
     installs).
 
@@ -651,23 +651,23 @@ def cmd_skill_upgrade(name: str) -> int:
     pkg = install_registry.get(name)
     if pkg is None or pkg.type != "skill":
         print(
-            f"[ava skill upgrade] '{name}' is not an installed skill package "
-            f"(a repo-native skill updates via `ava skill update {name}`).",
+            f"[meiva skill upgrade] '{name}' is not an installed skill package "
+            f"(a repo-native skill updates via `meiva skill update {name}`).",
             file=sys.stderr,
         )
         return 1
     if pkg.source is None:
         print(
-            f"[ava skill upgrade] '{name}' has no recorded source "
+            f"[meiva skill upgrade] '{name}' has no recorded source "
             f"(a hand-registered local skill is not updatable by design).",
             file=sys.stderr,
         )
         return 1
 
-    dest = paths.skills_dir(paths.ava_home()) / name
+    dest = paths.skills_dir(paths.meiva_home()) / name
     if dest.exists() and install_registry.copy_changed(dest, pkg.installed_hash):
         print(
-            f"[ava skill upgrade] note: '{name}' was modified locally; "
+            f"[meiva skill upgrade] note: '{name}' was modified locally; "
             "replacing it with the fetched source."
         )
 
@@ -675,13 +675,13 @@ def cmd_skill_upgrade(name: str) -> int:
         acquired = acquire_source(pkg.source, pkg.ref)
     except (subprocess.CalledProcessError, SourcePathNotFoundError) as e:
         detail = e.stderr.strip() if isinstance(e, subprocess.CalledProcessError) else str(e)
-        print(f"[ava skill upgrade] {detail}", file=sys.stderr)
+        print(f"[meiva skill upgrade] {detail}", file=sys.stderr)
         return 1
     try:
         pkg_dir = acquired.root / pkg.path if pkg.path else acquired.root
         if not (pkg_dir / "SKILL.md").is_file():
             print(
-                "[ava skill upgrade] source no longer has SKILL.md at the package root; aborting.",
+                "[meiva skill upgrade] source no longer has SKILL.md at the package root; aborting.",
                 file=sys.stderr,
             )
             return 1
@@ -703,7 +703,7 @@ def cmd_skill_upgrade(name: str) -> int:
         pkg.updated_at = datetime.now(UTC).isoformat(timespec="seconds")
         pkg.installed_hash = install_registry.tree_hash(dest)
         install_registry.register(pkg)
-        print(f"[ava skill upgrade] re-fetched '{name}' from {pkg.source}.")
+        print(f"[meiva skill upgrade] re-fetched '{name}' from {pkg.source}.")
         print("  active on the next skill scan; no restart needed.")
         return 0
     finally:

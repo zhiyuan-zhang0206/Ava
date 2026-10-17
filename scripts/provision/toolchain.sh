@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# uv — the package manager every Ava unit and the verification image use. Installed
+# uv — the package manager every Meiva unit and the verification image use. Installed
 # from a pinned GitHub release asset (fixed version + sha256, single source
 # with base/host/brew_pin.py) instead of the astral installer's rolling latest,
 # so a fresh box gets the same operator-approved version CI and brew-pinned

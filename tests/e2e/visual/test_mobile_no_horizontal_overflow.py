@@ -20,7 +20,7 @@ Assertions are layout invariants (no page-level horizontal scroll; the
 timeline surface never wider than its parent section), so they hold on any
 data state — empty timeline, real conversations, empty or full kanban.
 
-Target environment: `AVA_MOBILE_TEST_BASE_URL` (deployed bundle, the reliable
+Target environment: `MEIVA_MOBILE_TEST_BASE_URL` (deployed bundle, the reliable
 mode) or the session-scoped `frontend_proc` build — same convention as
 test_spawn_button_mobile.py.
 """
@@ -33,7 +33,7 @@ from collections.abc import Iterator
 import pytest
 from playwright.sync_api import Browser, BrowserContext, Page
 
-_OVERRIDE_BASE_URL = os.environ.get("AVA_MOBILE_TEST_BASE_URL")
+_OVERRIDE_BASE_URL = os.environ.get("MEIVA_MOBILE_TEST_BASE_URL")
 
 _IPHONE_14_UA = (
     "Mozilla/5.0 (iPhone; CPU iPhone OS 16_0 like Mac OS X) "
@@ -58,13 +58,13 @@ def mobile_chromium_context(playwright_browser: Browser) -> Iterator[BrowserCont
     # stack has no backend behind the frontend build (the specs stub `/api/*`,
     # `/api/auth/check` included); when targeting a real deployment, inject a
     # valid session via
-    # `AVA_TEST_SESSION_COOKIE="ava_session=<token>"`.
-    if _OVERRIDE_BASE_URL and os.environ.get("AVA_TEST_SESSION_COOKIE"):
+    # `MEIVA_TEST_SESSION_COOKIE="meiva_session=<token>"`.
+    if _OVERRIDE_BASE_URL and os.environ.get("MEIVA_TEST_SESSION_COOKIE"):
         ctx.add_cookies(
             [
                 {
-                    "name": "ava_session",
-                    "value": os.environ["AVA_TEST_SESSION_COOKIE"].split("=", 1)[-1],
+                    "name": "meiva_session",
+                    "value": os.environ["MEIVA_TEST_SESSION_COOKIE"].split("=", 1)[-1],
                     "domain": _OVERRIDE_BASE_URL.split("//", 1)[-1].split(":", 1)[0],
                     "path": "/",
                 }
@@ -112,7 +112,7 @@ def _no_page_scroll(page: Page) -> bool:
 
 @pytest.mark.skipif(
     not _OVERRIDE_BASE_URL,
-    reason="same as above — set AVA_MOBILE_TEST_BASE_URL",
+    reason="same as above — set MEIVA_MOBILE_TEST_BASE_URL",
 )
 def test_mobile_fleet_no_page_scroll(
     mobile_chromium_context: BrowserContext,

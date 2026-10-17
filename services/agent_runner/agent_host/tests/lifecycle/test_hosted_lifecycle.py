@@ -17,7 +17,7 @@ from agent.ownership.hosted import (
 )
 from agent.ownership.tests.test_lifecycle_intent import insert_lifecycle_command
 from agent.tests.claim.test_inbound_ownership import admit_owner, agent_row
-from base.agents.context import AvaContext
+from base.agents.context import MeivaContext
 from base.config import settings
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
@@ -129,7 +129,7 @@ async def test_hosted_applies_only_after_continuation_returns(
             host._invoke_until_done(
                 agent_id,
                 replace(
-                    AvaContext(
+                    MeivaContext(
                         ops_pool=aops_pool,
                         agent=AgentSlices.resolve(
                             default_reader=configured_policy().default_reader
@@ -236,7 +236,7 @@ async def test_hosted_terminate_crash_has_no_applied_unobserved_gap(
                 await host._invoke_until_done(
                     agent_id,
                     replace(
-                        AvaContext(
+                        MeivaContext(
                             ops_pool=aops_pool,
                             agent=AgentSlices.resolve(
                                 default_reader=configured_policy().default_reader
@@ -264,7 +264,7 @@ async def test_hosted_terminate_crash_has_no_applied_unobserved_gap(
             assert await host._invoke_until_done(
                 agent_id,
                 replace(
-                    AvaContext(
+                    MeivaContext(
                         ops_pool=aops_pool,
                         agent=AgentSlices.resolve(
                             default_reader=configured_policy().default_reader
@@ -377,7 +377,7 @@ async def _run_terminating_turn(
         host._runtimes[agent_id] = Mock()
         assert await host._invoke_until_done(
             agent_id,
-            AvaContext(
+            MeivaContext(
                 original_incarnation=incarnation,
                 hosted_resources=resources,
                 ops_pool=aops_pool,

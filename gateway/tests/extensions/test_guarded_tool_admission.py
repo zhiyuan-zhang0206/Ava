@@ -22,7 +22,7 @@ def test_older_server_rejects_guarded_tool_before_creating_anything(
 
     def older_manager(*args: object, local_machine: MachineIdentity, **kwargs: object) -> Any:
         del local_machine
-        server = MCPServer("older-ava")
+        server = MCPServer("older-meiva")
 
         @server.tool()
         async def spawn_agent(prompt: str) -> dict[str, object]:

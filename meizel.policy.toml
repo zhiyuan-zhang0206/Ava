@@ -3,23 +3,23 @@
 "agent/graph/tests/test_agent_traceback.py" = "executes agent-style code to check how its traceback is rendered"
 "agent/tests/plugins/test_register_namespace.py" = "imports SDK namespaces that plugins install at run time; they have no module file"
 "gateway/tests/lifecycle/sdk/test_external_integration_agent.py" = "loads a built-in skill script by path to test it; skill content is discovered, core does not depend on it"
-"ava/agents/tests/test_adversarial_eval_schedule.py" = "imports a built-in schedule template from schedules/ to test it; schedule scripts are run content, core does not depend on them"
-"ava/shell/coding_tools/tests/test_claude_canonical_owner.py" = "loads a built-in skill script by path to test it; skill content is discovered, core does not depend on it"
-"ava/shell/coding_tools/tests/test_codex_canonical_owner.py" = "loads a built-in skill script by path to test it; skill content is discovered, core does not depend on it"
-"ava/tests/namespaces/sdk_surface/test_help_renderer.py" = "executes generated module source to render help for it"
-"ava/tests/test_self_evolution_evaluate.py" = "loads a built-in skill script by path to test it; skill content is discovered, core does not depend on it"
-"ava_builtins/plugins/ava_fleet/tests/child_launched_boot.py" = "resolves the plugin namespaces (ava.tasks, ava.memory) the SDK installs at run time; they have no module file to import statically"
-"ava_builtins/plugins/ava_syntax_fix/_deterministic_fixes.py" = "the syntax repairer's oracle: compiles agent-authored code"
-"ava_builtins/plugins/ava_syntax_fix/_llm_repair.py" = "the syntax repairer's oracle: compiles agent-authored code"
-"ava_builtins/plugins/ava_syntax_fix/agent_runtime.py" = "the syntax repairer's oracle: compiles agent-authored code"
-"ava_builtins/plugins/ava_syntax_fix/tests/legacy_fixers_support.py" = "checks the syntax repairer's output with the same compile the agent code goes through"
-"ava_builtins/plugins/ava_syntax_fix/tests/syntax_fix/test_fix_invalid_escapes.py" = "checks the syntax repairer's output with the same compile the agent code goes through"
-"ava_builtins/plugins/ava_syntax_fix/tests/syntax_fix/test_fix_nested_triple_quote.py" = "checks the syntax repairer's output with the same compile the agent code goes through"
-"ava_builtins/plugins/ava_syntax_fix/tests/test_syntax_fix.py" = "checks the syntax repairer's output with the same compile the agent code goes through"
-"ava_builtins/plugins/ava_syntax_fix/tests/test_syntax_fix_part2.py" = "checks the syntax repairer's output with the same compile the agent code goes through"
-"ava_builtins/tests/test_watcher_wake_delivery.py" = "executes skill reference scripts up to a marker assignment"
+"meiva/agents/tests/test_adversarial_eval_schedule.py" = "imports a built-in schedule template from schedules/ to test it; schedule scripts are run content, core does not depend on them"
+"meiva/shell/coding_tools/tests/test_claude_canonical_owner.py" = "loads a built-in skill script by path to test it; skill content is discovered, core does not depend on it"
+"meiva/shell/coding_tools/tests/test_codex_canonical_owner.py" = "loads a built-in skill script by path to test it; skill content is discovered, core does not depend on it"
+"meiva/tests/namespaces/sdk_surface/test_help_renderer.py" = "executes generated module source to render help for it"
+"meiva/tests/test_self_evolution_evaluate.py" = "loads a built-in skill script by path to test it; skill content is discovered, core does not depend on it"
+"meiva_builtins/plugins/meiva_fleet/tests/child_launched_boot.py" = "resolves the plugin namespaces (meiva.tasks, meiva.memory) the SDK installs at run time; they have no module file to import statically"
+"meiva_builtins/plugins/meiva_syntax_fix/_deterministic_fixes.py" = "the syntax repairer's oracle: compiles agent-authored code"
+"meiva_builtins/plugins/meiva_syntax_fix/_llm_repair.py" = "the syntax repairer's oracle: compiles agent-authored code"
+"meiva_builtins/plugins/meiva_syntax_fix/agent_runtime.py" = "the syntax repairer's oracle: compiles agent-authored code"
+"meiva_builtins/plugins/meiva_syntax_fix/tests/legacy_fixers_support.py" = "checks the syntax repairer's output with the same compile the agent code goes through"
+"meiva_builtins/plugins/meiva_syntax_fix/tests/syntax_fix/test_fix_invalid_escapes.py" = "checks the syntax repairer's output with the same compile the agent code goes through"
+"meiva_builtins/plugins/meiva_syntax_fix/tests/syntax_fix/test_fix_nested_triple_quote.py" = "checks the syntax repairer's output with the same compile the agent code goes through"
+"meiva_builtins/plugins/meiva_syntax_fix/tests/test_syntax_fix.py" = "checks the syntax repairer's output with the same compile the agent code goes through"
+"meiva_builtins/plugins/meiva_syntax_fix/tests/test_syntax_fix_part2.py" = "checks the syntax repairer's output with the same compile the agent code goes through"
+"meiva_builtins/tests/test_watcher_wake_delivery.py" = "executes skill reference scripts up to a marker assignment"
 "base/agents/sdk/tests/test_sdk_telemetry.py" = "wraps builtins.__import__ so one import raises"
-"base/lm/factory.py" = "imports the module named by AVA_LLM_OVERRIDE"
+"base/lm/factory.py" = "imports the module named by MEIVA_LLM_OVERRIDE"
 "base/packages/dashboard_supply.py" = "loads discovered plugins, built-in or user-installed; core does not depend on them"
 "base/packages/plugin_providers.py" = "loads discovered plugins, built-in or user-installed; core does not depend on them"
 "base/packages/plugins/config_face.py" = "loads discovered plugins, built-in or user-installed; core does not depend on them"
@@ -35,26 +35,26 @@
 "scripts/audit/module_moves.py" = "imports the old and new module names the operator passes on the command line"
 "scripts/ci/tests/test_watch_pr.py" = "executes the watcher template the workflow embeds"
 "scripts/host_ops/update_schedule_script.py" = "compiles a user-written schedule script before replacing the stored copy"
-"services/supervision/ava_root/probes.py" = "resolves the healthcheck module an operator-installed plugin names"
-"services/supervision/ava_root/wiring.py" = "resolves the --wiring module:attr the operator passes to the daemon"
-"services/supervision/ava_root_glue/tests/test_plugin_services.py" = "imports the plugin module the test writes under tmp_path"
+"services/supervision/meiva_root/probes.py" = "resolves the healthcheck module an operator-installed plugin names"
+"services/supervision/meiva_root/wiring.py" = "resolves the --wiring module:attr the operator passes to the daemon"
+"services/supervision/meiva_root_glue/tests/test_plugin_services.py" = "imports the plugin module the test writes under tmp_path"
 "services/supervision/roster/plugin_services.py" = "loads discovered plugins, built-in or user-installed; core does not depend on them"
-"services/wake/schedule_manager/engine.py" = "runs schedule scripts (the one materialized from the database under $AVA_HOME/schedules, and the built-in templates in schedules/); run content, not a dependency"
+"services/wake/schedule_manager/engine.py" = "runs schedule scripts (the one materialized from the database under $MEIVA_HOME/schedules, and the built-in templates in schedules/); run content, not a dependency"
 "tests/ci/test_structure_codegen.py" = "executes the selector script embedded in the CI workflow"
 "tests/e2e/fakes/child_budget_writer.py" = "executes the generated scenario program passed on its command line"
 
 [loads]
-"ava/impersonation/attachment.py" = ["agent/extensions"]
-"ava_builtins/skills/coordination/ava-being-a-long-running-agent/tests/test_agent_usage.py" = ["ava_builtins/skills"]
-"ava_builtins/skills/coordination/ava-dynamic-workflow/tests/test_minimal_dispatch.py" = ["ava_builtins/skills"]
-"ava_builtins/skills/platform/ava-guide/external-agents/tests/test_coding_session_resume.py" = ["ava_builtins/skills/platform/ava-guide/external-agents"]
-"ava_builtins/skills/platform/ava-guide/external-agents/tests/test_impersonation_launch.py" = ["ava_builtins/skills"]
-"ava_builtins/skills/tests/skill_script.py" = ["ava_builtins/skills"]
-"ava_builtins/skills/tests/test_rss_feed.py" = ["ava_builtins/skills"]
-"ava_builtins/skills/tests/test_sms.py" = ["ava_builtins/skills"]
-"ava_builtins/skills/tests/test_telegram_send_file.py" = ["ava_builtins/skills"]
-"ava_builtins/skills/tests/test_youtube_feed.py" = ["ava_builtins/skills"]
-"ava_builtins/tests/test_watcher_wake_delivery.py" = ["ava_builtins/skills"]
+"meiva/impersonation/attachment.py" = ["agent/extensions"]
+"meiva_builtins/skills/coordination/meiva-being-a-long-running-agent/tests/test_agent_usage.py" = ["meiva_builtins/skills"]
+"meiva_builtins/skills/coordination/meiva-dynamic-workflow/tests/test_minimal_dispatch.py" = ["meiva_builtins/skills"]
+"meiva_builtins/skills/platform/meiva-guide/external-agents/tests/test_coding_session_resume.py" = ["meiva_builtins/skills/platform/meiva-guide/external-agents"]
+"meiva_builtins/skills/platform/meiva-guide/external-agents/tests/test_impersonation_launch.py" = ["meiva_builtins/skills"]
+"meiva_builtins/skills/tests/skill_script.py" = ["meiva_builtins/skills"]
+"meiva_builtins/skills/tests/test_rss_feed.py" = ["meiva_builtins/skills"]
+"meiva_builtins/skills/tests/test_sms.py" = ["meiva_builtins/skills"]
+"meiva_builtins/skills/tests/test_telegram_send_file.py" = ["meiva_builtins/skills"]
+"meiva_builtins/skills/tests/test_youtube_feed.py" = ["meiva_builtins/skills"]
+"meiva_builtins/tests/test_watcher_wake_delivery.py" = ["meiva_builtins/skills"]
 "base/events/loader.py" = ["base/events/declarations"]
 "base/events/tests/test_declarations_layout.py" = ["base/events/declarations"]
 "cli/tests/bootstrap/_logging_entry_child.py" = ["services/agent_runner/agent_ops"]
@@ -67,10 +67,10 @@
 "scripts/host_ops/tcc/tests/test_tcc_onboard_helper_grants.py" = ["scripts/host_ops/tcc"]
 "services/agent_runner/agent_host/tests/agent_host/child_sdk_host_posture.py" = ["services/agent_runner/agent_host"]
 "services/backup/scheduler/operation/worker_bootstrap.py" = ["services/backup/scheduler"]
-"services/supervision/ava_root/probes.py" = ["services/supervision/healthchecks"]
+"services/supervision/meiva_root/probes.py" = ["services/supervision/healthchecks"]
 "tests/ci/test_path_scopes.py" = ["tests/path_scoped"]
-"tests/components/ava/test_self_evolution_schedules.py" = ["schedules"]
-"tests/components/schedules/test_goal_watch_filter.py" = ["ava_builtins/plugins", "ava_builtins/skills"]
+"tests/components/meiva/test_self_evolution_schedules.py" = ["schedules"]
+"tests/components/schedules/test_goal_watch_filter.py" = ["meiva_builtins/plugins", "meiva_builtins/skills"]
 "tests/e2e/process_support.py" = ["services/agent_runner"]
 "tests/fixtures/path_scopes.py" = ["tests/path_scoped"]
 "tests/skills/test_inspect_a_trace_fetch.py" = [".agents/skills/inspect-a-trace/scripts"]
@@ -216,8 +216,8 @@ pure-chain-callees = [
 # Exact sites let through, `path::rule:name`: a memoized pure function or a namespace built once.
 # A site that stops being reported fails as stale.
 [ambient-state.sites]
-"ava/__init__.py::ambient-instance:extend" = "a namespace of functions built once and never rebound or filled afterwards"
-"ava_builtins/plugins/ava_memory/sdk.py::hidden-cache:_documented_pool" = "wraps one home's pool path in a documented constant"
+"meiva/__init__.py::ambient-instance:extend" = "a namespace of functions built once and never rebound or filled afterwards"
+"meiva_builtins/plugins/meiva_memory/sdk.py::hidden-cache:_documented_pool" = "wraps one home's pool path in a documented constant"
 "base/config/admin/candidate.py::hidden-cache:_candidate_validation_model" = "builds a validation subclass of a given Settings class"
 "base/config/config_registry.py::hidden-singleton:build_registry" = "the static config registry derived from the Settings classes"
 "base/config/config_registry.py::hidden-singleton:field_infos" = "a static view of the config registry"
@@ -244,8 +244,8 @@ family-modules = [
 
 [clock-lattice.independent-clocks]
 "agent/graph/node_log.py::_STALL_GUARD_EXEMPT" = "frozenset of exempt node kinds, not a clock"
-"ava_builtins/plugins/lm_anthropic/provider.py::_CLAUDE_EXTENDED_THINKING_DEFAULT_BUDGET" = "LLM thinking-token budget, not a wall-clock constant"
-"ava_builtins/skills/platform/ava-guide/external-agents/scripts/watch_work.py::STALL_SECONDS" = "example script (skill reference), not cluster runtime — its own stall judgment, no lattice neighbour"
+"meiva_builtins/plugins/lm_anthropic/provider.py::_CLAUDE_EXTENDED_THINKING_DEFAULT_BUDGET" = "LLM thinking-token budget, not a wall-clock constant"
+"meiva_builtins/skills/platform/meiva-guide/external-agents/scripts/watch_work.py::STALL_SECONDS" = "example script (skill reference), not cluster runtime — its own stall judgment, no lattice neighbour"
 "base/daemon/schedules/watcher.py::AT_SESSION_TTL_GRACE_SECONDS" = "independent: the at-watcher session's post-fire reclamation window (wake delivery + exit-notice latency); the TTL reaper's poll cadence only delays the kill beyond it — no lattice neighbour and no ordering safety depends on this value"
 "base/events/contract.py::DELIVERY_STALLED_KEYS" = "SQL key set for the delivery_stalled view, not a clock"
 "base/events/live/redis_listener.py::_CONSUME_ABANDON_GRACE" = "independent: pubsub consume-abandon window, no lattice neighbour"
@@ -269,70 +269,70 @@ family-modules = [
 # no-os-environ (meizel/state/no_os_environ): environment variables that tests may set live, and
 # the files that read the environment because they cannot go through Settings.
 [no-os-environ.provider-key-vars]
-"ANTHROPIC_API_KEY" = "read live by ava_builtins/plugins/lm_anthropic"
-"DASHSCOPE_API_KEY" = "read live by ava_builtins/plugins/lm_alibaba"
-"DEEPSEEK_API_KEY" = "read live by ava_builtins/plugins/lm_deepseek"
-"GEMINI_API_KEY" = "read live by ava_builtins/plugins/lm_google"
-"GLM_API_KEY" = "read live by ava_builtins/plugins/lm_zhipu"
-"MIMO_API_KEY" = "read live by ava_builtins/plugins/lm_xiaomi"
-"MOONSHOT_API_KEY" = "read live by ava_builtins/plugins/lm_moonshot"
-"OPENAI_API_KEY" = "read live by ava_builtins/plugins/lm_openai"
-"TYPESAFE_API_KEY" = "read live by ava_builtins/plugins/lm_typesafe"
+"ANTHROPIC_API_KEY" = "read live by meiva_builtins/plugins/lm_anthropic"
+"DASHSCOPE_API_KEY" = "read live by meiva_builtins/plugins/lm_alibaba"
+"DEEPSEEK_API_KEY" = "read live by meiva_builtins/plugins/lm_deepseek"
+"GEMINI_API_KEY" = "read live by meiva_builtins/plugins/lm_google"
+"GLM_API_KEY" = "read live by meiva_builtins/plugins/lm_zhipu"
+"MIMO_API_KEY" = "read live by meiva_builtins/plugins/lm_xiaomi"
+"MOONSHOT_API_KEY" = "read live by meiva_builtins/plugins/lm_moonshot"
+"OPENAI_API_KEY" = "read live by meiva_builtins/plugins/lm_openai"
+"TYPESAFE_API_KEY" = "read live by meiva_builtins/plugins/lm_typesafe"
 
 [no-os-environ.live-read-vars]
-"AVA_TELEMETRY_OTLP_CHILD_DEFER" = "read live by base/telemetry/otlp/telemetry_otlp_defer.py"
-"AVA_TELEMETRY_OTLP_CHILD_DEFER_MAX_AGE_S" = "read live by base/telemetry/otlp/telemetry_otlp_defer.py"
+"MEIVA_TELEMETRY_OTLP_CHILD_DEFER" = "read live by base/telemetry/otlp/telemetry_otlp_defer.py"
+"MEIVA_TELEMETRY_OTLP_CHILD_DEFER_MAX_AGE_S" = "read live by base/telemetry/otlp/telemetry_otlp_defer.py"
 
 [no-os-environ.files]
-"agent/execution/child.py" = "the exec child reads its per-launch protocol env (AVA_EXEC_REQUEST_FILE / AVA_EXEC_RESULT_FILE, one-shot spawn handoff) and pops the re-emitted per-agent overlay maps before child spawn — the same child-env handoff class as agent/loop.py's pop"
-"agent/execution/owner_child.py" = "the gated exec child validates the same one-shot AVA_EXEC_REQUEST_FILE / AVA_EXEC_RESULT_FILE handoff against its signed owner context before delegating to agent.execution.child; these dynamic per-launch paths are not Settings config"
+"agent/execution/child.py" = "the exec child reads its per-launch protocol env (MEIVA_EXEC_REQUEST_FILE / MEIVA_EXEC_RESULT_FILE, one-shot spawn handoff) and pops the re-emitted per-agent overlay maps before child spawn — the same child-env handoff class as agent/loop.py's pop"
+"agent/execution/owner_child.py" = "the gated exec child validates the same one-shot MEIVA_EXEC_REQUEST_FILE / MEIVA_EXEC_RESULT_FILE handoff against its signed owner context before delegating to agent.execution.child; these dynamic per-launch paths are not Settings config"
 "agent/graph/exec/_child_boundary.py" = "build_child_env copies the LIVE parent env and layers the exec protocol vars on top — a whole-environment child handoff (same class as base/sessions/env_forwarding.py / ops/agent_launch.py); Settings cannot enumerate non-modeled keys and the dict must reflect the parent env"
-"agent/loop.py" = "run() pops the per-agent config-overlay / birth-config env vars ($AVA_AGENT_CONFIG_OVERLAY / $AVA_AGENT_BIRTH_CONFIG) before spawning children; argv is world-readable via ps (issue #974) and the payloads are per-agent launch secrets, not Settings fields"
-"agent/process_boot.py" = "boot sets os.environ[\"AVA_AGENT_ID\"] so child processes inherit the agent identity; the env forward must run before child spawn and cannot route through Settings (the same forward agent/loop.py previously owned)"
-"ava/boot.py" = "launched_context() / has_launched_identity() read os.environ[\"AVA_AGENT_ID\"]; the env key is the only channel for child processes (shell sessions, watchers) to discover their parent agent"
-"ava/watcher/spawn.py" = "build_boot() bootstrap code uses os.environ.get in a string literal for the child process bootstrap"
-"ava_builtins/skills/integrations/telegram-send-file/scripts/send_file.py" = "the telegram config domain is EXCLUDED from the agent process profile (Task #856 consumption matrix), so Settings cannot construct it in the skill's runtime context — the env aliases (the same values Settings itself reads from) are the only access path; same class as the child-env handoff entries"
+"agent/loop.py" = "run() pops the per-agent config-overlay / birth-config env vars ($MEIVA_AGENT_CONFIG_OVERLAY / $MEIVA_AGENT_BIRTH_CONFIG) before spawning children; argv is world-readable via ps (issue #974) and the payloads are per-agent launch secrets, not Settings fields"
+"agent/process_boot.py" = "boot sets os.environ[\"MEIVA_AGENT_ID\"] so child processes inherit the agent identity; the env forward must run before child spawn and cannot route through Settings (the same forward agent/loop.py previously owned)"
+"meiva/boot.py" = "launched_context() / has_launched_identity() read os.environ[\"MEIVA_AGENT_ID\"]; the env key is the only channel for child processes (shell sessions, watchers) to discover their parent agent"
+"meiva/watcher/spawn.py" = "build_boot() bootstrap code uses os.environ.get in a string literal for the child process bootstrap"
+"meiva_builtins/skills/integrations/telegram-send-file/scripts/send_file.py" = "the telegram config domain is EXCLUDED from the agent process profile (Task #856 consumption matrix), so Settings cannot construct it in the skill's runtime context — the env aliases (the same values Settings itself reads from) are the only access path; same class as the child-env handoff entries"
 "base/agents/impersonation/host_transport.py" = "CODEX_HOME is provider routing context, not cluster configuration; the shared transport preserves the CLI socket resolution contract"
 "base/agents/messages/external_caller.py" = "per-invocation external child profile, consumed by SDK identity bootstrap before Settings; caller provenance is not cluster config and must not enter its persisted Settings projection"
 "base/config/__init__.py" = "Settings aggregate; role-derives the gateway-config fetch before sub-models construct"
-"base/config/_full.py" = "the eager builder reads AVA_PROCESS_PROFILE at construction time, before the singleton exists — the same bootstrap-ordering class as base/config/domains/storage/data_plane.py"
+"base/config/_full.py" = "the eager builder reads MEIVA_PROCESS_PROFILE at construction time, before the singleton exists — the same bootstrap-ordering class as base/config/domains/storage/data_plane.py"
 "base/config/_lite.py" = "the boot-lite resolution layer IS the Settings bootstrap: it reads raw env aliases and plants the placeholder data-plane URLs before any sub-model exists — the same \"cannot depend on Settings by construction\" class as base/config/__init__.py"
-"base/config/domains/storage/data_plane.py" = "self_machine_host reads AVA_MACHINE_HOST at sub-model construction time — the settings singleton does not exist yet, sibling sub-models are unreachable, and base.cluster.machine imports settings (circular)"
+"base/config/domains/storage/data_plane.py" = "self_machine_host reads MEIVA_MACHINE_HOST at sub-model construction time — the settings singleton does not exist yet, sibling sub-models are unreachable, and base.cluster.machine imports settings (circular)"
 "base/host/env/bootstrap.py" = "fetches config from the gateway and os.environ.update()s it BEFORE Settings is built; importing base.config here is the import cycle this module exists to break"
-"base/host/env/dotenv_boot.py" = "load_dotenv ~/.ava/.env, must run before Settings import"
+"base/host/env/dotenv_boot.py" = "load_dotenv ~/.meiva/.env, must run before Settings import"
 "base/host/env/registry.py" = "child_env builds the parent->child forwarding dict from the LIVE env (the registry's allowlist keys + passthrough rows); Settings cannot enumerate non-modeled keys and the dict must reflect the parent env, not its own snapshot — same child-env handoff as base.sessions.env_forwarding"
-"base/host/git/gitenv.py" = "git_env copies the live env for a git subprocess (which needs PATH/HOME/SSH_AUTH_SOCK) and layers GIT_TERMINAL_PROMPT/GIT_SSH_COMMAND on top; git plumbing + a whole-environment child handoff, not Ava runtime config"
-"base/host/net/auth.py" = "delivered_token reads the per-launch AVA_API_TOKEN the root launcher (or the boot pass) sets for this process — a write generation's machine credential handoff, never persisted config; it is read during the Settings import (bootstrap fetch), same class as PAGE_SERVER_TOKEN"
-"base/host/system/probes.py" = "display_available reads DISPLAY/WAYLAND_DISPLAY to detect X11/Wayland; these are OS display-server vars, not ava runtime config; no Settings field models them. Single source of truth shared by the browser daemon / MCP loader / host-config validators"
+"base/host/git/gitenv.py" = "git_env copies the live env for a git subprocess (which needs PATH/HOME/SSH_AUTH_SOCK) and layers GIT_TERMINAL_PROMPT/GIT_SSH_COMMAND on top; git plumbing + a whole-environment child handoff, not Meiva runtime config"
+"base/host/net/auth.py" = "delivered_token reads the per-launch MEIVA_API_TOKEN the root launcher (or the boot pass) sets for this process — a write generation's machine credential handoff, never persisted config; it is read during the Settings import (bootstrap fetch), same class as PAGE_SERVER_TOKEN"
+"base/host/system/probes.py" = "display_available reads DISPLAY/WAYLAND_DISPLAY to detect X11/Wayland; these are OS display-server vars, not meiva runtime config; no Settings field models them. Single source of truth shared by the browser daemon / MCP loader / host-config validators"
 "base/lm/provider_api.py" = "plugin keys are not Settings fields; require_key reads the live process env for the bootstrap plugin-secrets channel on split runners, the same class as child-env handoff entries"
 "base/native_process/child_env.py" = "centralized process-protocol seam: copies the complete live env, consumes one-shot markers, and adopts a child's committed handoff; Settings cannot model dynamic per-process state"
 "base/native_process/os_platform.py" = "launchd_job_label reads the per-process XPC_SERVICE_NAME scheduler identity"
 "base/native_process/ownership.py" = "process_metadata records CODEX_HOME, the provider routing context the impersonation relay spec needs — a child-env handoff read, not persisted cluster config"
-"base/paths/home.py" = "resolve_ava_home reads AVA_HOME: the home is the input that locates the .env Settings is built from, so it is read before (and below) Settings; moved here from dotenv_boot unchanged"
-"base/sessions/env_forwarding.py" = "forward_env_dict builds the child env from the LIVE env (incl. AVA_* vars Settings does not model); that is exactly what must be forwarded"
+"base/paths/home.py" = "resolve_meiva_home reads MEIVA_HOME: the home is the input that locates the .env Settings is built from, so it is read before (and below) Settings; moved here from dotenv_boot unchanged"
+"base/sessions/env_forwarding.py" = "forward_env_dict builds the child env from the LIVE env (incl. MEIVA_* vars Settings does not model); that is exactly what must be forwarded"
 "base/telemetry/observability.py" = "endpoint_override_is_explicit must distinguish operator-set observability URLs from Settings' identical loopback defaults; Settings preserves the value but not whether it was explicit"
-"base/telemetry/otlp/telemetry_otlp_defer.py" = "the exec-child OTLP deferral knobs (AVA_TELEMETRY_OTLP_CHILD_DEFER[_MAX_AGE_S]) are read from the raw env on the child arm path — reading them through Settings would import the settings singleton + full config chain the deferral exists to keep out of the child's life (task #3816 M4b); same presence-style class as base/telemetry/observability.py"
-"base/telemetry/tracing.py" = "sets TRACELOOP_TRACE_CONTENT=false for the traceloop-sdk instrumentors — the SDK's ONLY content-tracing switch (no Python API equivalent); Ava's own config surface is the AVA_TRACE_STRIP_CONTENT settings field, which drives this env translation"
-"cli/commands/agents/impersonation.py" = "AVA_IMPERSONATION_RELAY_TOKEN is the relay's scoped credential handoff (stdin for codex, env for claude); it is neither persisted cluster config nor inherited native agent identity"
+"base/telemetry/otlp/telemetry_otlp_defer.py" = "the exec-child OTLP deferral knobs (MEIVA_TELEMETRY_OTLP_CHILD_DEFER[_MAX_AGE_S]) are read from the raw env on the child arm path — reading them through Settings would import the settings singleton + full config chain the deferral exists to keep out of the child's life (task #3816 M4b); same presence-style class as base/telemetry/observability.py"
+"base/telemetry/tracing.py" = "sets TRACELOOP_TRACE_CONTENT=false for the traceloop-sdk instrumentors — the SDK's ONLY content-tracing switch (no Python API equivalent); Meiva's own config surface is the MEIVA_TRACE_STRIP_CONTENT settings field, which drives this env translation"
+"cli/commands/agents/impersonation.py" = "MEIVA_IMPERSONATION_RELAY_TOKEN is the relay's scoped credential handoff (stdin for codex, env for claude); it is neither persisted cluster config nor inherited native agent identity"
 "cli/commands/cluster/home.py" = "Cross-home child environment projection removes caller credentials before the target's Settings loads."
-"cli/commands/management/config.py" = "the settings-free repair path (ava config --local) reads AVA_GATEWAY_URL / AVA_CLUSTER_SECRET from the raw env/.env WITHOUT constructing Settings — a broken .env is exactly the scenario it repairs, and constructing Settings would fail first"
+"cli/commands/management/config.py" = "the settings-free repair path (meiva config --local) reads MEIVA_GATEWAY_URL / MEIVA_CLUSTER_SECRET from the raw env/.env WITHOUT constructing Settings — a broken .env is exactly the scenario it repairs, and constructing Settings would fail first"
 "cli/main.py" = "CLI bootstrap sets config/profile/log routing before importing Settings or command modules."
 "cli/start_intent.py" = "Identity bootstrap precedes Settings: read the birth inputs and pin the resolved home before config imports."
 "cli/tests/bootstrap/test_start_identity.py" = "Exercises the settings-free birth boundary; environment is the actual input before Settings exists."
 "meizel/state/ambient_state/scan.py" = "same reason: it MATCHES the strings \"os.environ\" / \"os.getenv\" against a module's AST to find an import-time read; it never reads the environment"
 "meizel/state/no_os_environ.py" = "this script itself has \"os.environ\" in strings"
 "scripts/ci/coverage_gates.py" = "BACKEND_COVERAGE_THRESHOLD is a ci.yml workflow knob for the pre-merge gate, not runtime config — Settings models the deployed runtime, and importing base.config would drag the settings singleton into a pure CI report parser"
-"scripts/ci/migration_smoke.py" = "builds a psql subprocess env (PGHOST/PGPORT/... from a throwaway native Postgres); PG* are libpq plumbing, not Ava runtime config"
+"scripts/ci/migration_smoke.py" = "builds a psql subprocess env (PGHOST/PGPORT/... from a throwaway native Postgres); PG* are libpq plumbing, not Meiva runtime config"
 "scripts/ci/pull_requests/commands.py" = "TRUNK_API_TOKEN optionally adds read-only queue evidence to diagnosis; it is not deployment configuration"
 "scripts/ci/pull_requests/owner_operations.py" = "TRUNK_API_TOKEN and CI_QUEUE are explicit owner-operation inputs, separate from deployment Settings"
-"scripts/codegen/gen_config_lite_table.py" = "regeneration must run in exactly the states that need it (broken .env, unreachable gateway): it forces AVA_CONFIG_FETCH=skip in the process env BEFORE importing the registry, which Settings cannot mediate by construction"
+"scripts/codegen/gen_config_lite_table.py" = "regeneration must run in exactly the states that need it (broken .env, unreachable gateway): it forces MEIVA_CONFIG_FETCH=skip in the process env BEFORE importing the registry, which Settings cannot mediate by construction"
 "scripts/host_ops/guard_editable_venv.py" = "dependency-free pre-uv preflight must inspect inherited VIRTUAL_ENV before a project environment can be trusted or Settings can import"
 "scripts/lint/code_structure.py" = "LINT_STRUCTURE_BASELINE_BASE is a live per-invocation CI input; standalone lint must not load deployed Settings."
 "scripts/lint/fixture_scope.py" = "same reason: it MATCHES the string \"os.environ\" against a test module's AST to find env mutation in a fixture body"
 "scripts/model_registry/check_model_updates.py" = "tracker selects provider API-key aliases dynamically and must prefer the live process env before its `.env` fallback"
 "services/agent_runner/page_server/daemon.py" = "spawns the page-server child with a per-launch PAGE_SERVER_TOKEN overlaid on the inherited env — the token is a fresh secrets.token_hex(16) per spawn, a dynamic child-env handoff Settings (boot-time static) cannot model, same class as base/sessions/env_forwarding"
 "services/agent_runner/page_server/server.py" = "reads the per-launch PAGE_SERVER_TOKEN its daemon parent set in the child env — the token is minted per spawn by the daemon, Settings (boot-time static) cannot model it"
-"services/desktop/computer/mcp_wrapper.py" = "_agent_id() reads the ambient AVA_AGENT_ID to stamp computer-mcp requests; same identity channel, not Settings-managed"
+"services/desktop/computer/mcp_wrapper.py" = "_agent_id() reads the ambient MEIVA_AGENT_ID to stamp computer-mcp requests; same identity channel, not Settings-managed"
 "tests/components/cli/test_start_repo_guard.py" = "Verifies checkout/home routing before Settings can be constructed."
 
 # turn-scoped-config (meizel/state/turn_scoped_config): files that read per-agent fields off the
@@ -347,18 +347,18 @@ family-modules = [
 # type-checking (meizel/language/type_checking): files allowed an `if TYPE_CHECKING:` block.
 [type-checking.files]
 "agent/graph/__init__.py" = "PEP 562 lazy re-export: the node set is a heavy import on paths (the exec child) that never use the names; TYPE_CHECKING restores the real signatures for static checkers without putting them back on the import path (task #3585)."
-"ava/skills/__init__.py" = "Boot-path trim: the skill-index stack is a heavy import every exec child pays; `SkillFile` is annotation-only on the mount helpers (script/module-level imports removed for task #3816)."
-"ava_builtins/plugins/ava_fleet/_task_update.py" = "Boot-path trim: the fleet plugin (autoloaded into every exec child) keeps psycopg off its module import graph — `psycopg` is annotation-only here, imported at the raise sites (task #3816)."
-"ava_builtins/plugins/ava_fleet/task_registry.py" = "Boot-path trim: the fleet plugin (autoloaded into every exec child) keeps psycopg off its module import graph — `psycopg` is annotation-only here, imported at the raise sites (task #3816)."
-"ava_builtins/plugins/lm_alibaba/provider.py" = "LM provider registration surface: the chat-model stack is a heavy import on the exec-child boot path, which never uses the type (annotation-only references; task #3633)."
-"ava_builtins/plugins/lm_anthropic/provider.py" = "LM provider registration surface: the chat-model stack is a heavy import on the exec-child boot path, which never uses the type (annotation-only references; task #3633)."
-"ava_builtins/plugins/lm_deepseek/provider.py" = "LM provider registration surface: the chat-model stack is a heavy import on the exec-child boot path, which never uses the type (annotation-only references; task #3633)."
-"ava_builtins/plugins/lm_google/provider.py" = "LM provider registration surface: the chat-model stack is a heavy import on the exec-child boot path, which never uses the type (annotation-only references; task #3633)."
-"ava_builtins/plugins/lm_moonshot/provider.py" = "LM provider registration surface: the chat-model stack is a heavy import on the exec-child boot path, which never uses the type (annotation-only references; task #3633)."
-"ava_builtins/plugins/lm_openai/provider.py" = "LM provider registration surface: the chat-model stack is a heavy import on the exec-child boot path, which never uses the type (annotation-only references; task #3633)."
-"ava_builtins/plugins/lm_xiaomi/provider.py" = "LM provider registration surface: the chat-model stack is a heavy import on the exec-child boot path, which never uses the type (annotation-only references; task #3633)."
-"ava_builtins/plugins/lm_zhipu/provider.py" = "LM provider registration surface: the chat-model stack is a heavy import on the exec-child boot path, which never uses the type (annotation-only references; task #3633)."
-"base/agents/context/__init__.py" = "The exec child builds an `AvaContext` from its request envelope: the handle types (psycopg pool, redis bus, chat model) are annotation-only fields it never holds, and importing them would put the whole DB / LM stack on its boot path."
+"meiva/skills/__init__.py" = "Boot-path trim: the skill-index stack is a heavy import every exec child pays; `SkillFile` is annotation-only on the mount helpers (script/module-level imports removed for task #3816)."
+"meiva_builtins/plugins/meiva_fleet/_task_update.py" = "Boot-path trim: the fleet plugin (autoloaded into every exec child) keeps psycopg off its module import graph — `psycopg` is annotation-only here, imported at the raise sites (task #3816)."
+"meiva_builtins/plugins/meiva_fleet/task_registry.py" = "Boot-path trim: the fleet plugin (autoloaded into every exec child) keeps psycopg off its module import graph — `psycopg` is annotation-only here, imported at the raise sites (task #3816)."
+"meiva_builtins/plugins/lm_alibaba/provider.py" = "LM provider registration surface: the chat-model stack is a heavy import on the exec-child boot path, which never uses the type (annotation-only references; task #3633)."
+"meiva_builtins/plugins/lm_anthropic/provider.py" = "LM provider registration surface: the chat-model stack is a heavy import on the exec-child boot path, which never uses the type (annotation-only references; task #3633)."
+"meiva_builtins/plugins/lm_deepseek/provider.py" = "LM provider registration surface: the chat-model stack is a heavy import on the exec-child boot path, which never uses the type (annotation-only references; task #3633)."
+"meiva_builtins/plugins/lm_google/provider.py" = "LM provider registration surface: the chat-model stack is a heavy import on the exec-child boot path, which never uses the type (annotation-only references; task #3633)."
+"meiva_builtins/plugins/lm_moonshot/provider.py" = "LM provider registration surface: the chat-model stack is a heavy import on the exec-child boot path, which never uses the type (annotation-only references; task #3633)."
+"meiva_builtins/plugins/lm_openai/provider.py" = "LM provider registration surface: the chat-model stack is a heavy import on the exec-child boot path, which never uses the type (annotation-only references; task #3633)."
+"meiva_builtins/plugins/lm_xiaomi/provider.py" = "LM provider registration surface: the chat-model stack is a heavy import on the exec-child boot path, which never uses the type (annotation-only references; task #3633)."
+"meiva_builtins/plugins/lm_zhipu/provider.py" = "LM provider registration surface: the chat-model stack is a heavy import on the exec-child boot path, which never uses the type (annotation-only references; task #3633)."
+"base/agents/context/__init__.py" = "The exec child builds an `MeivaContext` from its request envelope: the handle types (psycopg pool, redis bus, chat model) are annotation-only fields it never holds, and importing them would put the whole DB / LM stack on its boot path."
 "base/agents/context/clients.py" = "The same exec-child boot path: a ClientSet builds psycopg / redis / httpx clients on first use only, so its client types are annotation-only."
 "base/agents/messages/kwargs.py" = "LangChain message-stack trim on the same registration path: message types appear in annotations only, or (pricing) import at the call site of a runtime isinstance (task #3633)."
 "base/agents/sdk/telemetry.py" = "Exec-child boot path (`_run_code` -> sdk_telemetry): ToolMessage is runtime-only (imported at the isinstance call site), BaseMessage annotation-only (task #3633)."

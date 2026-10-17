@@ -20,7 +20,7 @@ def core_metrics() -> list[MetricSpec]:
     specs: list[MetricSpec] = []
     specs.append(
         MetricSpec(
-            name="ava_obs_frontend_interactions",
+            name="meiva_obs_frontend_interactions",
             title="Frontend interactions",
             time_basis="per_minute",
             description=(
@@ -51,7 +51,7 @@ def core_metrics() -> list[MetricSpec]:
 
     specs.append(
         MetricSpec(
-            name="ava_obs_frontend_top_elements",
+            name="meiva_obs_frontend_top_elements",
             title="Frontend interactions (Top 15 elements)",
             description=(
                 "Top 15 in-window interactions grouped by attributes.element — "
@@ -78,7 +78,7 @@ def core_metrics() -> list[MetricSpec]:
 
     specs.append(
         MetricSpec(
-            name="ava_obs_frontend_page_views",
+            name="meiva_obs_frontend_page_views",
             title="Frontend page views (Top 15)",
             description=(
                 "Top 15 in-window page views (element='page-view') grouped by "
@@ -105,7 +105,7 @@ def core_metrics() -> list[MetricSpec]:
 
     specs.append(
         MetricSpec(
-            name="ava_obs_frontend_settings_changes",
+            name="meiva_obs_frontend_settings_changes",
             title="Settings changes (Top 15)",
             description=(
                 "Top 15 in-window user setting changes (element='setting-change') "

@@ -37,6 +37,6 @@ def test_malformed_value_falls_back_to_empty_and_names_the_problem_on_stderr(
 ) -> None:
     assert validated_observability_base(raw) == ""
     err = capsys.readouterr().err
-    assert "AVA_OBSERVABILITY_URL" in err
+    assert "MEIVA_OBSERVABILITY_URL" in err
     assert problem in err
     assert "falling back to local loopback endpoints" in err

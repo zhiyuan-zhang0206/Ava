@@ -6,20 +6,20 @@ Current topology and authority have component owners:
 
 | Topic | Owner |
 |---|---|
-| Home identity, capabilities, init, ports and admitted checkout | [Start identity](../../cli/docs/start_identity.ava.okf.md) |
-| Owned or remote-managed PostgreSQL, Redis and PgBouncer startup | [Data-plane startup](../../cli/commands/data_plane/docs/data-plane-startup.ava.okf.md) |
-| Native PostgreSQL custody and admin authority | [PostgreSQL owner](../../base/cluster/docs/postgres.ava.okf.md) |
-| Runtime DB/API delivery and remote runner bootstrap | [Authority wiring](../../base/cluster/authority/docs/wiring.ava.okf.md) |
-| Sealed unit bundle exposure and compromise boundary | [Unit bundle](../../base/host/db_authority/docs/unit-bundle.ava.okf.md) |
-| Agent checkpoint persistence and crash replay | [Agent startup](../../agent/startup/docs/startup.ava.okf.md) |
+| Home identity, capabilities, init, ports and admitted checkout | [Start identity](../../cli/docs/start_identity.meiva.okf.md) |
+| Owned or remote-managed PostgreSQL, Redis and PgBouncer startup | [Data-plane startup](../../cli/commands/data_plane/docs/data-plane-startup.meiva.okf.md) |
+| Native PostgreSQL custody and admin authority | [PostgreSQL owner](../../base/cluster/docs/postgres.meiva.okf.md) |
+| Runtime DB/API delivery and remote runner bootstrap | [Authority wiring](../../base/cluster/authority/docs/wiring.meiva.okf.md) |
+| Sealed unit bundle exposure and compromise boundary | [Unit bundle](../../base/host/db_authority/docs/unit-bundle.meiva.okf.md) |
+| Agent checkpoint persistence and crash replay | [Agent startup](../../agent/startup/docs/startup.meiva.okf.md) |
 
 Initialize the home before starting it. For a split cluster, start the gateway
 before joining or starting runners; their Settings construction requires its
-bootstrap endpoint. Use the [deployment capability](../../.agents/skills/ava-guide/deploy/SKILL.md)
+bootstrap endpoint. Use the [deployment capability](../../.agents/skills/meiva-guide/deploy/SKILL.md)
 for the installation sequence. Ordinary start refuses missing or contradictory
 identity rather than inferring it from an existing listener or directory.
 
-Checkpoint schema admission belongs to [agent infrastructure](../../agent/docs/infra.ava.okf.md).
+Checkpoint schema admission belongs to [agent infrastructure](../../agent/docs/infra.meiva.okf.md).
 For an upstream checkpoint dependency change, follow the
 [checkpoint migration rule](../../db/docs/migrations.md#checkpoint-dependency-upgrades).
 The interval's replay contract belongs to the agent startup owner above; its
@@ -43,7 +43,7 @@ prod runtime and dev workspace are split at the filesystem level:
 
 | Path | Role | Notes |
 |---|---|---|
-| `$AVA_HOME/source/` (default `~/.ava/source/`) | **prod** — cwd of the long-running service sessions | git working tree; upgrades go through `python -m cli.fleet_update` ([Updating a networked cluster in source mode](#updating-a-networked-cluster-in-source-mode)) |
+| `$MEIVA_HOME/source/` (default `~/.meiva/source/`) | **prod** — cwd of the long-running service sessions | git working tree; upgrades go through `python -m cli.fleet_update` ([Updating a networked cluster in source mode](#updating-a-networked-cluster-in-source-mode)) |
 | `<development-checkout>/` | **dev clone** — root of worktree-driven development; dev worktrees live under `.worktrees/<task>/` (made by `scripts/setup-worktree.sh <task>`) or `.claude/worktrees/<task>/` (Claude Code's native worktree tool; complete it with `scripts/setup-worktree.sh` inside it) | freely checkout any branch, decoupled from prod |
 
 ### Worktree uv iron rule (Tasks #1572, #5638)
@@ -53,7 +53,7 @@ Use the checkout's own real `.venv`, clear inherited `VIRTUAL_ENV`, and run
 `guard_editable_venv.py` before dependency operations as described in
 [development setup](dev-setup.md#development-in-a-worktree) and
 [testing environment](testing.md#environment). The
-[editable-install guard](../../cli/commands/docs/editable-install-guard.ava.okf.md)
+[editable-install guard](../../cli/commands/docs/editable-install-guard.meiva.okf.md)
 owns exact-root validation and explicit repair; ordinary startup does not
 permit changing another checkout's installation.
 
@@ -65,7 +65,7 @@ is recorded in [the editable-pointer incident](../postmortems/0006-an-editable-i
 
 ### Manual editable-install recovery
 
-Use the [editable-install guard](../../cli/commands/docs/editable-install-guard.ava.okf.md)
+Use the [editable-install guard](../../cli/commands/docs/editable-install-guard.meiva.okf.md)
 from the affected stable checkout, then recheck both editable records before
 removing a worktree. [Development setup](dev-setup.md#development-in-a-worktree)
 owns environment isolation and dependency commands.
@@ -74,34 +74,34 @@ Runtime facts needed to choose the checkout and operation have component owners:
 
 | Question | Current owner |
 |---|---|
-| Which home and initialized identity a CLI may operate | [Start identity](../../cli/docs/start_identity.ava.okf.md) |
-| Which checkout supplies the CLI and Python installation | [Python installation](../../cli/docs/python-install.ava.okf.md) |
-| PostgreSQL, PgBouncer and Redis startup/custody | [Data-plane startup](../../cli/commands/data_plane/docs/data-plane-startup.ava.okf.md) |
-| Database roles and credential delivery | [Authority](../../base/cluster/authority/docs/authority.ava.okf.md), [wiring](../../base/cluster/authority/docs/wiring.ava.okf.md), [unit bundle exposure](../../base/host/db_authority/docs/unit-bundle.ava.okf.md) |
-| Source-start host integration | [Host converge](../../cli/commands/converge/docs/converge-host-wiring.ava.okf.md) |
-| External agent skill ownership and update | [Package commands](../../cli/commands/extensions/packages/docs/packages.ava.okf.md) |
+| Which home and initialized identity a CLI may operate | [Start identity](../../cli/docs/start_identity.meiva.okf.md) |
+| Which checkout supplies the CLI and Python installation | [Python installation](../../cli/docs/python-install.meiva.okf.md) |
+| PostgreSQL, PgBouncer and Redis startup/custody | [Data-plane startup](../../cli/commands/data_plane/docs/data-plane-startup.meiva.okf.md) |
+| Database roles and credential delivery | [Authority](../../base/cluster/authority/docs/authority.meiva.okf.md), [wiring](../../base/cluster/authority/docs/wiring.meiva.okf.md), [unit bundle exposure](../../base/host/db_authority/docs/unit-bundle.meiva.okf.md) |
+| Source-start host integration | [Host converge](../../cli/commands/converge/docs/converge-host-wiring.meiva.okf.md) |
+| External agent skill ownership and update | [Package commands](../../cli/commands/extensions/packages/docs/packages.meiva.okf.md) |
 | Schedule source, provisioning and stored-script verification | [Schedules](../../schedules/README.md) |
 
-Use the [deployment capability](../../ava_builtins/skills/platform/ava-guide/deploy/SKILL.md)
-for a new unit and the [operations capability](../../ava_builtins/skills/platform/ava-guide/operations/SKILL.md)
+Use the [deployment capability](../../meiva_builtins/skills/platform/meiva-guide/deploy/SKILL.md)
+for a new unit and the [operations capability](../../meiva_builtins/skills/platform/meiva-guide/operations/SKILL.md)
 for an existing cluster. Development preparation and a repository merge do not
 authorize a runtime rollout.
 
-## $AVA_HOME, installed packages, and node capabilities
+## $MEIVA_HOME, installed packages, and node capabilities
 
-The `$AVA_HOME` directory tree, the `PluginsConfig` / `installed.json` schemas,
-the `ava plugins` / `ava skill` / `ava mcp` command surface, and the
+The `$MEIVA_HOME` directory tree, the `PluginsConfig` / `installed.json` schemas,
+the `meiva plugins` / `meiva skill` / `meiva mcp` command surface, and the
 capability -> service model are structure, not procedure. They live in the OKF
 nodes of the packages that own the code:
 
 | What | Node |
 |---|---|
-| `$AVA_HOME` layout, what derives from the home | `base/paths/docs/paths.ava.okf.md` |
-| plugin enable config (`plugins_config.json`) | `base/packages/plugins/docs/enable_config.ava.okf.md` |
-| `installed.json` schema, installable shapes, the scanner gate | `base/packages/extensions/docs/install_registry/install_registry.ava.okf.md` |
-| `ava plugins` / `skill` / `mcp` verbs, MCP merge layers, secret channel | `cli/commands/extensions/packages/docs/packages.ava.okf.md` |
-| machine name, capability set, `machines` table, spawn-target 400 invariant | `base/cluster/machine/docs/machine.ava.okf.md` |
-| which services each capability contributes | `services/docs/services.ava.okf.md` |
+| `$MEIVA_HOME` layout, what derives from the home | `base/paths/docs/paths.meiva.okf.md` |
+| plugin enable config (`plugins_config.json`) | `base/packages/plugins/docs/enable_config.meiva.okf.md` |
+| `installed.json` schema, installable shapes, the scanner gate | `base/packages/extensions/docs/install_registry/install_registry.meiva.okf.md` |
+| `meiva plugins` / `skill` / `mcp` verbs, MCP merge layers, secret channel | `cli/commands/extensions/packages/docs/packages.meiva.okf.md` |
+| machine name, capability set, `machines` table, spawn-target 400 invariant | `base/cluster/machine/docs/machine.meiva.okf.md` |
+| which services each capability contributes | `services/docs/services.meiva.okf.md` |
 
 Three operational consequences worth stating here:
 
@@ -109,17 +109,17 @@ Three operational consequences worth stating here:
   MCP servers are consumed inside the agent process, and agents only run on
   runner units — a package dropped into a gateway-only host is never scanned.
 - **Installs are per machine.** To install somewhere else, spawn an agent there
-  (`ava.agents.spawn(machine=...)`); nothing is pushed from the cluster.
+  (`meiva.agents.spawn(machine=...)`); nothing is pushed from the cluster.
 - Per-host inventory (private-network addresses, public IPs, SSH key paths) is
   operator-specific and belongs in your own deployment notes, not here.
 
 ## Long-running processes: one service per session
 
-Service registration belongs to [the service domain](../../services/docs/services.ava.okf.md);
+Service registration belongs to [the service domain](../../services/docs/services.meiva.okf.md);
 native custody and generation-bound readiness belong to
-[Ava Root](../../services/supervision/ava_root/docs/ava_root.ava.okf.md).
+[Meiva Root](../../services/supervision/meiva_root/docs/meiva_root.meiva.okf.md).
 Persistent interactive shells use the
-[PTY generation boundary](../../base/sessions/pty/docs/generation-boundary.ava.okf.md).
+[PTY generation boundary](../../base/sessions/pty/docs/generation-boundary.meiva.okf.md).
 When stopping an older release, verify the actual native inventory as well as
 the desired roster; configuration alone is not evidence of termination.
 
@@ -144,18 +144,18 @@ for the optional private HTTPS/HTTP2 entry, rollback and browser acceptance.
 ### Backup and recovery posture
 
 The recovery points are the daily encrypted logical dumps (`pg-backup`, due at
-`AVA_BACKUP_HOUR` cluster time, the newest `AVA_BACKUP_KEEP` kept in
-`$AVA_HOME/backups/db/`, published off-site under `ava-logical/` when
-`AVA_BACKUP_OFFSITE_ENDPOINT`, `AVA_BACKUP_OFFSITE_BUCKET` and
-`AVA_BACKUP_OFFSITE_CREDENTIALS_FILE` are set through `ava config set`), proved
+`MEIVA_BACKUP_HOUR` cluster time, the newest `MEIVA_BACKUP_KEEP` kept in
+`$MEIVA_HOME/backups/db/`, published off-site under `meiva-logical/` when
+`MEIVA_BACKUP_OFFSITE_ENDPOINT`, `MEIVA_BACKUP_OFFSITE_BUCKET` and
+`MEIVA_BACKUP_OFFSITE_CREDENTIALS_FILE` are set through `meiva config set`), proved
 by the weekly isolated logical restore drill. The self-written PITR stack was
 deleted (`docs/decisions/data/backup/2026-10-02-delete-the-self-written-pitr-stack.md`). Point-in-time
 recovery exists only while WAL-G is on (["WAL-G archiving"](#wal-g-archiving) below):
-`ava backup walg restore`, proved weekly by the recovery drill. Never state a
+`meiva backup walg restore`, proved weekly by the recovery drill. Never state a
 recovery point newer than the last published dump unless the latest drill has passed.
 
 Scheduled dumps and logical restore drills use separate private scratch roots
-under `$AVA_HOME/backups/operations/`. Workers run outside the scheduler event
+under `$MEIVA_HOME/backups/operations/`. Workers run outside the scheduler event
 loop. Cancellation asks a worker to unwind its cleanup, then bounds stop of the
 known child/group. A zero exit and validated artifact are required before
 atomic publication; a failed or cancelled run does not advance success markers.
@@ -168,11 +168,11 @@ A temporary Postgres uses its native shutdown; failures preserve PGDATA for
 investigation. No full-family disappearance census is performed.
 
 Application service commands, admitted PATH and process ancestry belong to
-[start identity](../../cli/docs/start_identity.ava.okf.md) and
-[root supervision](../../services/supervision/ava_root/docs/ava_root.ava.okf.md).
-Enumerate application services through `ava status`; persistent shells through
-`ava sessions list`. Idle and paused agent identities remain durable even when
-no active turn task is running; see [agent runtime](../../agent/docs/agent-runtime/agent-runtime.ava.okf.md).
+[start identity](../../cli/docs/start_identity.meiva.okf.md) and
+[root supervision](../../services/supervision/meiva_root/docs/meiva_root.meiva.okf.md).
+Enumerate application services through `meiva status`; persistent shells through
+`meiva sessions list`. Idle and paused agent identities remain durable even when
+no active turn task is running; see [agent runtime](../../agent/docs/agent-runtime/agent-runtime.meiva.okf.md).
 
 PTY closure is best effort: known shells/terminals close with bounded signals;
 background or detached processes can remain. Known job leftovers are diagnostic.
@@ -200,10 +200,10 @@ For a bounded host cleanup, keep the order explicit:
 
 ### Canonical Codex workspace sessions
 
-The [Codex ownership reference](../../ava_builtins/skills/platform/ava-guide/external-agents/references/canonical_codex_owner.md)
+The [Codex ownership reference](../../meiva_builtins/skills/platform/meiva-guide/external-agents/references/canonical_codex_owner.md)
 owns generation records, status and exact-generation cancellation. The
-[launcher guide](../../ava_builtins/skills/platform/ava-guide/external-agents/references/codex.md)
-and [resume reference](../../ava_builtins/skills/platform/ava-guide/external-agents/references/resume_after_interruption.md)
+[launcher guide](../../meiva_builtins/skills/platform/meiva-guide/external-agents/references/codex.md)
+and [resume reference](../../meiva_builtins/skills/platform/meiva-guide/external-agents/references/resume_after_interruption.md)
 own commands and conversation recovery. Inspect the printed generation before
 cancelling; a shared workspace can contain several live generations.
 
@@ -213,7 +213,7 @@ See [component operations](../../services/desktop/browser/docs/operations.md).
 
 ### Deployment footprint & memory
 
-Ava retains a native Postgres/Redis data plane, LangGraph checkpoints, and a
+Meiva retains a native Postgres/Redis data plane, LangGraph checkpoints, and a
 Next.js frontend. One agent-host daemon shares process-wide infrastructure
 while per-agent model/runtime caches remain bounded.
 
@@ -223,9 +223,9 @@ while per-agent model/runtime caches remain bounded.
   execution children and persistent PTY shells have separate resource costs.
   There is no runner-mode toggle or individual agent process to maintain.
 - **Heartbeat owns the idle nudge, hibernation is gone** — the heartbeat's own
-  idle threshold (`AVA_HEARTBEAT_IDLE_THRESHOLD_SECONDS`, default 300s) nudges
+  idle threshold (`MEIVA_HEARTBEAT_IDLE_THRESHOLD_SECONDS`, default 300s) nudges
   idling agents; agents that paused their own heartbeat
-  (`ava.self.pause_heartbeat`) simply stop being nudged.
+  (`meiva.self.pause_heartbeat`) simply stop being nudged.
   [`docs/decisions/runtime/processes/health/2026-06-22-heartbeat-opt-out-over-escalation.md`](../decisions/runtime/processes/health/2026-06-22-heartbeat-opt-out-over-escalation.md).
 - **Per-cluster data plane is sized to be noise, not a multiplier** — every
   cluster (including each dev worktree) runs its own Postgres + Redis instance
@@ -237,20 +237,20 @@ while per-agent model/runtime caches remain bounded.
   `browser-mcp` services above own ONE headed Chrome + ONE
   `chrome-devtools-mcp` upstream, multiplexed to every agent over a Unix
   socket, instead of spawning a browser (and its CDP collector buffers) per
-  agent that touches `ava.mcps.chrome.*`.
+  agent that touches `meiva.mcps.chrome.*`.
 - **Lazy MCP connections** — the per-agent MCP daemon subprocess boots at
   agent start (its cold start is overlapped with the rest of boot — see
   warm-up above), but it does not eagerly connect to every configured MCP
   server: each server connection opens only on that tool's first call, and the
   tool schema itself is cached on disk for 24h so repeat discovery costs no
-  round trip. [`docs/mcps/mcps.ava.okf.md`](../mcps/mcps.ava.okf.md).
+  round trip. [`docs/mcps/mcps.meiva.okf.md`](../mcps/mcps.meiva.okf.md).
 - **Fixed, small per-agent connection budget** — 2 pooled Postgres
   connections (shared with the LangGraph checkpoint saver) + one Redis
   subscription per agent, with pgbouncer transaction pooling in front of the
   cluster's Postgres so the connection count does not scale 1:1 with fleet
   size (hosted mode replaces per-agent pools with one bounded workload pool and
   one fixed four-connection control pool for the runner).
-  [`agent/db/docs/db.ava.okf.md`](../../agent/db/docs/db.ava.okf.md).
+  [`agent/db/docs/db.meiva.okf.md`](../../agent/db/docs/db.meiva.okf.md).
 
 None of this claims memory stops mattering — it is the honest current floor.
 The next walls once memory is handled: the heartbeat's
@@ -270,7 +270,7 @@ health JSON. It uses repo-pinned Playwright Chromium and writes browser probes,
 metadata and capture artifacts. Use `--output-root <artifact-directory>` for
 the target; choose the monitoring schedule as part of the deployment policy.
 
-If authentication is needed, `AVA_VISUAL_GATE_COOKIE_FILE` accepts a mode-0600
+If authentication is needed, `MEIVA_VISUAL_GATE_COOKIE_FILE` accepts a mode-0600
 Playwright storage-state JSON, Netscape cookie jar or `name=value` file. Protect
 that file as a credential and revoke a leaked session through the target's
 supported logout flow. No command implicitly accepts a new visual baseline;
@@ -279,17 +279,17 @@ The output's escalation policy is diagnostic; an operator decides its use.
 
 ### Start / check / restart
 
-The CLI owns local lifecycle; `ava start` initializes a fresh home and resumes an
+The CLI owns local lifecycle; `meiva start` initializes a fresh home and resumes an
 existing one through the same path. First-start inputs persist before native
 effects. Repeated start checks the same identity and selected service roster.
 
 ```bash
-ava start
-ava status
-ava stop -y
-ava restart
-ava cluster status
-ava cluster destroy [--drop-db]
+meiva start
+meiva status
+meiva stop -y
+meiva restart
+meiva cluster status
+meiva cluster destroy [--drop-db]
 ```
 
 Full `stop` closes infrastructure, browser and persistent PTYs; `--keep-infra` and
@@ -298,26 +298,26 @@ ordinary local stop/start path: it keeps infrastructure, the browser session, Ga
 the permissions helper and native LGTM, while persistent terminals close and the
 pty-sessions service restarts with the new code. Destroy decommissions this host's cluster: it stops it, retires the host's
 native jobs (launchd, crontab, the Linux boot unit, the permissions helper) and marks the home
-detached, so `ava start` refuses it until `destroy-intent.json` is deleted by hand;
+detached, so `meiva start` refuses it until `destroy-intent.json` is deleted by hand;
 `--drop-db` additionally removes the data directories (`pg/`, `redis/`). It acts on
-this process's home, `~/.ava` included, and asks you to type the home path at a
+this process's home, `~/.meiva` included, and asks you to type the home path at a
 terminal: with no terminal on stdin and stdout it refuses, and no flag skips the
 prompt (over ssh, use `ssh -t`). A home that is not the default home neither
 registers nor removes OS jobs, because their names carry no home.
 
-A runner joins through `ava init`. Supply the capability
-bundle's `AVA_DB_CAPABILITY_KEY` without echoing it, then use its checkout's
-`.venv/bin/ava init --serve-agent-runner --no-serve-gateway --gateway-url URL
---machine-name NAME --machine-host HOST --db-capability BUNDLE` and `ava start`
-(`ava` on PATH does not exist until the first start; the bundle comes from `ava
+A runner joins through `meiva init`. Supply the capability
+bundle's `MEIVA_DB_CAPABILITY_KEY` without echoing it, then use its checkout's
+`.venv/bin/meiva init --serve-agent-runner --no-serve-gateway --gateway-url URL
+--machine-name NAME --machine-host HOST --db-capability BUNDLE` and `meiva start`
+(`meiva` on PATH does not exist until the first start; the bundle comes from `meiva
 cluster db-authority issue-unit` on the gateway). Bootstrap publishes no database
 credential and not the human secret; the runner's login, API token and
 telemetry token arrive only in that unit's bundle (they are shared by every
 runner unit of the generation), and a runner never holds
-`AVA_CLUSTER_SECRET` (a home that still records it refuses to start). Memory checkout initialization remains
-explicit through `ava memory init`.
+`MEIVA_CLUSTER_SECRET` (a home that still records it refuses to start). Memory checkout initialization remains
+explicit through `meiva memory init`.
 
-**Health observations.** `ava cluster health-probe` retries
+**Health observations.** `meiva cluster health-probe` retries
 gateway liveness three times, 30 seconds apart, before declaring it unhealthy.
 It checks data-volume usage before gateway liveness so a full disk that prevents
 gateway startup is reported as disk pressure. The schema
@@ -328,9 +328,9 @@ global population: the probe still exits 1 and grades that outage.
 
 The probe does not alert. Every run emits `health_probe_ran` (INFO, healthy or not),
 and every failed check emits `health_probe_failing` (check, failure class, message) on
-each run it stays failed; Grafana rules do the rest: `ava-ops-health-probe-warning`
-(`for: 3m`) and `ava-ops-health-probe-error` (`for: 10m`) per check, and
-`ava-ops-health-probe-silent` when no `health_probe_ran` reached Loki for 15 minutes
+each run it stays failed; Grafana rules do the rest: `meiva-ops-health-probe-warning`
+(`for: 3m`) and `meiva-ops-health-probe-error` (`for: 10m`) per check, and
+`meiva-ops-health-probe-silent` when no `health_probe_ran` reached Loki for 15 minutes
 (the probe stopped, or the event path did). A deploy window is silenced by the fleet
 update's silence, except disk pressure; `gateway_liveness` and the dead-man rule also
 reach Telegram directly, because the webhook cannot report a down gateway.
@@ -339,12 +339,12 @@ The OS job and CLI probe only observe. They do not invoke rollback,
 maintain release-policy failure counters, or promote pending code to known-good.
 `--auto-rollback` and rollback `--threshold` options are rejected, including at
 health-probe registration. Registration replaces this home's scheduled payload with
-`ava cluster health-probe`; other homes' jobs stay untouched.
+`meiva cluster health-probe`; other homes' jobs stay untouched.
 
-A dev/QA cluster's birth seeds `AVA_HEALTH_PROBE_AGENT_MIN=0` when it has no resident
+A dev/QA cluster's birth seeds `MEIVA_HEALTH_PROBE_AGENT_MIN=0` when it has no resident
 agents by design; an explicit value stands as written.
 
-**`ava start` reports the admitted roster's readiness.**
+**`meiva start` reports the admitted roster's readiness.**
 
 | rc | Meaning | What to do |
 |---|---|---|
@@ -367,13 +367,13 @@ so the independent data plane survives while root closes its own application
 tree. Failed closure retains custody; systemd cannot prove orphan closure after
 abrupt root death. There is no convergence shell script or duplicate proxy probe.
 
-Boot retry is bounded on both platforms: the boot job runs `ava start --boot` and a
+Boot retry is bounded on both platforms: the boot job runs `meiva start --boot` and a
 failed attempt is retried (launchd `KeepAlive`, systemd `Restart=on-failure`) for
 `BOOT_MAX_ATTEMPTS` (10) attempts per boot, about ten minutes
 (`base/host/system/boot_policy.py`). The attempt that spends the budget emits
-`boot_retries_exhausted` (alert `ava-ops-boot-retries-exhausted`); on Linux the unit
+`boot_retries_exhausted` (alert `meiva-ops-boot-retries-exhausted`); on Linux the unit
 then sits in systemd's `failed` state, on macOS the job exits 0. Fix the cause in the
-boot log, then run `ava start`. A boot attempt never re-ups a unit whose ava-root
+boot log, then run `meiva start`. A boot attempt never re-ups a unit whose meiva-root
 restart budget is spent.
 
 **OS-scheduled jobs.** The platform scheduler runs the health probe
@@ -387,10 +387,10 @@ launch root directly. The unit carries the exact home, checkout and registry.
 There is no cron boot route or second boot-install command. Two properties are
 load-bearing:
 
-- **A job spec is anchored to the checkout that wrote it.** `ava_binary_path()`
+- **A job spec is anchored to the checkout that wrote it.** `meiva_binary_path()`
   resolves this checkout's `.venv` binary (PATH only as a fallback), and the
-  launchd plist / systemd unit / maintenance crontab line pin `AVA_HOME` explicitly, so a job registered by
-  cluster X can never run cluster Y's `ava` against cluster Y's home.
+  launchd plist / systemd unit / maintenance crontab line pin `MEIVA_HOME` explicitly, so a job registered by
+  cluster X can never run cluster Y's `meiva` against cluster Y's home.
 - **A scheduled process never reloads its own launchd label.** `launchctl bootout`
   would terminate the registering process tree. Registration defers on the
   direct child's label match (the env fast path) or on a proven live-process-
@@ -398,30 +398,30 @@ load-bearing:
   `XPC_SERVICE_NAME` alone is not proof for descendants, which read "0"
   (`docs/postmortems/0008`) — leaves the existing plist untouched, and lets the
   next external converge apply any pending spec change.
-- **`AVA_OS_JOBS_ENABLED=false` disables registration for a process.** The
-  scheduler is one namespace per OS user, so a test-scoped `$AVA_HOME` cannot
+- **`MEIVA_OS_JOBS_ENABLED=false` disables registration for a process.** The
+  scheduler is one namespace per OS user, so a test-scoped `$MEIVA_HOME` cannot
   isolate it — the pytest suite sets this and `tests/fixtures/provisioning.py` fails any run
   that leaves a job behind. Deregistration is never gated. Operators do not set
   this: a prod cluster with it off silently loses its health probe,
   daily log maintenance, and its ability to come back after a reboot.
 
-`ava stop`, restart and update use the native maintenance primitives.
+`meiva stop`, restart and update use the native maintenance primitives.
 Restart retains infrastructure and the shared browser, but closes persistent PTYs
 exactly as a stop does; default stop closes those local resources too. Durable
 agent identity and work remain on disk.
 A stop timeout is a failure; force escalation requires an explicit option.
-Normal `ava start` resumes only after readiness. See the
+Normal `meiva start` resumes only after readiness. See the
 [stop procedure](operations/graceful-maintenance.md) for partial stop, coordinated
 multi-machine ordering, failure recovery and the first-deployment limitation.
 
 Stop-class drills and operations: see the executor-cancellation insurance and hold handover section of [graceful maintenance](operations/graceful-maintenance.md).
 
-Merging a PR does not deploy it. `ava stop` asks for confirmation unless `-y` is supplied.
+Merging a PR does not deploy it. `meiva stop` asks for confirmation unless `-y` is supplied.
 
 
 ### Updating a networked cluster in source mode
 
-A cluster whose units span machines, each running from `$HOME/.ava/source`, is
+A cluster whose units span machines, each running from `$HOME/.meiva/source`, is
 updated by stopping every unit, switching every checkout and starting again
 ([decision](../decisions/runtime/updates/release/2026-09-30-networked-cluster-stays-on-source-updates.md)).
 `python -m cli.fleet_update` runs it from the operator's development checkout
@@ -437,15 +437,15 @@ itself (its own public key in its own `authorized_keys`):
 ```
 
 - `down` refuses (exit 2, nothing changed) when a checkout has a
-  `post-checkout` hook, uncommitted changes or `$HOME/.ava/updates/active`,
+  `post-checkout` hook, uncommitted changes or `$HOME/.meiva/updates/active`,
   when a host holds maintenance other than a completed stop, when the hosts
   disagree on HEAD, when `.python-version` changes without
-  `--allow-python-change`, or when it runs inside an Ava agent's shell. It
+  `--allow-python-change`, or when it runs inside an Meiva agent's shell. It
   prints `git diff --stat OLD..NEW` over migrations, helper sources and locks,
   fetches NEW on every host, then — still before anything stops, and also under
-  `--dry-run` — runs NEW's `ava schedules verify` against the running gateway's
+  `--dry-run` — runs NEW's `meiva schedules verify` against the running gateway's
   schedule table (every stored script, agent-written ones included) from a
-  throwaway worktree of NEW at `$HOME/.ava/pre-update-verify` on the host's current
+  throwaway worktree of NEW at `$HOME/.meiva/pre-update-verify` on the host's current
   interpreter. The table is read by the home's own (OLD) source checkout — the only code
   the database authority admits — through whatever read API that OLD has (a
   no-argument `_read_schedule_rows()` or one taking the operator database factory,
@@ -453,8 +453,8 @@ itself (its own public key in its own `authorized_keys`):
   database-opener and gateway-URL-reader dependencies; missing dependencies and real
   read failures remain errors. The result is handed to the
   worktree as a rows file (`--rows-file`). NEW checks it through its own
-  `ava schedules verify --rows-file ... --no-notify` entry point under a throwaway
-  `AVA_HOME`, offline, never dialing the database and never calling its Python
+  `meiva schedules verify --rows-file ... --no-notify` entry point under a throwaway
+  `MEIVA_HOME`, offline, never dialing the database and never calling its Python
   API directly (that signature changes between versions). A red row (a moved module, an undefined name, a call that no longer binds), or a check that
   could not run, refuses with exit 2, the rows listed and nothing stopped; fix the
   scripts and rerun, or pass `--allow-red-schedules` to proceed (the rows then
@@ -469,20 +469,20 @@ itself (its own public key in its own `authorized_keys`):
   and so does everything when the decision itself fails; `--restart-all` skips the
   decision. The verdicts per component print into the log, and `--dry-run` runs the
   decision too. Then, before the first stop, it opens the window's
-  alert silence (below). Then it runs `ava stop -y --timeout 600` on each runner and
+  alert silence (below). Then it runs `meiva stop -y --timeout 600` on each runner and
   then the gateway (each must leave phase `stopped` with no failures; the keep flags ride
   the same stop), then on
   every host checks out NEW detached, repairs legacy read-only venv
   directories, runs `uv sync --frozen` and requires a clean tree.
-- Runners fetch through the gateway's source clone (their checkout's `origin` is the gateway host's `~/.ava/source`): the target commit is fetched by SHA before it is reachable from any of the clone's refs, so the clone carries `uploadpack.allowAnySHA1InWant=true` (repo-local; set 2026-09-30). A reclone of the clone must re-apply it.
+- Runners fetch through the gateway's source clone (their checkout's `origin` is the gateway host's `~/.meiva/source`): the target commit is fetched by SHA before it is reachable from any of the clone's refs, so the clone carries `uploadpack.allowAnySHA1InWant=true` (repo-local; set 2026-09-30). A reclone of the clone must re-apply it.
 - A failed stop prints the next step: on that host retry
-  `ava stop -y --timeout 600`, confirm `ava status` shows
+  `meiva stop -y --timeout 600`, confirm `meiva status` shows
   paused/stopped, then rerun `down`. A tree that is not clean after the switch
   prints its `git status --porcelain` (first 20 lines). Untracked files are not
   caused by the update (a changed `.gitignore` can reveal them): check them and
   move them away, never delete, then rerun `down`. Nothing is moved, deleted or
   retried automatically.
-- `up` runs `ava start` on the gateway (its cold start applies migrations),
+- `up` runs `meiva start` on the gateway (its cold start applies migrations),
   then on each runner; on macOS as a one-time LaunchAgent in `gui/<uid>`,
   because signing the helper needs the login keychain (the user must be
   logged in to the GUI). Each start must release its hold; every machine
@@ -494,20 +494,20 @@ itself (its own public key in its own `authorized_keys`):
   row fails the half. Roster machines that are not listed (a laptop that is off) are
   reported with their online flag and commits and never fail `up` (see the last bullet for their old processes). Then
   the gateway smoke-tests each listed agent-runner with a real agent, reading its own
-  address and bearer in place; then each host runs `ava packages refresh`
+  address and bearer in place; then each host runs `meiva packages refresh`
   (skills follow their channel) and its summary
   line (`summary: …`) is printed. A differing local copy is replaced and
   reported — an info line names the differing files. Last, two read-only drift checks
   run, each to the end before `up` fails with the details in the
-  log: `ava schedules verify --no-notify` on the gateway (the stored schedule scripts, as
-  above) and `ava plugins verify` on every listed host (each enabled plugin loads as an
+  log: `meiva schedules verify --no-notify` on the gateway (the stored schedule scripts, as
+  above) and `meiva plugins verify` on every listed host (each enabled plugin loads as an
   agent boot loads it; the loader skips a broken plugin, so this is what turns that into
   a failure — 2026-10-03: out-of-repo plugins calling deleted hook APIs). They come
   last so a red never skips the smoke or the refresh. Only after they pass does `up`
   expire the window's alert silence.
 - The window is quiet through one Grafana silence, not through any gate in the services:
   `down` has the gateway host create a silence in the co-located Grafana's Alertmanager
-  (`createdBy` `ava-fleet-update`, matcher `alertname=~".+"` except the disk alerts (`metric="host_disk"`, `attributes_check="disk_usage"`: a filling disk still pages) — comment naming NEW, expiry
+  (`createdBy` `meiva-fleet-update`, matcher `alertname=~".+"` except the disk alerts (`metric="host_disk"`, `attributes_check="disk_usage"`: a filling disk still pages) — comment naming NEW, expiry
   `--silence-hours`, default 4) before anything stops, and `up` expires it after the drift
   checks. A silenced rule keeps evaluating, so a condition that outlives the window notifies
   when the silence ends. A rerun of `down` extends the silence it owns; a failed `up`
@@ -524,8 +524,8 @@ itself (its own public key in its own `authorized_keys`):
 - **A manual step that rewrites a state file comes before any command of the new
   code.** When a release's manual steps change a file the code reads (a key dropped
   from `start-intent.json`, a renamed file), finish them on every host already switched
-  to NEW before that host runs any NEW command, `ava stop` included. A rerun of `down`
-  is such a command: it runs `ava stop` again on a host already on NEW, and NEW refuses
+  to NEW before that host runs any NEW command, `meiva stop` included. A rerun of `down`
+  is such a command: it runs `meiva stop` again on a host already on NEW, and NEW refuses
   the state file that is not yet converted. Rerun `down` only after the step is done on
   the hosts it has switched.
 - A unit `down` could not reach (a laptop offline) keeps running its old
@@ -541,7 +541,7 @@ See [component operations](../../services/backup/walg/docs/operations.md).
 
 One permanent provider rejection suppresses background wakes. Fix the provider
 account or configuration, then send the affected agent a fresh message. An
-explicit `ava agents resurrect <id>` is also available when the row is terminated.
+explicit `meiva agents resurrect <id>` is also available when the row is terminated.
 There is no balance-gated billing batch command or permanent-error restart loop.
 Unknown code execution is never automatically replayed. Interrupted strong
 cancel, compact or restart receipts may remain held and require inspection.
@@ -566,9 +566,9 @@ group**. The gateway is reachable **only** over the private network — there is
 no public ingress, the gateway host has no public IP (and the earlier
 Cloudflare Tunnel was retired) — but reachability is not trust: every
 authenticated route requires a bearer or a session cookie (browser login). A
-human or operator presents the cluster secret (`AVA_CLUSTER_SECRET`, gateway
+human or operator presents the cluster secret (`MEIVA_CLUSTER_SECRET`, gateway
 only); services, agents and remote units present their write generation's
-machine API token (`AVA_API_TOKEN`: the gateway admits the active
+machine API token (`MEIVA_API_TOKEN`: the gateway admits the active
 generation's, a unit's `/ops` its own generation's). See
 [`docs/decisions/runtime/updates/release/2026-06-11-multihost-deployment.md`](../decisions/runtime/updates/release/2026-06-11-multihost-deployment.md)
 (explicitly flags its own §4/§5/§9 "no auth" description as superseded history)
@@ -584,23 +584,23 @@ NAT64-synthesize IPv4 literals and the request never enters the tunnel):
 The frontend resolves the gateway as `${location.hostname}:8000` (frontend
 `:3000` and gateway `:8000` are co-located on the gateway host, different
 ports). Gateway CORS accepts exact origins only. An empty
-`AVA_GATEWAY_CORS_ALLOWED_ORIGINS` derives localhost, `127.0.0.1`, and the
+`MEIVA_GATEWAY_CORS_ALLOWED_ORIGINS` derives localhost, `127.0.0.1`, and the
 configured gateway host at the frontend entry port, plus localhost and
-`127.0.0.1` at the cluster's reserved app port (`AVA_APP_PORT`, loopback-only
+`127.0.0.1` at the cluster's reserved app port (`MEIVA_APP_PORT`, loopback-only
 like the Next.js bind); set the variable to a comma-separated list to replace
 that derived allowlist. Cookie-authenticated
 state changes also reject a present, non-allowlisted `Origin`. On a host where
 another service holds the gateway port, set
-`AVA_GATEWAY_PORT` plus the matching
-`AVA_GATEWAY_HEALTH_URL=http://localhost:<port>/api/health`
-(two-var contract; `ava status` probes the health URL). A pure agent-runner
-derives this health URL from the reachable `AVA_GATEWAY_URL` written by
+`MEIVA_GATEWAY_PORT` plus the matching
+`MEIVA_GATEWAY_HEALTH_URL=http://localhost:<port>/api/health`
+(two-var contract; `meiva status` probes the health URL). A pure agent-runner
+derives this health URL from the reachable `MEIVA_GATEWAY_URL` written by
 runner first start unless the host sets an explicit health URL override.
 
 ### Transport encryption
 
 A cluster that serves the gateway or ops server on a non-loopback
-address MUST declare `AVA_TRANSPORT_ENCRYPTION`; every start checks the
+address MUST declare `MEIVA_TRANSPORT_ENCRYPTION`; every start checks the
 declaration and refuses to start when it is empty or unsupported. The accepted
 modes are:
 
@@ -618,12 +618,12 @@ loopback.
 
 ## Credential rotation
 
-`AVA_CLUSTER_SECRET` is the gateway's human bearer (API, frontend login); no
+`MEIVA_CLUSTER_SECRET` is the gateway's human bearer (API, frontend login); no
 remote unit holds it, and machine API tokens rotate with every write
 generation. Run
 [`scripts/data_plane_ops/rotate_cluster_secret.py`](../../scripts/data_plane_ops/rotate_cluster_secret.py)
 (`--execute`) only after a bearer leak. Rotating the secret never touches the
-logical-backup passphrase `$AVA_HOME/backups/logical-backup.passphrase`: a gateway
+logical-backup passphrase `$MEIVA_HOME/backups/logical-backup.passphrase`: a gateway
 home's birth mints and pins it, independent of the secret; a home born earlier carries
 `sha256(secret)`, pinned once, so every earlier logical backup keeps decrypting (an
 empty-secret home carries a minted one instead). The script verifies the pin before it
@@ -631,7 +631,7 @@ writes the new secret, and journals each step with fingerprints, never secrets.
 **The pinned file is backup-critical material**: nothing re-derives it, and losing it
 makes every logical backup of the home unreadable; escrow a copy with the gateway's
 backup keys ([decision](../decisions/data/backup/2026-09-28-backup-passphrase-minted-at-birth.md),
-[passphrase](../../services/backup/artifact/docs/passphrase.ava.okf.md)). Restart the
+[passphrase](../../services/backup/artifact/docs/passphrase.meiva.okf.md)). Restart the
 gateway, then issue every remote unit a new capability bundle (its telemetry token
 derives from the secret). It does not change Postgres, Redis, ACLs, or PgBouncer.
 
@@ -645,7 +645,7 @@ Routine data-plane rotation is independent and uses
 ```
 
 Run this script in a gateway context, not an agent shell: agent contexts see the
-runner-projected `AVA_DB_URL` and agent-profile environment hygiene, so the script
+runner-projected `MEIVA_DB_URL` and agent-profile environment hygiene, so the script
 refuses them. See [Data-plane credential split](data/data-plane-secret-split.md#routine-data-plane-rotation)
 for the exact invocation command.
 
@@ -654,7 +654,7 @@ state on failure. The complete upgrade, verification, runner-restart, and
 recovery procedure is [Data-plane credential split](data/data-plane-secret-split.md).
 
 **Provider API key rotation** — mint the new key in each console, then
-`ava config set KEY=VALUE` (a merge patch over just that key; it prints
+`meiva config set KEY=VALUE` (a merge patch over just that key; it prints
 whether a restart is required — see
 [`docs/decisions/runtime/config/2026-07-17-config-reducer-semantics.md`](../decisions/runtime/config/2026-07-17-config-reducer-semantics.md)):
 
@@ -672,15 +672,15 @@ whether a restart is required — see
 | `BRAVE_API_KEY` | api-dashboard.search.brave.com |
 | `JINA_API_KEY` | jina.ai -> API keys |
 | `WANDB_API_KEY` | wandb.ai -> Settings -> API keys |
-| `AVA_CF_API_TOKEN` | Cloudflare dashboard -> My Profile -> API Tokens |
-| `AVA_TELEGRAM_BOT_TOKEN` | Telegram `@BotFather` -> `/revoke` then `/token` |
+| `MEIVA_CF_API_TOKEN` | Cloudflare dashboard -> My Profile -> API Tokens |
+| `MEIVA_TELEGRAM_BOT_TOKEN` | Telegram `@BotFather` -> `/revoke` then `/token` |
 
 Not automated: each is a manual console visit, and several (Telegram) have no
 programmatic rotation API at all.
 
 ## Code version gate
 
-The [database code-version gate](../../base/db/docs/code-version-gate.ava.okf.md)
+The [database code-version gate](../../base/db/docs/code-version-gate.meiva.okf.md)
 owns the process version, pooled-session admission, minimum update and exit
 contract. Its [decision](../decisions/runtime/updates/execution/converge/2026-09-30-client-side-code-version-gate.md)
 records the boundary. The coordinated recovery order below remains an operator
@@ -694,7 +694,7 @@ exit `78` (`git rev-parse --is-shallow-repository` must print `false`).
 **A unit exits `78`.** Its log holds one `critical` line: `code version gate:
 process <name> runs code version <v>, below the cluster minimum <m>`. The checkout
 is behind the cluster: check out the commit the gateway runs, `uv sync --frozen`,
-`ava start`. `ava stop` and every other `ava` command keep working meanwhile, so
+`meiva start`. `meiva stop` and every other `meiva` command keep working meanwhile, so
 a behind host can always be stopped and recovered; only service processes are
 gated. A supervisor that revives the stale service gets the same exit again until
 the checkout is updated.
@@ -703,14 +703,14 @@ the checkout is updated.
 
 ```bash
 git rev-list --count --first-parent HEAD          # this checkout's code version
-psql "host=/tmp/ava-pg-<home-slug> port=<pg port> dbname=<db>" \
+psql "host=/tmp/meiva-pg-<home-slug> port=<pg port> dbname=<db>" \
   -c "SELECT min_code_version FROM deployment_state"   # administrator, as above
 ```
 
-Running processes name themselves `ava:<process>:v<version>` in the pooler's
-client list: `PGPASSWORD=$(jq -r .password "$AVA_HOME/db-authority/pooler-admin.json")
-psql "host=127.0.0.1 port=<pooler port> user=ava_pooler_admin dbname=pgbouncer"
--c 'SHOW CLIENTS'` (the pooler port is `AVA_DB_URL`'s port in the gateway `.env`;
+Running processes name themselves `meiva:<process>:v<version>` in the pooler's
+client list: `PGPASSWORD=$(jq -r .password "$MEIVA_HOME/db-authority/pooler-admin.json")
+psql "host=127.0.0.1 port=<pooler port> user=meiva_pooler_admin dbname=pgbouncer"
+-c 'SHOW CLIENTS'` (the pooler port is `MEIVA_DB_URL`'s port in the gateway `.env`;
 read the `application_name` column). The password stays in the environment, never
 argv.
 
@@ -718,10 +718,10 @@ argv.
 by itself, and an older process would exit `78` at its first dial (the gateway
 included).
 
-1. Stop the whole cluster (`ava stop -y` on every unit; the gateway with
+1. Stop the whole cluster (`meiva stop -y` on every unit; the gateway with
    `--keep-infra`).
 2. Compute the target's version: `git rev-list --count --first-parent <sha>`.
-3. As the administrator, `psql "host=/tmp/ava-pg-<home-slug> port=<pg port>
+3. As the administrator, `psql "host=/tmp/meiva-pg-<home-slug> port=<pg port>
    dbname=<db>" -c "UPDATE deployment_state SET min_code_version = <target>
    WHERE id = 1"`. `0` switches the gate off until the next gateway start.
 4. Check out `<sha>` on every unit, `uv sync --frozen`, start the gateway, then the
@@ -734,12 +734,12 @@ hand, as updates did before; the gate protects from the following update on.
 ## Code flow & Events
 
 Event publication and payloads belong to
-[the live event bus](../../base/events/live/docs/live/live.ava.okf.md);
-interrupt and control belong to [the agent graph](../../agent/graph/docs/graph.ava.okf.md).
+[the live event bus](../../base/events/live/docs/live/live.meiva.okf.md);
+interrupt and control belong to [the agent graph](../../agent/graph/docs/graph.meiva.okf.md).
 
 **Lifecycle command residue:** a force-terminate whose original host died before
 observing it is never settled by a successor boot or a sweep. The agent stays
-terminated with `agents_meta.lifecycle_command_id` set, `ava agents resurrect`
+terminated with `agents_meta.lifecycle_command_id` set, `meiva agents resurrect`
 refuses ("outstanding hosted lifecycle command has not settled"), and the
 `lifecycle_pointer_stuck` alert fires from the hourly TTL-reaper scan. The
 operator settles it by hand: first inspect the agent's leftover exec request
@@ -767,15 +767,15 @@ same boundary is why `execute_code` has no compute budget (issue #45).
 
 What the operator watches, and where it reads:
 
-Infrastructure views and alerts group `job="ava-infra"` series by the Ava
+Infrastructure views and alerts group `job="meiva-infra"` series by the Meiva
 roster `machine_name`; `host` remains the OS hostname for physical diagnosis.
 
 | Axis | Read | Alert |
 |---|---|---|
-| LLM / gateway / turn latency p95-p99 | Grafana `ava-ops-main`, Prometheus `ava_*` histograms | R4 (LLM p95) |
+| LLM / gateway / turn latency p95-p99 | Grafana `meiva-ops-main`, Prometheus `meiva_*` histograms | R4 (LLM p95) |
 | Error and warning volume | Loki event stream | R1, R6 |
 | Delivery and event-pipeline health | Loki | R2, R5 |
-| Host CPU / memory / load | Grafana `ava-ops-main` ("Host & data plane" section), `job="ava-infra"` | R8, R9 |
+| Host CPU / memory / load | Grafana `meiva-ops-main` ("Host & data plane" section), `job="meiva-infra"` | R8, R9 |
 | Per-volume disk | same, `system_filesystem_utilization_ratio` | R10 (and R7, its trace-recording consequence) |
 | Data-plane saturation | same, `postgresql_*` / `redis_*` | R11, R12 |
 
@@ -784,7 +784,7 @@ investigate, terminate idle agents to shed load, or tell the user — and
 sometimes conclude the machine is busy for a good reason and do nothing. The
 thresholds live in `deploy/lgtm/config/grafana/provisioning/alerting/rules.yml`
 (the converge-rendered source template — converge copies it verbatim into
-`$AVA_HOME/lgtm/native/config/provisioning/`) as deployment-tunable rule
+`$MEIVA_HOME/lgtm/native/config/provisioning/`) as deployment-tunable rule
 config; a box whose normal state trips a rule wants its threshold edited
 there, not a special case in code.
 
@@ -794,10 +794,10 @@ Where to look when something went wrong on a host:
 
 | Question | Surface |
 |---|---|
-| what did daemon X do | `$AVA_HOME/logs/<name>.log` (JSONL, rotated 100MB / 7 days) |
+| what did daemon X do | `$MEIVA_HOME/logs/<name>.log` (JSONL, rotated 100MB / 7 days) |
 | what did the cluster do, without ssh | `GET /api/cluster/admin/events` over the private network |
 | why did a daemon vanish | its log file: every daemon wraps `asyncio.run(main())` and logs the traceback before re-raising |
-| an agent's exec subprocesses | `$AVA_HOME/logs/agent-{N}.log` (every exec subprocess of the agent appends) |
+| an agent's exec subprocesses | `$MEIVA_HOME/logs/agent-{N}.log` (every exec subprocess of the agent appends) |
 | raw session stdout (gateway / shells / daemons / schedules) | Loki (the LGTM backend): shell logs → `filelog/sessions`; gateway/daemon/schedule logs → `filelog/services`. Banner-only agent main stdout is excluded. All filelog receivers derive Loki `service_name` from the filename and persist offsets. Loki retains 84 hours; scheduled local cleanup uses the family tiers below. See `deploy/lgtm/README.md`. |
 
 ### Local log rotation and retention
@@ -827,7 +827,7 @@ Never install from an ephemeral worktree: all worktrees of a clone share
 installing interpreter's absolute path into `INSTALL_PYTHON`. Deleting that
 worktree leaves a dead pointer. `scripts/setup-worktree.sh` checks the shared
 installation (`check_git_hooks.py --strict`: a problem stops the bootstrap) without rewriting hooks or `core.hooksPath`. Converge re-asserts
-the same health on every source `ava start`
+the same health on every source `meiva start`
 (`ensure_local_git_hooks` runs `check_git_hooks.py --scan-machine` over the
 conventional local checkouts); drift warns, it never blocks. Before deleting a
 worktree, inspect both shared hooks' `INSTALL_PYTHON` values and reinstall from
@@ -845,7 +845,7 @@ Review any `core.hooksPath` override before removing it and installing.
 A commit hook's cost follows the change, not the repository. The per-file
 Python and content lints take the changed files (`--only FILE...`; the contract,
 and what widens the run to a full scan, is the
-[changed-files mode](../../scripts/lint/docs/changed-files-mode.ava.okf.md)). The
+[changed-files mode](../../scripts/lint/docs/changed-files-mode.meiva.okf.md)). The
 code-generation freshness hooks, whose check needs the whole project, run only
 when one of the inputs in their `files:` filter changed. ESLint lints the changed
 frontend files (`scripts/hooks/precommit-eslint.sh`) and the whole project when the
@@ -915,7 +915,7 @@ create), and one that a per-file verdict cannot see:
   stale artifact and nothing local catching it. A whole-repository hook whose
   inputs the branch also added or changed already ran in the branch-diff run,
   which judges the deletion with it, so it is not repeated; a per-file hook
-  (`lint-ava-okf`) sees only the files it is handed and is re-checked whenever
+  (`lint-meiva-okf`) sees only the files it is handed and is re-checked whenever
   a deleted path matches. A rename counts as deleting the old path; an unknown
   range fails explicitly. `types-codegen-fresh` alone skips when
   `ui/web/node_modules` is missing, same as the frontend pre-push hooks.
@@ -937,9 +937,9 @@ which stock macOS does not ship — bound to the *open file description* fd 9
 refers to, so it stays held after that python3 process exits, until the
 guarded command (exec'd in the same shell process, inheriting fd 9) itself
 finishes. A wait-with-timeout is `LOCK_NB` polled in a loop, since `fcntl` has
-no built-in timed blocking wait. Locks live in `/tmp/ava-prepush-locks`,
+no built-in timed blocking wait. Locks live in `/tmp/meiva-prepush-locks`,
 independent of clone, user, and `TMPDIR`; never delete live lock files.
-`AVA_PREPUSH_LOCK_DIR` may override this for tests or a host policy, but every
+`MEIVA_PREPUSH_LOCK_DIR` may override this for tests or a host policy, but every
 checkout on that host must use the same local directory. Missing
 tools/dependencies, unavailable load probes, excessive load, or a lock
 timeout print **WARNING: PRE-PUSH SKIPPED** with the tool and reason, then
@@ -947,9 +947,9 @@ exit 0. Hook verbosity makes these successful skips visible. Install frontend
 dependencies with `(cd ui/web && npm ci)`; Python dependencies use
 `env -u VIRTUAL_ENV uv sync` after the worktree venv preflight above.
 
-`AVA_PREPUSH_LOCK_WAIT_SECONDS` bounds how long a contended push waits for a
+`MEIVA_PREPUSH_LOCK_WAIT_SECONDS` bounds how long a contended push waits for a
 tool's lock before it skips; waiting prints the tool name.
-`AVA_PREPUSH_MAX_LOAD_PER_CORE` is the one-minute load average per logical CPU
+`MEIVA_PREPUSH_MAX_LOAD_PER_CORE` is the one-minute load average per logical CPU
 above which a heavy tool skips rather than add work to a sustained CPU queue;
 load is checked before and after acquiring the lock. Both exist for the heavy
 tools only: a hook light enough to run every time takes neither (the nested
@@ -964,30 +964,30 @@ enforcement; the structural CI job already skips the four duplicate hooks.
 
 ## CI (Continuous Integration)
 
-The [GitHub Actions overview](../../.github/.github.ava.okf.md) owns workflow
+The [GitHub Actions overview](../../.github/.github.meiva.okf.md) owns workflow
 composition, suite selection and hosted runners. The
-[native test gate](../../.github/test-gate.ava.okf.md) owns result semantics;
-[native CI infrastructure](../../.github/ci-data-plane.ava.okf.md) owns isolated
+[native test gate](../../.github/test-gate.meiva.okf.md) owns result semantics;
+[native CI infrastructure](../../.github/ci-data-plane.meiva.okf.md) owns isolated
 database prerequisites. [Testing](testing.md) owns scoped contributor checks.
 Runtime operation and CI verification are separate: test and build processes
 must not target a production home.
 
 ## Root-owned application lifecycle
 
-[Host lifecycle](../../cli/commands/lifecycle/docs/lifecycle.ava.okf.md),
-[start identity](../../cli/docs/start_identity.ava.okf.md),
-[Ava Root](../../services/supervision/ava_root/docs/ava_root.ava.okf.md) and
-[native closure](../../services/supervision/ava_root/docs/closure.ava.okf.md)
+[Host lifecycle](../../cli/commands/lifecycle/docs/lifecycle.meiva.okf.md),
+[start identity](../../cli/docs/start_identity.meiva.okf.md),
+[Meiva Root](../../services/supervision/meiva_root/docs/meiva_root.meiva.okf.md) and
+[native closure](../../services/supervision/meiva_root/docs/closure.meiva.okf.md)
 own service selection, launch generations, platform ancestry, readiness and
 stop/destroy custody. Consult these owners before changing a running generation;
 missing native evidence cannot establish readiness or exit.
 
-Root framework tests under `services/supervision/ava_root/tests/test_ava_root_*` exercise supervision,
+Root framework tests under `services/supervision/meiva_root/tests/test_meiva_root_*` exercise supervision,
 custody, IPC and readiness; an isolated native cluster is still required to verify
 platform ancestry and actual application execution. There is no local branch-preview
 controller: validate a branch with CI, the throwaway test clusters, and the Linux
 verification container (`python3 scripts/verify/container.py --ref <ref>`: a fresh
-container, the commit cloned to `~/.ava/source`, `ava init` and the first `ava start`, a scripted agent;
+container, the commit cloned to `~/.meiva/source`, `meiva init` and the first `meiva start`, a scripted agent;
 [verification boundaries](../../future/infra/engineering/verification-boundaries.md)); what only macOS can show
 (the signed helper chain, the desktop grants) runs in a throwaway Tart VM cloned from the golden
 image (`python3 scripts/verify/tart_run.py --ref <ref>`, same flow, plus the helper chain check).

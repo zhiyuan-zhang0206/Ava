@@ -1,6 +1,6 @@
 # Native cancel: work identity and checkpoint evidence
 
-Proposed implementation for [#4474](https://github.com/zhiyuan-zhang0206/Ava/issues/4474).
+Proposed implementation for [#4474](https://github.com/zhiyuan-zhang0206/Meiva/issues/4474).
 This plan is not an implemented capability or deployment authorization. Its base
 is third integration `fa0847e987bdf95ba95ff7b35a1fa458e904f32d`.
 

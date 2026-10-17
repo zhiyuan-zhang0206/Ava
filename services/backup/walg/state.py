@@ -1,6 +1,6 @@
 """What the daily tick has done, in one owner-only file the health probe reads.
 
-`$AVA_HOME/backups/walg/state.json` (0600, replaced atomically) is the only thing
+`$MEIVA_HOME/backups/walg/state.json` (0600, replaced atomically) is the only thing
 the tick and the probe share. Every alert about the tick is a condition on it, so
 its sections are facts, not messages:
 
@@ -11,7 +11,7 @@ its sections are facts, not messages:
   visible until a run succeeds.
 - `backup`, `verify`, `retention`: the last result of each step.
 - `drill`: the latest recovery drill (`drill.py`) and when one last succeeded. Written by
-  whoever runs the drill: the tick, or `ava backup walg drill`, both under the lock.
+  whoever runs the drill: the tick, or `meiva backup walg drill`, both under the lock.
 
 Only the tick writes, and only while holding the per-home run lock; readers never
 lock. A missing file is an empty state; an unreadable or malformed one is an error
@@ -29,7 +29,7 @@ from typing import Any, Literal, cast
 
 from base.host.private_storage import write_private_bytes
 from base.host.verified_file import RegularFileReadError, regular_bytes
-from base.paths import ava_home
+from base.paths import meiva_home
 
 _VERSION = 1
 _MAX_BYTES = 256 * 1024
@@ -50,7 +50,7 @@ class StateError(RuntimeError):
 
 
 def walg_dir() -> Path:
-    return ava_home() / "backups" / "walg"
+    return meiva_home() / "backups" / "walg"
 
 
 def state_path() -> Path:

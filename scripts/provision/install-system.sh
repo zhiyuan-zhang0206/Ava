@@ -1,15 +1,15 @@
 #!/usr/bin/env bash
-# The system layer of a Linux Ava host: Python 3.12 + build tools, then the
+# The system layer of a Linux Meiva host: Python 3.12 + build tools, then the
 # shared provision pieces — pg17 + redis servers, node 22, CLI tools. Composes
 # scripts/provision/* so the package logic lives in one place.
 #
-# Use it to bring a bare Debian/Ubuntu box up to "can run Ava" in one call;
-# `ava init` and `ava start` then initialize the cluster. Not required on a host that already
+# Use it to bring a bare Debian/Ubuntu box up to "can run Meiva" in one call;
+# `meiva init` and `meiva start` then initialize the cluster. Not required on a host that already
 # has the toolchain.
 #
 # Server binaries only, NO initdb: the test suite spins throwaway native clusters
 # (base/deploy/tests/containers.py), and a gateway unit's own per-cluster instance is
-# provisioned under $AVA_HOME/pg by `ava start`.
+# provisioned under $MEIVA_HOME/pg by `meiva start`.
 #
 # Idempotent, runs as root (or via sudo). macOS prod is provisioned via brew.
 set -euo pipefail

@@ -27,7 +27,7 @@ FAILING = frozenset(
     }
 )
 CONFLICTING = frozenset({"CONFLICTING"})
-_FALLBACK_REPO = "zhiyuan-zhang0206/Ava"
+_FALLBACK_REPO = "zhiyuan-zhang0206/Meiva"
 
 POLL_INTERVAL = 30
 MAX_CONSECUTIVE_ERRORS = 3
@@ -62,7 +62,7 @@ def _derive_repo() -> str:
             text=True,
             timeout=10,
         ).stdout.strip()
-        m = re.search(r"(?:github\.com[:/])([^/]+)/([^/]+?)(?:\.git)?$", out)
+        m = re.search(r"github\.com(?::\d+)?[:/]([^/]+)/([^/]+?)(?:\.git)?$", out)
         if m:
             return f"{m.group(1)}/{m.group(2)}"
     except (OSError, subprocess.SubprocessError):  # noqa: S110 - best-effort lookup; fall back

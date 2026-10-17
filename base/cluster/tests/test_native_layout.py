@@ -10,7 +10,7 @@ from base.cluster import ownership
 def test_redis_data_dir_is_redis_under_the_home(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    monkeypatch.setenv("AVA_HOME", str(tmp_path))
+    monkeypatch.setenv("MEIVA_HOME", str(tmp_path))
     assert ownership.redis_data_dir() == tmp_path / "redis"
 
 
@@ -18,7 +18,7 @@ def test_redis_data_dir_is_redis_under_the_home(
     ("url", "port"),
     [
         ("redis://127.0.0.1:6380/0", 6380),
-        ("redis://ava:runtime-pw@10.0.0.9:6391/2", 6391),
+        ("redis://meiva:runtime-pw@10.0.0.9:6391/2", 6391),
         ("redis://127.0.0.1/0", None),
     ],
 )

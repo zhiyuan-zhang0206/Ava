@@ -1,9 +1,9 @@
 """Reachable-bind wait + degraded-bind alert in the pgbouncer bring-up (task #1288).
 
 pgbouncer treats a failed bind on one `listen_addr` entry as a WARNING and keeps
-running on the rest. When `ava start` races the private network at boot, the
+running on the rest. When `meiva start` races the private network at boot, the
 pooler comes up loopback-only, a loopback-only readiness probe reads it as
-healthy, and the pooled AVA_DB_URL public path stays silently dead for every
+healthy, and the pooled MEIVA_DB_URL public path stays silently dead for every
 enrolled agent-runner (2026-08-16: two days).
 
 What is asserted here — the decision logic around `ensure_pgbouncer`:
@@ -35,7 +35,7 @@ from cli.database.tests.command_inputs import command_runtime as command_runtime
 
 _SECRET = "s3cr3t"  # noqa: S105 — test fixture, not a real credential
 _ADMIN = "pooler-admin-fixture"
-_USERLIST = b'"ava_pooler_admin" "SCRAM-SHA-256$4096:c2FsdA==$a:b"\n'
+_USERLIST = b'"meiva_pooler_admin" "SCRAM-SHA-256$4096:c2FsdA==$a:b"\n'
 
 
 class _ReloadProcess:
@@ -49,7 +49,7 @@ class _ReloadProcess:
 
 @pytest.fixture()
 def _noop_write(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Never touch the real $AVA_HOME/pgbouncer dir from a unit test."""
+    """Never touch the real $MEIVA_HOME/pgbouncer dir from a unit test."""
     monkeypatch.setattr(
         _pb.port_preflight, "require_listener", Mock(return_value=frozenset({4242}))
     )
@@ -93,7 +93,7 @@ def test_fresh_start_waits_for_reachable_bind_and_fails_fast_on_timeout(
 ) -> None:
     """The reachable address is not up within the bound: a fresh start must NOT
     birth a pooler that would silently degrade to loopback-only. Fail fast with an
-    explicit message; the boot retry re-runs `ava start` once the network is up."""
+    explicit message; the boot retry re-runs `meiva start` once the network is up."""
     monkeypatch.setattr(_pb.ownership, "pooler", Mock(return_value=None))
 
     def fake_wait_for_reachable_bind(*, machine: MachineIdentity) -> bool:
@@ -107,7 +107,7 @@ def test_fresh_start_waits_for_reachable_bind_and_fails_fast_on_timeout(
     rc = _pb.ensure_pgbouncer(
         pg_port=5433,
         listen_port=6433,
-        db_name="ava_main",
+        db_name="meiva_main",
         userlist=_USERLIST,
         admin_password=_ADMIN,
         machine=command_machine,
@@ -153,7 +153,7 @@ def test_fresh_start_degraded_to_loopback_only_is_a_loud_failure(
     rc = _pb.ensure_pgbouncer(
         pg_port=5433,
         listen_port=6433,
-        db_name="ava_main",
+        db_name="meiva_main",
         userlist=_USERLIST,
         admin_password=_ADMIN,
         machine=command_machine,
@@ -189,7 +189,7 @@ def test_fresh_start_with_public_listener_is_success(
     rc = _pb.ensure_pgbouncer(
         pg_port=5433,
         listen_port=6433,
-        db_name="ava_main",
+        db_name="meiva_main",
         userlist=_USERLIST,
         admin_password=_ADMIN,
         machine=command_machine,
@@ -199,27 +199,27 @@ def test_fresh_start_with_public_listener_is_success(
     assert "✓ pgbouncer started" in capsys.readouterr().out
 
 
-# Delivered to an operator's `ava start` by the boot pass; a daemon it spawns
+# Delivered to an operator's `meiva start` by the boot pass; a daemon it spawns
 # must not keep them in its environment until it restarts.
 _AUTHORITY_ENV = {
-    "AVA_DB_URL": "postgresql://ava_g0_gateway:gen-password@127.0.0.1:6433/ava",
-    "AVA_DB_GENERATION": "0",
-    "AVA_API_TOKEN": "gateway-api-token-" + "t" * 32,
-    "AVA_CLUSTER_SECRET": "human-" + "h" * 40,
-    "AVA_REDIS_ADMIN_PASSWORD": "redis-admin-" + "r" * 20,
+    "MEIVA_DB_URL": "postgresql://meiva_g0_gateway:gen-password@127.0.0.1:6433/meiva",
+    "MEIVA_DB_GENERATION": "0",
+    "MEIVA_API_TOKEN": "gateway-api-token-" + "t" * 32,
+    "MEIVA_CLUSTER_SECRET": "human-" + "h" * 40,
+    "MEIVA_REDIS_ADMIN_PASSWORD": "redis-admin-" + "r" * 20,
 }
 
 
-def test_the_pooler_daemon_inherits_no_ava_authority(
+def test_the_pooler_daemon_inherits_no_meiva_authority(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
     _noop_write: None,
     *,
     command_machine: MachineIdentity,
 ) -> None:
-    # The operator's home is a real directory the code may create: `ava_home()` makes
+    # The operator's home is a real directory the code may create: `meiva_home()` makes
     # its home, so a made-up `/Users/...` path would be created (or refused) on the host.
-    authority = {**_AUTHORITY_ENV, "AVA_HOME": str(tmp_path / ".ava-operator")}
+    authority = {**_AUTHORITY_ENV, "MEIVA_HOME": str(tmp_path / ".meiva-operator")}
     for key, value in {**authority, "PATH": "/usr/bin:/bin", "LANG": "C.UTF-8"}.items():
         monkeypatch.setenv(key, value)
 
@@ -243,7 +243,7 @@ def test_the_pooler_daemon_inherits_no_ava_authority(
         _pb.ensure_pgbouncer(
             pg_port=5433,
             listen_port=6433,
-            db_name="ava_main",
+            db_name="meiva_main",
             userlist=_USERLIST,
             admin_password=_ADMIN,
             machine=command_machine,
@@ -254,7 +254,7 @@ def test_the_pooler_daemon_inherits_no_ava_authority(
     assert isinstance(captured, dict)
     env = cast("dict[str, str]", captured)
     assert env["PATH"] == "/usr/bin:/bin" and env["LANG"] == "C.UTF-8"
-    assert not [key for key in env if key.startswith("AVA_")]
+    assert not [key for key in env if key.startswith("MEIVA_")]
     assert not set(authority.values()) & set(env.values())
 
 
@@ -308,7 +308,7 @@ def test_running_pooler_is_reloaded_when_public_listener_is_healthy(
     rc = _pb.ensure_pgbouncer(
         pg_port=5433,
         listen_port=6433,
-        db_name="ava_main",
+        db_name="meiva_main",
         userlist=_USERLIST,
         admin_password=_ADMIN,
         machine=command_machine,
@@ -369,7 +369,7 @@ def test_running_degraded_pooler_is_restarted_not_reloaded(
     rc = _pb.ensure_pgbouncer(
         pg_port=5433,
         listen_port=6433,
-        db_name="ava_main",
+        db_name="meiva_main",
         userlist=_USERLIST,
         admin_password=_ADMIN,
         machine=command_machine,
@@ -413,7 +413,7 @@ def test_running_degraded_pooler_surviving_terminate_is_reported(
     rc = _pb.ensure_pgbouncer(
         pg_port=5433,
         listen_port=6433,
-        db_name="ava_main",
+        db_name="meiva_main",
         userlist=_USERLIST,
         admin_password=_ADMIN,
         machine=command_machine,
@@ -462,7 +462,7 @@ def test_running_pooler_with_changed_userlist_is_restarted_never_reloaded(
     rc = _pb.ensure_pgbouncer(
         pg_port=5433,
         listen_port=6433,
-        db_name="ava_main",
+        db_name="meiva_main",
         userlist=_USERLIST,
         admin_password=_ADMIN,
         machine=command_machine,

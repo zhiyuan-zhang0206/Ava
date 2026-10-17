@@ -15,8 +15,8 @@ import sys
 import time
 from datetime import UTC, datetime, timedelta
 
-import ava
-from ava.agents import AgentStatus as S
+import meiva
+from meiva.agents import AgentStatus as S
 from schedules.agent_status_guard import ensure_agent_status_members
 from schedules.catchup import cluster_timezone, fire_slot_once
 from base.daemon.schedules.watcher import next_fire
@@ -24,17 +24,17 @@ from base.daemon.schedules.inputs import ScheduleInputs
 from schedules.entry import fresh_schedule_entry, schedule_entry
 
 
-# daily_scan.py ships with the ava-self-evolution skill. The load-dir copy is
+# daily_scan.py ships with the meiva-self-evolution skill. The load-dir copy is
 # converge-managed but bootstrap-only (R5): converge lands it once, and the
 # product rollout's update legs refresh it to the landed revision (issue
 # #1289 — before that wiring, the copy stayed at its first-landing version
-# and a script added later never arrived; `ava skill update` is the manual
+# and a script added later never arrived; `meiva skill update` is the manual
 # equivalent).
 def _daily_scan_path() -> str:
     return os.path.join(
-        os.environ.get("AVA_HOME", os.path.expanduser("~/.ava")),
+        os.environ.get("MEIVA_HOME", os.path.expanduser("~/.meiva")),
         "skills",
-        "ava-self-evolution",
+        "meiva-self-evolution",
         "reference",
         "daily_scan.py",
     )
@@ -47,7 +47,7 @@ CRON = "0 0 * * *"  # 00:00 cluster time — the off-peak trough of a cluster wo
 # 2026-08-09 ruling (daily reports replaced the weekly ones); an env override
 # wins, and an explicit empty env value skips the report.
 def _report_agent() -> str:
-    return os.environ.get("AVA_SELF_EVOLUTION_DAILY_REPORT_AGENT", "228")
+    return os.environ.get("MEIVA_SELF_EVOLUTION_DAILY_REPORT_AGENT", "228")
 
 
 # Measured full-day scan T >= 108 min: 112.9 min total on 2026-09-25 while
@@ -62,20 +62,20 @@ _SCAN_TIMEOUT_SECONDS = 10800
 def ensure_agent(label: str, prompt: str) -> int:
     before_id = None
     while True:
-        page = ava.agents.list_agents(scope="all", query=label, before_id=before_id)
+        page = meiva.agents.list_agents(scope="all", query=label, before_id=before_id)
         # Directory pages are newest first; substring search still needs an exact label match.
         for agent in page.agents:
             if agent.label != label:
                 continue
             if agent.status == S.TERMINATED:
-                ava.agents.resurrect(agent.agent_id, prompt)
+                meiva.agents.resurrect(agent.agent_id, prompt)
             else:
-                ava.agents.send_message(agent.agent_id, prompt)
+                meiva.agents.send_message(agent.agent_id, prompt)
             return agent.agent_id
         if page.next_cursor is None:
             break
         before_id = page.next_cursor
-    return ava.agents.spawn(prompt=prompt, label=label, idempotency_key=str(uuid4()))  # pyright: ignore[reportCallIssue] — fleet plugin wraps spawn with label
+    return meiva.agents.spawn(prompt=prompt, label=label, idempotency_key=str(uuid4()))  # pyright: ignore[reportCallIssue] — fleet plugin wraps spawn with label
 
 
 def run_scan() -> None:
@@ -85,8 +85,8 @@ def run_scan() -> None:
         # when it cannot open the file, which the rc==2 branch would read
         # as "bad runs found". Fail loudly and wake the agent instead.
         msg = (
-            f"daily_scan.py missing at {daily} — run `ava skill update ava-self-evolution` "
-            f"(or `ava skill update` for all repo-native skills) to refresh the load-dir copy"
+            f"daily_scan.py missing at {daily} — run `meiva skill update meiva-self-evolution` "
+            f"(or `meiva skill update` for all repo-native skills) to refresh the load-dir copy"
         )
         print(f"[{datetime.now(UTC).isoformat()}] {msg}")
         ensure_agent("self-evolution", f"Daily scan cannot run: {msg}")
@@ -124,7 +124,7 @@ def run_scan() -> None:
     report_agent = _report_agent()
     if report_agent:
         try:
-            ava.agents.send_message(
+            meiva.agents.send_message(
                 int(report_agent),
                 f"[self-evolution daily {datetime.now(UTC).strftime('%m-%d')}]\n{tail}",
             )
@@ -162,7 +162,7 @@ if __name__ == "__main__":
         {"TERMINATED"},
         schedule_name="self-evolution-daily",
     )
-    entry_inputs = globals().get("AVA_SCHEDULE_INPUTS")
+    entry_inputs = globals().get("MEIVA_SCHEDULE_INPUTS")
     if entry_inputs is None:
         from base.log import prepare_process_logging
 

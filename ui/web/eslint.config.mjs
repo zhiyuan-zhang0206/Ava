@@ -16,7 +16,7 @@ import noUntranslatedUiCopy from "./eslint-rules/no-untranslated-ui-copy.mjs";
 // only true proper nouns landed here.
 const SENTENCE_CASE_ALLOW = [
   // Brands / products
-  "Ava",
+  "Meiva",
   "Grafana",
   "GitHub",
   "Claude",
@@ -299,7 +299,7 @@ export default tseslint.config(
   // ── English-only UI copy (AGENTS.md "English only — no raw CJK") ──
   // No lint previously covered this: the only CJK-forbidding lint in the repo
   // (scripts/lint/agent_docstrings.py) is Python-only (`types: [python]`),
-  // scoped to ava/*.py + plugins/*/*.py agent-visible SDK docstrings — it
+  // scoped to meiva/*.py + plugins/*/*.py agent-visible SDK docstrings — it
   // structurally cannot reach .tsx. This mirrors its CJK ranges (Unified
   // Ideographs + CJK punctuation + fullwidth ASCII) for JSX text and the
   // common copy-carrying attributes. Test files are exempt — fixtures that
@@ -340,7 +340,7 @@ export default tseslint.config(
     rules: {
       "local/no-untranslated-ui-copy": [
         "error",
-        { allow: ["$AVA_HOME/logs/rollout-<epoch>.log"] },
+        { allow: ["$MEIVA_HOME/logs/rollout-<epoch>.log"] },
       ],
     },
   },

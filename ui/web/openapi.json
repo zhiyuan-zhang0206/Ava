@@ -1,7 +1,7 @@
 {
   "openapi": "3.1.0",
   "info": {
-    "title": "Ava",
+    "title": "Meiva",
     "version": "0.1.0"
   },
   "paths": {
@@ -195,7 +195,7 @@
     "/api/bootstrap": {
       "get": {
         "summary": "Get Bootstrap",
-        "description": "Return cluster-common config ({ENV_ALIAS: value}, unmasked) for an\nagent-runner to load into its environment.\n\n`AVA_DB_URL` is the credential-free endpoint; no database credential is\nserved. The admin credentials remain gateway-local (see\nbase.config.bootstrap_config_values).\n\nRaises:\n    HTTPException: 401 when the request carries neither the active write\n        generation's machine API token nor the cluster secret as its bearer;\n        400 when the gateway configuration has no database\n        endpoint.",
+        "description": "Return cluster-common config ({ENV_ALIAS: value}, unmasked) for an\nagent-runner to load into its environment.\n\n`MEIVA_DB_URL` is the credential-free endpoint; no database credential is\nserved. The admin credentials remain gateway-local (see\nbase.config.bootstrap_config_values).\n\nRaises:\n    HTTPException: 401 when the request carries neither the active write\n        generation's machine API token nor the cluster secret as its bearer;\n        400 when the gateway configuration has no database\n        endpoint.",
         "operationId": "get_bootstrap_api_bootstrap_get",
         "parameters": [
           {
@@ -452,7 +452,7 @@
     "/api/keyed/v1/agents": {
       "post": {
         "summary": "Post Guarded Agents",
-        "description": "Create or fork an agent through principal-bound keyed admission.\n\nSpawn is HTTP-uniform: every spawn funnels through\n`create_and_launch_agent`, which creates the agent row in the gateway\nprocess (the main data-plane identity — the target runner's ops server\nruns as the least-privilege `ava_runner` role and cannot INSERT agents)\nand forwards a launch-only op to the target runner's ops server, whether\nthe runner is remote or co-located on this box (localhost) — one code\npath, uniform logs/traces, no in-process shortcut. Auto label generation\nis done asynchronously by the services/derived/labeler daemon — does not block\nthe spawn response.\n\nPlain and fork first prompts commit with the row. The fork marker precedes\nits chat in that transaction. InboundArrived is a best-effort live hint;\nthe pending scan recovers a missed wake.\n\nbody.machine = None targets the local machine (which must be a registered\nagent-runner).\n\nCallers must keep the key fixed for one intent: a retry replays the retained\nbirth instead of creating another agent.\n\n400: the target machine is registered but has no agent-runner capability\n(wire `reason='spawn_target_not_agent_runner'`). 404: the target is not in the\nregistry. 409: the fork_from agent has no checkpoint (no LLM/exec step yet),\nor the key already identifies a different request. 422: the scope header is\nnot principal-v1.",
+        "description": "Create or fork an agent through principal-bound keyed admission.\n\nSpawn is HTTP-uniform: every spawn funnels through\n`create_and_launch_agent`, which creates the agent row in the gateway\nprocess (the main data-plane identity — the target runner's ops server\nruns as the least-privilege `meiva_runner` role and cannot INSERT agents)\nand forwards a launch-only op to the target runner's ops server, whether\nthe runner is remote or co-located on this box (localhost) — one code\npath, uniform logs/traces, no in-process shortcut. Auto label generation\nis done asynchronously by the services/derived/labeler daemon — does not block\nthe spawn response.\n\nPlain and fork first prompts commit with the row. The fork marker precedes\nits chat in that transaction. InboundArrived is a best-effort live hint;\nthe pending scan recovers a missed wake.\n\nbody.machine = None targets the local machine (which must be a registered\nagent-runner).\n\nCallers must keep the key fixed for one intent: a retry replays the retained\nbirth instead of creating another agent.\n\n400: the target machine is registered but has no agent-runner capability\n(wire `reason='spawn_target_not_agent_runner'`). 404: the target is not in the\nregistry. 409: the fork_from agent has no checkpoint (no LLM/exec step yet),\nor the key already identifies a different request. 422: the scope header is\nnot principal-v1.",
         "operationId": "post_guarded_agents_api_keyed_v1_agents_post",
         "parameters": [
           {
@@ -1293,7 +1293,7 @@
     "/api/agents/{agent_id}/understanding/build": {
       "post": {
         "summary": "Post Understanding Build",
-        "description": "Build the understanding tree of chosen sessions by hand, then rebuild the levels above.\n\nChoose sessions by number (`sessions`) or by a `from` / `to` range (every session whose\nread-time extent intersects it). Each chosen session is cut into chunks by the live rule\n(a chunk per `AVA_UNDERSTANDING_CHUNK_RATIO` x the agent model's soft compaction threshold of\ngrowth in the provider-reported input, the session's remainder last); what level-1 nodes already cover is skipped exactly, a chunk that\noverlaps it is cut to its uncovered runs. The jobs run on the agent hosts' consumer in order,\none agent at a time; the session still in progress is built to the last request the agent has\nsent. Once the agent's chunk jobs have all ended, every node above level 1 and the grouping\ncursor are dropped and the levels above are rebuilt over all of the agent's level-1 nodes in\nmessage order; builds of one agent in flight merge into one rebuild. A job that fails leaves\nits stretch undescribed and the rebuild runs anyway.\n\nCost warning: these calls are NOT warm. A manual build reads a stored history long after the\nagent's last request, so every job's whole conversation prefix is billed at the full\n(cache-miss) input price; a 390K-token session costs that much input once per chunk. Always run\nwith `dry_run=true` first: it returns the chunk jobs that would be queued and the estimated\ncost (`cost_basis` says how) without writing anything, and it works whatever the feature switch.\n\nThe feature switch: with `AVA_UNDERSTANDING_ENABLED` off the build is still queued (jobs and\nrebuild) and waits, undescribed, until the switch is turned on; `understanding_enabled` in the\nresponse says which it is. A repeat request merges into the jobs and the pending rebuild already\nqueued and only records another build. Returns the jobs queued and a `build_id` for\n`GET .../understanding/builds/{build_id}`. 404 when the agent does not exist; 422 for an\nunknown session number, an empty selection or a range no session intersects; 503 when the\nstored history cannot be read.",
+        "description": "Build the understanding tree of chosen sessions by hand, then rebuild the levels above.\n\nChoose sessions by number (`sessions`) or by a `from` / `to` range (every session whose\nread-time extent intersects it). Each chosen session is cut into chunks by the live rule\n(a chunk per `MEIVA_UNDERSTANDING_CHUNK_RATIO` x the agent model's soft compaction threshold of\ngrowth in the provider-reported input, the session's remainder last); what level-1 nodes already cover is skipped exactly, a chunk that\noverlaps it is cut to its uncovered runs. The jobs run on the agent hosts' consumer in order,\none agent at a time; the session still in progress is built to the last request the agent has\nsent. Once the agent's chunk jobs have all ended, every node above level 1 and the grouping\ncursor are dropped and the levels above are rebuilt over all of the agent's level-1 nodes in\nmessage order; builds of one agent in flight merge into one rebuild. A job that fails leaves\nits stretch undescribed and the rebuild runs anyway.\n\nCost warning: these calls are NOT warm. A manual build reads a stored history long after the\nagent's last request, so every job's whole conversation prefix is billed at the full\n(cache-miss) input price; a 390K-token session costs that much input once per chunk. Always run\nwith `dry_run=true` first: it returns the chunk jobs that would be queued and the estimated\ncost (`cost_basis` says how) without writing anything, and it works whatever the feature switch.\n\nThe feature switch: with `MEIVA_UNDERSTANDING_ENABLED` off the build is still queued (jobs and\nrebuild) and waits, undescribed, until the switch is turned on; `understanding_enabled` in the\nresponse says which it is. A repeat request merges into the jobs and the pending rebuild already\nqueued and only records another build. Returns the jobs queued and a `build_id` for\n`GET .../understanding/builds/{build_id}`. 404 when the agent does not exist; 422 for an\nunknown session number, an empty selection or a range no session intersects; 503 when the\nstored history cannot be read.",
         "operationId": "post_understanding_build_api_agents__agent_id__understanding_build_post",
         "parameters": [
           {
@@ -1343,7 +1343,7 @@
     "/api/agents/{agent_id}/understanding/builds/{build_id}": {
       "get": {
         "summary": "Get Understanding Build",
-        "description": "A build's progress: each job's status and actual cost, then the rebuild of the upper levels.\n\n`phase` runs `chunks` (jobs live) then `rebuild_pending` (the rebuild waits for the agent's\nchunk jobs to end or is running) then `done`, or `failed` when the rebuild failed. Costs are\nsummed from the raw record of the provider calls so far at the price book's rates; a stalled\nbuild with `AVA_UNDERSTANDING_ENABLED` off stays in `chunks` with its jobs `pending`. 404 when\nthe agent or the build (of this agent) does not exist.",
+        "description": "A build's progress: each job's status and actual cost, then the rebuild of the upper levels.\n\n`phase` runs `chunks` (jobs live) then `rebuild_pending` (the rebuild waits for the agent's\nchunk jobs to end or is running) then `done`, or `failed` when the rebuild failed. Costs are\nsummed from the raw record of the provider calls so far at the price book's rates; a stalled\nbuild with `MEIVA_UNDERSTANDING_ENABLED` off stays in `chunks` with its jobs `pending`. 404 when\nthe agent or the build (of this agent) does not exist.",
         "operationId": "get_understanding_build_api_agents__agent_id__understanding_builds__build_id__get",
         "parameters": [
           {
@@ -1879,7 +1879,7 @@
     "/api/agents/{agent_id}/events/stream": {
       "get": {
         "summary": "Get Events Stream",
-        "description": "SSE endpoint — subscribe to Redis `ava:events`, filter by `agent_id`,\nforward.\n\nClient `EventSource` receives `data: {json}\\n\\n` frames, one JSON\n`events.Event` per frame. code_delta chunks pass through immediately,\nnative streaming. This is the live tail; `GET /api/agents/{id}/events`\n(no `/stream`) is the historical REST query over the persisted unified\nevent stream (`telemetry_events`).\n\nDoes **not** check agent_exists as a precondition: subscribing to a\nnon-existent agent is allowed, you just receive no messages. Otherwise\nagents that were just switched / newly created but with slight DB\nvisibility lag would 404.",
+        "description": "SSE endpoint — subscribe to Redis `meiva:events`, filter by `agent_id`,\nforward.\n\nClient `EventSource` receives `data: {json}\\n\\n` frames, one JSON\n`events.Event` per frame. code_delta chunks pass through immediately,\nnative streaming. This is the live tail; `GET /api/agents/{id}/events`\n(no `/stream`) is the historical REST query over the persisted unified\nevent stream (`telemetry_events`).\n\nDoes **not** check agent_exists as a precondition: subscribing to a\nnon-existent agent is allowed, you just receive no messages. Otherwise\nagents that were just switched / newly created but with slight DB\nvisibility lag would 404.",
         "operationId": "get_events_stream_api_agents__agent_id__events_stream_get",
         "parameters": [
           {
@@ -2652,7 +2652,7 @@
     "/api/agents/{agent_id}/system": {
       "get": {
         "summary": "Get System Events",
-        "description": "SSE endpoint — subscribe to `ava:events`, only forward SYSTEM_ROLES events.\n\nSYSTEM_ROLES contains code_delta / exec_output / compact_done /\ncancelled etc. \"system state\" events — clients that need to track the\nkernel runtime state subscribe to this channel.",
+        "description": "SSE endpoint — subscribe to `meiva:events`, only forward SYSTEM_ROLES events.\n\nSYSTEM_ROLES contains code_delta / exec_output / compact_done /\ncancelled etc. \"system state\" events — clients that need to track the\nkernel runtime state subscribe to this channel.",
         "operationId": "get_system_events_api_agents__agent_id__system_get",
         "parameters": [
           {
@@ -2735,7 +2735,7 @@
     "/api/keyed/v1/agents/{agent_id}/pages": {
       "post": {
         "summary": "Post Guarded Page Register",
-        "description": "ava.ui.show / .serve register a page — SDK main entry.\n\nEach agent can have at most one open page. Registering atomically closes any\nexisting open page of the agent (the closed pages get individual PageClosed\nevents so the frontend removes them from the popover) and commits the original\nacceptance, so a replay returns it without a second effect.\n\nReturns 409 when the agent is terminated (dead agents do not show UI), or\nwhen another live page already holds (host, port) — in the port-conflict\ncase the agent's current page is left open and the response detail names\nthe occupying page.",
+        "description": "meiva.ui.show / .serve register a page — SDK main entry.\n\nEach agent can have at most one open page. Registering atomically closes any\nexisting open page of the agent (the closed pages get individual PageClosed\nevents so the frontend removes them from the popover) and commits the original\nacceptance, so a replay returns it without a second effect.\n\nReturns 409 when the agent is terminated (dead agents do not show UI), or\nwhen another live page already holds (host, port) — in the port-conflict\ncase the agent's current page is left open and the response detail names\nthe occupying page.",
         "operationId": "post_guarded_page_register_api_keyed_v1_agents__agent_id__pages_post",
         "parameters": [
           {
@@ -2805,7 +2805,7 @@
     "/api/keyed/v1/agents/{agent_id}/pages/{name}/close": {
       "post": {
         "summary": "Post Guarded Page Close",
-        "description": "ava.ui.close a page — closes only the observed row (`expected_page_id`).\n\nA newer registration under the same name makes the observation stale (409);\nreplay returns the historical acceptance.",
+        "description": "meiva.ui.close a page — closes only the observed row (`expected_page_id`).\n\nA newer registration under the same name makes the observation stale (409);\nreplay returns the historical acceptance.",
         "operationId": "post_guarded_page_close_api_keyed_v1_agents__agent_id__pages__name__close_post",
         "parameters": [
           {
@@ -3562,7 +3562,7 @@
     "/api/cluster/stopping": {
       "post": {
         "summary": "Post Cluster Stopping",
-        "description": "Record that the (machine, home) unit is shutting down intentionally.\n\n`ava stop` POSTs this (best-effort) just before local teardown so the\ncluster view distinguishes a deliberate stop from a crash — the live probe\ncannot. Stamps the unit's `stopped_at` and recomputes the composed\n`machines` row; `ava start` clears it. `home` is the stopping unit's\n$AVA_HOME so a co-located peer unit keeps its capability.\n\n`machine`/`home` are caller-asserted, not verified against the auth\nprincipal (same trust model as the other cluster control endpoints).\nLow-stakes: stopped_at is cosmetic and a spuriously-stamped live host still\nprobes online=True.",
+        "description": "Record that the (machine, home) unit is shutting down intentionally.\n\n`meiva stop` POSTs this (best-effort) just before local teardown so the\ncluster view distinguishes a deliberate stop from a crash — the live probe\ncannot. Stamps the unit's `stopped_at` and recomputes the composed\n`machines` row; `meiva start` clears it. `home` is the stopping unit's\n$MEIVA_HOME so a co-located peer unit keeps its capability.\n\n`machine`/`home` are caller-asserted, not verified against the auth\nprincipal (same trust model as the other cluster control endpoints).\nLow-stakes: stopped_at is cosmetic and a spuriously-stamped live host still\nprobes online=True.",
         "operationId": "post_cluster_stopping_api_cluster_stopping_post",
         "parameters": [
           {
@@ -3615,7 +3615,7 @@
     "/api/cluster/status": {
       "get": {
         "summary": "Get Cluster Status",
-        "description": "This host's own snapshot (name / role / paused).\n\nOn an agent-runner-capable host the snapshot comes from this host's ops\nserver (a status_probe op dialed at its registered localhost URL) — the\ngateway never probes sessions/pidfiles itself. A pure gateway runs no ops\nserver, so it assembles a lightweight local snapshot (paused flag +\norchestration session + prod-source HEAD; no shell/daemon probes — that is\nagent-runner data a pure gateway does not have).\n\nConsumed by `ava status`'s gateway supplement. For the full multi-machine\nroster use `/api/cluster/roster`. Bypasses 503 mode so status stays visible\nduring pause — observability is always online.",
+        "description": "This host's own snapshot (name / role / paused).\n\nOn an agent-runner-capable host the snapshot comes from this host's ops\nserver (a status_probe op dialed at its registered localhost URL) — the\ngateway never probes sessions/pidfiles itself. A pure gateway runs no ops\nserver, so it assembles a lightweight local snapshot (paused flag +\norchestration session + prod-source HEAD; no shell/daemon probes — that is\nagent-runner data a pure gateway does not have).\n\nConsumed by `meiva status`'s gateway supplement. For the full multi-machine\nroster use `/api/cluster/roster`. Bypasses 503 mode so status stays visible\nduring pause — observability is always online.",
         "operationId": "get_cluster_status_api_cluster_status_get",
         "responses": {
           "200": {
@@ -3634,7 +3634,7 @@
     "/api/cluster/roster": {
       "get": {
         "summary": "Get Cluster Roster",
-        "description": "The full multi-machine roster — every registered machine + status.\n\nBacks the thin-client `ava cluster status`: the gateway's own row is\nresolved locally; each agent-runner renders from the heartbeat liveness\npass's last status_probe (`MachineStatus.observed_at` says how old), so the\nread dials nothing and a down host cannot slow it. `fresh=true` probes every\nrunner in parallel via the status_probe op instead (total wall ≈ the probe\ntimeout regardless of N) — for a caller that must see a restart land, such as\nthe fleet update. Same fan-out the `/api/status` cluster panel uses. Bypasses\n503 mode so the roster stays visible during pause.",
+        "description": "The full multi-machine roster — every registered machine + status.\n\nBacks the thin-client `meiva cluster status`: the gateway's own row is\nresolved locally; each agent-runner renders from the heartbeat liveness\npass's last status_probe (`MachineStatus.observed_at` says how old), so the\nread dials nothing and a down host cannot slow it. `fresh=true` probes every\nrunner in parallel via the status_probe op instead (total wall ≈ the probe\ntimeout regardless of N) — for a caller that must see a restart land, such as\nthe fleet update. Same fan-out the `/api/status` cluster panel uses. Bypasses\n503 mode so the roster stays visible during pause.",
         "operationId": "get_cluster_roster_api_cluster_roster_get",
         "parameters": [
           {
@@ -3818,7 +3818,7 @@
     "/api/cluster/machines": {
       "get": {
         "summary": "Get Cluster Machines",
-        "description": "List every registered machine with its description + live status.\n\nBacks ava.agents.list_machines(). Live status comes from the same source the\nroster uses: the heartbeat liveness pass's last status_probe, or with\n`fresh=true` a probe of every runner now (gateway is live from its own\nperspective). role / gateway_url are intentionally omitted — agents reason\nover the free-text description, not ops topology.",
+        "description": "List every registered machine with its description + live status.\n\nBacks meiva.agents.list_machines(). Live status comes from the same source the\nroster uses: the heartbeat liveness pass's last status_probe, or with\n`fresh=true` a probe of every runner now (gateway is live from its own\nperspective). role / gateway_url are intentionally omitted — agents reason\nover the free-text description, not ops topology.",
         "operationId": "get_cluster_machines_api_cluster_machines_get",
         "parameters": [
           {
@@ -3865,7 +3865,7 @@
     "/api/cluster/machines/{name}/staging": {
       "post": {
         "summary": "Set Machine Staging",
-        "description": "Set or clear a machine's operator staging flag (`is_staging`).\n\nThe staging latch is what keeps a registered staging host out of the\nagent-runner target set — `ava start` on it clears its `stopped_at` like any\nhost, and this flag is the exclusion (`base.cluster.machines.list_agent_runners`\nskips is_staging rows). Backed by `base.cluster.machines.set_staging`; the CLI\nverbs `ava cluster mark-staging` / `unmark-staging` call this endpoint.",
+        "description": "Set or clear a machine's operator staging flag (`is_staging`).\n\nThe staging latch is what keeps a registered staging host out of the\nagent-runner target set — `meiva start` on it clears its `stopped_at` like any\nhost, and this flag is the exclusion (`base.cluster.machines.list_agent_runners`\nskips is_staging rows). Backed by `base.cluster.machines.set_staging`; the CLI\nverbs `meiva cluster mark-staging` / `unmark-staging` call this endpoint.",
         "operationId": "set_machine_staging_api_cluster_machines__name__staging_post",
         "parameters": [
           {
@@ -3955,7 +3955,7 @@
     "/api/cluster/machines/{name}/pause": {
       "post": {
         "summary": "Pause Cluster Machine",
-        "description": "Temporarily pull a machine out of the cluster (`ava cluster pause`).\n\nThe operator act starts with an admission fence, then drains and sweeps:\n\n1. **Latch** — set `paused_at`/`pause_reason` first. Every resurrection\n   transaction (explicit, pending-work, controller, and retry) locks and\n   checks this latch before its agent row, so stale resurrection cannot\n   escape the sweep.\n2. **Drain** — every in_progress task owned by a live agent on this\n   machine is reassigned to the drain owner (#405) with a note; the\n   reminder daemon then surfaces it.\n3. **Final sweep** — every agent row on the machine, including an already\n   terminated row, receives a newer force-terminate intent fence. A\n   pre-latch resurrection holding the agent row lock completes first, then\n   this sweep terminates its exact session; older pending work on a dead\n   row cannot reverse the pause either. Other existing-agent re-entry paths\n   (respawn/swap/revive) keep their established admission rules and are\n   caught when they hold or update an existing row before the final sweep.\n\nThe live rows are\n   force-terminated via the machine's own ops server (kill the process +\n   mark terminated in one op, source=\"machine-pause\"): the machine is\n   about to be disconnected, so waiting for graceful turns is not worth\n   the non-determinism of an agent that may never claim. An agent whose\n   ops server is unreachable (the machine is already down) is force-marked\n   terminated in the shared DB — its process is on the departing host\n   anyway.\nFrom the latch onward the machine vanishes from the roster / cluster panel /\nagents' list_machines, `list_agent_runners()` drops it (no probe, no offline\nalert, cluster fan-outs skip it) and ordinary spawns targeting it are refused (409).\nThe separate transaction race between the pause latch and creation of a\nbrand-new agent row is outside this resurrection boundary.\n\nThe expected absence is silent at the source: the latch removes the machine\nfrom the liveness pass's targets, so it emits no `machine_probe_failed`\nsignal. Idempotent: pausing an already-paused machine re-runs the\n(now-empty) drain/terminate and returns the existing latch.\n\nRefuses (400) to pause the gateway's own machine — the gateway host must\nstay a cluster member for the cluster to answer anything.",
+        "description": "Temporarily pull a machine out of the cluster (`meiva cluster pause`).\n\nThe operator act starts with an admission fence, then drains and sweeps:\n\n1. **Latch** — set `paused_at`/`pause_reason` first. Every resurrection\n   transaction (explicit, pending-work, controller, and retry) locks and\n   checks this latch before its agent row, so stale resurrection cannot\n   escape the sweep.\n2. **Drain** — every in_progress task owned by a live agent on this\n   machine is reassigned to the drain owner (#405) with a note; the\n   reminder daemon then surfaces it.\n3. **Final sweep** — every agent row on the machine, including an already\n   terminated row, receives a newer force-terminate intent fence. A\n   pre-latch resurrection holding the agent row lock completes first, then\n   this sweep terminates its exact session; older pending work on a dead\n   row cannot reverse the pause either. Other existing-agent re-entry paths\n   (respawn/swap/revive) keep their established admission rules and are\n   caught when they hold or update an existing row before the final sweep.\n\nThe live rows are\n   force-terminated via the machine's own ops server (kill the process +\n   mark terminated in one op, source=\"machine-pause\"): the machine is\n   about to be disconnected, so waiting for graceful turns is not worth\n   the non-determinism of an agent that may never claim. An agent whose\n   ops server is unreachable (the machine is already down) is force-marked\n   terminated in the shared DB — its process is on the departing host\n   anyway.\nFrom the latch onward the machine vanishes from the roster / cluster panel /\nagents' list_machines, `list_agent_runners()` drops it (no probe, no offline\nalert, cluster fan-outs skip it) and ordinary spawns targeting it are refused (409).\nThe separate transaction race between the pause latch and creation of a\nbrand-new agent row is outside this resurrection boundary.\n\nThe expected absence is silent at the source: the latch removes the machine\nfrom the liveness pass's targets, so it emits no `machine_probe_failed`\nsignal. Idempotent: pausing an already-paused machine re-runs the\n(now-empty) drain/terminate and returns the existing latch.\n\nRefuses (400) to pause the gateway's own machine — the gateway host must\nstay a cluster member for the cluster to answer anything.",
         "operationId": "pause_cluster_machine_api_cluster_machines__name__pause_post",
         "parameters": [
           {
@@ -4005,7 +4005,7 @@
     "/api/cluster/machines/{name}/resume": {
       "post": {
         "summary": "Resume Cluster Machine",
-        "description": "Restore a paused machine as a normal cluster member (`ava cluster resume`).\n\nClears `paused_at`/`pause_reason`; the row's registration info (gateway_url\n/ role / description) was never touched, so probing, the roster, rollout and\nspawn acceptance all resume immediately. The machine's own side needs no\ngateway action: when it is back online it re-runs `ava start`, whose\n`register_self()` refreshes its dial URL (its reachable address may have\nchanged) and clears its `stopped_at` latch. If the machine's reachable\naddress changed, the gateway's pg_hba must cover the new IP — see the ops checklist in the\nCLI output (`AVA_TRUSTED_CIDRS`, then `ava restart` on the gateway host).\n\n404 when the row does not exist; idempotent (resumed=False) when the\nmachine was not paused.",
+        "description": "Restore a paused machine as a normal cluster member (`meiva cluster resume`).\n\nClears `paused_at`/`pause_reason`; the row's registration info (gateway_url\n/ role / description) was never touched, so probing, the roster, rollout and\nspawn acceptance all resume immediately. The machine's own side needs no\ngateway action: when it is back online it re-runs `meiva start`, whose\n`register_self()` refreshes its dial URL (its reachable address may have\nchanged) and clears its `stopped_at` latch. If the machine's reachable\naddress changed, the gateway's pg_hba must cover the new IP — see the ops checklist in the\nCLI output (`MEIVA_TRUSTED_CIDRS`, then `meiva restart` on the gateway host).\n\n404 when the row does not exist; idempotent (resumed=False) when the\nmachine was not paused.",
         "operationId": "resume_cluster_machine_api_cluster_machines__name__resume_post",
         "parameters": [
           {
@@ -4897,7 +4897,7 @@
     "/api/keyed/v1/schedules/draft": {
       "post": {
         "summary": "Guarded Draft Schedule",
-        "description": "Hand a natural-language request to an ava-schedule-writer agent. Spawns the\nagent (which loads ava-guide.schedules, clarifies, writes the script,\nand POSTs it back) and returns its id so the UI can open the conversation.\nReplays one raw draft intent and its original birth.",
+        "description": "Hand a natural-language request to an meiva-schedule-writer agent. Spawns the\nagent (which loads meiva-guide.schedules, clarifies, writes the script,\nand POSTs it back) and returns its id so the UI can open the conversation.\nReplays one raw draft intent and its original birth.",
         "operationId": "guarded_draft_schedule_api_keyed_v1_schedules_draft_post",
         "parameters": [
           {
@@ -4958,7 +4958,7 @@
     "/api/keyed/v1/guide/draft": {
       "post": {
         "summary": "Guarded Draft Guide",
-        "description": "Spawn an ava-guide agent for a natural-language ops request and return its\nid so the UI can open the conversation. Replays one raw draft intent and its\noriginal birth.",
+        "description": "Spawn an meiva-guide agent for a natural-language ops request and return its\nid so the UI can open the conversation. Replays one raw draft intent and its\noriginal birth.",
         "operationId": "guarded_draft_guide_api_keyed_v1_guide_draft_post",
         "parameters": [
           {
@@ -5129,7 +5129,7 @@
     "/api/skills": {
       "get": {
         "summary": "Get Skills",
-        "description": "List the skills in this host's load dir, correlated with the registry.\n\nEach top-level directory under `$AVA_HOME/skills/` becomes a row: its source\nlayer (core=repo / plugin / machine=user), its `enabled` toggle, and whether\nthe on-disk copy drifted from what converge last wrote (`modified_locally`).\nA directory with no registry entry is reported as `untracked` (present on\ndisk but the scanner won't load it).",
+        "description": "List the skills in this host's load dir, correlated with the registry.\n\nEach top-level directory under `$MEIVA_HOME/skills/` becomes a row: its source\nlayer (core=repo / plugin / machine=user), its `enabled` toggle, and whether\nthe on-disk copy drifted from what converge last wrote (`modified_locally`).\nA directory with no registry entry is reported as `untracked` (present on\ndisk but the scanner won't load it).",
         "operationId": "get_skills_api_skills_get",
         "responses": {
           "200": {
@@ -5146,7 +5146,7 @@
       },
       "put": {
         "summary": "Update Skill Enabled",
-        "description": "Toggle one skill's enabled flag in the install registry.\n\nThe change is persisted to `installed.json` immediately; the skill scanner\npicks it up on the next agent spawn. Untracked skills (no registry entry)\ncannot be toggled — register them first with `ava skill register`.\n\n`body.name` is an inbound name: the lookup folds dash and underscore\ntogether (`match_key`), and the row's own spelling — not the request's — is\nwhat addresses the directory and comes back in the view.\n\nRead and write are ONE `mutate` cycle. Looking the row up through a separate\nread and then re-saving it would let a concurrent `ava skill install` or\n`ava converge` land its rows in between, and this handler's save — built on\na registry read before those rows existed — would drop them.",
+        "description": "Toggle one skill's enabled flag in the install registry.\n\nThe change is persisted to `installed.json` immediately; the skill scanner\npicks it up on the next agent spawn. Untracked skills (no registry entry)\ncannot be toggled — register them first with `meiva skill register`.\n\n`body.name` is an inbound name: the lookup folds dash and underscore\ntogether (`match_key`), and the row's own spelling — not the request's — is\nwhat addresses the directory and comes back in the view.\n\nRead and write are ONE `mutate` cycle. Looking the row up through a separate\nread and then re-saving it would let a concurrent `meiva skill install` or\n`meiva converge` land its rows in between, and this handler's save — built on\na registry read before those rows existed — would drop them.",
         "operationId": "update_skill_enabled_api_skills_put",
         "requestBody": {
           "content": {
@@ -5185,7 +5185,7 @@
     "/api/keyed/v1/packages/draft": {
       "post": {
         "summary": "Guarded Draft Package",
-        "description": "Spawn an ava-package-installer agent for a natural-language install request\nand return its id so the UI can open the conversation. Replays one raw draft\nintent and its original birth; 422 on an unknown kind.",
+        "description": "Spawn an meiva-package-installer agent for a natural-language install request\nand return its id so the UI can open the conversation. Replays one raw draft\nintent and its original birth; 422 on an unknown kind.",
         "operationId": "guarded_draft_package_api_keyed_v1_packages_draft_post",
         "parameters": [
           {
@@ -6365,7 +6365,7 @@
     "/api/alerts/stream": {
       "get": {
         "summary": "Get Alerts Stream",
-        "description": "SSE endpoint — subscribe to the ``ava:alerts`` Redis channel, forward.\n\n    Client ``EventSource`` receives ``data: {json}\n\n`` frames, one\n    ``AlertRow`` JSON per frame, on every ingest. Same machinery as the\n    agent-events stream (heartbeat frames, error frames, reconnection-safe);\n    this is the live tail — the initial fetch (GET /api/alerts) covers rows\n    ingested before the subscription opened.",
+        "description": "SSE endpoint — subscribe to the ``meiva:alerts`` Redis channel, forward.\n\n    Client ``EventSource`` receives ``data: {json}\n\n`` frames, one\n    ``AlertRow`` JSON per frame, on every ingest. Same machinery as the\n    agent-events stream (heartbeat frames, error frames, reconnection-safe);\n    this is the live tail — the initial fetch (GET /api/alerts) covers rows\n    ingested before the subscription opened.",
         "operationId": "get_alerts_stream_api_alerts_stream_get",
         "responses": {
           "200": {
@@ -6382,7 +6382,7 @@
     "/api/health": {
       "get": {
         "summary": "Get Health",
-        "description": "Liveness probe over the private network (the gateway is unauthenticated). DB ping\nincluded — a gateway that can serve HTTP but cannot reach Postgres is not\n\"healthy\" enough for the watchdog to leave alone.\n\nThe identity fields answer the questions a 200 alone cannot: `name` is\nwhich *service* answered, `home` this gateway's `$AVA_HOME` (its cluster\nidentity), `machine` its host, `started_at` this process's birth, and `sha`\nthe code frozen at boot. A 200 on this port only proves *something* listens\nthere, so the watchdog verifies the stable identity too rather than the status\ncode alone — see `services/supervision/healthchecks/gateway.py`. The start and code facts\nalso let read-only post-deploy checks detect a new serving generation without\nconsulting disk state. Each field was additive to the `{\"status\": \"ok\"}` contract.\n\nLiveness must fail faster than the resource it protects: this uses the\ncontrol-plane pool and a 1-2 second database budget rather than waiting up\nto 30 seconds for the data-plane pool. A 503 therefore means the process is\nalive but Postgres is degraded; the watchdog's consecutive-failure policy\ndecides whether that merits a respawn.\n\n`name` is a constant naming the service this route belongs to — the point being\nthat an impostor answering here reports its own name, or none. No probe reads it\nyet; `base.daemon.health.probe_unit_home` gains the `name` arm only once every\ndeployed gateway emits the field, and that ordering is load-bearing (#1038).",
+        "description": "Liveness probe over the private network (the gateway is unauthenticated). DB ping\nincluded — a gateway that can serve HTTP but cannot reach Postgres is not\n\"healthy\" enough for the watchdog to leave alone.\n\nThe identity fields answer the questions a 200 alone cannot: `name` is\nwhich *service* answered, `home` this gateway's `$MEIVA_HOME` (its cluster\nidentity), `machine` its host, `started_at` this process's birth, and `sha`\nthe code frozen at boot. A 200 on this port only proves *something* listens\nthere, so the watchdog verifies the stable identity too rather than the status\ncode alone — see `services/supervision/healthchecks/gateway.py`. The start and code facts\nalso let read-only post-deploy checks detect a new serving generation without\nconsulting disk state. Each field was additive to the `{\"status\": \"ok\"}` contract.\n\nLiveness must fail faster than the resource it protects: this uses the\ncontrol-plane pool and a 1-2 second database budget rather than waiting up\nto 30 seconds for the data-plane pool. A 503 therefore means the process is\nalive but Postgres is degraded; the watchdog's consecutive-failure policy\ndecides whether that merits a respawn.\n\n`name` is a constant naming the service this route belongs to — the point being\nthat an impostor answering here reports its own name, or none. No probe reads it\nyet; `base.daemon.health.probe_unit_home` gains the `name` arm only once every\ndeployed gateway emits the field, and that ordering is load-bearing (#1038).",
         "operationId": "get_health_api_health_get",
         "responses": {
           "200": {
@@ -6585,7 +6585,7 @@
     "/api/memory/search": {
       "post": {
         "summary": "Post Memory Search",
-        "description": "Search the memory pool; return the `k` notes most relevant to the query,\neach with the chunk that matched and a relevance score.\n\nTwo stages. Vector search finds the best chunk of the closest\n`memory_rerank_candidates` notes (`memory_dedup_candidates` for the `dedup`\npurpose); a decision model then judges each chunk\nagainst the query, and the response is ordered by the probability that the\nchunk is relevant (`score`). No text is generated on this path.\n\nOne search issues at most that many decision requests, whatever `k` is: `k` above the\ncandidate count returns the candidates. Notes in `exclude` are dropped from the vector\ncandidates before ranking and take no slot. The ranking stops, and its unanswered requests\nare cancelled, when the client disconnects or the deadline passes (the gateway's own, or\nthe request's `deadline_seconds` when that is shorter).\n\nPaths are relative to memory pool root (settings.services.memory_root, e.g.\n`~/.ava/memory/`); the SDK caller prepends `ava.memory.PATH` to\nreconstruct the absolute path. fs-neutral so gateway fs (e.g.\n/Users/x) and agent-runner fs (/home/y) being different still works.\n\nOnly the gateway hosts the search backend (numpy by default), so\nthis endpoint always runs on the gateway; agent-runner SDK calls reach this\nhandler via the gateway URL they were configured with (CF Tunnel /\nprivate network) and never enter via a local agent-runner gateway\n(agent-runners run no gateway process).\n\nRaises:\n    IndexerUnavailable: embedder API / search backend unreachable, the\n        decision model failed, or the search exceeded its deadline (wire 503)",
+        "description": "Search the memory pool; return the `k` notes most relevant to the query,\neach with the chunk that matched and a relevance score.\n\nTwo stages. Vector search finds the best chunk of the closest\n`memory_rerank_candidates` notes (`memory_dedup_candidates` for the `dedup`\npurpose); a decision model then judges each chunk\nagainst the query, and the response is ordered by the probability that the\nchunk is relevant (`score`). No text is generated on this path.\n\nOne search issues at most that many decision requests, whatever `k` is: `k` above the\ncandidate count returns the candidates. Notes in `exclude` are dropped from the vector\ncandidates before ranking and take no slot. The ranking stops, and its unanswered requests\nare cancelled, when the client disconnects or the deadline passes (the gateway's own, or\nthe request's `deadline_seconds` when that is shorter).\n\nPaths are relative to memory pool root (settings.services.memory_root, e.g.\n`~/.meiva/memory/`); the SDK caller prepends `meiva.memory.PATH` to\nreconstruct the absolute path. fs-neutral so gateway fs (e.g.\n/Users/x) and agent-runner fs (/home/y) being different still works.\n\nOnly the gateway hosts the search backend (numpy by default), so\nthis endpoint always runs on the gateway; agent-runner SDK calls reach this\nhandler via the gateway URL they were configured with (CF Tunnel /\nprivate network) and never enter via a local agent-runner gateway\n(agent-runners run no gateway process).\n\nRaises:\n    IndexerUnavailable: embedder API / search backend unreachable, the\n        decision model failed, or the search exceeded its deadline (wire 503)",
         "operationId": "post_memory_search_api_memory_search_post",
         "requestBody": {
           "content": {
@@ -7167,7 +7167,7 @@
     "/api/okf/graph": {
       "get": {
         "summary": "Get Okf Graph",
-        "description": "Build the OKF graph from the live `.ava.okf.md` tree and render it\ninto the self-contained D3 template — open directly in a browser tab.",
+        "description": "Build the OKF graph from the live `.meiva.okf.md` tree and render it\ninto the self-contained D3 template — open directly in a browser tab.",
         "operationId": "get_okf_graph_api_okf_graph_get",
         "responses": {
           "200": {
@@ -8511,7 +8511,7 @@
           "live"
         ],
         "title": "AgentMachineRow",
-        "description": "One machine as exposed to agents via ava.agents.list_machines().\n\nIntentionally minimal: name + free-text description + determinate liveness.\nA paused host is still live, but a reached host whose status operation\nfailed has no liveness verdict, so `live=False` until a probe returns a\nconcrete paused value. role / gateway_url stay internal to ops and are not\nsurfaced to agents."
+        "description": "One machine as exposed to agents via meiva.agents.list_machines().\n\nIntentionally minimal: name + free-text description + determinate liveness.\nA paused host is still live, but a reached host whose status operation\nfailed has no liveness verdict, so `live=False` until a probe returns a\nconcrete paused value. role / gateway_url stay internal to ops and are not\nsurfaced to agents."
       },
       "AgentMessageEnqueued": {
         "properties": {
@@ -8587,7 +8587,7 @@
           "source"
         ],
         "title": "AgentMessageIn",
-        "description": "POST /api/agents/{id}/messages request body — for SDK send_message and\nthe `ava agents send` CLI (which the generated background-run / watcher\ncompletion notices invoke).\n\nPure INSERT + return — the caller does not inspect status.\nAuto-resurrect on the gateway side ensures delivery to any agent,\nterminated or not.\n\n`source` is required — the SDK passes f\"agent:{my_id}\", the generated\nnotices pass shell:N / watcher:N; there is no default to prevent callers\nfrom forgetting and having inbounds silently tagged as \"user\", muddying\nenvelope labels. The valid set is in `base/agents/messages/envelope.py:validate_source`\n(system / agent:N / external_agent:<subject>[:<instance>] / user / ui:page:<name> /\nwatcher:N / shell:N / schedule:N). `user` delivers as the user; an\n`external_agent:` declaration delivers as a message from that external\nagent (self-asserted, never authenticated). An illegal source is intercepted by\n422 at the HTTP layer — otherwise it would land in inbound_messages and the agent claim node\nwould hit ValueError and kill the process."
+        "description": "POST /api/agents/{id}/messages request body — for SDK send_message and\nthe `meiva agents send` CLI (which the generated background-run / watcher\ncompletion notices invoke).\n\nPure INSERT + return — the caller does not inspect status.\nAuto-resurrect on the gateway side ensures delivery to any agent,\nterminated or not.\n\n`source` is required — the SDK passes f\"agent:{my_id}\", the generated\nnotices pass shell:N / watcher:N; there is no default to prevent callers\nfrom forgetting and having inbounds silently tagged as \"user\", muddying\nenvelope labels. The valid set is in `base/agents/messages/envelope.py:validate_source`\n(system / agent:N / external_agent:<subject>[:<instance>] / user / ui:page:<name> /\nwatcher:N / shell:N / schedule:N). `user` delivers as the user; an\n`external_agent:` declaration delivers as a message from that external\nagent (self-asserted, never authenticated). An illegal source is intercepted by\n422 at the HTTP layer — otherwise it would land in inbound_messages and the agent claim node\nwould hit ValueError and kill the process."
       },
       "AgentMessagesResponse": {
         "properties": {
@@ -10379,7 +10379,7 @@
           "paused"
         ],
         "title": "ClusterStatus",
-        "description": "`GET /api/cluster/status` response body — this host's snapshot in the\nmulti-machine view.\n\n`ava cluster status` CLI and the future monitoring page consume the\nsame payload."
+        "description": "`GET /api/cluster/status` response body — this host's snapshot in the\nmulti-machine view.\n\n`meiva cluster status` CLI and the future monitoring page consume the\nsame payload."
       },
       "CommandItem": {
         "properties": {
@@ -11128,7 +11128,7 @@
           "source"
         ],
         "title": "DefaultModelView",
-        "description": "GET/PUT /api/config/default-model — the model a new agent is born on.\n\n`source` names where `model` came from, because the two cases behave\ndifferently on the next `.env` edit: `cluster` is the DB row (a deliberate\nchoice through this endpoint, which outranks `.env`), `config` is the ordinary\nchain (`.env` AVA_MODEL, else the code default) showing through because no\ncluster choice has been made."
+        "description": "GET/PUT /api/config/default-model — the model a new agent is born on.\n\n`source` names where `model` came from, because the two cases behave\ndifferently on the next `.env` edit: `cluster` is the DB row (a deliberate\nchoice through this endpoint, which outranks `.env`), `config` is the ordinary\nchain (`.env` MEIVA_MODEL, else the code default) showing through because no\ncluster choice has been made."
       },
       "DefaultModelWrite": {
         "properties": {
@@ -13269,7 +13269,7 @@
             ],
             "title": "Timestamp"
           },
-          "ava_agent": {
+          "meiva_agent": {
             "anyOf": [
               {
                 "type": "string"
@@ -13278,9 +13278,9 @@
                 "type": "null"
               }
             ],
-            "title": "Ava Agent"
+            "title": "Meiva Agent"
           },
-          "ava_machine": {
+          "meiva_machine": {
             "anyOf": [
               {
                 "type": "string"
@@ -13289,7 +13289,7 @@
                 "type": "null"
               }
             ],
-            "title": "Ava Machine"
+            "title": "Meiva Machine"
           }
         },
         "type": "object",
@@ -13302,8 +13302,8 @@
           "tags",
           "primary_tag",
           "timestamp",
-          "ava_agent",
-          "ava_machine"
+          "meiva_agent",
+          "meiva_machine"
         ],
         "title": "MemoryGraphNode",
         "description": "One node in the OKF memory graph — a concept note, or a folder pseudo\nnode (the graph's structural skeleton)."
@@ -13379,7 +13379,7 @@
             ],
             "title": "Timestamp"
           },
-          "ava_agent": {
+          "meiva_agent": {
             "anyOf": [
               {
                 "type": "string"
@@ -13388,9 +13388,9 @@
                 "type": "null"
               }
             ],
-            "title": "Ava Agent"
+            "title": "Meiva Agent"
           },
-          "ava_machine": {
+          "meiva_machine": {
             "anyOf": [
               {
                 "type": "string"
@@ -13399,7 +13399,7 @@
                 "type": "null"
               }
             ],
-            "title": "Ava Machine"
+            "title": "Meiva Machine"
           },
           "body": {
             "type": "string",
@@ -13413,12 +13413,12 @@
           "description",
           "tags",
           "timestamp",
-          "ava_agent",
-          "ava_machine",
+          "meiva_agent",
+          "meiva_machine",
           "body"
         ],
         "title": "MemoryNoteResponse",
-        "description": "GET /api/memory/note response — one parsed memory note.\n\nMirrors MemoryGraphNode plus the parsed markdown body. The body is the\nmarkdown with the YAML frontmatter removed (base.parse_note's body), so\nthe frontend renders the note itself rather than re-parsing frontmatter\n(frontmatter values arrive as structured fields: title / description /\ntags / timestamp / ava_agent / ava_machine)."
+        "description": "GET /api/memory/note response — one parsed memory note.\n\nMirrors MemoryGraphNode plus the parsed markdown body. The body is the\nmarkdown with the YAML frontmatter removed (base.parse_note's body), so\nthe frontend renders the note itself rather than re-parsing frontmatter\n(frontmatter values arrive as structured fields: title / description /\ntags / timestamp / meiva_agent / meiva_machine)."
       },
       "MemoryRefreshResponse": {
         "properties": {
@@ -13508,7 +13508,7 @@
           "results"
         ],
         "title": "MemorySearchResponse",
-        "description": "POST /api/memory/search response — RELATIVE paths from memory pool root.\n\nCaller (SDK `ava.memory.search`) uses `ava.memory.PATH / p` to\nreconstruct absolute paths. fs-neutral makes mismatched gateway\n(e.g. /Users/x) and agent-runner (/home/y) filesystems work.\n\n`results` carries path, description, tags, score and matched chunk for each\nmatch, most relevant first."
+        "description": "POST /api/memory/search response — RELATIVE paths from memory pool root.\n\nCaller (SDK `meiva.memory.search`) uses `meiva.memory.PATH / p` to\nreconstruct absolute paths. fs-neutral makes mismatched gateway\n(e.g. /Users/x) and agent-runner (/home/y) filesystems work.\n\n`results` carries path, description, tags, score and matched chunk for each\nmatch, most relevant first."
       },
       "MemorySearchResultItem": {
         "properties": {
@@ -14286,7 +14286,7 @@
           "title"
         ],
         "title": "NoticeCreateIn",
-        "description": "POST /api/agents/{id}/notices request body — the unified notice write API\n(R3 door ④).\n\nMirrors the SDK ava.ui.notify() contract: `priority` P0-P3, `blocking`\nmeaningful only when `require_response` is true (an FYI never stalls).\n`task_id` optionally groups the notice under a task in the user's queue.\n`expire_at` specifies the notice lifetime; omitted uses the configured default TTL."
+        "description": "POST /api/agents/{id}/notices request body — the unified notice write API\n(R3 door ④).\n\nMirrors the SDK meiva.ui.notify() contract: `priority` P0-P3, `blocking`\nmeaningful only when `require_response` is true (an FYI never stalls).\n`task_id` optionally groups the notice under a task in the user's queue.\n`expire_at` specifies the notice lifetime; omitted uses the configured default TTL."
       },
       "NoticeItem": {
         "properties": {
@@ -14717,7 +14717,7 @@
           "created_at"
         ],
         "title": "OpenNotice",
-        "description": "One open notice from ava.ui.notify() (migration 0053).\n\nThe agent snapshot's `notices_awaiting_response` carries only the require_response\nsubset (the \"needs response\" worklist); this model also serves the per-agent\ninspector panel where the single open notice (since #152) may be either kind.\n\n`title` is the one-line headline; `content` is the optional detail\nbody (possibly long). `priority` is P0..P3 (the stakes axis) and `blocking`\nsays whether the agent is stalled waiting on the answer (the urgency axis) —\nthe two triage axes (color + sort). `require_response` is True when the agent\nneeds a user decision, False for a one-way FYI; defaults to True for backward\ncompat with the snapshot's notices_awaiting_response subquery (which only\nselects require_response rows)."
+        "description": "One open notice from meiva.ui.notify() (migration 0053).\n\nThe agent snapshot's `notices_awaiting_response` carries only the require_response\nsubset (the \"needs response\" worklist); this model also serves the per-agent\ninspector panel where the single open notice (since #152) may be either kind.\n\n`title` is the one-line headline; `content` is the optional detail\nbody (possibly long). `priority` is P0..P3 (the stakes axis) and `blocking`\nsays whether the agent is stalled waiting on the answer (the urgency axis) —\nthe two triage axes (color + sort). `require_response` is True when the agent\nneeds a user decision, False for a one-way FYI; defaults to True for backward\ncompat with the snapshot's notices_awaiting_response subquery (which only\nselects require_response rows)."
       },
       "OpenTaskRow": {
         "properties": {
@@ -14952,7 +14952,7 @@
           "port"
         ],
         "title": "PageRegisterRequest",
-        "description": "POST /api/keyed/v1/agents/{aid}/pages request body — SDK ava.ui.show / .serve call.\n\n`host`: the agent-runner's reachable address (the agent self-reports\n    it) — where the gateway's reverse proxy dials the page server\n    (loopback on a single box). Never appears in any URL.\n`port`: port that the agent process's HTTP server is listening on\n    (bound on the runner's reachable host, never 0.0.0.0). 1-65535.\n`title`: optional human-readable title shown in the frontend\n    tab/header; falls back to name when not given.\n`serve_dir`: directory the page server serves, recorded by\n    ava.ui.serve() so agent boot can re-serve a dead\n    page server after resurrect/restart; absent for ava.ui.show()\n    pages (the agent manages those servers itself)."
+        "description": "POST /api/keyed/v1/agents/{aid}/pages request body — SDK meiva.ui.show / .serve call.\n\n`host`: the agent-runner's reachable address (the agent self-reports\n    it) — where the gateway's reverse proxy dials the page server\n    (loopback on a single box). Never appears in any URL.\n`port`: port that the agent process's HTTP server is listening on\n    (bound on the runner's reachable host, never 0.0.0.0). 1-65535.\n`title`: optional human-readable title shown in the frontend\n    tab/header; falls back to name when not given.\n`serve_dir`: directory the page server serves, recorded by\n    meiva.ui.serve() so agent boot can re-serve a dead\n    page server after resurrect/restart; absent for meiva.ui.show()\n    pages (the agent manages those servers itself)."
       },
       "PageRow": {
         "properties": {
@@ -15778,7 +15778,7 @@
         },
         "type": "object",
         "title": "ResurrectAgentRequest",
-        "description": "Resurrect agent request body.\n\nThe public `POST /api/agents/{id}/resurrect` endpoint uses this for an\nexplicit lifecycle wake with no work guard. The internal\npending-work path also carries it alongside the exact chat or compact\nrequest id and kind; controller recovery calls the lower lifecycle helper\nwith its own exact death claim.\n\n`resurrected_by` default \"user\" — frontend resurrect button does not\nneed to pass it; SDK paths pass f\"agent:{my_id}\"; pending-work and\ncontroller auto-resurrect pass \"system\". Written into the\nlifecycle 'resurrect' inbound's source; the claim-side dispatch\ncomposes it into the marker `[system ts] You have been resurrected\nby {resurrected_by}` so the agent knows who resurrected it.\n\nThe value must pass `base.agents.messages.envelope.validate_source` (same check as\n`AgentMessageIn.source`): the same value becomes the prompt chat\ninbound's source, and the claim node's envelope wrap raises on\nanything outside the whitelist — killing the freshly resurrected\nprocess on its first claim. Validating here turns that process-fatal\nvalue into a 422 at the HTTP boundary (the agent-240 incident).\n\n`prompt` is **optional at this HTTP boundary**. The frontend resurrect\nbutton is a pure lifecycle event — there is no message to deliver, so it\nsends no prompt and the agent just gets the \"you have been resurrected\"\nmarker. Peer agents no longer have a dedicated resurrect API — they send\na chat message (`ava.agents.send_message`) and auto-resurrect handles the\nrest. When a prompt is given it is INSERTed as a chat inbound in **the same\ntransaction** as the lifecycle 'resurrect' inbound. The session may be\ncreated before commit, but its child blocks on the agent row and cannot\nclaim or process either inbound until both are committed."
+        "description": "Resurrect agent request body.\n\nThe public `POST /api/agents/{id}/resurrect` endpoint uses this for an\nexplicit lifecycle wake with no work guard. The internal\npending-work path also carries it alongside the exact chat or compact\nrequest id and kind; controller recovery calls the lower lifecycle helper\nwith its own exact death claim.\n\n`resurrected_by` default \"user\" — frontend resurrect button does not\nneed to pass it; SDK paths pass f\"agent:{my_id}\"; pending-work and\ncontroller auto-resurrect pass \"system\". Written into the\nlifecycle 'resurrect' inbound's source; the claim-side dispatch\ncomposes it into the marker `[system ts] You have been resurrected\nby {resurrected_by}` so the agent knows who resurrected it.\n\nThe value must pass `base.agents.messages.envelope.validate_source` (same check as\n`AgentMessageIn.source`): the same value becomes the prompt chat\ninbound's source, and the claim node's envelope wrap raises on\nanything outside the whitelist — killing the freshly resurrected\nprocess on its first claim. Validating here turns that process-fatal\nvalue into a 422 at the HTTP boundary (the agent-240 incident).\n\n`prompt` is **optional at this HTTP boundary**. The frontend resurrect\nbutton is a pure lifecycle event — there is no message to deliver, so it\nsends no prompt and the agent just gets the \"you have been resurrected\"\nmarker. Peer agents no longer have a dedicated resurrect API — they send\na chat message (`meiva.agents.send_message`) and auto-resurrect handles the\nrest. When a prompt is given it is INSERTed as a chat inbound in **the same\ntransaction** as the lifecycle 'resurrect' inbound. The session may be\ncreated before commit, but its child blocks on the agent row and cannot\nclaim or process either inbound until both are committed."
       },
       "ResurrectAgentResponse": {
         "properties": {
@@ -16583,7 +16583,7 @@
           "request"
         ],
         "title": "RunTimelineUnit",
-        "description": "One layer-0 block (see `base.agents.history.hierarchy.units`).\n\nA message unit, except that a work unit is served as its parts: `thinking` (the model's\ngeneration for the turn), `call` (an instant at the end of the stream) and `output` (the\nexecution). `start` / `end` are the extent on the read times of the messages; `i0`..`i1` the\ninclusive message-index span of the block's unit. Blocks without a time are not served.\n`parent` is the level-1 node whose span holds the block's first message, None for a block no\nnode covers (a compaction segment's head, the not yet summarized tail). `inbound_id` is the\n`inbound_messages` row an inbound or note block was made from (the checkpoint's `ava_inbound_id`), None\nfor any other block and for a message that carries no stamp.\n\n`context_tokens` is what the block occupies in the context (None while no request has read\nit), `generation_tokens` what the model generated for it (AI blocks only), `estimated` whether\nany of that was a share rather than the provider's own number (None with `context_tokens`).\nA thinking / output(text) / call block is its share of the turn's AIMessage, so estimated.\n\n`context_total` is the context through this block (what the Context size row draws; None while\nno request has read it): its session's head and everything up to and including the block, each\nmessage at the weight it was read with. The blocks of one AIMessage each add their share, so the\nfirst one starts from the `input_tokens` of the request that produced the message and the last\nends at the context through the whole message. `session` is the zero-based compaction segment\n(the total starts over in each). `request` is the usage of the LLM request the block's AIMessage\nwas (input, output, cache, cost), repeated on each of its turn blocks; None on any other block."
+        "description": "One layer-0 block (see `base.agents.history.hierarchy.units`).\n\nA message unit, except that a work unit is served as its parts: `thinking` (the model's\ngeneration for the turn), `call` (an instant at the end of the stream) and `output` (the\nexecution). `start` / `end` are the extent on the read times of the messages; `i0`..`i1` the\ninclusive message-index span of the block's unit. Blocks without a time are not served.\n`parent` is the level-1 node whose span holds the block's first message, None for a block no\nnode covers (a compaction segment's head, the not yet summarized tail). `inbound_id` is the\n`inbound_messages` row an inbound or note block was made from (the checkpoint's `meiva_inbound_id`), None\nfor any other block and for a message that carries no stamp.\n\n`context_tokens` is what the block occupies in the context (None while no request has read\nit), `generation_tokens` what the model generated for it (AI blocks only), `estimated` whether\nany of that was a share rather than the provider's own number (None with `context_tokens`).\nA thinking / output(text) / call block is its share of the turn's AIMessage, so estimated.\n\n`context_total` is the context through this block (what the Context size row draws; None while\nno request has read it): its session's head and everything up to and including the block, each\nmessage at the weight it was read with. The blocks of one AIMessage each add their share, so the\nfirst one starts from the `input_tokens` of the request that produced the message and the last\nends at the context through the whole message. `session` is the zero-based compaction segment\n(the total starts over in each). `request` is the usage of the LLM request the block's AIMessage\nwas (input, output, cache, cost), repeated on each of its turn blocks; None on any other block."
       },
       "RunTimelineUsage": {
         "properties": {
@@ -16627,7 +16627,7 @@
           "cost_calls"
         ],
         "title": "RunTimelineUsage",
-        "description": "The agent's own cost over a message span: its AIMessages' `usage_metadata`, summed.\n\n`input` is the provider's total input tokens (cache reads and writes included).\n`cost_usd` sums the usage-time cost recorded on the AIMessages (`ava_usage`); `cost_calls` is\nhow many of `calls` carry one, the rest (older messages, unpriced models) being unknown, not\nestimated."
+        "description": "The agent's own cost over a message span: its AIMessages' `usage_metadata`, summed.\n\n`input` is the provider's total input tokens (cache reads and writes included).\n`cost_usd` sums the usage-time cost recorded on the AIMessages (`meiva_usage`); `cost_calls` is\nhow many of `calls` carry one, the rest (older messages, unpriced models) being unknown, not\nestimated."
       },
       "RunTimelineWindow": {
         "properties": {
@@ -17044,7 +17044,7 @@
           "count"
         ],
         "title": "SdkCall",
-        "description": "One SDK method's call count in an agent_code block, e.g.\n``SdkCall(method=\"files.read\", count=3)`` for ``ava.files.read(...)`` x3."
+        "description": "One SDK method's call count in an agent_code block, e.g.\n``SdkCall(method=\"files.read\", count=3)`` for ``meiva.files.read(...)`` x3."
       },
       "ServiceItem": {
         "properties": {
@@ -17387,7 +17387,7 @@
           "lines"
         ],
         "title": "ShellCaptureResponse",
-        "description": "GET /api/agents/{id}/shell/{sid} response — a recent tail of one\npersistent-shell session's terminal output.\n\n`lines` is the session's most recent output (up to the last 200 lines,\nhistory that has scrolled past included), one string per line with no\ntrailing newline. `session_name` is the resolved session name the\ncapture came from. Backs the shell monitor page, which polls it while open;\nthe session must be live (404 otherwise).\n\n`created_at` / `uptime_seconds` come from the runner's session record\n(the launch epoch + probe-time uptime); `expires_at` is the gateway-owned\nTTL deadline from `agent_shell_ttls` — None when the session has no TTL\nrow (page and schedule sessions carry their own lifecycle).\n`renewals` / `last_renewed_at` carry the\nrow's explicit-renewal facts (ava.shell.sessions.renew); the monitor page\nshows a renewed-count badge so an extension is visible, never silent.\nTogether they let the monitor page's title bar render runtime + TTL\nwithout a second probe."
+        "description": "GET /api/agents/{id}/shell/{sid} response — a recent tail of one\npersistent-shell session's terminal output.\n\n`lines` is the session's most recent output (up to the last 200 lines,\nhistory that has scrolled past included), one string per line with no\ntrailing newline. `session_name` is the resolved session name the\ncapture came from. Backs the shell monitor page, which polls it while open;\nthe session must be live (404 otherwise).\n\n`created_at` / `uptime_seconds` come from the runner's session record\n(the launch epoch + probe-time uptime); `expires_at` is the gateway-owned\nTTL deadline from `agent_shell_ttls` — None when the session has no TTL\nrow (page and schedule sessions carry their own lifecycle).\n`renewals` / `last_renewed_at` carry the\nrow's explicit-renewal facts (meiva.shell.sessions.renew); the monitor page\nshows a renewed-count badge so an extension is visible, never silent.\nTogether they let the monitor page's title bar render runtime + TTL\nwithout a second probe."
       },
       "ShellInfo": {
         "properties": {
@@ -17642,7 +17642,7 @@
         "additionalProperties": false,
         "type": "object",
         "title": "SpawnAgentRequest",
-        "description": "POST /api/keyed/v1/agents request body — for frontend / SDK; frontend does\nnot need to know checkpoint ids.\n\nIf `fork_from` is given, the gateway resolves the latest checkpoint\ninternally and passes an explicit id to the underlying create_agent_row\n(consistent with SDK `ava.agents.spawn(fork_from=N)` logic).\n\nFork config rule: a fork keeps the source's effective config so the\ninherited context stays cache-valid. The only allowed config change is\nADDING skills to `skills_to_inject_into_system_prompt` /\n`skills_to_expand_at_start` (supersets); anything else is rejected with\n`fork_config_change_not_allowed`. A fork WITHOUT config inherits the\nsource's resolved overlay + preset verbatim.\n\n`spawner` default \"user\" — frontend spawn button does not need to\npass it; external callers (claude-code / SDK paths `agent:N` etc.)\npass their own identifier so the frontend sidebar groups them under\na separate root section by spawner.\n\n`prompt_source` is **required only when prompt is given** —\nINSERTed into inbound_messages.source; the envelope wrap marks who\nthe message came from. Frontend passes \"user\"; SDK paths pass\nf\"agent:{my_id}\". This differs from spawner: spawner is \"who\ncreated the agent\", source is \"from whom the prompt arrived\".\n\nThe schema does not give prompt_source a default — to avoid the\n\"caller forgot to pass it and got silently tagged user,\ncontaminating envelope source\" anti-pattern (one of the\n`or default` forms AGENTS.md prohibits); both kinds of callers must\nexplicitly identify themselves."
+        "description": "POST /api/keyed/v1/agents request body — for frontend / SDK; frontend does\nnot need to know checkpoint ids.\n\nIf `fork_from` is given, the gateway resolves the latest checkpoint\ninternally and passes an explicit id to the underlying create_agent_row\n(consistent with SDK `meiva.agents.spawn(fork_from=N)` logic).\n\nFork config rule: a fork keeps the source's effective config so the\ninherited context stays cache-valid. The only allowed config change is\nADDING skills to `skills_to_inject_into_system_prompt` /\n`skills_to_expand_at_start` (supersets); anything else is rejected with\n`fork_config_change_not_allowed`. A fork WITHOUT config inherits the\nsource's resolved overlay + preset verbatim.\n\n`spawner` default \"user\" — frontend spawn button does not need to\npass it; external callers (claude-code / SDK paths `agent:N` etc.)\npass their own identifier so the frontend sidebar groups them under\na separate root section by spawner.\n\n`prompt_source` is **required only when prompt is given** —\nINSERTed into inbound_messages.source; the envelope wrap marks who\nthe message came from. Frontend passes \"user\"; SDK paths pass\nf\"agent:{my_id}\". This differs from spawner: spawner is \"who\ncreated the agent\", source is \"from whom the prompt arrived\".\n\nThe schema does not give prompt_source a default — to avoid the\n\"caller forgot to pass it and got silently tagged user,\ncontaminating envelope source\" anti-pattern (one of the\n`or default` forms AGENTS.md prohibits); both kinds of callers must\nexplicitly identify themselves."
       },
       "SpawnedAgent": {
         "properties": {
@@ -18591,7 +18591,7 @@
         },
         "type": "object",
         "title": "TerminateAgentRequest",
-        "description": "POST /api/agents/{id}/terminate request body — fully optional.\n\n`force` defaults to False for graceful termination. True directly kills the\ndetached process and force-updates status when the agent cannot reach claim.\n\n`kill_all_shell_sessions` also kills every shell session the agent owns on\nits home machine (watchers included; `ava.ui.serve` page servers keep their\nown lifecycle), with no per-session notice. A graceful terminate of a live\nagent records the request on its terminate command and the home runtime\nattempts older sessions after the termination commits and the agent's last\nstep ends. Force and already-terminated requests attempt older sessions\nbefore the response; the original host also attempts one fresh cutoff after\nforce quiescence. Cleanup is best-effort: errors are visible, but crash or\nlate-session leftovers require operators. Without it, sessions are left alone.\nA terminated agent is otherwise an ordinary terminated agent — any new\nmessage may resurrect it\n(docs/decisions/agents/lifecycle/2026-09-27-terminate-has-no-closed-state.md).\n\n`source` defaults to \"user\"; SDK paths pass f\"agent:{my_id}\". Claim\nincludes this source in the lifecycle marker shown to the agent.\n\n`message`, when present, is queued as chat immediately before the terminate\ninbound. Lifecycle acceptance claims only the terminate row, so the chat\nremains pending for the next resurrection without another LLM turn."
+        "description": "POST /api/agents/{id}/terminate request body — fully optional.\n\n`force` defaults to False for graceful termination. True directly kills the\ndetached process and force-updates status when the agent cannot reach claim.\n\n`kill_all_shell_sessions` also kills every shell session the agent owns on\nits home machine (watchers included; `meiva.ui.serve` page servers keep their\nown lifecycle), with no per-session notice. A graceful terminate of a live\nagent records the request on its terminate command and the home runtime\nattempts older sessions after the termination commits and the agent's last\nstep ends. Force and already-terminated requests attempt older sessions\nbefore the response; the original host also attempts one fresh cutoff after\nforce quiescence. Cleanup is best-effort: errors are visible, but crash or\nlate-session leftovers require operators. Without it, sessions are left alone.\nA terminated agent is otherwise an ordinary terminated agent — any new\nmessage may resurrect it\n(docs/decisions/agents/lifecycle/2026-09-27-terminate-has-no-closed-state.md).\n\n`source` defaults to \"user\"; SDK paths pass f\"agent:{my_id}\". Claim\nincludes this source in the lifecycle marker shown to the agent.\n\n`message`, when present, is queued as chat immediately before the terminate\ninbound. Lifecycle acceptance claims only the terminate row, so the chat\nremains pending for the next resurrection without another LLM turn."
       },
       "TerminateAgentResponse": {
         "properties": {

@@ -11,11 +11,11 @@ def stopped_helper_plist(home: Path, path: Path) -> bytes:
     body = plistlib.dumps(
         {
             "Label": jobs.helper_job_label(home),
-            "ProgramArguments": ["/private/test/AvaPermissionsHelper"],
+            "ProgramArguments": ["/private/test/MeivaPermissionsHelper"],
             "KeepAlive": {"SuccessfulExit": False},
             "EnvironmentVariables": {
-                "AVA_PERMISSIONS_HELPER_SOCKET": str(home / "run/permissions-helper.23456.sock"),
-                "AVA_PERMISSIONS_HELPER_ROOT_SEED": str(home / "run/ava-root/seed.json"),
+                "MEIVA_PERMISSIONS_HELPER_SOCKET": str(home / "run/permissions-helper.23456.sock"),
+                "MEIVA_PERMISSIONS_HELPER_ROOT_SEED": str(home / "run/meiva-root/seed.json"),
             },
         }
     )

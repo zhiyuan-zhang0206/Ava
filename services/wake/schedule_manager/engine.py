@@ -1,8 +1,8 @@
 """Schedule execution engine, composed by ``services.wake.schedule_manager.runner``.
 
 Loads schedule ``<id>`` from the DB, materializes its script under
-``$AVA_HOME/schedules/<id>/``, binds a ``schedule:<id>`` actor identity (so the
-script's ``ava.agents.*`` calls attribute to the schedule instead of failing for
+``$MEIVA_HOME/schedules/<id>/``, binds a ``schedule:<id>`` actor identity (so the
+script's ``meiva.agents.*`` calls attribute to the schedule instead of failing for
 lack of an agent id), then runs it. A ``.py`` script runs in-process via runpy so
 it shares the bound actor; any other command runs as a subprocess. An uncaught
 crash's traceback is written to ``schedules.last_error`` (the latest crash) and, truncated
@@ -24,7 +24,7 @@ periodic sweep closes it. A stall-guard hard exit reaps owned descendants,
 then attempts to close it ``ok = false`` within a bounded record deadline.
 
 The ScheduleManager launches this inside a session named
-``ava-schedule-<id>`` with one admitted launch per desired revision. A schedule is a supervised resident process, so an exit-0 is treated as
+``meiva-schedule-<id>`` with one admitted launch per desired revision. A schedule is a supervised resident process, so an exit-0 is treated as
 a deliberate finish: the runner records ``status='completed'`` and the manager
 leaves it alone. A nonzero exit / uncaught exception records its traceback in
 ``schedules.last_error``. Process loss becomes terminal error; only an explicit
@@ -53,7 +53,7 @@ import base.host.proc
 from base.config import settings
 from base.daemon.schedules.inputs import ScheduleInputs
 from base.db import Database
-from base.paths import ava_home
+from base.paths import meiva_home
 
 
 # A .py schedule script is run in-process, so a single call that hangs (a
@@ -100,7 +100,7 @@ _SELECTORS_FILENAME = selectors.SelectSelector.select.__code__.co_filename
 
 
 def schedule_dir(schedule_id: int) -> Path:
-    return ava_home() / "schedules" / str(schedule_id)
+    return meiva_home() / "schedules" / str(schedule_id)
 
 
 # Filename suffixes that mean "this token IS the script" — a bare token with
@@ -442,12 +442,12 @@ def run_python_script(
     inputs: ScheduleInputs,
 ) -> None:
     """Run with isolated argv and collect the watchdog before any terminal write."""
-    # Load plugin namespaces (ava.tasks etc.) into this process before the
+    # Load plugin namespaces (meiva.tasks etc.) into this process before the
     # in-process script runs. This runner never builds the agent graph, so
     # nothing else loads plugins here; without this, a schedule script that
-    # touches ava.tasks would hit the factory `import ava` and AttributeError.
+    # touches meiva.tasks would hit the factory `import meiva` and AttributeError.
     # Only the .py-in-process branch needs it — the other branch runs a
-    # non-.py shell command (bash etc.) that does not import ava.
+    # non-.py shell command (bash etc.) that does not import meiva.
     # Stall guard: a hung call inside the script (or in plugin
     # loading below) must not leave the runner alive-but-silent
     # (2026-08-03 self-evolution miss). Started before plugin loading
@@ -467,7 +467,7 @@ def run_python_script(
     try:
         load_plugins()
         runpy.run_path(
-            str(script_path), run_name="__main__", init_globals={"AVA_SCHEDULE_INPUTS": inputs}
+            str(script_path), run_name="__main__", init_globals={"MEIVA_SCHEDULE_INPUTS": inputs}
         )
     finally:
         sys.argv = runner_argv

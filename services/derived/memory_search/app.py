@@ -60,8 +60,8 @@ def emit_memory_search_stats(rows: int, last_save_seconds: float | None) -> None
 
     `rows` and `last_save_seconds` are state, never sums — the
     `_METRIC_DISPOSITION` override records both as ObservableGauges
-    (`ava_memory_search_stats_rows_ratio` /
-    `ava_memory_search_stats_last_save_seconds`), so a flat store does not
+    (`meiva_memory_search_stats_rows_ratio` /
+    `meiva_memory_search_stats_last_save_seconds`), so a flat store does not
     accrue value the way Counters would. `last_save_seconds` is None until
     the first save since boot; the field is omitted then (an absent optional
     metric is not zero).
@@ -205,7 +205,7 @@ def build_app(store: MemoryStore, max_batch_rows: int, *, embedding_dim: int) ->
             finally:
                 flusher.cancel()
 
-    app = FastAPI(title="ava-memory-search", lifespan=lifespan)
+    app = FastAPI(title="meiva-memory-search", lifespan=lifespan)
 
     @app.get("/healthz")
     async def healthz() -> dict[str, str]:

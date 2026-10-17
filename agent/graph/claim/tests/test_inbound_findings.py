@@ -26,9 +26,9 @@ from agent.graph import node_log as _node_log
 from agent.graph.claim.node import claim_node
 from agent.messages import NoteTag
 from agent.state import AgentState
-from base.agents.context import AvaContext
+from base.agents.context import MeivaContext
 from base.agents.inbox.insert import insert_inbound_message
-from base.agents.messages.kwargs import AvaMsgType, read_ava_kwargs
+from base.agents.messages.kwargs import MeivaMsgType, read_meiva_kwargs
 from base.agents.tests.units import spawn_agent
 from base.clock import Clock
 from base.cluster.machine import MachineIdentity
@@ -67,7 +67,7 @@ async def _claim(
     return await claim_node(
         AgentState(messages=[SystemMessage(content="sys")]),
         Runtime(
-            context=AvaContext(
+            context=MeivaContext(
                 ops_pool=pool,
                 llm=MagicMock(),
                 event_publisher=MagicMock(),
@@ -90,10 +90,10 @@ def _delta(command: Command[Any]) -> list[AnyMessage]:
 
 
 def _is_security_note(message: AnyMessage) -> bool:
-    kwargs = read_ava_kwargs(message)
+    kwargs = read_meiva_kwargs(message)
     return (
-        kwargs.get("ava_msg_type") == AvaMsgType.SYSTEM_NOTE.value
-        and kwargs.get("ava_note_tag") == NoteTag.SECURITY.value
+        kwargs.get("meiva_msg_type") == MeivaMsgType.SYSTEM_NOTE.value
+        and kwargs.get("meiva_note_tag") == NoteTag.SECURITY.value
     )
 
 
@@ -122,7 +122,7 @@ async def test_flagged_chat_note_rides_right_behind_its_message(
 
     inbound, note = _delta(await _claim(aops_pool, agent_id, database_gate=database_gate))
 
-    assert read_ava_kwargs(inbound).get("ava_msg_type") == AvaMsgType.INBOUND.value
+    assert read_meiva_kwargs(inbound).get("meiva_msg_type") == MeivaMsgType.INBOUND.value
     assert _HOSTILE_USER in str(inbound.content)
     assert _is_security_note(note)
     assert note.content == _USER_NOTE
@@ -160,7 +160,7 @@ async def test_flagged_system_note_inbound_note_rides_behind_it(
 
     task_note, note = _delta(await _claim(aops_pool, agent_id, database_gate=database_gate))
 
-    assert read_ava_kwargs(task_note).get("ava_note_tag") == NoteTag.TASK.value
+    assert read_meiva_kwargs(task_note).get("meiva_note_tag") == NoteTag.TASK.value
     assert _is_security_note(note)
     assert "inbound.system_note:agent:405" in str(note.content)
 

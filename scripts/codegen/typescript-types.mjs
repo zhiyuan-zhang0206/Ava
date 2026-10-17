@@ -19,7 +19,7 @@ function retainDeprecation(node) {
   ts.forEachChild(node, retainDeprecation);
 }
 
-// ava:ref scripts/codegen/docs/types.ava.okf.md#generated-types
+// meiva:ref scripts/codegen/docs/types.meiva.okf.md#generated-types
 export async function generateTypes(schema) {
   const nodes = await openapiTS(schema);
   nodes.forEach(retainDeprecation);

@@ -42,8 +42,8 @@ def _desired_plist(_interval_s: int, *, host: Host) -> str:
     return "<desired-plist/>"
 
 
-def _fixed_ava(*, host: Host) -> str:
-    return "/x/ava"
+def _fixed_meiva(*, host: Host) -> str:
+    return "/x/meiva"
 
 
 def _never_descendant(_label: str) -> bool:
@@ -53,7 +53,7 @@ def _never_descendant(_label: str) -> bool:
 def test_register_macos_never_reloads_its_own_launchd_job(
     fake_home: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    label = "com.ava.health-probe"
+    label = "com.meiva.health-probe"
     plist = _plant_plist(fake_home, label)
     plist.write_text("<old-plist/>")
     monkeypatch.setenv("XPC_SERVICE_NAME", label)
@@ -68,9 +68,9 @@ def test_register_macos_never_reloads_its_own_launchd_job(
 def test_register_macos_still_reloads_from_another_launchd_job(
     fake_home: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    plist = _plant_plist(fake_home, "com.ava.health-probe")
+    plist = _plant_plist(fake_home, "com.meiva.health-probe")
     plist.write_text("<old-plist/>")
-    monkeypatch.setenv("XPC_SERVICE_NAME", "com.ava.autostart")
+    monkeypatch.setenv("XPC_SERVICE_NAME", "com.meiva.autostart")
     monkeypatch.setattr(cron, "launchd_plist_content", _desired_plist)
     monkeypatch.setattr(cron, "descends_from_launchd_job", _never_descendant)
     commands, host = _launchctl()
@@ -89,7 +89,7 @@ def _crontab(
     write_rc: int = 0,
     write_error: str = "",
 ) -> tuple[FakeCommands, Host]:
-    monkeypatch.setattr(cron, "ava_binary_path", _fixed_ava)
+    monkeypatch.setattr(cron, "meiva_binary_path", _fixed_meiva)
     commands = FakeCommands()
     commands.on(["crontab", "-l"], Reply(existing, read_error, read_rc), repeat=True)
     commands.on(["crontab", "-"], Reply("", write_error, write_rc), repeat=True)
@@ -119,16 +119,16 @@ def test_register_linux_treats_no_crontab_as_empty(monkeypatch: pytest.MonkeyPat
     assert "health-probe" in str(_written(commands))
 
 
-def _local_ava(*, host: Host) -> str:
-    return "/Users/x/.local/bin/ava"
+def _local_meiva(*, host: Host) -> str:
+    return "/Users/x/.local/bin/meiva"
 
 
-def _brew_ava(*, host: Host) -> str:
-    return "/opt/homebrew/bin/ava"
+def _brew_meiva(*, host: Host) -> str:
+    return "/opt/homebrew/bin/meiva"
 
 
 def test_launchd_path_env_includes_brew_bin(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(cron, "ava_binary_path", _local_ava)
+    monkeypatch.setattr(cron, "meiva_binary_path", _local_meiva)
     path = cron.launchd_path_env(host=fake_host(programs={"brew": "/opt/homebrew/bin/brew"}))
     assert "/opt/homebrew/bin" in path
     assert "/Users/x/.local/bin" in path
@@ -136,14 +136,14 @@ def test_launchd_path_env_includes_brew_bin(monkeypatch: pytest.MonkeyPatch) -> 
 
 
 def test_launchd_path_env_falls_back_without_brew(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(cron, "ava_binary_path", _local_ava)
+    monkeypatch.setattr(cron, "meiva_binary_path", _local_meiva)
     path = cron.launchd_path_env(host=fake_host())
     assert "/opt/homebrew/bin" in path
     assert "/usr/local/bin" in path
 
 
 def test_launchd_path_env_deduplicates(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(cron, "ava_binary_path", _brew_ava)
+    monkeypatch.setattr(cron, "meiva_binary_path", _brew_meiva)
     host = fake_host(programs={"brew": "/opt/homebrew/bin/brew"})
     assert cron.launchd_path_env(host=host).split(":").count("/opt/homebrew/bin") == 1
 
@@ -153,7 +153,7 @@ def test_register_linux_stamps_the_fixed_marker(monkeypatch: pytest.MonkeyPatch)
 
     assert cron.register_linux(300, host=host) == 0
     (line,) = str(_written(commands)).splitlines()
-    assert line.endswith("cluster health-probe # ava-health-probe")
+    assert line.endswith("cluster health-probe # meiva-health-probe")
     assert "--auto-rollback" not in line
     assert "--threshold" not in line
 
@@ -162,7 +162,7 @@ def test_register_linux_keeps_unrelated_lines_and_reports_success(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
     other_job = (
-        "*/1 * * * * /x/ava cluster watchdog-probe --role gateway  # ava-watchdog-probe.gateway"
+        "*/1 * * * * /x/meiva cluster watchdog-probe --role gateway  # meiva-watchdog-probe.gateway"
     )
     commands, host = _crontab(monkeypatch, f"0 3 * * * backup\n{other_job}\n")
 
@@ -173,7 +173,7 @@ def test_register_linux_keeps_unrelated_lines_and_reports_success(
     )
     body = str(_written(commands))
     assert "0 3 * * * backup" in body and other_job in body
-    assert body.count("# ava-health-probe") == 1
+    assert body.count("# meiva-health-probe") == 1
 
 
 @pytest.mark.parametrize(
@@ -223,7 +223,7 @@ def test_register_linux_missing_crontab_message_and_rc(capsys: pytest.CaptureFix
 
 
 def test_unregister_linux_removes_only_the_probe_line(monkeypatch: pytest.MonkeyPatch) -> None:
-    probe = "*/5 * * * * /x/ava cluster health-probe # ava-health-probe"
+    probe = "*/5 * * * * /x/meiva cluster health-probe # meiva-health-probe"
     commands, host = _crontab(monkeypatch, f"{probe}\n0 3 * * * backup\n")
 
     assert cron.unregister_linux(host=host) == 0
@@ -232,7 +232,7 @@ def test_unregister_linux_removes_only_the_probe_line(monkeypatch: pytest.Monkey
 
 
 def test_unregister_linux_ignores_the_watchdog_probe_lines(monkeypatch: pytest.MonkeyPatch) -> None:
-    probe_line = "*/1 * * * * /x/ava cluster watchdog-probe --role gateway  # ava-watchdog-probe.gateway.ava-mine"
+    probe_line = "*/1 * * * * /x/meiva cluster watchdog-probe --role gateway  # meiva-watchdog-probe.gateway.meiva-mine"
     commands, host = _crontab(monkeypatch, f"{probe_line}\n")
 
     assert cron.unregister_linux(host=host) == 0
@@ -243,15 +243,15 @@ def test_unregister_linux_ignores_the_watchdog_probe_lines(monkeypatch: pytest.M
     ("read_rc", "existing", "write_rc", "expected_out", "should_write"),
     [
         (1, "", 0, "  . no crontab to unregister\n", False),
-        (0, "0 3 * * * backup\n", 0, "  . no Ava health-probe entry found in crontab\n", False),
+        (0, "0 3 * * * backup\n", 0, "  . no Meiva health-probe entry found in crontab\n", False),
         (
             0,
-            "*/5 * * * * /x/ava cluster health-probe # ava-health-probe\n",
+            "*/5 * * * * /x/meiva cluster health-probe # meiva-health-probe\n",
             0,
             "  . crontab entry removed\n",
             True,
         ),
-        (0, "*/5 * * * * /x/ava cluster health-probe # ava-health-probe\n", 1, "", True),
+        (0, "*/5 * * * * /x/meiva cluster health-probe # meiva-health-probe\n", 1, "", True),
     ],
 )
 def test_unregister_linux_messages_and_success_gated_removal(
@@ -276,8 +276,8 @@ def test_unregister_macos_removes_only_the_probe_plist(
     monkeypatch.setenv("HOME", str(tmp_path))
     agents = tmp_path / "Library" / "LaunchAgents"
     agents.mkdir(parents=True)
-    probe = agents / "com.ava.health-probe.plist"
-    autostart = agents / "com.ava.autostart.plist"
+    probe = agents / "com.meiva.health-probe.plist"
+    autostart = agents / "com.meiva.autostart.plist"
     probe.write_text("<plist/>")
     autostart.write_text("<plist/>")
 
@@ -286,7 +286,7 @@ def test_unregister_macos_removes_only_the_probe_plist(
     assert cron.unregister_macos(host=host) == 0
     assert not probe.exists()
     assert autostart.exists()
-    assert [argv[-1] for argv in commands.argvs] == [f"gui/{_UID}/com.ava.health-probe"]
+    assert [argv[-1] for argv in commands.argvs] == [f"gui/{_UID}/com.meiva.health-probe"]
 
 
 def _fake_backend(monkeypatch: pytest.MonkeyPatch) -> list[str]:
@@ -303,9 +303,9 @@ def _fake_backend(monkeypatch: pytest.MonkeyPatch) -> list[str]:
 def test_register_refused_for_worktree_checkout_against_prod_home(
     default_home: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    prod_home = default_home / ".ava"
+    prod_home = default_home / ".meiva"
     (prod_home / "source").mkdir(parents=True)
-    monkeypatch.setattr(paths, "repo_root", lambda: default_home / "Ava" / ".worktrees" / "r4")
+    monkeypatch.setattr(paths, "repo_root", lambda: default_home / "Meiva" / ".worktrees" / "r4")
     calls = _fake_backend(monkeypatch)
 
     cron.register_os_cron(enabled_reader=lambda: True, host=fake_host(platform=DARWIN_ARM64))
@@ -316,7 +316,7 @@ def test_register_refused_for_worktree_checkout_against_prod_home(
 def test_register_allowed_from_the_homes_own_source_checkout(
     default_home: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    prod_home = default_home / ".ava"
+    prod_home = default_home / ".meiva"
     (prod_home / "source").mkdir(parents=True)
     monkeypatch.setattr(paths, "repo_root", lambda: prod_home / "source")
     calls = _fake_backend(monkeypatch)
@@ -340,7 +340,7 @@ def test_register_allowed_for_a_default_home_without_source(
 def test_register_macos_defers_when_ancestry_proves_the_job(
     fake_home: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    label = "com.ava.health-probe"
+    label = "com.meiva.health-probe"
     plist = _plant_plist(fake_home, label)
     plist.write_text("<old-plist/>")
     monkeypatch.setenv("XPC_SERVICE_NAME", "0")
@@ -360,7 +360,7 @@ def test_register_macos_defers_when_ancestry_proves_the_job(
 def test_register_macos_reloads_when_env_reads_zero_but_tree_is_external(
     fake_home: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    plist = _plant_plist(fake_home, "com.ava.health-probe")
+    plist = _plant_plist(fake_home, "com.meiva.health-probe")
     plist.write_text("<old-plist/>")
     monkeypatch.setenv("XPC_SERVICE_NAME", "0")
     monkeypatch.setattr(cron, "launchd_plist_content", _desired_plist)

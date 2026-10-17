@@ -23,7 +23,7 @@ from base.paths.private_dir import ensure_private_dir
 
 def lock_agent(conn: Connection[Any], agent_id: int) -> None:
     # Conservatively serialize across machines; physical reservation accounting
-    # still binds the actual storage directory, not the independent AVA_HOME.
+    # still binds the actual storage directory, not the independent MEIVA_HOME.
     conn.execute("SELECT pg_advisory_xact_lock(hashtextextended(%s, 0))", (f"upload:{agent_id}",))
 
 

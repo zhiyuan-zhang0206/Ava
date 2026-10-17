@@ -1,6 +1,6 @@
 """`host_running()` / `ops_quiescent()`: the mode-aware owner recognition (W1.2e-2).
 
-A root-driven host keeps its services as ava-root tree units, not session
+A root-driven host keeps its services as meiva-root tree units, not session
 records — the pidfile is the same, so the pidfile-only inconsistency check must
 ask the root before it calls a live pid an unrecorded owner; the same holds for
 `ops_quiescent()`'s "is ops even running" gate (task #3370).
@@ -116,7 +116,7 @@ def test_host_running_retries_the_scan_once_past_a_leaked_permission_error(
     real answer still lands (the 2026-09-18 flake)."""
     _stub_backend(monkeypatch, has_session=False)
     _pin_pidfiles(monkeypatch, tmp_path)
-    monkeypatch.setattr(probe, "ava_home", lambda: tmp_path)
+    monkeypatch.setattr(probe, "meiva_home", lambda: tmp_path)
     calls: list[int] = []
 
     class _UnrecordedHost:
@@ -127,7 +127,7 @@ def test_host_running_retries_the_scan_once_past_a_leaked_permission_error(
             }
 
         def environ(self) -> dict[str, str]:
-            return {"AVA_HOME": str(tmp_path)}
+            return {"MEIVA_HOME": str(tmp_path)}
 
     def process_iter(attrs: list[str]) -> Iterator[object]:
         del attrs
@@ -150,7 +150,7 @@ def test_host_running_stays_loud_when_the_process_scan_is_unreadable(
     declaring the host absent."""
     _stub_backend(monkeypatch, has_session=False)
     _pin_pidfiles(monkeypatch, tmp_path)
-    monkeypatch.setattr(probe, "ava_home", lambda: tmp_path)
+    monkeypatch.setattr(probe, "meiva_home", lambda: tmp_path)
     calls: list[int] = []
 
     def process_iter(attrs: list[str]) -> Iterator[object]:
@@ -172,7 +172,7 @@ def test_host_running_retries_the_scan_once_past_a_leaked_system_error(
     real answer still lands (task #4964)."""
     _stub_backend(monkeypatch, has_session=False)
     _pin_pidfiles(monkeypatch, tmp_path)
-    monkeypatch.setattr(probe, "ava_home", lambda: tmp_path)
+    monkeypatch.setattr(probe, "meiva_home", lambda: tmp_path)
     calls: list[int] = []
 
     class _UnrecordedHost:
@@ -183,7 +183,7 @@ def test_host_running_retries_the_scan_once_past_a_leaked_system_error(
             }
 
         def environ(self) -> dict[str, str]:
-            return {"AVA_HOME": str(tmp_path)}
+            return {"MEIVA_HOME": str(tmp_path)}
 
     def process_iter(attrs: list[str]) -> Iterator[object]:
         del attrs
@@ -238,7 +238,7 @@ def _stub_ops_wait(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, *, calls: li
         "pid": os.getpid(),
         "maintenance": {"protocol": 1, "requests": 0, "workers": 0},
     }
-    monkeypatch.setattr(probe, "ava_home", lambda: tmp_path)
+    monkeypatch.setattr(probe, "meiva_home", lambda: tmp_path)
     monkeypatch.setattr(
         probe,
         "build_opener",
@@ -300,7 +300,7 @@ def test_ops_quiescent_waits_when_the_root_runs_ops(
 def test_ops_quiescent_session_gate_does_not_consult_the_tree(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    """Session first: a recorded `ava-ops` opens the wait without a root roundtrip."""
+    """Session first: a recorded `meiva-ops` opens the wait without a root roundtrip."""
     _stub_backend(monkeypatch, has_session=True)
 
     def _explode(*_args: object, **_kwargs: object) -> object:

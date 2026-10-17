@@ -47,7 +47,7 @@ runs:
           'Acquire::http::Timeout "15";' \
           'Acquire::https::Timeout "15";' \
           'Acquire::Retries "3";' \
-          | sudo tee /etc/apt/apt.conf.d/99-ava-playwright-archives >/dev/null
+          | sudo tee /etc/apt/apt.conf.d/99-meiva-playwright-archives >/dev/null
 
         # One bounded attempt per retry: a stalled apt fails in seconds-to-
         # minutes instead of eating the caller's whole step cap, and a

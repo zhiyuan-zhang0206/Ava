@@ -53,7 +53,7 @@ def test_isolated_helper_build_never_replaces_installed_artifact(
 
     monkeypatch.setattr(lifecycle, "run_tool", run)
     app, rebuilt = lifecycle.build_and_sign(destination=candidate)
-    assert rebuilt and app == candidate / "AvaPermissionsHelper.app"
+    assert rebuilt and app == candidate / "MeivaPermissionsHelper.app"
     assert sentinel.read_text() == "unchanged installed state"
     assert sorted(path.name for path in installed.iterdir()) == ["build-state.json"]
     assert (candidate / "build-state.json").is_file()
@@ -83,13 +83,13 @@ def _stale_installed_helper(
     from services.desktop.permissions_helper import launchd_job as jobs
 
     installed = tmp_path / "home" / "helper"
-    exe = installed / "AvaPermissionsHelper.app" / "Contents" / "MacOS" / "AvaPermissionsHelper"
+    exe = installed / "MeivaPermissionsHelper.app" / "Contents" / "MacOS" / "MeivaPermissionsHelper"
     exe.parent.mkdir(parents=True)
     exe.write_bytes(b"old helper")
     state = {"source_hash": "old", "dr": dr, "signed_at": "2026-09-29T00:00:00+00:00"}
     (installed / "build-state.json").write_text(json.dumps(state))
     (tmp_path / "agents").mkdir()
-    monkeypatch.setattr(paths, "ava_home", lambda: tmp_path / "home")
+    monkeypatch.setattr(paths, "meiva_home", lambda: tmp_path / "home")
     monkeypatch.setattr(jobs, "helper_job_agents_dir", lambda: tmp_path / "agents")
     monkeypatch.setattr(paths, "permissions_helper_app_dir", lambda: installed)
     monkeypatch.setattr(lifecycle, "source_content_hash", lambda: "new")
@@ -131,7 +131,7 @@ def test_stale_installed_helper_is_never_replaced_while_in_use(
     reason = {"loaded": "launchd still has", "plist": "still registered", "pid": "pid 4242 still"}
     with pytest.raises(RuntimeError, match=reason[blocker]) as refused:
         lifecycle.build_and_sign()
-    assert "run `ava stop` first" in str(refused.value)
+    assert "run `meiva stop` first" in str(refused.value)
     assert exe.read_bytes() == b"old helper"
     assert (exe.parents[3] / "build-state.json").read_text() == state
     assert not {"keychain", "acl", "smoke", "swiftc", "codesign"} & set(events)
@@ -190,7 +190,7 @@ def test_isolated_artifact_stays_immutable_without_consulting_the_home_job(
     events: list[str] = []
     _stale_installed_helper(tmp_path, monkeypatch, events)
     candidate = tmp_path / "candidate"
-    exe = candidate / "AvaPermissionsHelper.app" / "Contents" / "MacOS" / "AvaPermissionsHelper"
+    exe = candidate / "MeivaPermissionsHelper.app" / "Contents" / "MacOS" / "MeivaPermissionsHelper"
     exe.parent.mkdir(parents=True)
     exe.write_bytes(b"prepared helper")
 
@@ -298,7 +298,7 @@ def test_helper_retirement_refuses_foreign_home_plist(tmp_path: Path) -> None:
             {
                 "Label": jobs.helper_job_label(home),
                 "ProgramArguments": ["/test/helper"],
-                "EnvironmentVariables": {"AVA_PERMISSIONS_HELPER_SOCKET": "/foreign/home/socket"},
+                "EnvironmentVariables": {"MEIVA_PERMISSIONS_HELPER_SOCKET": "/foreign/home/socket"},
             }
         )
     )
@@ -314,7 +314,7 @@ def test_retained_definition_after_completed_stop_requires_exact_absence(
 
     from services.desktop.permissions_helper import launchd_job as jobs
 
-    with tempfile.TemporaryDirectory(prefix="avah-", dir="/tmp") as directory:
+    with tempfile.TemporaryDirectory(prefix="meivah-", dir="/tmp") as directory:
         home = Path(directory).resolve()
         (home / "run").mkdir()
         monkeypatch.setattr(jobs.sys, "platform", "darwin")
@@ -323,7 +323,9 @@ def test_retained_definition_after_completed_stop_requires_exact_absence(
         stopped_helper_plist(home, path)
         if conflict == "wrong-seed":
             data = plistlib.loads(path.read_bytes())
-            data["EnvironmentVariables"]["AVA_PERMISSIONS_HELPER_ROOT_SEED"] = "/foreign/seed.json"
+            data["EnvironmentVariables"]["MEIVA_PERMISSIONS_HELPER_ROOT_SEED"] = (
+                "/foreign/seed.json"
+            )
             path.write_bytes(plistlib.dumps(data))
         neighbor = tmp_path / "neighbor.plist"
         neighbor.write_bytes(b"neighbor")
@@ -447,7 +449,7 @@ def test_idle_shutdown_retry_requires_native_success_and_retained_intent(
     monkeypatch.setattr(jobs, "helper_job_agents_dir", lambda: tmp_path)
     path = jobs.helper_job_plist_path(home)
     original = stopped_helper_plist(home, path)
-    marker = home / "run" / "ava-root" / "helper-stopped"
+    marker = home / "run" / "meiva-root" / "helper-stopped"
     marker.parent.mkdir(parents=True)
     if fault != "no-intent":
         marker.write_bytes(b"corrupt" if fault == "corrupt-intent" else b"stopped\n")
@@ -556,7 +558,7 @@ _REGION_GRANT_GUARD = (
     reason="native serial helper request and Foundation child contract",
 )
 def test_helper_shutdown_waits_for_inflight_gui_child_before_acknowledging() -> None:
-    with tempfile.TemporaryDirectory(prefix="ava-hreq-", dir="/tmp") as directory:
+    with tempfile.TemporaryDirectory(prefix="meiva-hreq-", dir="/tmp") as directory:
         home = Path(directory).resolve()
         run_dir = home / "run"
         run_dir.mkdir()
@@ -599,8 +601,8 @@ def test_helper_shutdown_waits_for_inflight_gui_child_before_acknowledging() -> 
 
         environment = dict(os.environ)
         environment.update(
-            AVA_PERMISSIONS_HELPER_SOCKET=str(sock),
-            AVA_PERMISSIONS_HELPER_ROOT_SEED=str(run_dir / "seed.json"),
+            MEIVA_PERMISSIONS_HELPER_SOCKET=str(sock),
+            MEIVA_PERMISSIONS_HELPER_ROOT_SEED=str(run_dir / "seed.json"),
         )
         process = subprocess.Popen(
             [str(executable)], env=environment, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
@@ -671,7 +673,7 @@ def test_exact_home_helper_retirement_keeps_neighbor_and_waits_for_native_exit(
     from base.host.permissions_helper import client
 
     def shutdown(run_dir: Path) -> client.HelperShutdownResult:
-        assert run_dir == home / "run" / "ava-root"
+        assert run_dir == home / "run" / "meiva-root"
         marker = run_dir / "helper-stopped"
         marker.write_bytes(b"stopped\n")
         marker.chmod(0o600)

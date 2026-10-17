@@ -27,7 +27,7 @@ _PageName = Annotated[
 
 
 class PageRegisterRequest(BaseModel):
-    """POST /api/keyed/v1/agents/{aid}/pages request body — SDK ava.ui.show / .serve call.
+    """POST /api/keyed/v1/agents/{aid}/pages request body — SDK meiva.ui.show / .serve call.
 
     `host`: the agent-runner's reachable address (the agent self-reports
         it) — where the gateway's reverse proxy dials the page server
@@ -37,8 +37,8 @@ class PageRegisterRequest(BaseModel):
     `title`: optional human-readable title shown in the frontend
         tab/header; falls back to name when not given.
     `serve_dir`: directory the page server serves, recorded by
-        ava.ui.serve() so agent boot can re-serve a dead
-        page server after resurrect/restart; absent for ava.ui.show()
+        meiva.ui.serve() so agent boot can re-serve a dead
+        page server after resurrect/restart; absent for meiva.ui.show()
         pages (the agent manages those servers itself).
     """
 

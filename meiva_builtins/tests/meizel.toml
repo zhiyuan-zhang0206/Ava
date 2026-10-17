@@ -1,0 +1,23 @@
+[loads]
+"test_watcher_wake_delivery.py" = ["meiva_builtins/skills"]
+
+[external]
+"test_watcher_wake_delivery.py" = "executes skill reference scripts up to a marker assignment"
+
+[debt.first-party-patch]
+"test_watcher_wake_delivery.py#monkeypatch.setattr meiva.self" = 1
+
+[debt.unresolved-patch]
+"test_watcher_wake_delivery.py#monkeypatch.setattr gather_files.EXPECTED_FILES" = 1
+"test_watcher_wake_delivery.py#monkeypatch.setattr gather_files.HANDOFF_DIR" = 1
+"test_watcher_wake_delivery.py#monkeypatch.setattr gather_files.ORCHESTRATOR_ID" = 1
+"test_watcher_wake_delivery.py#monkeypatch.setattr gather_files._dir" = 1
+"test_watcher_wake_delivery.py#monkeypatch.setattr module.meiva" = 1
+"test_watcher_wake_delivery.py#monkeypatch.setattr module.time.sleep" = 1
+"test_watcher_wake_delivery.py#monkeypatch.setattr watch_work.HEARTBEAT_SECONDS" = 1
+"test_watcher_wake_delivery.py#monkeypatch.setattr watch_work._notify" = 1
+"test_watcher_wake_delivery.py#monkeypatch.setattr watch_work._owner_terminated" = 1
+"test_watcher_wake_delivery.py#monkeypatch.setattr watch_work._session_crashed" = 1
+"test_watcher_wake_delivery.py#monkeypatch.setattr watch_work.coding_session_owner.read" = 1
+"test_watcher_wake_delivery.py#monkeypatch.setattr watch_work.time" = 1
+"test_watcher_wake_delivery.py#monkeypatch.setattr watch_work.time.sleep" = 2

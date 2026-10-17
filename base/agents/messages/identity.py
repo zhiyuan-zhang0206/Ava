@@ -9,7 +9,7 @@ from langgraph.checkpoint.base import CheckpointTuple
 from langgraph.checkpoint.serde.types import _DeltaSnapshot
 from langgraph.types import Overwrite
 
-from base.agents.messages.kwargs import read_ava_kwargs
+from base.agents.messages.kwargs import read_meiva_kwargs
 
 
 def normalize_stored_message_ids(value: Any) -> Any:
@@ -31,7 +31,7 @@ def normalize_stored_message_ids(value: Any) -> Any:
     messages = [message_chunk_to_message(m) for m in convert_to_messages(group)]
     for message in messages:
         if message.id is None and not isinstance(message, RemoveMessage):
-            read_ava_kwargs(message)["ava_ephemeral_message_id"] = True
+            read_meiva_kwargs(message)["meiva_ephemeral_message_id"] = True
     return messages
 
 

@@ -5,8 +5,8 @@
 >
 > **Update 2026-06-09: the local leg landed.** `services/backup/dump.py` runs a
 > daily `pg_dump --format=custom` on the gateway host via the watchdog tick
-> (03:00 local, `$AVA_HOME/backups/db/`, `BACKUP_KEEP=1` — retention was cut
-> from 3 to 1 in #832 when daily dumps filled the Mac mini's disk) — see `.agents/skills/ava-guide/operations/references/db-restore.md`. The old R2-era `scripts/pg_backup.sh` was removed
+> (03:00 local, `$MEIVA_HOME/backups/db/`, `BACKUP_KEEP=1` — retention was cut
+> from 3 to 1 in #832 when daily dumps filled the Mac mini's disk) — see `.agents/skills/meiva-guide/operations/references/db-restore.md`. The old R2-era `scripts/pg_backup.sh` was removed
 > with it. Local dumps cover bad migrations / accidental deletes / DB
 > corruption; what remains open here is the **disk-loss** scenario — and a
 > one-dump local window makes the off-site leg below the *only* history.
@@ -26,7 +26,7 @@
 > the emitter's JSONL mirror is the local backfill source.
 >
 > **Update 2026-08-19: the two clocks are pinned.** `BACKUP_HOUR = 3` is read
-> on the **cluster** wall clock (`AVA_TIMEZONE`), and dumps are named in UTC
+> on the **cluster** wall clock (`MEIVA_TIMEZONE`), and dumps are named in UTC
 > (`<db>-YYYYMMDDTHHMMSSZ.dump`). Reading the host's clock had made a machine
 > that changed timezone see its newest dump as dated in the future and skip the
 > daily backup silently; the local filename had no offset, so prune's
@@ -61,20 +61,20 @@
 > **Update 2026-10-01:** the daily logical backup no longer depends on the
 > physical PITR stack. The off-site leg is OSS-only
 > (`services/backup/artifact/offsite.py`; the destination is the
-> `AVA_BACKUP_OFFSITE_*` keys, and a home without them skips the leg with one
+> `MEIVA_BACKUP_OFFSITE_*` keys, and a home without them skips the leg with one
 > INFO line). The managed-name grammar
 > (`services/backup/artifact/names.py`) is `<db>-<UTC stamp>.dump.enc`: the
 > `.pre-update` and `.pitr-activation-*` kinds and the pre-cutover wall-clock
 > stamp have no writer and are no longer managed, so prune keeps the newest
 > `backup_keep` dumps. Operation custody moved to
-> `services/backup/scheduler/operation/` and `ava backup operations` is the
+> `services/backup/scheduler/operation/` and `meiva backup operations` is the
 > custody verb. The in-process pre-activation snapshot is gone.
 
 > **Update 2026-10-02:** the self-written physical PITR stack is deleted
 > ([decision](../../../docs/decisions/data/backup/2026-10-02-delete-the-self-written-pitr-stack.md)).
-> The off-site destination is configured as `AVA_BACKUP_OFFSITE_ENDPOINT`,
-> `AVA_BACKUP_OFFSITE_BUCKET` and `AVA_BACKUP_OFFSITE_CREDENTIALS_FILE`
-> (`ava config set`); the PITR-era keys and the backend switch are gone.
+> The off-site destination is configured as `MEIVA_BACKUP_OFFSITE_ENDPOINT`,
+> `MEIVA_BACKUP_OFFSITE_BUCKET` and `MEIVA_BACKUP_OFFSITE_CREDENTIALS_FILE`
+> (`meiva config set`); the PITR-era keys and the backend switch are gone.
 
 ## Future work
 
@@ -87,7 +87,7 @@ document may promise point-in-time recovery.
 
 1. **Off-site encrypted copy — delivered.** After encryption and before local
    pruning, the gateway publishes the artifact to OSS
-   (`services/backup/artifact/offsite.py`) as `ava-logical/<name>`; the
+   (`services/backup/artifact/offsite.py`) as `meiva-logical/<name>`; the
    store-verified ACK (pin_token, size, checksum) is the identity. The publish
    is if-absent and immutable; a missing/unconfigured store is skipped with one
    INFO line, and a failed publish warns without discarding the local backup,

@@ -60,7 +60,7 @@ def pgbouncer_in_front(
     info = conninfo_to_dict(pg_url)
     pg_port = int(str(info["port"]))
     dbname = str(info["dbname"])
-    role = "ava_citest"
+    role = "meiva_citest"
 
     # Give the cluster role a scram verifier so client scram against the userlist works
     # (pg default password_encryption = scram-sha-256). ALTER ROLE ... PASSWORD is DDL
@@ -74,7 +74,7 @@ def pgbouncer_in_front(
                 )
             )
 
-    tmp = Path(tempfile.mkdtemp(prefix="ava-pgbouncer-test-"))
+    tmp = Path(tempfile.mkdtemp(prefix="meiva-pgbouncer-test-"))
     listen_port = free_port()
     userlist = tmp / "userlist.txt"
     # Mirrors _render_ini: the admin console belongs to the pooler admin alone.

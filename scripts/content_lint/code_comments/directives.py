@@ -4,9 +4,9 @@ from pathlib import PurePosixPath
 
 from scripts.content_lint.code_comments.model import NoteKind
 
-_KEY = r"[A-Za-z0-9_./-]+\.ava\.okf\.md#[a-z][a-z0-9]*(?:-[a-z0-9]+)*"
-_REFERENCE = re.compile(rf"(?:#|//) ava:ref ({_KEY})")
-_QUIESCE = re.compile(rf"# quiesce-exempt: ava:ref ({_KEY})")
+_KEY = r"[A-Za-z0-9_./-]+\.meiva\.okf\.md#[a-z][a-z0-9]*(?:-[a-z0-9]+)*"
+_REFERENCE = re.compile(rf"(?:#|//) meiva:ref ({_KEY})")
+_QUIESCE = re.compile(rf"# quiesce-exempt: meiva:ref ({_KEY})")
 _RUFF_CODE = r"[A-Z]+[0-9]{3,4}"
 _PYRIGHT_CODE = r"report[A-Z][A-Za-z0-9]+"
 _LINT = re.compile(
@@ -22,7 +22,7 @@ def reference_key(text: str, *, python: bool) -> str | None:
     return match[1] if match is not None else None
 
 
-# ava:ref scripts/content_lint/code_comments/docs/code_comments.ava.okf.md#python-machine-directives
+# meiva:ref scripts/content_lint/code_comments/docs/code_comments.meiva.okf.md#python-machine-directives
 def ambient_call_lines(path: str, tree: ast.Module) -> frozenset[int]:
     if (
         "/tests/" in path
@@ -45,7 +45,7 @@ def ambient_call_lines(path: str, tree: ast.Module) -> frozenset[int]:
     )
 
 
-# ava:ref scripts/content_lint/code_comments/docs/code_comments.ava.okf.md#python-machine-directives
+# meiva:ref scripts/content_lint/code_comments/docs/code_comments.meiva.okf.md#python-machine-directives
 def comment_kind(text: str, line: int, ambient_lines: frozenset[int]) -> NoteKind:
     if _LINT.fullmatch(text):
         return NoteKind.LINT_DIRECTIVE

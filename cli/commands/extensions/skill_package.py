@@ -2,14 +2,14 @@
 
 The unit of installation is one **skill package**: a directory holding a
 SKILL.md, installed verbatim (sub-skills, `scripts/`, `references/`, `assets/`
-and anything else it carries come along) into `$AVA_HOME/skills/<name>/`, where
+and anything else it carries come along) into `$MEIVA_HOME/skills/<name>/`, where
 the skill scanner mounts it.
 
 A source tree names its skills in one of three shapes, tried in this order:
 
 1. **bare skill** — SKILL.md at the tree root; the tree *is* one package.
 2. **collection root** — a `skills/`, `.claude/skills/`, `.agents/skills/`
-   or `.ava/skills/` directory whose children are skill packages. This is how the ecosystem
+   or `.meiva/skills/` directory whose children are skill packages. This is how the ecosystem
    ships more than one skill in a repo, and it is why an unmodified Claude
    Code skills tree installs as-is. The first of the three that exists and
    holds a skill wins (a repo carrying both usually carries the same skills
@@ -41,7 +41,7 @@ from base.cluster.machine import MachineIdentity
 from base.packages.extensions.install_registry import IGNORED_NAMES, tree_hash
 from base.packages.skills import scan
 
-_COLLECTION_ROOTS = ("skills", ".claude/skills", ".agents/skills", ".ava/skills")
+_COLLECTION_ROOTS = ("skills", ".claude/skills", ".agents/skills", ".meiva/skills")
 
 
 class SkillPackageError(ValueError):
@@ -75,7 +75,7 @@ def contains_skill_md(d: Path) -> bool:
     Deliberately broader than `_package_at`'s root-SKILL.md rule, and the two
     are not interchangeable: the scanner mounts SKILL.md files at any depth
     (namespaced by folder path), so a plugin whose `skills/` root has only
-    nested skills (`ava_fleet/ava-fleet/SKILL.md`, no `skills/SKILL.md`) still syncs.
+    nested skills (`meiva_fleet/meiva-fleet/SKILL.md`, no `skills/SKILL.md`) still syncs.
     Install is the inverse — a *package* needs a root SKILL.md because its
     frontmatter name is the install identity.
     """
@@ -158,7 +158,7 @@ def register_installed(
 
     Trust is always `"unreviewed"` here: this is third-party content, and a
     clean scan does not stand in for a human having read it. Promotion is the
-    separate, explicit `ava skill trust <name>`.
+    separate, explicit `meiva skill trust <name>`.
 
     `content_hash` / `installed_hash` record the tree hash of what was just
     written (R5): the later `upgrade` path compares the on-disk tree against
@@ -291,12 +291,12 @@ def install(
     """
     from base import paths
 
-    dest_root = paths.skills_dir(paths.ava_home())
+    dest_root = paths.skills_dir(paths.meiva_home())
     clashes = [pkg.name for pkg in packages if (dest_root / pkg.name).exists()]
     if clashes:
         raise SkillPackageError(
             f"already installed: {', '.join(clashes)} — "
-            "`ava plugins uninstall <name>` first, or `ava plugins upgrade <name>` to re-fetch."
+            "`meiva plugins uninstall <name>` first, or `meiva plugins upgrade <name>` to re-fetch."
         )
     scanned = [scan_report(pkg.root, pkg.name, accept_risk=accept_risk) for pkg in packages]
     # The CLUSTER row lands before anything touches this machine's disk, and the

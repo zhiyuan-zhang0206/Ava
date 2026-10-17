@@ -31,7 +31,7 @@ CAPABILITY_ORDER: tuple[MachineRole, ...] = ("agent-runner", "gateway")
 @dataclass(frozen=True)
 class ConvergeCtx:
     repo: Path
-    ava_home: Path
+    meiva_home: Path
     roles: MachineRoles | None  # None = unit not configured yet (fresh install)
     config: ConfigBoot
     machine: MachineIdentity
@@ -66,10 +66,10 @@ class ConvergeStep:
     apply: Callable[[ConvergeCtx], None]
     roles: frozenset[MachineRole] = ALL_ROLES
     requires_unit_config: bool = False
-    # host-global wiring (the single `~/.local/bin/ava` symlink + shell-rc PATH
+    # host-global wiring (the single `~/.local/bin/meiva` symlink + shell-rc PATH
     # edit) belongs to the host's prod install, not to any one cluster. Skipped
-    # for a dev / non-default cluster so a worktree's `ava start` never repoints
-    # the host's prod `ava` or rewrites the shell rc.
+    # for a dev / non-default cluster so a worktree's `meiva start` never repoints
+    # the host's prod `meiva` or rewrites the shell rc.
     host_global: bool = False
     # Empty means shared host/cluster preparation. Otherwise one selected
     # consumer is required; role membership alone does not select a service.

@@ -9,14 +9,14 @@ from typing import Any
 
 import pytest
 
-import ava
+import meiva
 from base.events.live.projection import EVENT_ADAPTER
 
 _REPO_ROOT = Path(__file__).resolve().parents[3]
 _SNIPPET_PATHS = (
-    "ava_builtins/skills/coordination/ava-goal/scripts/watch_idle.py",
-    "ava_builtins/skills/coordination/ava-being-a-long-running-agent/scripts/watch_idle.py",
-    "ava_builtins/plugins/ava_fleet/skills/ava-fleet/reference/watch_idle.py",
+    "meiva_builtins/skills/coordination/meiva-goal/scripts/watch_idle.py",
+    "meiva_builtins/skills/coordination/meiva-being-a-long-running-agent/scripts/watch_idle.py",
+    "meiva_builtins/plugins/meiva_fleet/skills/meiva-fleet/reference/watch_idle.py",
 )
 _FIXTURE_PATH = _REPO_ROOT / "tests" / "fixtures" / "events" / "agent" / "agent_updated.json"
 
@@ -58,7 +58,7 @@ def test_target_hint_reads_current_status(
         requested.append(agent_id)
         return status
 
-    monkeypatch.setattr(ava.agents, "get_status", get_status)
+    monkeypatch.setattr(meiva.agents, "get_status", get_status)
     assert is_target_idle(_agent_updated_event(42), 42) is (status == "idling")
     assert requested == [42]
 
@@ -78,7 +78,7 @@ def test_other_events_do_not_fetch_status(
     def forbidden(_agent_id: int) -> None:
         pytest.fail("unrelated events must not trigger a status read")
 
-    monkeypatch.setattr(ava.agents, "get_status", forbidden)
+    monkeypatch.setattr(meiva.agents, "get_status", forbidden)
     assert is_target_idle(event, 42) is False
 
 
@@ -96,7 +96,7 @@ def test_poll_fallback_reads_status_until_idle(monkeypatch: pytest.MonkeyPatch, 
             raise reply
         return reply
 
-    monkeypatch.setattr(ava.agents, "get_status", get_status)
+    monkeypatch.setattr(meiva.agents, "get_status", get_status)
     monkeypatch.setattr(module, "_notify", notified.append)
     vars(module)["_watch_via_poll"](42, interval_s=0)
     assert requested == [42, 42, 42]

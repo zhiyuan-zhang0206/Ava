@@ -56,4 +56,4 @@ would add unnecessary process to tasks that need only a direct check.
 Leaving capability calibration as an incidental planning reference would keep
 stale capability assumptions upstream of goal and strategy selection.
 
-Current guidance lives in [Workflow](../../../../ava_builtins/skills/practice/ava-workflow/SKILL.md).
+Current guidance lives in [Workflow](../../../../meiva_builtins/skills/practice/meiva-workflow/SKILL.md).

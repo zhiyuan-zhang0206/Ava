@@ -441,7 +441,7 @@ async def test_end_note_resumes_an_empty_queue(
     assert len(model_calls) == 1
     note = model_calls[0].messages[-1]
     assert note.id == f"impersonation-handoff:{owner.agent_id}:0"
-    assert note.additional_kwargs["ava_note_tag"] == "impersonation"
+    assert note.additional_kwargs["meiva_note_tag"] == "impersonation"
     assert_resume_note_delivery_contract(note.content)
     await graph.ainvoke(
         reset,

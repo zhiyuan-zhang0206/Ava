@@ -2,7 +2,7 @@
 
 ## Context
 
-#4245 (6ecfe14c3) deleted `AVA_DELIVERY_WATCHDOG_ALERT_GRACE_SECONDS` and the `delivery_watchdog_fields`
+#4245 (6ecfe14c3) deleted `MEIVA_DELIVERY_WATCHDOG_ALERT_GRACE_SECONDS` and the `delivery_watchdog_fields`
 code around it. #4207 (151bc92fe) then landed on main after replaying a stale branch through a conflict
 resolution, and carried the old content of four of those files back. A rebase merge queue does not catch
 this: the resurrected code compiles and its tests pass, so every existing gate is green. Asking agents to

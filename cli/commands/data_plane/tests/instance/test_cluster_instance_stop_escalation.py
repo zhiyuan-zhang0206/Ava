@@ -46,7 +46,9 @@ def test_stop_cluster_instance_reports_an_escalation(
     monkeypatch.setattr(pgbouncer, "stop_pgbouncer", fake_pgbouncer_stop)
 
     local_plane = dataclasses.replace(
-        data_plane_config, db_url="postgresql://ava@127.0.0.1/ava", redis_url="redis://127.0.0.1"
+        data_plane_config,
+        db_url="postgresql://meiva@127.0.0.1/meiva",
+        redis_url="redis://127.0.0.1",
     )
 
     assert dp.stop_cluster_instance(local_plane, producer=operator_pipeline) == 0

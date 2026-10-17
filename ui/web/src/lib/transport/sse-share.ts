@@ -24,7 +24,7 @@ type Message =
   | { type: "restart"; ch: SseChannel; backoff: boolean }
   | { type: "sessionInvalid"; leaderId: string };
 
-const NAME = "ava-ui-sse";
+const NAME = "meiva-ui-sse";
 // A ping requests a fresh interest announcement every 15s. A closed tab is
 // removed after 45-50s (three missed announcements plus a 5s sweep);
 // explicit leave is faster.

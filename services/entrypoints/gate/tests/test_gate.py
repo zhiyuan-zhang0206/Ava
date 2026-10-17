@@ -589,7 +589,7 @@ def test_a_leftover_update_marker_never_owns_the_entry(
     with the rest of root. A marker file left by the retired updater in the
     home must not pin the entry on "System updating": Gate answers from the live
     gateway/app."""
-    monkeypatch.setattr(paths, "ava_home", lambda: servers["flag"].parent)
+    monkeypatch.setattr(paths, "meiva_home", lambda: servers["flag"].parent)
     _write_v2(servers["flag"])
     FakeGateway.authenticated = True
     FakeGateway.down = True
@@ -601,8 +601,8 @@ def test_a_leftover_update_marker_never_owns_the_entry(
     FakeGateway.down = False
     status, body = _get(servers["gate"] + "/fleet")
     assert (status, body) == (200, "APP-PAGE /fleet")
-    status, body = _get(servers["gate"] + "/__ava/deploy-state")
-    assert (status, body) == (200, "APP-PAGE /__ava/deploy-state")
+    status, body = _get(servers["gate"] + "/__meiva/deploy-state")
+    assert (status, body) == (200, "APP-PAGE /__meiva/deploy-state")
 
 
 def test_gateway_503_without_flag_serves_down_page(servers) -> None:

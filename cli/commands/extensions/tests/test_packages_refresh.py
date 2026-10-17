@@ -1,4 +1,4 @@
-"""`ava packages refresh` — the content-channel executor contract (task #3267).
+"""`meiva packages refresh` — the content-channel executor contract (task #3267).
 
 Unit locks for due/backoff math + the policy write-back, then integration
 against a local git fixture: a real checkout with a bare `origin`, two skills,
@@ -22,7 +22,7 @@ from loguru import logger
 
 from base.config import ConfigBoot
 from base.packages.extensions import install_registry as reg
-from base.paths.home import resolve_ava_home
+from base.paths.home import resolve_meiva_home
 from cli.commands.extensions._refresh_rules import effective_interval_seconds, is_due
 from cli.commands.extensions.packages import refresh
 from cli.commands.extensions.packages.refresh import Pass, parse_duration, run_refresh
@@ -43,15 +43,15 @@ def _allow_os_jobs(**_kwargs: object) -> bool:
 def _hermetic(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Iterator[None]:
     """Restore real boot delivery as well as the scratch home."""
     with patch.dict(os.environ):
-        home = tmp_path / ".ava"
+        home = tmp_path / ".meiva"
         (home / "skills").mkdir(parents=True)
         (home / "logs").mkdir()
-        monkeypatch.setenv("AVA_HOME", str(home))
+        monkeypatch.setenv("MEIVA_HOME", str(home))
         yield
 
 
 def _home() -> Path:
-    return resolve_ava_home()
+    return resolve_meiva_home()
 
 
 def _git(cwd: Path, *args: str, check: bool = True) -> str:
@@ -74,13 +74,15 @@ def _git(cwd: Path, *args: str, check: bool = True) -> str:
 def _write_skill(
     repo: Path, name: str, body: str, manifest: dict[str, object] | None = None
 ) -> None:
-    d = repo / "ava_builtins" / "skills" / name
+    d = repo / "meiva_builtins" / "skills" / name
     d.mkdir(parents=True, exist_ok=True)
     (d / "SKILL.md").write_text(
         f"---\nname: {name}\ndescription: d\n---\n\n{body}", encoding="utf-8"
     )
     if manifest is not None:
-        (d / "ava-plugin.json").write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
+        (d / "meiva-plugin.json").write_text(
+            json.dumps(manifest, indent=2) + "\n", encoding="utf-8"
+        )
 
 
 def _head(repo: Path) -> str:
@@ -127,7 +129,7 @@ def _seed(
     mode: reg.UpdateMode | None = None,
     last_check_at: str | None = None,
 ) -> None:
-    src = repo / "ava_builtins" / "skills" / name
+    src = repo / "meiva_builtins" / "skills" / name
     dest = _home() / "skills" / name
     if dest.exists():
         shutil.rmtree(dest)
@@ -145,7 +147,7 @@ def _seed(
 
 
 def _mirror_installed_hash(name: str) -> None:
-    """Give `name` the row shape `ava skill install` writes: both edit guards set."""
+    """Give `name` the row shape `meiva skill install` writes: both edit guards set."""
     with reg.mutate() as registry:
         row = next(p for p in registry.packages if p.name == name)
         row.installed_hash = row.content_hash
@@ -239,14 +241,14 @@ def test_refresh_applies_only_the_changed_package(
         "bar": "up_to_date",
     }
     assert _installed_skill_text("foo") == (
-        (core_repo / "ava_builtins" / "skills" / "foo" / "SKILL.md").read_text(encoding="utf-8")
+        (core_repo / "meiva_builtins" / "skills" / "foo" / "SKILL.md").read_text(encoding="utf-8")
     )
 
 
 def test_refresh_apply_then_apply_with_installed_hash(
     refresh_config: ConfigBoot, core_repo: Path
 ) -> None:
-    """Rows carrying `installed_hash` (the `ava skill install` shape) keep
+    """Rows carrying `installed_hash` (the `meiva skill install` shape) keep
     updating: apply / rollback write BOTH edit guards, so the second upstream
     change is not misread as a local edit. The guard prefers `installed_hash`
     (converge owns `content_hash` on installed-plugin rows), so a stale value
@@ -373,7 +375,7 @@ def test_refresh_skips_local_source_rows(
     """Local sources have no remote channel (design §5.1): the pass skips them
     with no error record and no backoff — including a stale persisted
     `channel: git` written before local sources were classified (QA MF-3)."""
-    src = core_repo / "ava_builtins" / "skills" / "foo"
+    src = core_repo / "meiva_builtins" / "skills" / "foo"
     dest = _home() / "skills" / "foo"
     shutil.copytree(src, dest, ignore=shutil.ignore_patterns(*reg.IGNORED_NAMES))
 
@@ -410,7 +412,12 @@ def test_refresh_blocks_on_the_version_gate(refresh_config: ConfigBoot, core_rep
         core_repo,
         "foo",
         "# v2\n",
-        manifest={"apiVersion": 2, "name": "foo", "version": "2.0.0", "engines": {"ava": ">=2099"}},
+        manifest={
+            "apiVersion": 2,
+            "name": "foo",
+            "version": "2.0.0",
+            "engines": {"meiva": ">=2099"},
+        },
     )
     _commit_push(core_repo, "foo v2")
 
@@ -428,7 +435,7 @@ def test_refresh_never_deletes_a_package_removed_upstream(
 ) -> None:
     c1 = _head(core_repo)
     _seed(core_repo, "foo", applied_rev=c1)
-    shutil.rmtree(core_repo / "ava_builtins" / "skills" / "foo")
+    shutil.rmtree(core_repo / "meiva_builtins" / "skills" / "foo")
     _commit_push(core_repo, "drop foo")
 
     report = run_refresh(config=refresh_config, repo=core_repo)

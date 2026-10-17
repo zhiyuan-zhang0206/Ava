@@ -10,7 +10,7 @@
   "alertsDescription": "System alerts — separate from notices. Unresolved-first history, live via SSE.",
   "opsPanel": {
     "metrics": "Metrics (Grafana)",
-    "openDashboard": "Open the Ava ops dashboard"
+    "openDashboard": "Open the Meiva ops dashboard"
   },
   "status": {
     "couldNotReach": "Couldn't reach the gateway — retrying…",
@@ -32,7 +32,7 @@
     "observabilityStation": "observability-station",
     "noCapability": "no capability",
     "pausedDetail": "· paused",
-    "noHostStarted": "(no host has run `ava start` yet)",
+    "noHostStarted": "(no host has run `meiva start` yet)",
     "gatewayTitle": "Gateway",
     "host": "Host",
     "stagingTitle": "Staging host — visible here but excluded from cluster rollouts",

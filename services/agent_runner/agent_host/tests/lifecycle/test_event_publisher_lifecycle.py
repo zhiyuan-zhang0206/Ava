@@ -11,7 +11,7 @@ import redis.asyncio as aredis
 from redis.exceptions import AuthenticationError, DataError, ResponseError
 from redis.exceptions import ConnectionError as RedisConnectionError
 
-from base.agents.context import AvaContext
+from base.agents.context import MeivaContext
 from base.events.live.publisher import AgentEventPublisher
 from base.native_process.runtime_incarnation import RuntimeIncarnation
 
@@ -72,7 +72,7 @@ class _Redis:
 async def _drive(
     monkeypatch: pytest.MonkeyPatch,
     publisher: AgentEventPublisher,
-    invoke: Callable[[int, AvaContext], Awaitable[TurnOutcome]],
+    invoke: Callable[[int, MeivaContext], Awaitable[TurnOutcome]],
 ) -> TurnOutcome:
     monkeypatch.setattr(driver, "run_compact", AsyncMock(return_value=True))
     monkeypatch.setattr(driver, "settle_original_restart", AsyncMock(return_value=False))
@@ -81,7 +81,7 @@ async def _drive(
         MagicMock(),
         MagicMock(),
         42,
-        AvaContext(
+        MeivaContext(
             event_publisher=publisher,
             bus=MagicMock(),
             original_incarnation=RuntimeIncarnation(42, uuid4(), uuid4()),
@@ -111,7 +111,7 @@ async def test_unknown_worker_error_reaches_invocation_owner(
     cancelled = asyncio.Event()
     release = asyncio.Event()
 
-    async def invoke(_agent: int, _ctx: AvaContext) -> TurnOutcome:
+    async def invoke(_agent: int, _ctx: MeivaContext) -> TurnOutcome:
         publisher.emit("event")
         try:
             await release.wait()
@@ -141,7 +141,7 @@ async def test_invocation_failure_and_worker_cleanup_failure_are_both_visible(
     redis = _Redis("cleanup", worker)
     publisher = AgentEventPublisher(cast(aredis.Redis, redis), "events", agent_id=42)
 
-    async def invoke(_agent: int, _ctx: AvaContext) -> TurnOutcome:
+    async def invoke(_agent: int, _ctx: MeivaContext) -> TurnOutcome:
         publisher.emit("event")
         await redis.entered.wait()
         redis.release.set()
@@ -177,7 +177,7 @@ async def test_invocation_exit_joins_worker_with_bounded_drain(
     )
     release = asyncio.Event()
 
-    async def invoke(_agent: int, _ctx: AvaContext) -> TurnOutcome:
+    async def invoke(_agent: int, _ctx: MeivaContext) -> TurnOutcome:
         publisher.emit("event")
         await redis.entered.wait()
         if cancel:
@@ -212,7 +212,7 @@ async def test_known_transport_error_recovers_without_interrupting_invocation(
     redis = _Redis("transport", error)
     publisher = AgentEventPublisher(cast(aredis.Redis, redis), "events", agent_id=42)
 
-    async def invoke(_agent: int, _ctx: AvaContext) -> TurnOutcome:
+    async def invoke(_agent: int, _ctx: MeivaContext) -> TurnOutcome:
         publisher.emit("first")
         await publisher._queue.join()
         publisher.emit("second")
@@ -234,7 +234,7 @@ async def test_parallel_invocations_keep_their_event_identity_and_queues(
         AgentEventPublisher(cast(aredis.Redis, second), "second", agent_id=2),
     ]
 
-    async def invoke(_agent: int, ctx: AvaContext) -> TurnOutcome:
+    async def invoke(_agent: int, ctx: MeivaContext) -> TurnOutcome:
         assert ctx.event_publisher is not None
         ctx.event_publisher.emit("one")
         await asyncio.sleep(0)
@@ -254,7 +254,7 @@ async def test_invocation_failure_keeps_its_original_type_without_worker_failure
     redis = _Redis("normal", ValueError("unused worker defect"))
     publisher = AgentEventPublisher(cast(aredis.Redis, redis), "events", agent_id=42)
 
-    async def invoke(_agent: int, _ctx: AvaContext) -> TurnOutcome:
+    async def invoke(_agent: int, _ctx: MeivaContext) -> TurnOutcome:
         publisher.emit("event")
         raise primary
 

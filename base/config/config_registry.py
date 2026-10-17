@@ -10,9 +10,9 @@ boots lite (`base/config/_lite.py`), which defers the Settings build, and the
 module-level `FIELD_REFS` / `FIELD_INFOS` faces of `base.config` are served from this
 registry without upgrading. The sub-model class imports are deferred into the build
 (first use); the build completes against a partially-initialized `base.config` when
-one is already in flight (for example, the standalone `load_ava_env()` boot path),
+one is already in flight (for example, the standalone `load_meiva_env()` boot path),
 and the double build that results is idempotent. Code that must not import
-`base.config` at all (the `ava config` repair path) takes the wire vocabulary it
+`base.config` at all (the `meiva config` repair path) takes the wire vocabulary it
 needs from `base/api_contracts/config.py`, not from here.
 
 Settings fields and their `json_schema_extra` metadata are declared on the
@@ -20,7 +20,7 @@ owning domain sub-model. This registry exposes those declarations; non-Settings
 keys are declared in `base/host/env/registry.py`. Consumer projections combine
 scope/capability metadata with their explicit classification rules. Declaring a
 field does not decide every projection automatically. See
-`base/host/env/docs/registry.ava.okf.md` for the current projection boundaries.
+`base/host/env/docs/registry.meiva.okf.md` for the current projection boundaries.
 
 Everything here is a pure function of the class declarations: building reads no
 environment and constructs no Settings.

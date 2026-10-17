@@ -9,12 +9,12 @@ from base.telemetry.metrics.plugin_metrics import MetricSpec
 
 def _day_query(field: str) -> str:
     """One latest absolute gauge per complete cluster-time day."""
-    return f"max by (day) (last_over_time(ava_ci_runs_daily_{field}_ratio[26h]))"
+    return f"max by (day) (last_over_time(meiva_ci_runs_daily_{field}_ratio[26h]))"
 
 
 def _workflow_query(field: str) -> str:
     """One latest absolute gauge per workflow in the trailing window."""
-    return f"max by (workflow) (last_over_time(ava_ci_workflow_window_{field}_ratio[26h]))"
+    return f"max by (workflow) (last_over_time(meiva_ci_workflow_window_{field}_ratio[26h]))"
 
 
 def _day_transformations(names: list[str]) -> list[dict[str, Any]]:

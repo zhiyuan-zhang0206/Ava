@@ -3,13 +3,15 @@ from uuid import uuid4
 import psycopg
 import pytest
 
-from ava.tests.fixtures.pin_agent import pin_agent
-from ava_builtins.plugins.ava_fleet import task_registry
-from ava_builtins.plugins.ava_fleet.tests.task_registry.seeds import root_task_id as root_task_id
-from ava_builtins.plugins.ava_fleet.tests.task_registry.seeds import seed_agent
 from base.api_contracts.idempotency import keyed_headers
 from base.cluster.machine import MachineIdentity
 from gateway.routers import tasks
+from meiva.tests.fixtures.pin_agent import pin_agent
+from meiva_builtins.plugins.meiva_fleet import task_registry
+from meiva_builtins.plugins.meiva_fleet.tests.task_registry.seeds import (
+    root_task_id as root_task_id,
+)
+from meiva_builtins.plugins.meiva_fleet.tests.task_registry.seeds import seed_agent
 from tests.fixtures.gateway_config import gateway_test_client
 
 

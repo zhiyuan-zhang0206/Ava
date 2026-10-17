@@ -10,13 +10,13 @@
 
 ## Trust model (context, not debt)
 
-`AVA_CLUSTER_SECRET` (43-char high-entropy) is the gateway's human bearer;
+`MEIVA_CLUSTER_SECRET` (43-char high-entropy) is the gateway's human bearer;
 machine callers present their write generation's API token (the gateway and ops
 RPC admit only the current generation's). The data plane authenticates independently, whatever the bearer: the
 Postgres administrator is the OS user over the owner-only socket (`peer`), the
 schema owner is `NOLOGIN`, application processes hold only a write generation's
-class login (`$AVA_HOME/db-authority/`), and Redis has the gateway-only
-`AVA_REDIS_ADMIN_PASSWORD` plus the runtime `AVA_REDIS_PASSWORD`, so a runner
+class login (`$MEIVA_HOME/db-authority/`), and Redis has the gateway-only
+`MEIVA_REDIS_ADMIN_PASSWORD` plus the runtime `MEIVA_REDIS_PASSWORD`, so a runner
 bearer cannot become a data-plane administrator. No per-agent identity
 inside the cluster; every agent process environment carries the bearer + all 11
 provider keys. Postgres and PgBouncer bind loopback + the machine's reachable
@@ -28,16 +28,16 @@ every other role by scram.
 
 ## User rulings (do NOT "fix")
 
-- **Prompt-injection scan off is deliberate**: `AVA_SECURITY_SCAN_ENABLED=false`
+- **Prompt-injection scan off is deliberate**: `MEIVA_SECURITY_SCAN_ENABLED=false`
   — user ruling (little web browsing, low injection worry). Not a config drift.
 
 ## Open debt
 
-1. **`ava.ui` page servers bind `("", port)` (0.0.0.0) unauthenticated** —
+1. **`meiva.ui` page servers bind `("", port)` (0.0.0.0) unauthenticated** —
    pure static content, no auth, reachable from LAN/private network (ALF has a
    rule for it). Fix direction pending user decision: bind loopback / route via
    the gateway reverse proxy / private-network-only.
-2. **World-readable `~/.ava` files** — `logs/`, `workspaces/` (710 dirs),
+2. **World-readable `~/.meiva` files** — `logs/`, `workspaces/` (710 dirs),
    `memory/` are 755/644, containing health/financial data; `.env` (600) and
    `secrets/` (700) are correct.
 
@@ -49,11 +49,11 @@ every other role by scram.
   `Retry-After` during lockout, and
   [`gateway/tests/bootstrap/test_login_endpoint.py`](../../../gateway/tests/bootstrap/test_login_endpoint.py)
   pins the threshold, reset, expiry, and IP-isolation contract.
-- macOS ALF manifest drift is reconciled by `ava converge`: manifest globs cover
+- macOS ALF manifest drift is reconciled by `meiva converge`: manifest globs cover
   the current inbound binaries, direct `socketfilterfw` mutation was empirically
   verified on the macmini running macOS 15.3.1, and elevation on other platforms
   remains a bounded `sudo -n` / manual-command fallback (2026-08-24, task #1531).
-- Cloudflare tunnel deprecated (2026-08-02 ruling): the ava-prod user
+- Cloudflare tunnel deprecated (2026-08-02 ruling): the meiva-prod user
   LaunchAgent is disabled; the root LaunchDaemon
   `com.cloudflare.cloudflared` (token tunnel) was scheduled for
   `sudo launchctl bootout system/com.cloudflare.cloudflared` + plist removal.

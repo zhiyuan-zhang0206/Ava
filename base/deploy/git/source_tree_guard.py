@@ -1,17 +1,17 @@
 """Source-tree integrity detector for a home that runs from its source checkout.
 
-The 2026-08-28 fleet-wide outage (a half-installed ``ava_ledger`` plugin) and
+The 2026-08-28 fleet-wide outage (a half-installed ``meiva_ledger`` plugin) and
 earlier incidents of the same class all trace to someone editing the prod
-checkout (``$AVA_HOME/source``) in place — a tree edit broke ``import ava`` for
+checkout (``$MEIVA_HOME/source``) in place — a tree edit broke ``import meiva`` for
 every agent on the box within minutes. User ruling 2026-08-28: tampering is
 detected before exec crashes, and legitimate runtime artifacts are allowlisted.
 
-``ava cluster health-probe`` check 8 is the one caller: read-only detection on
+``meiva cluster health-probe`` check 8 is the one caller: read-only detection on
 the OS-cron cadence. It alerts on tamper and never writes. The check reports
 changed tracked files and untracked files outside ``SOURCE_TREE_WHITELIST``.
 A moved HEAD alone is not tamper: no lifecycle records an installed
 commit for a source checkout, and an operator legitimately moves the checkout
-before an ``ava restart``. Running-versus-checkout drift is shown, not alerted, by the
+before an ``meiva restart``. Running-versus-checkout drift is shown, not alerted, by the
 roster ``code`` column.
 """
 

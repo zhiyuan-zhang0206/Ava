@@ -1,0 +1,87 @@
+"""`import meiva` must not load the LM stack — startup-path laziness (task #3587).
+
+Every exec child pays `import meiva` before any user code runs; that import must
+stop at the config/effort layer and never pull langchain / langgraph /
+langsmith or the provider API (`base.lm.provider_api`). The attachment
+constants live in an import-free leaf (`base.lm.attach.constants`) precisely
+so the SDK surfaces do not drag the LangChain-backed packing machinery in.
+
+The probe runs in a clean subprocess (isolated interpreter, agent-launch env
+vars stripped) and reports every forbidden module left in `sys.modules`.
+"""
+
+from __future__ import annotations
+
+import json
+import os
+import subprocess
+import sys
+from pathlib import Path
+
+_REPO_ROOT = Path(__file__).resolve().parents[3]
+
+# Agent-launch markers: with MEIVA_AGENT_ID forwarded, `import meiva` self-loads
+# plugin namespaces (`agent_identity.is_launched_child`), inflating the import by ~13MB
+# and adding plugin modules (recon #3586 §2.6). A boot measurement must strip
+# them — mirroring measure-boot.sh's clean env.
+_CLEAN_ENV_STRIP = frozenset(
+    {
+        "MEIVA_AGENT_ID",
+        "MEIVA_PROCESS_PROFILE",
+        "MEIVA_EXEC_REQUEST_FILE",
+        "MEIVA_EXEC_RESULT_FILE",
+        "MEIVA_EXEC_TIMEOUT_S",
+        "MEIVA_TURN_ID",
+        "MEIVA_SESSION_ID",
+        "MEIVA_LOG_DIR",
+        "MEIVA_AGENT_LABEL",
+        "MEIVA_AGENT_DIR",
+    }
+)
+
+# Prefix match covers the module and any submodule under each name.
+_FORBIDDEN_PREFIXES = (
+    "langchain",
+    "langgraph",
+    "langsmith",
+    "base.lm.provider_api",
+)
+
+# Literal source with data in argv, so test selection can read the probe's imports.
+_PROBE = """
+import json
+import sys
+
+root, prefixes = sys.argv[1], tuple(json.loads(sys.argv[2]))
+sys.path.insert(0, root)
+import meiva  # the import under test
+
+bad = sorted(name for name in sys.modules if name.startswith(prefixes))
+print(json.dumps(bad))
+"""
+
+
+def test_import_meiva_clean_does_not_load_the_lm_stack() -> None:
+    env = {key: value for key, value in os.environ.items() if key not in _CLEAN_ENV_STRIP}
+    proc = subprocess.run(  # noqa: S603 — fixed argv, sys.executable is trusted
+        [
+            sys.executable,
+            "-I",
+            "-B",
+            "-X",
+            "utf8",
+            "-c",
+            _PROBE,
+            str(_REPO_ROOT),
+            json.dumps(_FORBIDDEN_PREFIXES),
+        ],
+        cwd=_REPO_ROOT,
+        env=env,
+        capture_output=True,
+        text=True,
+        timeout=120,
+        check=False,
+    )
+    assert proc.returncode == 0, proc.stderr
+    loaded = json.loads(proc.stdout.strip().splitlines()[-1])
+    assert loaded == [], f"`import meiva` must not load the LM stack, found: {loaded}"

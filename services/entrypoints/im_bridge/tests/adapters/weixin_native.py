@@ -47,7 +47,7 @@ async def native_weixin(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> AsyncIterator[NativeWeixin]:
-    monkeypatch.setenv("AVA_HOME", str(tmp_path))
+    monkeypatch.setenv("MEIVA_HOME", str(tmp_path))
     save_account(
         account_id="bot-id",
         bot_token="isolated-test-token",  # noqa: S106

@@ -4,14 +4,14 @@ from unittest.mock import Mock, patch
 
 import pytest
 
-import ava
+import meiva
 from base.cluster.machine import MachineIdentity
 from base.telemetry import EventPipeline
 from base.native_process.loaded_commit import LoadedCommit
 from base.daemon.schedules.inputs import ScheduleInputs
 from schedules.entry import fresh_schedule_entry, schedule_entry
 from schedules import entry
-from ava.sdk_surface import process_context
+from meiva.sdk_surface import process_context
 
 
 def test_quiet_schedule_exit_never_builds_a_writer(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -21,14 +21,14 @@ def test_quiet_schedule_exit_never_builds_a_writer(monkeypatch: pytest.MonkeyPat
     monkeypatch.setattr("threading.Thread", forbidden)
     with patch.dict(os.environ), fresh_schedule_entry() as inputs:
         assert callable(inputs.producer)
-        assert ava.context.require_machine() is inputs.machine
+        assert meiva.context.require_machine() is inputs.machine
 
 
 def test_schedule_closes_constructed_writer_and_preserves_loop_error() -> None:
     primary = RuntimeError("original schedule loop error")
 
     pipeline: EventPipeline | None = None
-    prior = getattr(ava, "context", None)
+    prior = getattr(meiva, "context", None)
     with (
         pytest.raises(RuntimeError) as caught,
         patch.dict(os.environ),
@@ -36,11 +36,11 @@ def test_schedule_closes_constructed_writer_and_preserves_loop_error() -> None:
     ):
         pipeline = inputs.producer()
         assert inputs.producer() is pipeline
-        assert ava.context.require_machine() is inputs.machine
+        assert meiva.context.require_machine() is inputs.machine
         raise primary
     assert caught.value is primary
     assert pipeline is not None and pipeline.stopped
-    assert getattr(ava, "context", None) is prior
+    assert getattr(meiva, "context", None) is prior
 
 
 def test_runner_inputs_are_borrowed_without_rebuilding_or_closing(
@@ -57,12 +57,12 @@ def test_runner_inputs_are_borrowed_without_rebuilding_or_closing(
     inputs = ScheduleInputs(
         database, producer, LoadedCommit(Path("/entry"), None), machine=machine_identity
     )
-    prior = getattr(ava, "context", None)
+    prior = getattr(meiva, "context", None)
     primary = RuntimeError("borrowed loop failed")
     with pytest.raises(RuntimeError) as caught, schedule_entry(inputs) as borrowed:
         assert borrowed is inputs
         assert borrowed.database() is database.return_value
-        assert getattr(ava, "context", None) is prior
+        assert getattr(meiva, "context", None) is prior
         raise primary
     assert caught.value is primary
     producer.assert_not_called()

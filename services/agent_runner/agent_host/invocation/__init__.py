@@ -18,7 +18,7 @@ from agent.ownership.hosted_completion import (
 from agent.state import BaseAgentState
 from agent.turn.runloop import PendingTurnFailure, publish_turn_failure, settle_turn_failure
 from agent.turn.trace_checkpoint import attach_trace_checkpoint_ref
-from base.agents.context import AvaContext
+from base.agents.context import MeivaContext
 from base.agents.impersonation.notes import HandoffNotes
 from base.agents.inbox.native_restart import original_guarded_restart_id
 from base.agents.incarnation.native_work_models import NativeWorkTarget
@@ -50,10 +50,10 @@ class PendingWorkResult:
 
 
 async def finish_pending_failure(
-    graph: CompiledStateGraph[BaseAgentState, AvaContext, BaseAgentState, BaseAgentState],
+    graph: CompiledStateGraph[BaseAgentState, MeivaContext, BaseAgentState, BaseAgentState],
     checkpointer: object,
     agent_id: int,
-    ctx: AvaContext,
+    ctx: MeivaContext,
     config: RunnableConfig,
     pending: PendingTurnFailure,
     *,
@@ -117,7 +117,7 @@ async def finish_completed_invocation(
     pool: AsyncConnectionPool,
     checkpoints: TurnCheckpoints,
     agent_id: int,
-    ctx: AvaContext,
+    ctx: MeivaContext,
     pending: PendingWorkResult,
     drop_agent: Callable[[int], None],
     kill_shell_sessions: Callable[[int, int], None],

@@ -9,13 +9,13 @@ import psycopg
 import pytest
 from psycopg_pool import AsyncConnectionPool, ConnectionPool
 
-import ava
-from ava.sdk_surface.installation import installed
+import meiva
 from base.agents.compaction.commands import observe
 from base.db.code_version_gate import ProcessDbGate
 from base.native_process.code_version import CodeVersion
 from base.native_process.loaded_commit import LoadedCommit
 from base.telemetry import process_name
+from meiva.sdk_surface.installation import installed
 from services.agent_runner.agent_host.host import AgentHost
 from services.agent_runner.agent_host.invocation.compact import execute as compact_execute
 from services.agent_runner.agent_host.invocation.compact import lifecycle as compact_lifecycle
@@ -59,25 +59,25 @@ def install(
 
 
 async def main(*, database_gate: ProcessDbGate) -> None:
-    agent = int(os.environ["AVA_TEST_COMPACT_AGENT"])
-    stage = os.environ["AVA_TEST_COMPACT_STAGE"]
+    agent = int(os.environ["MEIVA_TEST_COMPACT_AGENT"])
+    stage = os.environ["MEIVA_TEST_COMPACT_STAGE"]
     patch = pytest.MonkeyPatch()
     model = SummaryModel(responses=["Original child summary. " * 100])
-    ava.ensure_plugins_loaded()
+    meiva.ensure_plugins_loaded()
     installation = installed()
     assert installation is not None
     catalog = installation.require_catalog()
     binding = replace(catalog.bindings["gpt-"], build_single_attempt=lambda _: model)
     catalog = replace(catalog, bindings={**catalog.bindings, "gpt-": binding})
-    patch.setattr(ava, "__plugin_installation__", replace(installation, catalog=catalog))
+    patch.setattr(meiva, "__plugin_installation__", replace(installation, catalog=catalog))
     async with AsyncConnectionPool[psycopg.AsyncConnection](
-        os.environ["AVA_DB_URL"], open=False
+        os.environ["MEIVA_DB_URL"], open=False
     ) as pool:
         host, _, _ = await make_host(
             pool, agent, 100, [], patch, catalog=catalog, database_gate=database_gate
         )
         await host.run_turn(agent)
-        with ConnectionPool[psycopg.Connection](os.environ["AVA_DB_URL"]) as sync:
+        with ConnectionPool[psycopg.Connection](os.environ["MEIVA_DB_URL"]) as sync:
             target = observe(sync, agent)
         sys.stdout.write(target.model_dump_json() + "\n")
         sys.stdout.flush()

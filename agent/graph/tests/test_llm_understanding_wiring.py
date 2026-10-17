@@ -19,7 +19,7 @@ from agent.hooks import understanding_chunks as uc
 from agent.hooks.tests.fakes import make_fake_ops_pool
 from agent.state import AgentState
 from agent.state_channels import CompactState
-from base.agents.context import AvaContext
+from base.agents.context import MeivaContext
 from base.agents.context.identity import AgentIdentity
 from base.clock import Clock
 from base.config import settings
@@ -36,12 +36,12 @@ async def _aiter(chunks: list[AIMessageChunk]) -> AsyncIterator[AIMessageChunk]:
         yield c
 
 
-def _runtime(chunks: list[AIMessageChunk], database_gate: ProcessDbGate) -> Runtime[AvaContext]:
+def _runtime(chunks: list[AIMessageChunk], database_gate: ProcessDbGate) -> Runtime[MeivaContext]:
     llm = MagicMock()
     llm.bind_tools.return_value = llm
     llm.astream.return_value = _aiter(chunks)
     return Runtime(
-        context=AvaContext(
+        context=MeivaContext(
             ops_pool=make_fake_ops_pool(),
             llm=llm,
             event_publisher=MagicMock(),

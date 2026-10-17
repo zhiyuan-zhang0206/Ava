@@ -2,7 +2,7 @@
 
 One entry for every wal-g invocation: argv is `[wal-g, --config <file>, *args]`
 and nothing else crosses into the child. The environment is the daemon subset
-(`daemon_process_env`: PATH, HOME, locale; no `AVA_*` secret) plus, for commands
+(`daemon_process_env`: PATH, HOME, locale; no `MEIVA_*` secret) plus, for commands
 that talk to Postgres, the libpq variables that name this home's owner-only
 socket and the OS-user administrator (peer authentication, no password). Storage
 credentials stay in the 0600 file, never in argv or the environment.
@@ -77,7 +77,7 @@ def run_walg_logged(
     """
     config_file = configured_path(path_reader=path_reader)
     if config_file is None:
-        raise WalgConfigError("AVA_WALG_CONFIG_FILE is not set")
+        raise WalgConfigError("MEIVA_WALG_CONFIG_FILE is not set")
     argv = [str(walg_path()), "--config", str(config_file), *args]
     try:
         result = subprocess.run(  # noqa: S603 — the pinned wal-g with a fixed argv shape

@@ -361,7 +361,7 @@ def test_an_exempt_process_keeps_the_plain_restore(monkeypatch: pytest.MonkeyPat
     restore(conn, gate=process_gate)
 
     reset, plain = connections.PG_POOLED_BASELINE_RESTORE_SQL
-    assert conn.executed == [(reset, ()), (plain, ("ava:cli",))]
+    assert conn.executed == [(reset, ()), (plain, ("meiva:cli",))]
 
 
 # ── real Postgres ────────────────────────────────────────────────────────────
@@ -468,7 +468,7 @@ def test_a_pooled_dial_at_the_stored_minimum_works_and_keeps_the_ceiling(
         row = conn.execute("SHOW statement_timeout").fetchone()
         assert row is not None and row[0] == "1min"
         row = conn.execute("SHOW application_name").fetchone()
-        assert row is not None and row[0] == f"ava:{_PROCESS}:v{_VERSION}"
+        assert row is not None and row[0] == f"meiva:{_PROCESS}:v{_VERSION}"
     assert _gated_process == []
 
 
@@ -524,7 +524,7 @@ def test_direct_dials_are_not_gated_and_carry_no_process_name(
     _set_minimum(_VERSION + 1)
     with db.connect(direct=True, gate=process_gate, direct_url=_session_direct_url) as conn:
         params = conn.info.get_parameters()
-        assert not params.get("application_name", "").startswith("ava:")
+        assert not params.get("application_name", "").startswith("meiva:")
     assert _gated_process == []
 
 
@@ -538,7 +538,7 @@ def test_an_exempt_process_dials_as_the_cli_without_a_version(
 
     with db.connect(gate=process_gate) as conn:
         row = conn.execute("SHOW application_name").fetchone()
-        assert row is not None and row[0] == "ava:cli"
+        assert row is not None and row[0] == "meiva:cli"
     assert _gated_process == []
 
 
@@ -572,7 +572,7 @@ def test_independent_handles_and_async_restore_share_one_process_budget(
         connections.PG_POOLED_BASELINE_RESTORE_SQL[1],
     ]
     assert all(len(conn.executed) == 2 and conn.commits == 1 for conn in restored)
-    assert all(conn.executed[1][1] == (f"ava:test-process:v{_VERSION}",) for conn in restored)
+    assert all(conn.executed[1][1] == (f"meiva:test-process:v{_VERSION}",) for conn in restored)
     now[0] += 0.1
     first.connect()
     assert restored[-1].executed[1][0] == connections.PG_POOLED_RESTORE_WITH_MIN_SQL
@@ -616,7 +616,7 @@ def test_exempt_process_owner_never_needs_a_loaded_code_version() -> None:
         raise AssertionError("an exempt CLI must not resolve Git")
 
     owner = gate.ProcessDbGate(version=no_version, process="cli", exempt=True)
-    assert owner.application_name() == "ava:cli"
+    assert owner.application_name() == "meiva:cli"
     assert owner.min_read_due() is False
 
 

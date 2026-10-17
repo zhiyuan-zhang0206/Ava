@@ -12,7 +12,7 @@ $function$;
 REVOKE ALL ON FUNCTION public.lock_impersonation_event_participant(UUID, TEXT) FROM PUBLIC;
 DO $$
 BEGIN
-    IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname='ava_runner') THEN
-        GRANT EXECUTE ON FUNCTION public.lock_impersonation_event_participant(UUID, TEXT) TO ava_runner;
+    IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname='meiva_runner') THEN
+        GRANT EXECUTE ON FUNCTION public.lock_impersonation_event_participant(UUID, TEXT) TO meiva_runner;
     END IF;
 END $$;

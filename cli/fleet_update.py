@@ -1,4 +1,4 @@
-# ava:ref cli/docs/fleet-update.ava.okf.md#no-application-imports
+# meiva:ref cli/docs/fleet-update.meiva.okf.md#no-application-imports
 
 from __future__ import annotations
 
@@ -18,16 +18,16 @@ from subprocess import PIPE, STDOUT
 from typing import Any
 
 REPO = Path(__file__).resolve().parents[1]
-HOME = 'H="$HOME/.ava"; S="$H/source"; cd "$S" || exit 1'
-AVA = 'AVA_HOME="$H" "$S/.venv/bin/ava"'
-_PYTHON = f'{HOME}; AVA_HOME="$H" AVA_CONFIG_FETCH=skip "$S/.venv/bin/python"'
-_STATUS = f"{HOME}; {AVA} status --json"
+HOME = 'H="$HOME/.meiva"; S="$H/source"; cd "$S" || exit 1'
+MEIVA = 'MEIVA_HOME="$H" "$S/.venv/bin/meiva"'
+_PYTHON = f'{HOME}; MEIVA_HOME="$H" MEIVA_CONFIG_FETCH=skip "$S/.venv/bin/python"'
+_STATUS = f"{HOME}; {MEIVA} status --json"
 _FREE = ("inactive", "resumed")
 POLL_S = 5
 KEEP_TIMEOUT_S = 300.0
 _STOP_HINT = (
-    '\nOn that host retry "ava stop -y --timeout 600", confirm the maintenance hold is '
-    "paused/stopped (`ava status`), then rerun `down`."
+    '\nOn that host retry "meiva stop -y --timeout 600", confirm the maintenance hold is '
+    "paused/stopped (`meiva status`), then rerun `down`."
 )
 CLEAN = (
     'd=$(git status --porcelain | head -n 20); [ -z "$d" ] || { echo "$d"; echo "Untracked files '
@@ -39,11 +39,11 @@ printf '%s\\n' "head=$(git rev-parse HEAD)"
 printf '%s\\n' "dirty=$(git status --porcelain 2>&1 | wc -l | tr -d ' ')"
 test -e "$(git rev-parse --git-path hooks/post-checkout)" && echo hook=yes || echo hook=no
 test -e "$H/updates/active" && echo active=yes || echo active=no
-printf '%s\\n' "hold=$({AVA} status --json 2>/dev/null | grep '^{{' | tail -n 1)\""""
+printf '%s\\n' "hold=$({MEIVA} status --json 2>/dev/null | grep '^{{' | tail -n 1)\""""
 _VENV_DIRS = (
     "find .venv/bin .venv/lib -maxdepth 3 -type d \\( -path .venv/bin "
     '-o -path ".venv/lib/python*/site-packages" '
-    '-o -path ".venv/lib/python*/site-packages/ava-*.dist-info" \\) -exec chmod u+w {} +'
+    '-o -path ".venv/lib/python*/site-packages/meiva-*.dist-info" \\) -exec chmod u+w {} +'
 )
 _LOCKS = ("uv.lock", "ui/web/package-lock.json", ".python-version")
 _WATCHED = ("migrations/", "services/desktop/permissions_helper/helper", *_LOCKS)
@@ -77,11 +77,11 @@ W="$H/pre-update-verify"; R="$W.rows"; T=""
 trap 'git -C "$S" worktree remove --force "$W" >/dev/null 2>&1; rm -f "$R"; [ -z "$T" ] || rm -rf "$T"' EXIT
 git -C "$S" worktree remove --force "$W" >/dev/null 2>&1; rm -rf "$W"; git -C "$S" worktree prune
 git cat-file -e "{new}^{{commit}}" || {{ echo "SKIPPED: {new} is not fetched on this host (a dry run does not fetch)"; exit 0; }}
-(umask 077; AVA_HOME="$H" AVA_CONFIG_FETCH=skip "$S/.venv/bin/python" -c {read_rows} "$R") \\
+(umask 077; MEIVA_HOME="$H" MEIVA_CONFIG_FETCH=skip "$S/.venv/bin/python" -c {read_rows} "$R") \\
   || {{ echo "VERIFY_RC=2"; exit 0; }}
 git -C "$S" worktree add -q "$W" {new} || {{ echo "VERIFY_RC=2"; exit 0; }}
 T=$(mktemp -d) || {{ echo "VERIFY_RC=2"; exit 0; }}
-cd "$W" && AVA_HOME="$T" AVA_CONFIG_FETCH=skip "$S/.venv/bin/python" -c {check_rows} "$R"
+cd "$W" && MEIVA_HOME="$T" MEIVA_CONFIG_FETCH=skip "$S/.venv/bin/python" -c {check_rows} "$R"
 echo "VERIFY_RC=$?"; exit 0"""
 
 
@@ -151,18 +151,20 @@ def _host_refusals(alias: str, facts: dict[str, str]) -> list[str]:
     status, phase = split_hold_text(hold)
     reasons: list[str] = []
     if facts["dirty"] != "0":
-        reasons.append(f"{alias}: $HOME/.ava/source has uncommitted changes")
+        reasons.append(f"{alias}: $HOME/.meiva/source has uncommitted changes")
     if facts["hook"] == "yes":
         reasons.append(f"{alias}: a post-checkout hook (the guard recurses); move it aside")
     if facts["active"] == "yes":
-        reasons.append(f"{alias}: $HOME/.ava/updates/active names an unfinished release operation")
+        reasons.append(
+            f"{alias}: $HOME/.meiva/updates/active names an unfinished release operation"
+        )
     stopped = (status, phase) == ("paused", "stopped")
     if status not in _FREE and not stopped:
         reasons.append(f"{alias}: maintenance hold {status}/{phase}")
     return reasons
 
 
-# ava:ref cli/docs/fleet-update-window.ava.okf.md#preflight-refusals
+# meiva:ref cli/docs/fleet-update-window.meiva.okf.md#preflight-refusals
 def _preflight(s: Session, args: argparse.Namespace, new: str) -> tuple[list[str], str | None]:
     reasons: list[str] = []
     heads: dict[str, str] = {}
@@ -186,7 +188,7 @@ def _preflight(s: Session, args: argparse.Namespace, new: str) -> tuple[list[str
     return reasons, resolved
 
 
-# ava:ref cli/docs/fleet-update-window.ava.okf.md#keep-decision-subprocess
+# meiva:ref cli/docs/fleet-update-window.meiva.okf.md#keep-decision-subprocess
 def keep_decision(
     s: Session, old: str | None, new: str, *, timeout: float = KEEP_TIMEOUT_S
 ) -> list[str]:
@@ -225,7 +227,7 @@ def keep_decision(
     return keeps
 
 
-# ava:ref cli/docs/fleet-update-window.ava.okf.md#stored-schedules-refusal
+# meiva:ref cli/docs/fleet-update-window.meiva.okf.md#stored-schedules-refusal
 def _stored_schedules(s: Session, args: argparse.Namespace, new: str) -> None:
     out = s.run(
         args.gateway,
@@ -252,7 +254,7 @@ def _stored_schedules(s: Session, args: argparse.Namespace, new: str) -> None:
         return
     raise FailedError(
         f"refused: stored schedule scripts are {what} under {new[:12]} and would crash-loop after "
-        f"`up`:\n  {detail}\nFix them (`ava schedules update <id> --script-file ...` on the gateway) "
+        f"`up`:\n  {detail}\nFix them (`meiva schedules update <id> --script-file ...` on the gateway) "
         "and rerun `down`, or pass --allow-red-schedules to proceed anyway."
     )
 
@@ -261,7 +263,7 @@ def silence_program() -> str:
     return Path(__file__).with_name("fleet_alert_silence.py").read_text()
 
 
-# ava:ref cli/docs/fleet-update-window.ava.okf.md#silence-window
+# meiva:ref cli/docs/fleet-update-window.meiva.okf.md#silence-window
 def _silence(s: Session, args: argparse.Namespace, verb: str, comment: str = "") -> None:
     hours = getattr(args, "silence_hours", 0)
     tail = f" --hours {hours:g} --comment {shlex.quote(comment)}" if verb == "open" else ""
@@ -271,7 +273,7 @@ def _silence(s: Session, args: argparse.Namespace, verb: str, comment: str = "")
             s.say(f"WARNING: alert silence not {verb}: {line.removeprefix('SILENCE ')}")
 
 
-# ava:ref cli/docs/fleet-update.ava.okf.md#update-half-ordering
+# meiva:ref cli/docs/fleet-update.meiva.okf.md#update-half-ordering
 def down(s: Session, args: argparse.Namespace) -> None:
     new = _git("rev-parse", "--verify", f"{args.new}^{{commit}}").stdout.strip()
     if not new:
@@ -294,7 +296,7 @@ def down(s: Session, args: argparse.Namespace) -> None:
     )
     for alias in [*args.runner, args.gateway]:
         try:
-            s.run(alias, f"{HOME}; {AVA} stop -y --timeout {args.stop_timeout}{keep_flags}")
+            s.run(alias, f"{HOME}; {MEIVA} stop -y --timeout {args.stop_timeout}{keep_flags}")
             if not s.dry_run:
                 status, phase = split_hold_text(s.run(alias, _STATUS, effect=False))
                 if (status, phase) != ("paused", "stopped"):
@@ -312,9 +314,9 @@ def down(s: Session, args: argparse.Namespace) -> None:
 
 def gui_oneshot(alias: str, timeout_s: int) -> str:
     stamp = f"{datetime.now(UTC):%Y%m%dT%H%M%S}"
-    label = f"com.ava.fleet-update.{re.sub(r'[^A-Za-z0-9.-]', '-', alias)}.{stamp}"
+    label = f"com.meiva.fleet-update.{re.sub(r'[^A-Za-z0-9.-]', '-', alias)}.{stamp}"
     log = f"/tmp/{label}/oneshot.log"
-    start = f"{HOME}; {AVA} start"
+    start = f"{HOME}; {MEIVA} start"
     job = {
         "Label": label,
         "ProgramArguments": ["/bin/zsh", "-lc", f'({start}); echo "ONESHOT_RC=$?"'],
@@ -324,9 +326,9 @@ def gui_oneshot(alias: str, timeout_s: int) -> str:
         "StandardErrorPath": log,
     }
     return f"""D=/tmp/{label}; mkdir -m 700 "$D" && : > "{log}" || exit 70
-cat > "$D/job.plist" <<'AVA_FLEET_PLIST'
+cat > "$D/job.plist" <<'MEIVA_FLEET_PLIST'
 {plistlib.dumps(job).decode().rstrip()}
-AVA_FLEET_PLIST
+MEIVA_FLEET_PLIST
 launchctl bootstrap "gui/$(id -u)" "$D/job.plist" || {{ echo "not logged in to the GUI?"; exit 71; }}
 n=0; until grep -q '^ONESHOT_RC=' "{log}"; do
   [ "$n" -ge {timeout_s // 5} ] && {{ echo "still running: gui/$(id -u)/{label}, {log}"; exit 72; }}
@@ -349,7 +351,7 @@ def machine_names(s: Session, aliases: list[str]) -> dict[str, str]:
     return names
 
 
-# ava:ref cli/docs/fleet-update.ava.okf.md#up-completion-gates
+# meiva:ref cli/docs/fleet-update.meiva.okf.md#up-completion-gates
 def _roster(s: Session, args: argparse.Namespace, program: str) -> tuple[list[dict[str, Any]], str]:
     names = machine_names(s, [args.gateway, *args.runner])
     wanted = set(names.values())
@@ -385,7 +387,7 @@ def _report_unlisted(s: Session, rows: list[dict[str, Any]], wanted: set[str]) -
 
 def _refresh(s: Session, args: argparse.Namespace) -> None:
     for alias in [args.gateway, *args.runner]:
-        out = s.run(alias, f"{HOME}; {AVA} packages refresh")
+        out = s.run(alias, f"{HOME}; {MEIVA} packages refresh")
         if out:
             s.say(f"packages refresh [{alias}] {out.splitlines()[-1].strip()}")
 
@@ -396,9 +398,9 @@ def _drift_checks(s: Session, args: argparse.Namespace) -> None:
     failed: list[str] = []
     for alias, verb in checks:
         try:
-            s.run(alias, f"{HOME}; {AVA} {verb}", effect=True)
+            s.run(alias, f"{HOME}; {MEIVA} {verb}", effect=True)
         except FailedError as exc:
-            failed.append(f"`ava {verb}` {exc}")
+            failed.append(f"`meiva {verb}` {exc}")
     if failed:
         raise FailedError("drift check failed: " + "; ".join(failed))
 
@@ -406,7 +408,7 @@ def _drift_checks(s: Session, args: argparse.Namespace) -> None:
 def up(s: Session, args: argparse.Namespace) -> None:
     for alias in [args.gateway, *args.runner]:
         macos = s.os[alias] == "Darwin"
-        s.run(alias, gui_oneshot(alias, args.start_timeout) if macos else f"{HOME}; {AVA} start")
+        s.run(alias, gui_oneshot(alias, args.start_timeout) if macos else f"{HOME}; {MEIVA} start")
         if (
             not s.dry_run
             and (hold := split_hold_text(s.run(alias, _STATUS, effect=False)))[0] not in _FREE
@@ -455,7 +457,7 @@ def main(argv: list[str] | None = None) -> int:
             p.add_argument(
                 "--allow-red-schedules",
                 action="store_true",
-                help="proceed although stored schedule scripts fail NEW's `ava schedules verify`",
+                help="proceed although stored schedule scripts fail NEW's `meiva schedules verify`",
             )
             p.add_argument(
                 "--restart-all",
@@ -467,8 +469,10 @@ def main(argv: list[str] | None = None) -> int:
             p.add_argument("--smoke-timeout", type=int, default=300)
             p.add_argument("--roster-timeout", type=int, default=90)
     args = parser.parse_args(argv)
-    if "AVA_AGENT_ID" in os.environ:
-        print("refused: run from a plain login shell, not an Ava agent's shell (a stop closes it)")
+    if "MEIVA_AGENT_ID" in os.environ:
+        print(
+            "refused: run from a plain login shell, not an Meiva agent's shell (a stop closes it)"
+        )
         return 2
     s = Session(args)
     try:

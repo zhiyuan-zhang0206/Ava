@@ -41,7 +41,7 @@ class SpawnAgentRequest(BaseModel):
 
     If `fork_from` is given, the gateway resolves the latest checkpoint
     internally and passes an explicit id to the underlying create_agent_row
-    (consistent with SDK `ava.agents.spawn(fork_from=N)` logic).
+    (consistent with SDK `meiva.agents.spawn(fork_from=N)` logic).
 
     Fork config rule: a fork keeps the source's effective config so the
     inherited context stays cache-valid. The only allowed config change is
@@ -78,7 +78,7 @@ class SpawnAgentRequest(BaseModel):
     machine: str | None = Field(default=None, min_length=1, max_length=64)
     config: dict[str, object] | None = Field(default=None)
     # Optional initial label (spawner-assigned role). Stored sticky so the
-    # labeler does not overwrite it; the agent can change it via ava.self.set_label.
+    # labeler does not overwrite it; the agent can change it via meiva.self.set_label.
     label: str | None = Field(default=None, max_length=64)
 
     @model_validator(mode="after")
@@ -161,7 +161,7 @@ class ResurrectAgentRequest(BaseModel):
     button is a pure lifecycle event — there is no message to deliver, so it
     sends no prompt and the agent just gets the "you have been resurrected"
     marker. Peer agents no longer have a dedicated resurrect API — they send
-    a chat message (`ava.agents.send_message`) and auto-resurrect handles the
+    a chat message (`meiva.agents.send_message`) and auto-resurrect handles the
     rest. When a prompt is given it is INSERTed as a chat inbound in **the same
     transaction** as the lifecycle 'resurrect' inbound. The session may be
     created before commit, but its child blocks on the agent row and cannot
@@ -351,7 +351,7 @@ class OpResponse(BaseModel):
 class OpFailure(BaseModel):
     """The `result` of a failed op — what the gateway's
     `_raise_proxied_wire_error_from_payload` reconstructs the original wire
-    exception from. `reason` is an AvaAgentError reason-enum value when the op
+    exception from. `reason` is an MeivaAgentError reason-enum value when the op
     raised one; `detail` its message."""
 
     error: str
@@ -382,7 +382,7 @@ class ConfigWritePayload(BaseModel):
 
     `actor` / `trace_id` are stamped by the dispatching gateway from verified
     request state for the write audit — deliberately not part of the caller's
-    JSON contract (`gateway/http/auth/docs/request_principal.ava.okf.md`)."""
+    JSON contract (`gateway/http/auth/docs/request_principal.meiva.okf.md`)."""
 
     overrides: dict[str, Any]
     local: bool = False

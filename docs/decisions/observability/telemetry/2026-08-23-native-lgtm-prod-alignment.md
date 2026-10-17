@@ -25,4 +25,4 @@ The two collector transforms are independent and batching remains last.
 The launcher is native-only: it does not touch the Docker daemon or compose,
 and the retained compose stack is a manual rollback path. The repository keeps
 the neutral host-loopback Tempo default; production selects remote Tempo with
-a host-scope `AVA_TELEMETRY_TEMPO_ENDPOINT` override.
+a host-scope `MEIVA_TELEMETRY_TEMPO_ENDPOINT` override.

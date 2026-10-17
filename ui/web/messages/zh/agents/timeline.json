@@ -52,7 +52,7 @@
   "system": "系统",
   "agent": "Agent {id}",
   "externalAgent": "外部 agent {name}",
-  "agentChat": "Ava ▸{suffix}",
+  "agentChat": "Meiva ▸{suffix}",
   "compactSummarySingular": "个压缩摘要",
   "compactSummariesPlural": "个压缩摘要",
   "systemNoteSingular": "条系统笔记",

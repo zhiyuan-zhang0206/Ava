@@ -67,12 +67,12 @@ The import boundary is `base < ops < {gateway, cli}`. The supported RPC
 vocabulary lives in the `ops/rpc_schemas/` door; focused agent contracts live in
 its `terminate` and `content` submodules. Gateway-only
 schemas stay in `gateway/schemas/`.
-The [content bound](../rpc_schemas/docs/content.ava.okf.md) is a shared character
+The [content bound](../rpc_schemas/docs/content.meiva.okf.md) is a shared character
 constraint for prompts and replies, separate from transport and model budgets.
 The client and daemon reject unknown kinds before machine lookup, maintenance
 admission, dedupe, or dispatch. Callers import live pause, status and recovery
 definitions directly. The maintenance fences enforce admission.
-[Termination test evidence](../lifecycle/docs/termination-tests.ava.okf.md) describes
+[Termination test evidence](../lifecycle/docs/termination-tests.meiva.okf.md) describes
 the transaction, row-lock and native shell-session checks.
 Cluster identity remains the installed home path, resolved before runtime
 configuration construction.
@@ -103,6 +103,6 @@ database read fails, without retrying through another connection.
 `base.agents.birth.spawn.create_agent_row` retains its public transaction and
 post-commit announcement contract. Its cursor-owned SQL writer is
 `base.agents.birth.transaction.insert_agent_birth`; see
-[creation transaction primitives](../../base/agents/tasks/docs/creation-transactions.ava.okf.md).
+[creation transaction primitives](../../base/agents/tasks/docs/creation-transactions.meiva.okf.md).
 The writer opens no connection, commits nothing and performs no launch.
-A keyed birth retains its original snapshot in this same transaction; see [[gateway/agents/docs/guarded-drafts.ava.okf.md]].
+A keyed birth retains its original snapshot in this same transaction; see [[gateway/agents/docs/guarded-drafts.meiva.okf.md]].

@@ -1,14 +1,14 @@
 """`services.supervision.healthchecks.gateway` unit tests — the `gateway_probe` branches.
 
 A 2xx is necessary but NOT sufficient: the body must also report this unit's
-`$AVA_HOME`, otherwise the responder is some other cluster's gateway (or an
+`$MEIVA_HOME`, otherwise the responder is some other cluster's gateway (or an
 unrelated process) sitting on the port and the real gateway is dead. Identity is
 home-only here, deliberately without the pid comparison the daemon healthchecks
 apply — uvicorn reload serves from a worker forked out of the process that wrote
 `gateway_pidfile`, so a healthy gateway routinely answers with an unrecorded pid.
 
 The check itself is `base.daemon.health.probe_home`, shared with the operator
-surfaces (`ava status` / `ava cluster health-probe` reach it through
+surfaces (`meiva status` / `meiva cluster health-probe` reach it through
 `ServiceSpec.identity_probe`) so the watchdog and the human cannot be told
 different things about the same port. These tests exercise it through the
 healthcheck, which is the caller whose behaviour they pin.
@@ -28,7 +28,7 @@ from typing import Any
 import pytest
 
 from base.daemon.health import DaemonProbe, ProbeVerdict
-from base.paths import ava_home
+from base.paths import meiva_home
 from services.supervision.healthchecks import gateway as hc
 
 
@@ -52,7 +52,7 @@ def _respond(monkeypatch: pytest.MonkeyPatch, status: int, body: bytes) -> None:
 
 
 def _own_health_body() -> bytes:
-    return json.dumps({"status": "ok", "home": str(ava_home()), "machine": "m"}).encode()
+    return json.dumps({"status": "ok", "home": str(meiva_home()), "machine": "m"}).encode()
 
 
 def test_probe_alive_when_home_matches(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -62,17 +62,19 @@ def test_probe_alive_when_home_matches(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 def test_probe_rejects_gateway_from_another_home(monkeypatch: pytest.MonkeyPatch) -> None:
-    """200 from a gateway whose `$AVA_HOME` is not ours → dead, not "healthy".
+    """200 from a gateway whose `$MEIVA_HOME` is not ours → dead, not "healthy".
 
     The foreign-unit impostor case: another unit's gateway (or a leaked test one)
     holding this port would otherwise read as green forever while this unit's
     gateway stays down. The verdict is TERMINAL — this unit cannot kill the gateway
-    session on another unit's socket (the socket lives under `$AVA_HOME`), so
+    session on another unit's socket (the socket lives under `$MEIVA_HOME`), so
     respawning into the bound port every 60s is a loop, not a repair."""
     _respond(
         monkeypatch,
         200,
-        json.dumps({"status": "ok", "home": str(Path.home() / ".ava-some-other-cluster")}).encode(),
+        json.dumps(
+            {"status": "ok", "home": str(Path.home() / ".meiva-some-other-cluster")}
+        ).encode(),
     )
     probe = hc.gateway_probe()
     assert probe.verdict is ProbeVerdict.PORT_TAKEN

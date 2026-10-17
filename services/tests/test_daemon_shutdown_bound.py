@@ -248,7 +248,7 @@ class _Child:
 def _spawn_child(tmp_path: Path, slug: str) -> _Child:
     markers_path = tmp_path / "markers.txt"
     log_path = tmp_path / "child.log"
-    # The child inherits the suite's provisioned $AVA_HOME (machine identity,
+    # The child inherits the suite's provisioned $MEIVA_HOME (machine identity,
     # .env-declared cluster keys, live URL values): a fresh bare home would be
     # treated as a not-yet-installed unit by the boot authority pass, which
     # drops the cluster-scope env keys and plants the placeholder URL.

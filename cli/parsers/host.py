@@ -1,4 +1,4 @@
-"""`ava` host-level lifecycle verbs — argparse builders + their `_h_*` handlers.
+"""`meiva` host-level lifecycle verbs — argparse builders + their `_h_*` handlers.
 
 `init` / `start` / `stop` / `restart` / `status` / `converge` / `firewall` / `trace` /
 `lgtm` act
@@ -112,7 +112,7 @@ def _h_firewall_sync(args: argparse.Namespace) -> int:
 
 
 def _h_trace_ship(args: argparse.Namespace) -> int:
-    from base.paths import ava_home, traces_dir
+    from base.paths import meiva_home, traces_dir
     from cli.commands.observability.trace import cmd_trace_ship
 
     return cmd_trace_ship(
@@ -120,20 +120,20 @@ def _h_trace_ship(args: argparse.Namespace) -> int:
         until=args.until,
         dry_run=args.dry_run,
         machine=args.runtime.machine,
-        traces_dir=traces_dir(ava_home()),
+        traces_dir=traces_dir(meiva_home()),
     )
 
 
 def add_init_parser(sub: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
-    # `ava init` — the home's identity, recorded once. NO TTY prompt — agent-first
+    # `meiva init` — the home's identity, recorded once. NO TTY prompt — agent-first
     # design, agent has no TTY, missing values fail loud. Settings-free: it starts
-    # nothing; the first `ava start` provisions the data plane and launches.
+    # nothing; the first `meiva start` provisions the data plane and launches.
     init_p = sub.add_parser(
         "init",
         help="[host] record this home's identity once (machine name, capabilities, "
-        "credentials, ports) before its first `ava start`; starts nothing. The home is "
-        "$AVA_HOME, else ~/.ava — never a flag. A home that is already initialized is "
-        "refused; `ava start` brings it up.",
+        "credentials, ports) before its first `meiva start`; starts nothing. The home is "
+        "$MEIVA_HOME, else ~/.meiva — never a flag. A home that is already initialized is "
+        "refused; `meiva start` brings it up.",
     )
     init_p.add_argument(
         "--machine-name",
@@ -158,7 +158,7 @@ def add_init_parser(sub: argparse._SubParsersAction[argparse.ArgumentParser]) ->
         action=argparse.BooleanOptionalAction,
         default=None,
         help="serve the observability-station capability (own the native LGTM "
-        "observability backends — the declarative form of the $AVA_HOME/lgtm-host marker)",
+        "observability backends — the declarative form of the $MEIVA_HOME/lgtm-host marker)",
     )
     init_p.add_argument(
         "--machine-description",
@@ -168,7 +168,7 @@ def add_init_parser(sub: argparse._SubParsersAction[argparse.ArgumentParser]) ->
     init_p.add_argument(
         "--memory-remote",
         default=None,
-        help="central git remote URL for memory pool (e.g. git@github.com:you/AvaMemory.git)",
+        help="central git remote URL for memory pool (e.g. git@github.com:you/MeivaMemory.git)",
     )
     init_p.add_argument(
         "--gateway-url",
@@ -191,9 +191,9 @@ def add_init_parser(sub: argparse._SubParsersAction[argparse.ArgumentParser]) ->
         default=None,
         metavar="BUNDLE",
         help="agent-runner only: install the database capability bundle the gateway operator "
-        "issued (`ava cluster db-authority issue-unit`); its transport key comes from "
-        "AVA_DB_CAPABILITY_KEY. The bundle file is deleted once installed. A later bundle "
-        "goes to `ava cluster db-authority install-unit`.",
+        "issued (`meiva cluster db-authority issue-unit`); its transport key comes from "
+        "MEIVA_DB_CAPABILITY_KEY. The bundle file is deleted once installed. A later bundle "
+        "goes to `meiva cluster db-authority install-unit`.",
     )
     init_p.set_defaults(func=h_init)
 
@@ -203,13 +203,13 @@ def add_start_parser(
     *,
     retained_children: list[subprocess.Popen[bytes]] | None = None,
 ) -> None:
-    # `ava start` — brings up a home `ava init` initialized; the service selection
+    # `meiva start` — brings up a home `meiva init` initialized; the service selection
     # is its only input.
     start_p = sub.add_parser(
         "start",
         help="[host] bring up this unit's full stack (idempotent). The home is "
-        "$AVA_HOME, else ~/.ava — never a flag. It must be initialized first: "
-        "`ava init` takes the machine identity (name, capabilities, gateway).",
+        "$MEIVA_HOME, else ~/.meiva — never a flag. It must be initialized first: "
+        "`meiva init` takes the machine identity (name, capabilities, gateway).",
     )
     selection = start_p.add_mutually_exclusive_group()
     selection.add_argument(
@@ -218,14 +218,14 @@ def add_start_parser(
         default=[],
         metavar="SERVICE",
         help="durably disable this service session (repeatable; e.g. --disable-service labeler "
-        "--disable-service frontend). Pass the bare service name. Bare `ava start` preserves "
+        "--disable-service frontend). Pass the bare service name. Bare `meiva start` preserves "
         "this selection; use `--all-services` to reset it or `--only-service` to replace it.",
     )
     start_p.add_argument(
         # Internal: the OS boot job (launchd plist / systemd unit) passes it. A boot
         # start is retried by its scheduler, so it counts its attempts and stops
         # asking for a retry once the boot budget is spent
-        # (`base.host.system.boot_policy`); it also never re-ups a unit whose ava-root
+        # (`base.host.system.boot_policy`); it also never re-ups a unit whose meiva-root
         # restart budget is spent. Operators never pass it.
         "--boot",
         action="store_true",
@@ -261,8 +261,8 @@ def add_stop_parser(
         "--keep-infra",
         action="store_true",
         help="do not stop THIS cluster's own Postgres/Redis instance (every "
-        "cluster owns one, under its $AVA_HOME). Used by `ava restart`, whose start "
-        "leg still needs the database. A plain `ava stop` means 'fully stop' and "
+        "cluster owns one, under its $MEIVA_HOME). Used by `meiva restart`, whose start "
+        "leg still needs the database. A plain `meiva stop` means 'fully stop' and "
         "leaves this off.",
     )
     stop_p.add_argument(
@@ -341,7 +341,7 @@ def add_converge_parser(sub: argparse._SubParsersAction[argparse.ArgumentParser]
     converge_p = sub.add_parser(
         "converge",
         help="[host] re-apply idempotent host wiring (symlink/PATH/dirs/plugin images/memory pool); "
-        "normally run automatically by ava start",
+        "normally run automatically by meiva start",
     )
     converge_p.set_defaults(func=_h_converge)
 
@@ -401,9 +401,9 @@ def add_lgtm_parser(
     *,
     retained_children: list[subprocess.Popen[bytes]] | None = None,
 ) -> None:
-    # `ava lgtm on|off|status` — the observability-stack toggle on THIS host.
+    # `meiva lgtm on|off|status` — the observability-stack toggle on THIS host.
     # One command each way so observability's own overhead is measurable:
-    # `off` removes the $AVA_HOME/lgtm-host marker (converge + watchdog stop
+    # `off` removes the $MEIVA_HOME/lgtm-host marker (converge + watchdog stop
     # touching the stack) and compose-downs the containers (volumes persist);
     # `on` restores marker + stack with history intact.
     lgtm_p = sub.add_parser(
@@ -424,7 +424,7 @@ def add_lgtm_parser(
         )
     render_p = lgtm_sub.add_parser(
         "render",
-        help="render the ava-ops dashboard from the metric registries and diff it "
+        help="render the meiva-ops dashboard from the metric registries and diff it "
         "against this host's provisioning copy (--force writes the render)",
     )
     render_p.add_argument(
@@ -443,12 +443,12 @@ def add_lgtm_parser(
 
 
 def add_trace_parser(sub: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
-    # `ava trace ship` — replay the local OTel trace mirror to Tempo over OTLP
+    # `meiva trace ship` — replay the local OTel trace mirror to Tempo over OTLP
     trace_p = sub.add_parser("trace", help="trace mirror subcommands")
     trace_sub = trace_p.add_subparsers(dest="trace_cmd", required=True)
     trace_ship_p = trace_sub.add_parser(
         "ship",
-        help="replay the local $AVA_HOME/traces mirror to Tempo over OTLP "
+        help="replay the local $MEIVA_HOME/traces mirror to Tempo over OTLP "
         "(incremental from a per-file watermark; --since/--until re-ships a window)",
     )
     trace_ship_p.add_argument(

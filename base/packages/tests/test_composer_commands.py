@@ -102,11 +102,11 @@ def test_builtin_source_ignores_legacy_root_and_keeps_user_override(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ):
     repo, home = tmp_path / "repo", tmp_path / "home"
-    _write(repo / "ava_builtins" / "commands", "recap.md", "Builtin recap.")
+    _write(repo / "meiva_builtins" / "commands", "recap.md", "Builtin recap.")
     _write(repo / "commands", "plan.md", "Old bundled plan.")
     _write(home / "commands", "recap.md", "User recap.")
     monkeypatch.setattr(composer_commands, "repo_root", lambda: repo)
-    monkeypatch.setattr(composer_commands, "ava_home", lambda: home)
+    monkeypatch.setattr(composer_commands, "meiva_home", lambda: home)
     monkeypatch.setattr(composer_commands, "repo_plugins_dir", lambda: repo / "plugins")
     monkeypatch.setattr(composer_commands, "external_plugin_read_root", lambda: home / "plugins")
     catalog = composer_commands.discover_commands([])
@@ -120,9 +120,9 @@ def test_builtin_source_ignores_legacy_root_and_keeps_user_override(
 
 def test_scan_dir_renders_canonical_namespace_spelling(tmp_path: Path):
     _write(tmp_path, "deploy.md", "ship it")
-    out = composer_commands.scan_dir(tmp_path, ("ava_fleet",))
-    assert "ava-fleet:deploy" in out
-    assert out["ava-fleet:deploy"]["name"] == "ava-fleet:deploy"
+    out = composer_commands.scan_dir(tmp_path, ("meiva_fleet",))
+    assert "meiva-fleet:deploy" in out
+    assert out["meiva-fleet:deploy"]["name"] == "meiva-fleet:deploy"
 
 
 def test_underscore_command_spelling_still_expands(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
@@ -130,11 +130,11 @@ def test_underscore_command_spelling_still_expands(tmp_path: Path, monkeypatch: 
     monkeypatch.setattr(
         composer_commands,
         "command_dirs",
-        _dirs((tmp_path, ("ava_fleet",))),
+        _dirs((tmp_path, ("meiva_fleet",))),
     )
     catalog = CommandCatalog(skills=list)
-    dash = catalog.expand("/ava-fleet:ship fix the tests")
-    legacy = catalog.expand("/ava_fleet.ship fix the tests")
+    dash = catalog.expand("/meiva-fleet:ship fix the tests")
+    legacy = catalog.expand("/meiva_fleet.ship fix the tests")
     assert "write the release note" in dash
     assert "write the release note" in legacy
     assert "fix the tests" in dash and "fix the tests" in legacy
@@ -182,7 +182,7 @@ def _skill_catalog(*skills: Skill) -> list[composer_commands.Command]:
 def test_skill_as_command_bare():
     out = {c["name"]: c for c in _skill_catalog(_fake_skill("goal"))}
     assert out["goal"]["skill_target"] == "goal"
-    assert "ava.help(ava.skills.goal)" in composer_commands.expand_command(
+    assert "meiva.help(meiva.skills.goal)" in composer_commands.expand_command(
         "/goal", _skill_catalog(_fake_skill("goal"))
     )
 
@@ -193,20 +193,20 @@ def test_skill_as_command_namespaced():
     assert "demo:brainstorming" in out
     assert out["demo:brainstorming"]["skill_target"] == "demo.brainstorming"
     expanded = composer_commands.expand_command("/demo:brainstorming a login form", commands)
-    assert "ava.help(ava.skills.demo.brainstorming)" in expanded
+    assert "meiva.help(meiva.skills.demo.brainstorming)" in expanded
     assert expanded.endswith("Additional message: a login form")
 
 
 def test_skill_as_command_dotted_input_still_resolves():
     commands = _skill_catalog(_fake_skill("brainstorming", ("demo",)))
     expanded = composer_commands.expand_command("/demo.brainstorming a login form", commands)
-    assert "ava.help(ava.skills.demo.brainstorming)" in expanded
+    assert "meiva.help(meiva.skills.demo.brainstorming)" in expanded
 
 
 def test_skill_as_command_hyphen_maps_to_underscore_target():
     commands = _skill_catalog(_fake_skill("test-driven-development", ("demo",)))
     out = composer_commands.expand_command("/demo.test-driven-development", commands)
-    assert "ava.help(ava.skills.demo.test_driven_development)" in out
+    assert "meiva.help(meiva.skills.demo.test_driven_development)" in out
 
 
 def test_explicit_command_overrides_skill_as_command(
@@ -350,7 +350,7 @@ def test_chain_mixes_file_command_and_skill_as_command():
     commands = [_file_command("recap", "Recap it."), *_skill_catalog(_fake_skill("goal"))]
     out = composer_commands.expand_command("/recap the week /goal", commands)
     assert "Command /recap:\nRecap it.\nAdditional message: the week" in out
-    assert "ava.help(ava.skills.goal)" in out
+    assert "meiva.help(meiva.skills.goal)" in out
 
 
 def test_slash_token_that_is_not_a_command_stays_in_the_argument():

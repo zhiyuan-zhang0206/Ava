@@ -7,7 +7,7 @@ from base.host.proc import CommandRunner
 
 _BREW_TIMEOUT_S = 60.0
 
-# ava:ref base/host/docs/brew_pin.ava.okf.md#brew-formula-manifest
+# meiva:ref base/host/docs/brew_pin.meiva.okf.md#brew-formula-manifest
 PINNED_BREW_FORMULAE: frozenset[str] = frozenset(
     {
         "ca-certificates",
@@ -25,7 +25,7 @@ PINNED_BREW_FORMULAE: frozenset[str] = frozenset(
     }
 )
 
-# ava:ref base/host/docs/brew_pin.ava.okf.md#uv-pin-copies
+# meiva:ref base/host/docs/brew_pin.meiva.okf.md#uv-pin-copies
 UV_VERSION = "0.13.1"
 
 UV_ASSET_SHA256: dict[str, str] = {
@@ -35,13 +35,13 @@ UV_ASSET_SHA256: dict[str, str] = {
     "x86_64-unknown-linux-gnu": "eadd9d27c134ab5ac1ffd4473b97a741407f3ea238288f03121fc4deddf90220",
 }
 
-# ava:ref base/host/docs/brew_pin.ava.okf.md#apt-pin-copies
+# meiva:ref base/host/docs/brew_pin.meiva.okf.md#apt-pin-copies
 PGBOUNCER_APT_VERSION = "1.26.0-1.pgdg24.04+1"
 
 REDIS_APT_VERSION = "6:8.2.*"
 
 
-# ava:ref base/host/docs/brew_pin.ava.okf.md#brew-probe-warnings
+# meiva:ref base/host/docs/brew_pin.meiva.okf.md#brew-probe-warnings
 def pinned_brew_formulae(*, run: CommandRunner) -> set[str] | None:
     try:
         result = run(

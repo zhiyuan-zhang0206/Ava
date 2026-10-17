@@ -25,7 +25,7 @@ from base.db.config import db_config_from_settings
 from base.host.db_authority.model import GATEWAY_GROUP, RUNNER_GROUP, Groups
 from base.native_process.code_version import CodeVersion
 from base.native_process.loaded_commit import LoadedCommit
-from base.paths import ava_home
+from base.paths import meiva_home
 from services.backup import restore_drill
 from services.backup.artifact import offsite, passphrase
 
@@ -84,7 +84,7 @@ def test_verification_reports_schema_counts_and_readable_conversation(
 def _grant_prod_roles(db_conn: psycopg.Connection) -> None:
     """Reproduce the prod role set in the test DB so the dump carries the
     GRANT/OWNER statements that broke production drills (the throwaway cluster
-    only has `ava`, so pg_restore hit `role does not exist`): the 2026-08-27
+    only has `meiva`, so pg_restore hit `role does not exist`): the 2026-08-27
     missing roles, plus the 2026-09-21 admin-owned-object variant — a
     `zzy`-owned ad-hoc table, as the sweep backup convention leaves behind."""
     from psycopg import sql as pgsql
@@ -103,10 +103,10 @@ def _grant_prod_roles(db_conn: psycopg.Connection) -> None:
             cur.execute("SELECT 1 FROM pg_roles WHERE rolname = %s", (role,))
             if cur.fetchone() is None:
                 cur.execute(pgsql.SQL("CREATE ROLE {} LOGIN").format(pgsql.Identifier(role)))
-        cur.execute("GRANT SELECT ON agents TO ava_runner")
+        cur.execute("GRANT SELECT ON agents TO meiva_runner")
         cur.execute("GRANT SELECT ON agents TO grafana_ro")
         cur.execute(
-            pgsql.SQL("ALTER TABLE agents OWNER TO {}").format(pgsql.Identifier("ava_main"))
+            pgsql.SQL("ALTER TABLE agents OWNER TO {}").format(pgsql.Identifier("meiva_main"))
         )
         # The 2026-09-21 variant: an ad-hoc table owned by the admin role
         # (the model_sweep_backup_* convention leaves one in the app database).
@@ -128,7 +128,7 @@ def test_run_drill_restores_an_encrypted_artifact_into_throwaway_postgres(
     """The command path decrypts, restores, and proves a checkpoint
     reader can consume the restored conversation without touching the source DB.
 
-    The test DB carries the prod role set (ava_main / ava_runner / grafana_ro /
+    The test DB carries the prod role set (meiva_main / meiva_runner / grafana_ro /
     zzy with grants, plus a zzy-owned ad-hoc table) so the dump exercises the
     same restore path that failed in production on 2026-08-27 and 2026-09-21."""
     _grant_prod_roles(db_conn)
@@ -160,7 +160,7 @@ def test_run_drill_restores_an_encrypted_artifact_into_throwaway_postgres(
     monkeypatch.setattr(offsite, "publish", _no_publish)
     # The session database is not a born home: dump it through an explicit dial,
     # under the passphrase a gateway birth pins.
-    passphrase.ensure_minted(ava_home())
+    passphrase.ensure_minted(meiva_home())
     artifact = restore_drill.backup.run_backup(
         db_url=settings.data_plane.db_url,
         db=database,
@@ -177,7 +177,7 @@ def test_run_drill_restores_an_encrypted_artifact_into_throwaway_postgres(
     assert report.agents == 1
     assert report.sample_agent_id == agent_id
     assert report.sample_message_count == 1
-    assert report.agents_owner == "ava_main"
+    assert report.agents_owner == "meiva_main"
     assert elapsed > 0
 
 
@@ -214,7 +214,7 @@ def test_restore_failure_message_names_the_base_and_the_capacity_knob(
     assert "pg_restore exited 1" in message
     assert str(base) in message
     assert "512 MiB free" in message
-    assert "AVA_PG_THROWAWAY_BASE" in message
+    assert "MEIVA_PG_THROWAWAY_BASE" in message
     assert "PQputCopyData: server closed the connection" in message
 
 

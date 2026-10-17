@@ -20,7 +20,7 @@ cluster lifecycle:
 User ruling, 2026-09-27, accepting each recommendation:
 
 1. **A new agent-runner joins with an operator-issued unit bundle.** The gateway
-   operator runs `ava cluster db-authority issue-unit` for the new machine and
+   operator runs `meiva cluster db-authority issue-unit` for the new machine and
    home and supplies the sealed bundle at its first start (`--db-capability`).
    There is no join exchange authenticated by the human secret. The "manual
    bundles only for cutover and emergencies" rule governs *rollouts*: per-release
@@ -29,7 +29,7 @@ User ruling, 2026-09-27, accepting each recommendation:
    FC-6's closure: a bounded wait for work to finish, then a system-reason close,
    with each busy session's owner receiving the durable closure notice.
 3. **Fleet workload policy defaults are accepted as recorded** in
-   `cli/release_fleet/release_fleet.ava.okf.md`: a 30-minute watch window; recover
+   `cli/release_fleet/release_fleet.meiva.okf.md`: a 30-minute watch window; recover
    when affected agents are strictly above 20 % of the cohort and at least two;
    one failed shared-core sample recovers immediately (no debounce); any affected
    agent marks the release degraded, never known-good; an empty cohort is not

@@ -36,10 +36,10 @@ def direct_db_url(
     gateway_url_reader: Callable[[], str],
     local_host: Callable[[], str] | None = None,
 ) -> str:
-    """The admin-plane Postgres URL: this cluster's `AVA_DB_URL` never routed
+    """The admin-plane Postgres URL: this cluster's `MEIVA_DB_URL` never routed
     through PgBouncer.
 
-    `AVA_DB_URL` carries the pooler listener port whenever pooling is enabled
+    `MEIVA_DB_URL` carries the pooler listener port whenever pooling is enabled
     (the one-URL design: a normal process dials it as-is and never knows the
     pooler exists), so the admin plane — migrations (SESSION advisory locks),
     pg_dump (needs a real backend session), provisioning, auth probes — must
@@ -61,7 +61,7 @@ def direct_db_url(
 
     The placeholder URL passes through byte-identical (the connect guard
     matches it byte-for-byte), and a home with no record (no gateway capability)
-    keeps `AVA_DB_URL` as-is rather than guessing.
+    keeps `MEIVA_DB_URL` as-is rather than guessing.
     """
     url = config.db_url
     if url == PLACEHOLDER_DB_URL:
@@ -97,7 +97,7 @@ def direct_db_url(
 
 
 def _gateway_url_host(gateway_url: str) -> str:
-    """The host this process dials as its gateway (`AVA_GATEWAY_URL`), lowercased and
+    """The host this process dials as its gateway (`MEIVA_GATEWAY_URL`), lowercased and
     unbracketed; "" when its explicit URL is empty. It tells a split agent-runner's URL,
     which names the gateway's pooler (a foreign host whose fallback log is meaningful),
     apart from a remote/SaaS plane URL,
@@ -107,9 +107,9 @@ def _gateway_url_host(gateway_url: str) -> str:
 
 def _from_record(url: str, port: int) -> str | None:
     """The direct URL this home's record dictates for `url`, or None when it names neither port."""
-    from base.paths import ava_home
+    from base.paths import meiva_home
 
-    rec = get_record(ava_home())
+    rec = get_record(meiva_home())
     if rec is None:
         return None
     if port == rec.ports["pgbouncer"]:
@@ -124,13 +124,13 @@ def _from_record(url: str, port: int) -> str | None:
 
 def _log_pooled_fallback(host: str, port: int) -> None:
     # Expected shape on a split agent-runner (its URL names the gateway's
-    # pooler): every `ava start` logs one, so it is INFO, not a WARNING
+    # pooler): every `meiva start` logs one, so it is INFO, not a WARNING
     # (2026-10-03 triage).
     logger.info(
-        "direct_db_url: AVA_DB_URL names {host}:{port}, which this home's record "
+        "direct_db_url: MEIVA_DB_URL names {host}:{port}, which this home's record "
         "does not name as its PgBouncer or Postgres port (a split agent-runner's "
         "URL names the gateway's pooler, resolvable only on the gateway box). "
-        "Returning AVA_DB_URL as-is — the admin-plane dial routes through "
+        "Returning MEIVA_DB_URL as-is — the admin-plane dial routes through "
         "PgBouncer; the migration authority model keeps a non-gateway host "
         "from mutating the schema, but the direct exemption is unavailable here.",
         host=host,

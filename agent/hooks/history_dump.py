@@ -29,7 +29,7 @@ Injection-safety: the note is never merged into the live ``messages`` channel
 the summary. The pre-compact channel is wiped with REMOVE_ALL, so the note
 can never sit between an AIMessage and its ToolMessage (DeepSeek
 anthropic-compatible endpoint rejects that shape with a 400 — see
-``ava/design/injection-in-memory-exec-delta-20260811``).
+``meiva/design/injection-in-memory-exec-delta-20260811``).
 """
 
 from __future__ import annotations

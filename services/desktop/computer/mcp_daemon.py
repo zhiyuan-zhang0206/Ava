@@ -31,7 +31,7 @@ keeps the daemon lifecycle, serialization, screen ownership, and auditing.
 
 Wire types and request/response examples live in `protocol.py`. The per-agent
 bridge (`services/desktop/computer/mcp_wrapper.py`) and the MCP daemon's direct
-dial (`ava/mcps/_computer.py`) speak that protocol; `agent_id` is stamped by the
+dial (`meiva/mcps/_computer.py`) speak that protocol; `agent_id` is stamped by the
 bridge from the calling agent's identity and rides into the audit stream, where
 it is likewise self-reported by the agent's own process.
 
@@ -73,7 +73,7 @@ from base.host.permissions_helper.client import PermissionsHelperClient, Permiss
 from base.log import logger
 from base.native_process.code_version import CodeVersion
 from base.native_process.loaded_commit import LoadedCommit
-from base.paths import ava_home, computer_mcp_socket
+from base.paths import computer_mcp_socket, meiva_home
 from base.sessions.helperproc import helper_client
 from base.telemetry import audit_events, build_pipeline
 from base.telemetry.process_logging import init_gateway_process
@@ -371,7 +371,7 @@ class ComputerMcpDaemon:
     ) -> None:
         self._db = db
         self._helper = helper
-        self._sock = sock or str(computer_mcp_socket(ava_home()))
+        self._sock = sock or str(computer_mcp_socket(meiva_home()))
         # Last legacy pointer position in PHYSICAL pixels, retained for diagnostics.
         # Scroll without x/y reads the actual native cursor.
         self._pointer: tuple[float, float] | None = None
@@ -763,7 +763,7 @@ def main() -> None:
     machine_config = ConfigBoot()
     machine_config.boot()
     machine = machine_from_boot(machine_config)
-    process_home = ava_home().resolve()
+    process_home = meiva_home().resolve()
     version = CodeVersion(image)
     gate = ProcessDbGate(version=version.get, process="computer-mcp")
 

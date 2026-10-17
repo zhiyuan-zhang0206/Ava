@@ -10,7 +10,7 @@
   "alertsDescription": "系统告警 — 与通知分开。未解决项优先，SSE 实时更新。",
   "opsPanel": {
     "metrics": "指标 (Grafana)",
-    "openDashboard": "打开 Ava ops 仪表盘"
+    "openDashboard": "打开 Meiva ops 仪表盘"
   },
   "status": {
     "couldNotReach": "无法连接到网关 — 正在重试…",
@@ -32,7 +32,7 @@
     "observabilityStation": "可观测站",
     "noCapability": "无能力",
     "pausedDetail": "· 已暂停",
-    "noHostStarted": "（尚无主机运行过 `ava start`）",
+    "noHostStarted": "（尚无主机运行过 `meiva start`）",
     "gatewayTitle": "网关",
     "host": "主机",
     "stagingTitle": "预发布主机 — 此处可见但不参与集群发布",

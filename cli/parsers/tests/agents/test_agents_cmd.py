@@ -1,4 +1,4 @@
-"""`ava agents` thin-client commands — each forwards to the right gateway route
+"""`meiva agents` thin-client commands — each forwards to the right gateway route
 and renders the response, verified without a live gateway (httpx patched).
 
 The cmd_* functions import `httpx` and `base.cluster.machine.gateway_api_base` inside

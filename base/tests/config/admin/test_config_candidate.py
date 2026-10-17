@@ -89,7 +89,7 @@ def test_removing_required_field_is_invalid(configured_home: Path) -> None:
     errors = _validate_env_patch()({}, {"db_url"})
 
     assert errors
-    assert any("AVA_DB_URL" in error and "Field required" in error for error in errors)
+    assert any("MEIVA_DB_URL" in error and "Field required" in error for error in errors)
 
 
 def test_validate_or_raise_joins_candidate_errors(configured_home: Path) -> None:

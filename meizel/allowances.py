@@ -11,7 +11,7 @@ root; the checker's own tables come first, then one table per lint rule:
 "app/runner.py" = "executes the schedule script the user wrote"
 
 [loads]
-"app/loader.py" = ["ava_builtins"]
+"app/loader.py" = ["meiva_builtins"]
 
 [default-arguments]
 

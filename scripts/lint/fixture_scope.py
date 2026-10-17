@@ -16,7 +16,7 @@ its directory, in the same process, runs with the mutated value still installed.
 `finally` reads as a cleanup and is one.
 
 That is not hypothetical. `tests/e2e/conftest.py:e2e_process_env` reassigns
-`AVA_HOME`, `AVA_GATEWAY_URL` and eight more, restores them in a `finally`, and was
+`MEIVA_HOME`, `MEIVA_GATEWAY_URL` and eight more, restores them in a `finally`, and was
 declared `scope="session"`. `tests/harness/test_home_isolation.py` — the file whose whole job
 is to notice the operator's real home leaking into the test process — sorts after
 `tests/e2e/` and failed two of its four assertions on every serial run, on `main`,
@@ -32,7 +32,7 @@ Nothing caught it, and nothing would have caught the next one. Hence this lint.
 `tests/fixtures/provisioning.py` is exempt, and it is the only exemption: the repo-root
 `conftest.py` loads it once per pytest process, so "the session" and "my directory" are
 the same blast radius. Its
-`provisioned_db` / `provisioned_redis` assign `AVA_DB_URL` / `AVA_REDIS_URL` and
+`provisioned_db` / `provisioned_redis` assign `MEIVA_DB_URL` / `MEIVA_REDIS_URL` and
 never put them back, which is correct — they establish the session's baseline rather
 than claim to clean up after themselves.
 

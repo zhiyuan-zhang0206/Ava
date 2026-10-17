@@ -7,7 +7,7 @@ The motivation, in priority order:
 1. **A semantic gap in the state machine.** Between `idling` (alive, waiting) and
    `terminated` (dead, needs resurrect) there was no state for "alive in principle
    but not worth a resident process right now". Agents routinely
-   `ava.self.pause_heartbeat` for 30 minutes to a day; during that window an agent
+   `meiva.self.pause_heartbeat` for 30 minutes to a day; during that window an agent
    is guaranteed to do nothing, yet it holds a full process. The alternative — a
    "pause forever" knob — is an abuse surface (an agent can silence itself
    indefinitely); hibernation gives the reclaim without the knob, decided purely
@@ -46,7 +46,7 @@ Introduce a new agents_meta status, **`hibernating`** (a continuous-form name in
 the family of `running`/`idling`, not the terminal `-ed` of
 `terminated` — hibernation is a persisting live state), that exists **only in the
 ops layer**. When an agent has been `idling` longer than `H`
-(`AVA_HIBERNATE_IDLE_THRESHOLD_SECONDS`, default **450s**) with no pending inbound, a
+(`MEIVA_HIBERNATE_IDLE_THRESHOLD_SECONDS`, default **450s**) with no pending inbound, a
 per-machine controller in the restarter daemon (`HibernateController`) sends it
 SIGUSR1; the agent converts that to a clean process exit that parks its row
 `hibernating` (pages kept, no exit event). The same controller polls for a
@@ -65,7 +65,7 @@ of a cold start on each heartbeat wake; that is left as a future dial.
 Two hard invariants:
 
 1. **Invisible to agents and the frontend.** Both project `hibernating` → `idling`
-   (the SDK at the `ava/_gateway_client` boundary, the frontend at its cache
+   (the SDK at the `meiva/_gateway_client` boundary, the frontend at its cache
    ingest). There is no SDK API to request/observe hibernation; the wake inserts
    no note/resurrect message. A peer sees a swapped-out agent exactly as it sees
    an idle one — parked, wakes on a message. Like a K8s caller who sees capacity
@@ -137,7 +137,7 @@ Two hard invariants:
   size).** Hibernation trades ~0.4 core of cold-start CPU for the resident
   footprint — a good trade, but the thing to quantify next is wake rate and token
   cost, not memory.
-- **Ships enabled at `H=450s`** (`AVA_HIBERNATE_ENABLED` is the kill switch;
+- **Ships enabled at `H=450s`** (`MEIVA_HIBERNATE_ENABLED` is the kill switch;
   swap-in keeps running even when disabled so toggling off drains existing
   hibernating agents rather than stranding them). At 450s (above the 300s
   heartbeat threshold) the reclaimed set is essentially the paused agents; tuning

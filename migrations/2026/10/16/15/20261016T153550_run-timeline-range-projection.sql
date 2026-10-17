@@ -59,8 +59,8 @@ CREATE INDEX IF NOT EXISTS run_timeline_blocks_end_idx
     ON run_timeline_blocks (agent_id, version, end_ts);
 
 DO $$ BEGIN
-    IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'ava_runner') THEN
+    IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'meiva_runner') THEN
         GRANT SELECT, INSERT, DELETE ON run_timeline_segments,
-            run_timeline_message_facts, run_timeline_blocks TO ava_runner;
+            run_timeline_message_facts, run_timeline_blocks TO meiva_runner;
     END IF;
 END $$;

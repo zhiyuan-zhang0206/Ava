@@ -1,0 +1,66 @@
+---
+type: doc
+title: Tasks — Shared Task Registry Overview
+description: Entry index for the meiva.tasks subsystem — navigation document for Task data model, lifecycle API, state transitions and notification mechanism
+tags:
+- fleet
+- tasks
+- coordination
+- overview
+---
+
+# Tasks — Shared Task Registry Overview
+
+## What it is
+
+`meiva.tasks` is a shared persistent task system. A task outlives the agent working on it: a task carries **what to do** (description), **how it's going** (status), **result records** (results), and **who is currently responsible** (owner). Any agent can claim or reassign tasks — there is no fixed hierarchy, only who is currently processing it. Except for the system root task, every task always has an owner, no unclaimed state exists; `get()`/`list()` may return that root task with `owner=None` (see [[task_model.meiva.okf.md|Task Model]] "Root Task" section).
+
+## API Overview
+
+```python
+from uuid import uuid4
+
+task = meiva.tasks.create(title, description, parent=root_id, owner=None, priority="P2", operation_key=str(uuid4()))  # Create; parent is required (root id 1 for top-level tasks)
+task, aid = meiva.tasks.create_and_assign(title, description, parent=root_id, operation_key="assignment-intent")   # Create + spawn agent to claim; returns TaskAssignment(task, agent_id)
+task = meiva.tasks.get(task_id)                                 # Read by id
+tasks = meiva.tasks.list(owner=..., status=...)                 # Filter list
+meiva.tasks.update(task_id, status=..., owner=..., priority=..., note=..., operation_key=str(uuid4()))  # Change status/results/owner/priority + append progress
+meiva.tasks.log(task_id, "note", operation_key=str(uuid4()))                                # Append a timestamped line (= update(note=))
+```
+
+## Data Model at a Glance
+
+```
+agent_tasks (table)
+├── id, parent_id          — Primary key and tree structure
+├── title, description, results — Task description and result log
+├── status                 — CHECK IN ('in_progress','done','cancelled') DEFAULT 'in_progress' (agent_tasks_root_status_in_progress pins the root to its permanent in_progress state)
+├── owner                  — REFERENCES agents(id) (always has an owner except root task)
+├── priority                — TEXT NOT NULL DEFAULT 'P2', CHECK IN ('P0','P1','P2','P3') (added in #663)
+├── is_root                — BOOLEAN, system root task marker (the only row with owner=NULL)
+├── created_by             — TEXT (creator agent id string; 'system' for root)
+├── remind_interval_seconds        — Reminder interval in seconds (cannot be disabled, NULL only appears on root task)
+├── last_reminded_at, reminder_count — Reminder state (cleared on any write)
+└── created_at, updated_at
+```
+
+Task attribution is explicit: an assignment or task-update system note carries its
+task id into the receiver's turn, while chat and unassociated system work clear it.
+Only those tagged LLM calls increment the totals; an agent merely owning a task does
+not. Each ceiling sends the owner one system-note notification on its first breach;
+it does not terminate the agent or block an in-flight call.
+
+The write paths of `create`/`update` publish `task_created`/`task_updated` (Redis events channel, visible from `GLOBAL_ROLES`) — the task board relies on these two events for SSE-driven invalidation refetch, plus a 30s fallback polling.
+
+## Relationship with Other Subsystems
+
+- [[meiva_builtins/plugins/meiva_fleet/docs/neighbors/neighbors.meiva.okf.md|Neighbors]] — notifies old and new owners through task-tagged system notes on owner change
+- [[meiva_builtins/plugins/meiva_fleet/docs/notify.meiva.okf.md|Notify]] — can notify user when a task completes
+- [[meiva_builtins/plugins/meiva_fleet/docs/meiva_fleet.meiva.okf.md|meiva_fleet Overview]] — parent fleet plugin index
+
+## Costs are independent of task records
+
+Task ownership and task notes do not attribute LLM usage. Use the `meiva-being-a-long-running-agent`
+usage script to select agents, a time window, and birth lineage. Retired budget
+and accumulated-cost database columns remain inactive for expand-contract
+upgrade compatibility; they are absent from the SDK and task API.

@@ -8,7 +8,7 @@ from base.events.vocabulary import EventSpec, telemetry_event
 
 
 class SdkCall(TypedDict):
-    """`sdk_call` payload — ava/sdk_surface/metering.py recorder."""
+    """`sdk_call` payload — meiva/sdk_surface/metering.py recorder."""
 
     fn: str
     duration: float
@@ -33,13 +33,13 @@ class PluginActivation(TypedDict):
 
 
 class HeartbeatPaused(TypedDict):
-    """`heartbeat_paused` payload — ava/self/__init__.py."""
+    """`heartbeat_paused` payload — meiva/self/__init__.py."""
 
     duration_s: float
 
 
 class ShellTtlRenewed(TypedDict):
-    """`shell_ttl_renewed` payload — ava/shell/sessions.py renew().
+    """`shell_ttl_renewed` payload — meiva/shell/sessions.py renew().
 
     One event per explicit deadline extension: the requested ttl and the
     before/after deadlines (DB clock, ISO strings). The durable trail is the
@@ -113,7 +113,7 @@ class HeartbeatBackoffReset(TypedDict):
 
 
 class PassiveRecall(TypedDict, total=False):
-    """`passive_recall` payload — memory_recall.py / ava_memory plugin.
+    """`passive_recall` payload — memory_recall.py / meiva_memory plugin.
 
     `body` is the human-readable line. The success path records the search
     request's duration in milliseconds (it includes the gateway's ranking) and
@@ -179,8 +179,8 @@ class PluginLoadFailed(TypedDict):
     plugin-update result, and the runtime config readers' dangling warning is
     a plain log line — only the graph loader reports dangling entries as rows
     here. The plugin is skipped — fail-soft contract (user ruling 2026-09-11,
-    after the 2026-08-28 ava_ledger and 2026-09-10 agent-host incidents): a
-    broken plugin must never block `import ava` / host boot / graph build for
+    after the 2026-08-28 meiva_ledger and 2026-09-10 agent-host incidents): a
+    broken plugin must never block `import meiva` / host boot / graph build for
     the whole cluster. This event is the loud half of that contract; `error`
     carries the exception type + message so ops sees which plugin broke and
     why.
@@ -244,7 +244,7 @@ EVENTS: dict[str, EventSpec] = {
         "SDK call metering",
         payload=SdkCall,
         tier="noise",
-        site="ava/sdk_surface/metering.py recorder (via base/sdk_telemetry)",
+        site="meiva/sdk_surface/metering.py recorder (via base/sdk_telemetry)",
     ),
     "sdk_sampling_refresh_unfinished": telemetry_event(
         "sdk_sampling_refresh_unfinished",
@@ -267,14 +267,14 @@ EVENTS: dict[str, EventSpec] = {
         "heartbeat_paused",
         "heartbeat paused",
         payload=HeartbeatPaused,
-        site='ava/self/__init__.py:258 telemetry.emit("telemetry", ...)',
+        site='meiva/self/__init__.py:258 telemetry.emit("telemetry", ...)',
         persist=True,
     ),
     "shell_ttl_renewed": telemetry_event(
         "shell_ttl_renewed",
         "shell TTL deadline renewed",
         payload=ShellTtlRenewed,
-        site='ava/shell/sessions.py:_record_renewal telemetry.emit("telemetry", ...)',
+        site='meiva/shell/sessions.py:_record_renewal telemetry.emit("telemetry", ...)',
     ),
     "screen_capture_notify_failed": telemetry_event(
         "screen_capture_notify_failed", "screenshot notify failed", tier="anomaly"

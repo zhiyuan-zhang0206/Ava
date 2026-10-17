@@ -23,7 +23,7 @@ async def test_async_calls_record_inputs_in_order_and_filter_by_agent() -> None:
     second = RecordingModel(agent_id=23, script=(exec_call(2, "x = 1"),))
     prompt = HumanMessage(
         content=[{"type": "text", "text": "one"}, {"type": "text", "text": "two"}],
-        additional_kwargs={"ava_note_tag": "summary"},
+        additional_kwargs={"meiva_note_tag": "summary"},
     )
     assert (await first.ainvoke([prompt])).content == "reply"
     chunks = [chunk async for chunk in second.astream([exec_call(1, "x = 0")])]
@@ -102,13 +102,13 @@ async def test_exhausted_attempt_still_records_its_input() -> None:
 def test_scratch_root_resolves_current_home_at_call_time(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    monkeypatch.setenv("AVA_HOME", str(tmp_path / "first"))
+    monkeypatch.setenv("MEIVA_HOME", str(tmp_path / "first"))
     first = scratch_root("record")
-    monkeypatch.setenv("AVA_HOME", str(tmp_path / "second"))
+    monkeypatch.setenv("MEIVA_HOME", str(tmp_path / "second"))
     second = scratch_root("record")
     assert first != second
-    assert first.name == "ava-e2e-record-first"
-    assert second.name == "ava-e2e-record-second"
+    assert first.name == "meiva-e2e-record-first"
+    assert second.name == "meiva-e2e-record-second"
 
 
 def test_script_helpers_preserve_tool_identity_and_usage() -> None:

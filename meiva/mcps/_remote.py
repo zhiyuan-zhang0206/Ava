@@ -1,0 +1,194 @@
+"""In-process Unix socket client to the per-machine MCP daemon.
+
+The agent process talks to the shared MCP daemon (ops roster session
+"mcp-daemon") over a JSON-line Unix socket — one connection per agent, with
+the agent's identity riding on every request so gated servers can enforce
+per-agent governance. When the daemon is absent, SDK calls fail explicitly without starting servers.
+
+Moved out of `meiva.mcps` (2026-08-13, #1229) to keep that module under its
+line budget; `meiva.mcps` re-exports these names.
+"""
+
+from __future__ import annotations
+
+import json
+import socket
+import threading
+import time
+from contextlib import suppress
+from pathlib import Path
+from typing import Any
+
+from meiva.mcps.config import MCPCallError, MCPConnectError, ToolInfo
+
+
+class RemoteMCPClient:
+    """Lightweight Unix socket client to MCP daemon."""
+
+    def __init__(self, socket_path: str) -> None:
+        self._socket_path = socket_path
+        self._sock: socket.socket | None = None
+        self._lock = threading.Lock()
+        self._req_id = 0
+
+    def close(self) -> None:
+        """Close the daemon socket if one is open."""
+        with self._lock:
+            sock, self._sock = self._sock, None
+        if sock is not None:
+            with suppress(OSError):
+                sock.close()
+
+    def _ensure_connected(self, timeout_seconds: float) -> socket.socket:
+        if self._sock is not None:
+            try:
+                self._sock.sendall(b"")
+                return self._sock
+            except OSError:
+                with suppress(OSError):
+                    self._sock.close()
+                self._sock = None
+        sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        sock.settimeout(timeout_seconds)
+        sock.connect(self._socket_path)
+        self._sock = sock
+        return sock
+
+    def _request(self, method: str, params: dict[str, Any], *, timeout_seconds: float) -> Any:
+        with self._lock:
+            self._req_id += 1
+            req_id = self._req_id
+            req = (
+                json.dumps(
+                    {
+                        "id": req_id,
+                        "method": method,
+                        "params": params,
+                        # The daemon forwards this to the computer-mcp service
+                        # (and could forward it to any gated server): one
+                        # connection = one agent, and the identity rides on
+                        # every request so the service can gate per agent.
+                        "agent_id": _current_agent_id(),
+                    },
+                    ensure_ascii=False,
+                )
+                + "\n"
+            )
+            sock = self._ensure_connected(timeout_seconds)
+            try:
+                sock.sendall(req.encode("utf-8"))
+                resp = self._read_response(sock, req_id, timeout_seconds=timeout_seconds)
+            except BaseException as e:
+                # Any failure leaves the stream in an ambiguous state: a
+                # response to this request may still arrive (client deadline
+                # fired while the daemon kept processing), or the stream may be
+                # misaligned. A late response left in the buffer would be
+                # consumed by the NEXT request. Close and forget the socket so
+                # the next request reconnects fresh.
+                with suppress(OSError):
+                    sock.close()
+                self._sock = None
+                if method == "call_tool" and isinstance(e, Exception):
+                    raise MCPCallError(
+                        f"MCP tool result unknown for {params['server']}.{params['tool']}; "
+                        f"request may have reached the daemon: {type(e).__name__}: {e}"
+                    ) from e
+                raise
+            if not resp.get("ok"):
+                raise MCPCallError(resp.get("error", "Unknown error"))
+            return resp.get("result")
+
+    def _read_response(
+        self, sock: socket.socket, req_id: int, *, timeout_seconds: float
+    ) -> dict[str, Any]:
+        """Read response lines until the one whose id matches `req_id`.
+
+        Response-id matching: only the line whose id equals this request's id
+        is its response. A stale line — a response to a request that timed out
+        while the daemon kept processing it — or an unsolicited notification
+        carries a foreign / missing id; consuming it would mis-associate the
+        stream (this request gets the previous one's result, and the real
+        response then shifts every later request — response cross-talk). Foreign
+        lines are skipped; the unread tail stays buffered. Bounded by the same
+        timeout budget as the connect phase, supplied by the caller per request.
+        """
+        buf = b""
+        deadline = time.time() + timeout_seconds
+        while True:
+            remaining = deadline - time.time()
+            if remaining <= 0:
+                raise MCPConnectError("MCP daemon request timeout")
+            sock.settimeout(remaining)
+            try:
+                chunk = sock.recv(4096)
+            except TimeoutError:
+                raise MCPConnectError("MCP daemon request timeout") from None
+            if not chunk:
+                raise MCPConnectError("MCP daemon connection closed")
+            buf += chunk
+            while b"\n" in buf:
+                line, buf = buf.split(b"\n", 1)
+                try:
+                    parsed = json.loads(line.decode("utf-8"))
+                except json.JSONDecodeError:
+                    raise MCPConnectError("MCP daemon returned a malformed response line") from None
+                if parsed.get("id") == req_id:
+                    return parsed
+
+    def list_tools(self, server: str, *, timeout_seconds: float) -> list[ToolInfo]:
+        result = self._request("list_tools", {"server": server}, timeout_seconds=timeout_seconds)
+        return [
+            {
+                "name": t["name"],
+                "description": t.get("description", ""),
+                "input_schema": t.get("input_schema", {}),
+            }
+            for t in result
+        ]
+
+    def call_tool(
+        self, server: str, tool: str, args: dict[str, Any], *, timeout_seconds: float
+    ) -> dict[str, Any]:
+        return self._request(
+            "call_tool",
+            {
+                "server": server,
+                "tool": tool,
+                "args": args,
+            },
+            timeout_seconds=timeout_seconds,
+        )
+
+
+def _current_agent_id() -> int | None:
+    """The explicit SDK process identity, validating any borrowed lease on use."""
+    from meiva.sdk_surface import agent_identity
+
+    return agent_identity.agent_id()
+
+
+def connect_remote(socket_path: str) -> RemoteMCPClient:
+    """A client of the MCP daemon listening on `socket_path` (it dials on its first request)."""
+    return RemoteMCPClient(socket_path)
+
+
+def socket_path_for() -> str:
+    """Filesystem path of the shared MCP daemon socket — the client side of the
+    convention. The daemon is a per-machine service (one for all agents;
+    sessions isolated per connection). Thin alias of
+    `base.paths.mcp_daemon_shared_socket`, the single source of truth (moved
+    to base/ so the agent kernel's daemon can import it without going through
+    this SDK-disable-able module)."""
+    from base.paths import mcp_daemon_shared_socket, meiva_home
+
+    return mcp_daemon_shared_socket(meiva_home())
+
+
+def daemon_socket_path() -> str | None:
+    """This process's machine MCP socket path, or None when absent.
+
+    Presence does not prove liveness. An absent or stale socket fails the
+    request; callers never fall back to a local server.
+    """
+    path = socket_path_for()
+    return path if Path(path).exists() else None

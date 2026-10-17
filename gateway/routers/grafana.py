@@ -23,7 +23,7 @@ proxied requests share one `httpx.AsyncClient` (connection pooling instead of
 a client per request), created and closed by the gateway lifespan
 (`gateway/app.py`) and reached via `request.app.state.grafana_client`.
 
-Disabled by default (`AVA_GRAFANA_PROXY_ENABLED=false`): a cluster without a
+Disabled by default (`MEIVA_GRAFANA_PROXY_ENABLED=false`): a cluster without a
 Grafana upstream gets 404 on `/grafana/*` and nothing else changes. WebSocket
 endpoints (Grafana Live) are not proxied — out of scope for the read-only
 dashboard embed.

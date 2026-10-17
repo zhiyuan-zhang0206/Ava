@@ -1,4 +1,4 @@
-# Ava — project guidance for coding agents
+# Meiva — project guidance for coding agents
 
 Read [docs/contributing.md](docs/contributing.md) before repository work. It is
 the contributor entry point for setup, scoped validation, self-review and PRs.
@@ -6,8 +6,8 @@ Follow the user's authorized scope.
 
 ## Project invariants
 
-- Keep the core small. Ava uses one `execute_code(code: str)` tool and the
-  `ava.*` namespace; see [philosophy](docs/conventions/philosophy.md).
+- Keep the core small. Meiva uses one `execute_code(code: str)` tool and the
+  `meiva.*` namespace; see [philosophy](docs/conventions/philosophy.md).
 - Fail fast on invalid model input and unknown enum values. Validate raw inputs
   at their boundary; do not silently replace required data with defaults.
 - Prefer established dependencies over parallel implementations. Supported
@@ -23,7 +23,7 @@ Follow the user's authorized scope.
 - Trace consumers before changing a contract; do not widen local checks into
   unrelated suites.
 - Development is separate from a running deployment. Use an isolated checkout,
-  its own real virtualenv and a temporary `AVA_HOME` for development tools that
+  its own real virtualenv and a temporary `MEIVA_HOME` for development tools that
   import application code. Pytest supplies its own isolation.
 - Merged migrations are immutable. Fix forward, synchronize `db/schema.sql`,
   and use expand-contract for lossy changes. See the [migration guide](db/docs/migrations.md).
@@ -35,7 +35,7 @@ Follow the user's authorized scope.
 - [Import layering](docs/conventions/import-layering.md) explains the layering the
   `meizel.toml` manifests state; [technology selection](docs/conventions/technology-selection.md)
   explains dependency choices.
-- [OKF index](docs/index.ava.okf.md) and component-local `docs/` describe the
+- [OKF index](docs/index.meiva.okf.md) and component-local `docs/` describe the
   current system. Update the relevant owner in the same PR as the code.
 - [Documentation maintenance](docs/conventions/doc-maintenance.md) owns placement:
   current cross-cutting rules in `docs/conventions/`, choices in
@@ -59,5 +59,5 @@ Before moving or changing a symbol, use
 `.venv/bin/python scripts/audit/where_used.py TARGET` (`pkg.mod:name`, a module
 or a path). After a module move, use `scripts/audit/module_moves.py OLD=NEW`.
 Repository skills live in `.agents/skills/`; built-in mirrors point into
-`ava_builtins/skills/`. Load an applicable skill when its capability is needed,
+`meiva_builtins/skills/`. Load an applicable skill when its capability is needed,
 not merely because a process name appears in a document.

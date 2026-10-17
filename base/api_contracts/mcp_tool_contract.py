@@ -58,7 +58,7 @@ _TOOL_DESCRIPTIONS: dict[str, str] = {
 
         Returns the newest `limit` messages, oldest first. Each entry has a
         `role` (human / ai / system), the message `text`, and — for a turn
-        where the agent acted — the Python `code` it ran, which is how an Ava
+        where the agent acted — the Python `code` it ran, which is how an Meiva
         agent does everything. `total` is the full history length, so a caller
         can see how much was left out.
         """,
@@ -76,7 +76,7 @@ _TOOL_DESCRIPTIONS: dict[str, str] = {
         reports `open_tasks` — the tasks the agent still owns as it goes down
         (at most five, most recently updated first; null when it owns none).
         """,
-    "cluster_status": """Report the health of the Ava cluster itself — which host answered,
+    "cluster_status": """Report the health of the Meiva cluster itself — which host answered,
         what it is capable of running, and whether it is paused.
 
         A paused cluster is mid-maintenance: agents are stopped and spawns
@@ -88,7 +88,7 @@ _TOOL_DESCRIPTIONS: dict[str, str] = {
 
 _SERVER_INSTRUCTIONS = (
     "\n"
-    "Ava runs a fleet of long-lived autonomous agents. An agent is a persistent\n"
+    "Meiva runs a fleet of long-lived autonomous agents. An agent is a persistent\n"
     "process with its own conversation history that keeps working after you stop\n"
     "talking to it — not a request/response endpoint.\n"
     "\n"
@@ -136,7 +136,7 @@ def message_text(content: Any) -> str:
 def project_message(msg: dict[str, Any]) -> dict[str, Any]:
     """One transcript entry, reduced to role + text + the code the agent ran.
 
-    Ava agents act by writing Python (`execute_code` is their only tool), so the
+    Meiva agents act by writing Python (`execute_code` is their only tool), so the
     code of a turn *is* what the agent did — dropping it would leave a reader
     seeing an agent that talks and never acts. Everything else in the raw
     message (ids, provider metadata, token accounting) is machinery.

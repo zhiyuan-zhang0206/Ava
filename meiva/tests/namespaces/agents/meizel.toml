@@ -1,0 +1,15 @@
+[uses]
+"test_work_restart.py" = ["test_work.py"]
+
+[debt.env-patch]
+"test_compaction.py#patch.dict os.environ" = 1
+"test_work_restart.py#monkeypatch.delenv os.environ.MEIVA_AGENT_ID" = 1
+"test_work_restart.py#monkeypatch.delenv os.environ.MEIVA_CALLER_IDENTITY" = 2
+
+[debt.first-party-patch]
+"test_agents_scan.py#monkeypatch.setattr meiva.sdk_surface.agent_identity.require_actor" = 2
+"test_agents_scan.py#monkeypatch.setattr meiva.security.record_finding" = 2
+"test_compaction.py#monkeypatch.setattr meiva.sdk_surface.agent_identity.validate_external_identity" = 1
+"test_validation_agents.py#monkeypatch.setattr meiva.gateway_client.send_message" = 1
+"test_work.py#monkeypatch.setattr meiva.sdk_surface.agent_identity.validate_external_identity" = 1
+"test_work_restart.py#monkeypatch.setattr meiva.sdk_surface.agent_identity.validate_external_identity" = 1

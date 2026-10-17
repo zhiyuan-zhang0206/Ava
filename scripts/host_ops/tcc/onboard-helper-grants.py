@@ -572,7 +572,7 @@ def _screen_access_grants(items: list[str], ping: dict[str, Any], statuses: dict
         else:
             statuses["screen-recording"] = "missing"
             print(
-                "  [screen-recording] MISSING -- grant AvaPermissionsHelper in System Settings >"
+                "  [screen-recording] MISSING -- grant MeivaPermissionsHelper in System Settings >"
                 " Privacy & Security > Screen Recording, then restart the helper."
             )
         if ping.get("ax_trusted"):
@@ -581,7 +581,7 @@ def _screen_access_grants(items: list[str], ping: dict[str, Any], statuses: dict
         else:
             statuses["accessibility"] = "missing"
             print(
-                "  [accessibility] MISSING -- grant AvaPermissionsHelper in System Settings >"
+                "  [accessibility] MISSING -- grant MeivaPermissionsHelper in System Settings >"
                 " Privacy & Security > Accessibility."
             )
 

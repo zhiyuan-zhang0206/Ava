@@ -1,4 +1,4 @@
-"""Schedule management through the real gateway and the installed ``ava`` CLI.
+"""Schedule management through the real gateway and the installed ``meiva`` CLI.
 
 The e2e stack has no schedule-manager. Control requests therefore leave durable
 sync rows for its later consumer; session execution belongs to SC2/SC3.
@@ -187,10 +187,10 @@ def test_draft_launches_a_writer_with_the_request_in_model_input(spawned_agent: 
             message["text"] for message in model_inputs(writer_id)[0] if message["type"] == "human"
         )
         assert request_text in human
-        assert "ava.skills.ava_guide.schedules" in human
+        assert "meiva.skills.meiva_guide.schedules" in human
         with psycopg.connect(settings.data_plane.db_url) as conn:
             row = conn.execute("SELECT label FROM agents WHERE id = %s", (writer_id,)).fetchone()
-        assert row == ("ava-schedule-writer",)
+        assert row == ("meiva-schedule-writer",)
     finally:
         httpx.post(f"{GATEWAY_URL}/api/agents/{writer_id}/terminate", timeout=10.0)
 

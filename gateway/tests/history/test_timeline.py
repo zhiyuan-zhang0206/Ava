@@ -71,14 +71,14 @@ class TestSdkCallsProjection:
         ai = AIMessage(
             content="",
             tool_calls=[
-                {"name": "execute_code", "args": {"code": "ava.files.read('x')"}, "id": "tc-1"}
+                {"name": "execute_code", "args": {"code": "meiva.files.read('x')"}, "id": "tc-1"}
             ],
         )
         out = ToolMessage(
             content="ok",
             tool_call_id="tc-1",
             additional_kwargs={
-                "ava_msg_type": "exec_output",
+                "meiva_msg_type": "exec_output",
                 "sdk_calls": [{"method": "files.read", "count": 3}],
             },
         )
@@ -89,14 +89,14 @@ class TestSdkCallsProjection:
 
     def test_code_without_exec_output_metadata_has_no_sdk_calls(self):
         """The AIMessage alone — its exec has not produced a ToolMessage yet —
-        renders `sdk_calls=None` even though the code text calls ava.*: the
+        renders `sdk_calls=None` even though the code text calls meiva.*: the
         projection trusts the metadata, not the text."""
         from langchain_core.messages import AIMessage
 
         ai = AIMessage(
             content="",
             tool_calls=[
-                {"name": "execute_code", "args": {"code": "ava.files.read('x')"}, "id": "tc-1"}
+                {"name": "execute_code", "args": {"code": "meiva.files.read('x')"}, "id": "tc-1"}
             ],
         )
         items, _ = build_timeline_items([ai], inputs=_TIMELINE_INPUTS)
@@ -114,7 +114,7 @@ class TestSdkCallsProjection:
         out = ToolMessage(
             content="1",
             tool_call_id="tc-9",
-            additional_kwargs={"ava_msg_type": "exec_output", "sdk_calls": []},
+            additional_kwargs={"meiva_msg_type": "exec_output", "sdk_calls": []},
         )
         items, _ = build_timeline_items([ai, out], inputs=_TIMELINE_INPUTS)
         code = next(it for it in items if it.kind == "agent_code")
@@ -135,7 +135,7 @@ class TestSdkCallsProjection:
             content="a",
             tool_call_id="tc-a",
             additional_kwargs={
-                "ava_msg_type": "exec_output",
+                "meiva_msg_type": "exec_output",
                 "sdk_calls": [{"method": "a.fn", "count": 1}],
             },
         )
@@ -143,7 +143,7 @@ class TestSdkCallsProjection:
             content="b",
             tool_call_id="tc-b",
             additional_kwargs={
-                "ava_msg_type": "exec_output",
+                "meiva_msg_type": "exec_output",
                 "sdk_calls": [{"method": "b.fn", "count": 2}],
             },
         )
@@ -155,14 +155,14 @@ class TestSdkCallsProjection:
         ]
 
 
-class TestAvaMsgTypeDispatch:
-    """Every AvaMsgType member must dispatch to its intended timeline item kind.
+class TestMeivaMsgTypeDispatch:
+    """Every MeivaMsgType member must dispatch to its intended timeline item kind.
 
-    A HumanMessage tagged with a known ava_msg_type that the render loop has no
+    A HumanMessage tagged with a known meiva_msg_type that the render loop has no
     branch for falls to `_fallback_human_item` — a system_marker with
     source=None that the frontend renders as the red "unrecognized" alarm
     (the #1017 regression class: the auto-compact path produced an untagged
-    summary). This parametrized test makes "add a new AvaMsgType without
+    summary). This parametrized test makes "add a new MeivaMsgType without
     adapting the renderer" impossible: every member must render as its
     intended kind, never the null-source catch-all.
 
@@ -180,29 +180,29 @@ class TestAvaMsgTypeDispatch:
     def _tagged(msg_type: str, **extra: object) -> HumanMessage:
         return HumanMessage(
             content="payload",
-            additional_kwargs={"ava_msg_type": msg_type, **extra},
+            additional_kwargs={"meiva_msg_type": msg_type, **extra},
         )
 
     def test_every_msg_type_has_an_explicit_branch(self) -> None:
-        from base.agents.messages.kwargs import AvaMsgType
+        from base.agents.messages.kwargs import MeivaMsgType
 
         expected_kind = {
-            AvaMsgType.INBOUND: "inbound_chat",
-            AvaMsgType.EXEC_OUTPUT: "code_output",
-            AvaMsgType.SYSTEM_NOTE: "system_marker",
-            AvaMsgType.COMPACT_SUMMARY: "inbound_compact_summary",
-            AvaMsgType.COMPACT_REQUEST: "inbound_compact_request",
+            MeivaMsgType.INBOUND: "inbound_chat",
+            MeivaMsgType.EXEC_OUTPUT: "code_output",
+            MeivaMsgType.SYSTEM_NOTE: "system_marker",
+            MeivaMsgType.COMPACT_SUMMARY: "inbound_compact_summary",
+            MeivaMsgType.COMPACT_REQUEST: "inbound_compact_request",
         }
         # SYSTEM_NOTE needs a note_tag to render as its card chip (not the
         # null-source historical-data alarm path).
-        note_tag = {"ava_note_tag": "sdk_hint"}
-        by_type = {AvaMsgType.SYSTEM_NOTE: note_tag}
+        note_tag = {"meiva_note_tag": "sdk_hint"}
+        by_type = {MeivaMsgType.SYSTEM_NOTE: note_tag}
         for msg_type, expected in expected_kind.items():
             items = self._render(self._tagged(msg_type.value, **by_type.get(msg_type, {})))
             assert len(items) == 1, f"{msg_type}: expected exactly one item, got {items}"
             item = items[0]
             assert item.kind == expected, (
-                f"AvaMsgType.{msg_type.name} renders as {item.kind!r} (source={item.source!r}), "
+                f"MeivaMsgType.{msg_type.name} renders as {item.kind!r} (source={item.source!r}), "
                 f"expected {expected!r} — the render loop needs an explicit branch for it"
             )
             # A tagged message must NEVER hit the catch-all (system_marker +
@@ -211,7 +211,7 @@ class TestAvaMsgTypeDispatch:
             # source on the tagged SYSTEM_NOTE construction.
             if item.kind == "system_marker":
                 assert item.source is not None, (
-                    f"AvaMsgType.{msg_type.name} fell to the null-source catch-all: {item}"
+                    f"MeivaMsgType.{msg_type.name} fell to the null-source catch-all: {item}"
                 )
 
     def test_untagged_human_message_hits_catch_all_fail_loud(self) -> None:
@@ -224,18 +224,18 @@ class TestAvaMsgTypeDispatch:
         assert items[0].source is None
 
     def test_compact_summary_item_carries_the_compact_run_id(self) -> None:
-        """Task #3323: the ava_compact_id durable anchor rides into the
+        """Task #3323: the meiva_compact_id durable anchor rides into the
         timeline item — the frontend matches the live ticking block to this
         summary by it. Pre-anchor summaries render with None."""
-        from base.agents.messages.kwargs import AvaMsgType
+        from base.agents.messages.kwargs import MeivaMsgType
 
         anchored = self._render(
-            self._tagged(AvaMsgType.COMPACT_REQUEST.value, ava_compact_id="run-1")
+            self._tagged(MeivaMsgType.COMPACT_REQUEST.value, meiva_compact_id="run-1")
         )
         assert len(anchored) == 1
         assert anchored[0].kind == "inbound_compact_request"
         assert anchored[0].compact_id == "run-1"
-        unanchored = self._render(self._tagged(AvaMsgType.COMPACT_SUMMARY.value))
+        unanchored = self._render(self._tagged(MeivaMsgType.COMPACT_SUMMARY.value))
         assert unanchored[0].compact_id is None
 
         # Side effect: get_timeline's _log should have had a warning trace (operators can grep)
@@ -252,8 +252,8 @@ class CompactHistoryCases:
         return HumanMessage(
             content=content,
             additional_kwargs={
-                "ava_msg_type": "compact_summary",
-                "ava_created_at": "2026-08-25T00:00:00+00:00",
+                "meiva_msg_type": "compact_summary",
+                "meiva_created_at": "2026-08-25T00:00:00+00:00",
             },
         )
 

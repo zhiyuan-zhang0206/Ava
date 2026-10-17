@@ -193,8 +193,8 @@ def remind_expiring_impersonations(
                 is not None
             ):
                 continue
-            # A bare `ava`: the host's `~/.local/bin/ava`, linked to the production CLI.
-            prefix = ["ava", "impersonate"]
+            # A bare `meiva`: the host's `~/.local/bin/meiva`, linked to the production CLI.
+            prefix = ["meiva", "impersonate"]
             # Suggest the window the executor last chose, not a fixed hour: the
             # guide asks for short leases extended in steps.
             ttl = str(lease["ttl_seconds"])
@@ -205,7 +205,7 @@ def remind_expiring_impersonations(
                 [*prefix, "release", str(session_id), "--agent", str(agent_id), "--summary", "..."]
             )
             content = (
-                f"Ava impersonation session {session_id} for agent {agent_id} expires at "
+                f"Meiva impersonation session {session_id} for agent {agent_id} expires at "
                 f"{expires_at:%Y-%m-%d %H:%M UTC}. Renew it to keep working, or "
                 f"release it with a completion summary:\n{renew}\n{release}"
             )

@@ -39,7 +39,7 @@ def publish_impersonation_changed_sync(bus: EventBus, agent_id: int) -> None:
 
 
 def publish_task_created_sync(bus: EventBus, agent_id: int, task_id: int) -> None:
-    """Publish TaskCreated from a sync context (the ava.tasks.create SDK path).
+    """Publish TaskCreated from a sync context (the meiva.tasks.create SDK path).
     No task read — the frontend refetches /api/tasks on receipt, so the event
     only names the task; `agent_id` is the creating agent."""
     ev = TaskCreated(agent_id=agent_id, task_id=task_id)
@@ -47,7 +47,7 @@ def publish_task_created_sync(bus: EventBus, agent_id: int, task_id: int) -> Non
 
 
 def publish_task_updated_sync(bus: EventBus, agent_id: int, task_id: int) -> None:
-    """Publish TaskUpdated from a sync context (the ava.tasks.update SDK path).
+    """Publish TaskUpdated from a sync context (the meiva.tasks.update SDK path).
     See publish_task_created_sync; `agent_id` is the acting agent."""
     ev = TaskUpdated(agent_id=agent_id, task_id=task_id)
     bus.publish_best_effort_sync(ev.model_dump_json(), context="task_updated")

@@ -1,6 +1,6 @@
 """Linux systemd owns the lifetime of this home's application root.
 
-The unit invokes ordinary ``ava start`` directly. Its successful readiness tail
+The unit invokes ordinary ``meiva start`` directly. Its successful readiness tail
 publishes the birth-validated root PID. Type=forking adopts it only after the
 ordinary start command exits successfully and the root becomes a manager child.
 There is no resident boot wrapper and no separate service readiness policy.
@@ -40,7 +40,7 @@ START_LIMIT_INTERVAL_S = BOOT_MAX_ATTEMPTS * (START_TIMEOUT_S + BOOT_RETRY_INTER
 class BootUnitContext:
     """Everything the unit renders from (explicit for tests)."""
 
-    home: Path  # $AVA_HOME
+    home: Path  # $MEIVA_HOME
     repo: Path  # the checkout that owns this home (holds .venv/)
     user: str
     group: str
@@ -50,7 +50,7 @@ class BootUnitContext:
 # --- paths and names --------------------------------------------------------
 
 
-UNIT_NAME = "ava-boot.service"
+UNIT_NAME = "meiva-boot.service"
 """The one boot unit of the host: the host runs one cluster."""
 
 
@@ -60,19 +60,19 @@ def unit_path() -> Path:
 
 def root_pid_path(home: Path) -> Path:
     """Manager adoption hint; native root custody remains the ownership authority."""
-    return home / "run" / "ava-root" / "systemd.pid"
+    return home / "run" / "meiva-root" / "systemd.pid"
 
 
 def _default_context(*, host: Host) -> BootUnitContext:
     import grp
     import pwd
 
-    from base.paths import ava_home, repo_root
+    from base.paths import meiva_home, repo_root
 
     entry = pwd.getpwuid(host.uid)
     group = grp.getgrgid(entry.pw_gid).gr_name
     return BootUnitContext(
-        home=ava_home(),
+        home=meiva_home(),
         repo=repo_root(),
         user=entry.pw_name,
         group=group,
@@ -135,7 +135,7 @@ def render_unit(ctx: BootUnitContext) -> str:
     argv = (str(ctx.repo / ".venv/bin/python"), "-m", "cli.main", "start", "--boot")
     environment = (
         ("HOME", str(ctx.home_dir)),
-        ("AVA_HOME", str(ctx.home)),
+        ("MEIVA_HOME", str(ctx.home)),
         ("PATH", f"{ctx.repo}/.venv/bin:/usr/local/bin:/usr/bin:/bin"),
     )
     env_lines = "\n".join(
@@ -149,7 +149,7 @@ def render_unit(ctx: BootUnitContext) -> str:
     # BOOT_MAX_ATTEMPTS times: then the unit stays in systemd's `failed` state.
     return (
         "[Unit]\n"
-        "Description=Ava application root\n"
+        "Description=Meiva application root\n"
         "After=network-online.target\n"
         "Wants=network-online.target\n"
         f"StartLimitIntervalSec={START_LIMIT_INTERVAL_S}\n"
@@ -294,7 +294,7 @@ def install(*, context: BootUnitContext | None = None, host: Host) -> list[str]:
     destination = unit_path()
     unit_content = render_unit(ctx)
     if _read_text(destination) != unit_content:
-        fd, name = tempfile.mkstemp(prefix="ava-boot-unit-", suffix=".service")
+        fd, name = tempfile.mkstemp(prefix="meiva-boot-unit-", suffix=".service")
         os.close(fd)
         holder = Path(name)
         try:
@@ -320,7 +320,7 @@ def uninstall(*, host: Host) -> list[str]:
     """Remove the host's boot unit after a successful native stop.
 
     Safe when nothing is installed, and safe to call on non-systemd hosts (a
-    no-op): `ava cluster destroy` runs it unconditionally with the other OS
+    no-op): `meiva cluster destroy` runs it unconditionally with the other OS
     jobs. Removes only the exact unit path of `UNIT_NAME`, then resets the failed
     record systemd keeps listing for a removed unit whose last stop failed.
     """

@@ -1,6 +1,6 @@
 """The gateway PATCH path clears the escalation marker.
 
-Split out of `ava_builtins/plugins/ava_fleet/task_maintenance/tests/test_task_maintenance_escalation.py`: it drives the gateway app."""
+Split out of `meiva_builtins/plugins/meiva_fleet/task_maintenance/tests/test_task_maintenance_escalation.py`: it drives the gateway app."""
 
 from __future__ import annotations
 

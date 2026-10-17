@@ -43,7 +43,7 @@ class PlatformBackend(abc.ABC):
         ...
 
     def venv_launcher(self, name: str, *, root: Path | None = None) -> Path:
-        """Absolute path to a console script the virtualenv installs (``"ava"``,
+        """Absolute path to a console script the virtualenv installs (``"meiva"``,
         ``"uv"``, …) — ``.venv/bin/<name>``.
 
         `root` is the checkout holding the ``.venv`` (defaults to this one's repo

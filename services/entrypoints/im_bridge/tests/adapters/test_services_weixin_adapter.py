@@ -42,7 +42,7 @@ class _FakeHTTP:
 
 
 def _adapter(http: _FakeHTTP, monkeypatch: pytest.MonkeyPatch, tmp_path: Any) -> WeixinAdapter:
-    monkeypatch.setenv("AVA_HOME", str(tmp_path))
+    monkeypatch.setenv("MEIVA_HOME", str(tmp_path))
     monkeypatch.setattr(weixin, "load_account", lambda: dict(_ACCOUNT))
     a = WeixinAdapter(None)  # type: ignore[arg-type]
     a._client = http  # type: ignore[attr-defined]

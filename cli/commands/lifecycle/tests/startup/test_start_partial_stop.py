@@ -36,7 +36,7 @@ def partial_home(unit_home: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
             unit_home,
             checkout,
             frozenset({"gateway", "agent-runner"}),
-            {"AVA_MACHINE_NAME": "partial"},
+            {"MEIVA_MACHINE_NAME": "partial"},
         )
     )
     monkeypatch.setattr(service_stop, "require_no_terminals", lambda: None)
@@ -66,11 +66,11 @@ def test_any_application_evidence_refuses_partial_shortcut(
     if evidence == "serving":
         start_serving.begin_start()
     elif evidence == "manifest":
-        path = paths.root_manifests_path(paths.ava_home())
+        path = paths.root_manifests_path(paths.meiva_home())
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text("{}")
     else:
-        fd = acquire_instance_lock(paths.root_run_dir(paths.ava_home()))
+        fd = acquire_instance_lock(paths.root_run_dir(paths.meiva_home()))
     try:
         with pytest.raises(RuntimeError):
             stop.require_unstarted_initialization()

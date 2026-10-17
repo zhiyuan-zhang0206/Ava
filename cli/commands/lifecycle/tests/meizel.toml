@@ -4,15 +4,15 @@ exports = ["converge_host", "startup", "stop"]
 "identity" = ["test_root_driver.py"]
 
 [debt.env-patch]
-"test_collector_admission.py#monkeypatch.delitem os.environ.AVA_TELEMETRY_OTLP_ENDPOINT" = 3
-"test_collector_admission.py#monkeypatch.setitem os.environ.AVA_TELEMETRY_OTLP_ENDPOINT" = 1
-"test_commands_status.py#monkeypatch.delenv os.environ.AVA_API_TOKEN" = 1
-"test_commands_status.py#monkeypatch.setenv os.environ.AVA_HOME" = 3
-"test_pg_owner_authority.py#monkeypatch.setenv os.environ.AVA_HOME" = 3
+"test_collector_admission.py#monkeypatch.delitem os.environ.MEIVA_TELEMETRY_OTLP_ENDPOINT" = 3
+"test_collector_admission.py#monkeypatch.setitem os.environ.MEIVA_TELEMETRY_OTLP_ENDPOINT" = 1
+"test_commands_status.py#monkeypatch.delenv os.environ.MEIVA_API_TOKEN" = 1
+"test_commands_status.py#monkeypatch.setenv os.environ.MEIVA_HOME" = 3
+"test_pg_owner_authority.py#monkeypatch.setenv os.environ.MEIVA_HOME" = 3
 "test_root_driver.py#monkeypatch.delenv os.environ" = 1
 "test_root_driver.py#monkeypatch.setenv os.environ" = 2
 "test_root_driver.py#monkeypatch.setenv os.environ.PATH" = 2
-"test_unit_capability_lifecycle.py#monkeypatch.setenv os.environ.AVA_HOME" = 1
+"test_unit_capability_lifecycle.py#monkeypatch.setenv os.environ.MEIVA_HOME" = 1
 
 [debt.first-party-patch]
 "test_collector_admission.py#monkeypatch.setattr cli.commands.lifecycle.root_driver.root_client" = 1
@@ -25,7 +25,7 @@ exports = ["converge_host", "startup", "stop"]
 "test_commands_status.py#monkeypatch.setattr base.deploy.lifecycle.service_selection.read_selection" = 1
 "test_commands_status.py#monkeypatch.setattr base.host.resource_sample.resource_sample" = 1
 "test_commands_status.py#monkeypatch.setattr base.native_process.root_control.client.RootClient" = 3
-"test_commands_status.py#monkeypatch.setattr base.paths.ava_home" = 2
+"test_commands_status.py#monkeypatch.setattr base.paths.meiva_home" = 2
 "test_commands_status.py#monkeypatch.setattr cli.commands._repo.roles_or_none" = 12
 "test_commands_status.py#monkeypatch.setattr cli.commands.lifecycle.status.print_data_plane_status" = 3
 "test_commands_status.py#monkeypatch.setattr cli.commands.lifecycle.status.print_gateway_cluster_status" = 2

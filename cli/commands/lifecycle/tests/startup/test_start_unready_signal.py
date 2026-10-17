@@ -31,7 +31,7 @@ def emitted(emitted_events: EmittedEvents) -> Generator[FollowedAttributes]:
 def test_one_event_per_non_critical_service(emitted: FollowedAttributes) -> None:
     _probe_commands.report_non_critical_unready_services((_spec("labeler"), _spec("watcher")))
 
-    assert emitted == [{"service": "ava-labeler"}, {"service": "ava-watcher"}]
+    assert emitted == [{"service": "meiva-labeler"}, {"service": "meiva-watcher"}]
 
 
 def test_readiness_verdict_emits_for_non_critical_only_and_allows_the_start(
@@ -41,7 +41,7 @@ def test_readiness_verdict_emits_for_non_critical_only_and_allows_the_start(
     wait = SimpleNamespace(unready=(), non_critical_unready=(_spec("labeler"),))
 
     assert start_commands.readiness_verdict(launch, wait) is None
-    assert emitted == [{"service": "ava-labeler"}]
+    assert emitted == [{"service": "meiva-labeler"}]
 
 
 def test_a_ready_start_emits_nothing(emitted: FollowedAttributes) -> None:
@@ -52,7 +52,7 @@ def test_a_ready_start_emits_nothing(emitted: FollowedAttributes) -> None:
     assert emitted == []
 
 
-@pytest.mark.parametrize("failed, expected", [("ava-browser-mcp", None), ("ava-gateway", 4)])
+@pytest.mark.parametrize("failed, expected", [("meiva-browser-mcp", None), ("meiva-gateway", 4)])
 def test_only_core_launch_failures_block_serving(
     emitted: FollowedAttributes, failed: str, expected: int | None
 ) -> None:

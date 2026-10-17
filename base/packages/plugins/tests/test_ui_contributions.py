@@ -16,7 +16,7 @@ def _ui(**contributions: object) -> dict[str, object]:
                 "apiVersion": 2,
                 "name": "acme",
                 "version": "1.0.0",
-                "engines": {"ava": ">=0.1.0"},
+                "engines": {"meiva": ">=0.1.0"},
                 "contributions": {"ui": contributions},
             },
         )
@@ -232,7 +232,7 @@ def test_ui_must_be_an_object() -> None:
                     "apiVersion": 2,
                     "name": "acme",
                     "version": "1.0.0",
-                    "engines": {"ava": ">=0.1.0"},
+                    "engines": {"meiva": ">=0.1.0"},
                     "contributions": {"ui": ["themes"]},
                 },
             )

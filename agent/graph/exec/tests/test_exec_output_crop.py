@@ -171,7 +171,7 @@ def test_execute_code_argument_reference_protects_archive(
         tool_calls=[
             {
                 "name": "execute_code",
-                "args": {"code": f"ava.files.read({str(archive)!r})"},
+                "args": {"code": f"meiva.files.read({str(archive)!r})"},
                 "id": "read",
             }
         ],

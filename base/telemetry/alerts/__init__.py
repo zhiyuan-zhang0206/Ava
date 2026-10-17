@@ -342,7 +342,7 @@ def format_local(ts: datetime | None) -> str:
     `%m-%d %H:%M` gave no way to tell which year an alert near New Year's
     fired in, and no way to tell which machine's local zone the reader was
     looking at on a multi-machine cluster. Renders in the cluster's
-    `AVA_TIMEZONE` (user ruling 2026-08-27: one cluster clock — a runner
+    `MEIVA_TIMEZONE` (user ruling 2026-08-27: one cluster clock — a runner
     whose OS zone differs from the cluster's must not show a different wall
     clock from every other surface); when this process holds no authoritative
     cluster timezone (settings-lite, gateway down) it falls back to the host
@@ -359,9 +359,9 @@ def frontend_base_url() -> str:
 
     The user reaches the fleet UI at Gate's entry port on the
     gateway host (the Next.js app itself binds another port and is proxied).
-    Derived from the two existing settings: the HOST of ``AVA_GATEWAY_URL``
+    Derived from the two existing settings: the HOST of ``MEIVA_GATEWAY_URL``
     (reachable over the private network, never localhost in prod) and the PORT of
-    ``AVA_FRONTEND_HEALTHCHECK_URL`` (the fleet UI entry the user reaches).
+    ``MEIVA_FRONTEND_HEALTHCHECK_URL`` (the fleet UI entry the user reaches).
     """
 
     gw = urlsplit(settings.gateway.gateway_url or "")

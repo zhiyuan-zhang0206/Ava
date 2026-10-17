@@ -90,7 +90,7 @@ async def run_rounds(
 
     A unit inside its stop window (`admission.quiesced()`) skips the round: every
     round borrows the pool, and the window exists so a held unit stops doing
-    database work. Rounds resume on their own when `ava start` releases the hold.
+    database work. Rounds resume on their own when `meiva start` releases the hold.
 
     An unreachable database skips the round (the next one retries). Any other
     exception ends the loop and, through the owning `TaskGroup`, the process:

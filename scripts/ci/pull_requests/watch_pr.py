@@ -1,9 +1,9 @@
-"""Optional Ava watcher: watch a PR's CI and wake the agent once it settles.
+"""Optional Meiva watcher: watch a PR's CI and wake the agent once it settles.
 
-This Ava lifecycle wrapper is optional; contributors can poll scripts/ci/cli.py directly.
+This Meiva lifecycle wrapper is optional; contributors can poll scripts/ci/cli.py directly.
 One-shot — delivers exactly one wake message, then exits. Launch it from an
 agent-profile process carrying the runner DB and Redis URLs with
-`ava.watcher.launch(code, timeout=..., name="ci-watch-<pr>")` right after
+`meiva.watcher.launch(code, timeout=..., name="ci-watch-<pr>")` right after
 pushing a PR; the wake message carries the verdict.
 
 The settled verdict is persisted first — `ci-verdict-<PR>.txt` in the
@@ -39,9 +39,9 @@ raw gh output):
   workspace, so the template `os.chdir`s into the repo before polling.
 
 Usage:
-1. Read this file with `ava.files.read(...)`
+1. Read this file with `meiva.files.read(...)`
 2. Replace the placeholders (REPO_ROOT / PR_NUMBER / CI_UTILS / WATCHER_ID)
-3. Launch from an agent-profile process with `ava.watcher.launch(code,
+3. Launch from an agent-profile process with `meiva.watcher.launch(code,
    timeout="3h", name="ci-watch-<pr>")`
 4. When no wake arrives, read `ci-verdict-<PR>.txt` in your workspace — it
    was already persisted before the watcher tried to deliver.
@@ -53,23 +53,23 @@ import sys
 
 from pydantic import ValidationError
 
-import ava
+import meiva
 from base.clock import Clock
 from base.config.domains.storage.data_plane import AgentProfileOwnerDbUrlRefusedError
 from base.host.system.hostport import Host
 from base.paths import workspace_dir
 
 # ── Configure before launching ───────────────────────────────────────────────
-REPO_ROOT = ""  # e.g. "/home/user/ava/.worktrees/ava-1234-task" — the worktree
+REPO_ROOT = ""  # e.g. "/home/user/meiva/.worktrees/meiva-1234-task" — the worktree
 # (or checkout) the PR branch is on. gh resolves the repo from
 # cwd, so the watcher chdirs here before every poll.
 PR_NUMBER = ""  # e.g. "1234"
-CI_UTILS = ""  # e.g. "/home/user/ava" — checkout containing scripts/ci/cli.py
+CI_UTILS = ""  # e.g. "/home/user/meiva" — checkout containing scripts/ci/cli.py
 CHECK_EVERY = 60  # seconds between polls
 NO_CHECKS_RETRIES = 3  # consecutive NO_CHECKS verdicts tolerated before waking
 TIMEOUT_S = 7200  # hard stop; reports "timed out" instead of a verdict
-WATCHER_ID = 0  # agent to wake (ava.self.AGENT_ID of the launching agent)
-VERDICT_FILE = f"ci-verdict-{PR_NUMBER}.txt"  # relative — `ava.files` resolves
+WATCHER_ID = 0  # agent to wake (meiva.self.AGENT_ID of the launching agent)
+VERDICT_FILE = f"ci-verdict-{PR_NUMBER}.txt"  # relative — `meiva.files` resolves
 # it in the launching agent's workspace: the settled verdict is persisted
 # there before any delivery attempt and stays behind after a failed delivery
 VERDICT_PATH = (workspace_dir(WATCHER_ID) / VERDICT_FILE).resolve()
@@ -93,7 +93,7 @@ def persistent_config_cause(exc: Exception) -> str | None:
 def wake(message: str) -> tuple[bool, str | None]:
     """Send `message` to the agent once; return delivery and the failure cause."""
     try:
-        ava.agents.send_message(WATCHER_ID, message)
+        meiva.agents.send_message(WATCHER_ID, message)
     except Exception as exc:
         return False, persistent_config_cause(exc) or f"{type(exc).__name__}: {exc}"
     return True, None
@@ -109,7 +109,7 @@ def finish(message: str) -> bool:
     """
     persisted = True
     try:
-        ava.files.write(VERDICT_FILE, message + "\n")
+        meiva.files.write(VERDICT_FILE, message + "\n")
     except Exception as exc:  # the wake below is the primary delivery path
         persisted = False
         print(f"verdict persist failed: {exc!r}", flush=True)

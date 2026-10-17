@@ -5,7 +5,7 @@
 The runtime currently couples macOS-proprietary machinery into general
 semantics: the permissions helper and TCC attribution share one axis with
 cross-platform mechanism code (dual spawn backends, the
-`AVA_PERMISSIONS_HELPER_SPAWN` switch, a half-migrated per-process backend
+`MEIVA_PERMISSIONS_HELPER_SPAWN` switch, a half-migrated per-process backend
 choice). The user's 2026-09-12 order asked for the architectural decoupling
 itself, not a point fix, plus a full-tree lifecycle end-state; the three-step
 skeleton came the same day at 16:08. Draft-1 went through #1818 fact
@@ -22,8 +22,8 @@ ruled the open decision points on 2026-09-12 17:40–17:41. Design record:
    manager pulls up root directly; the helper is not involved. **Hard
    constraint: zero permission content in root code**, enforced at the code
    layer by a file/symbol-level lint rule whose violations block merge.
-2. **One root supervisor (`ava-root`) owns one full process tree per
-   (machine × $AVA_HOME)** — all long-lived processes (services, agent host,
+2. **One root supervisor (`meiva-root`) owns one full process tree per
+   (machine × $MEIVA_HOME)** — all long-lived processes (services, agent host,
    session/PTY hosts) and turn children; the chain never truncates
    ("attribution tree = process tree"); root is single-instance, never
    restarts for upgrades (exec replacement), and is the whole tree's reaper.
@@ -48,7 +48,7 @@ ruled the open decision points on 2026-09-12 17:40–17:41. Design record:
    OS adapter keeps root alive within a finite budget, like root's own units —
    the macOS keeper stops after three consecutive unstable failures spanning about a minute, systemd
    after its start limit, and the boot job after ten attempts per boot; each
-   leaves an observable failure and an operator's `ava start` re-arms it.*
+   leaves an observable failure and an operator's `meiva start` re-arms it.*
 6. **One-shot (big-bang) migration** per the 2026-08-07 precedent; the
    per-Mac user touchpoint is one ~1–2 minute authorization click, not
    repeated by any canary-then-final sequence.
@@ -83,7 +83,7 @@ ruled the open decision points on 2026-09-12 17:40–17:41. Design record:
 ## Consequences
 
 - **Two independent programs/codebases** (permission-helper/seeder +
-  ava-root) with isolated failure domains; the permission-execution surface
+  meiva-root) with isolated failure domains; the permission-execution surface
   stays entirely in the helper, and the zero-permission lint becomes a merge
   gate for the root codebase.
 - **Measurement debt accepted; F1 first.** The design rests on TCC
@@ -98,4 +98,4 @@ ruled the open decision points on 2026-09-12 17:40–17:41. Design record:
   Settings), identical whether a transition canary lands or the final state
   lands first — never cumulative.
 
-Five-question record (added afterwards): [`2026-10-02-ava-root-five-questions.md`](2026-10-02-ava-root-five-questions.md).
+Five-question record (added afterwards): [`2026-10-02-meiva-root-five-questions.md`](2026-10-02-meiva-root-five-questions.md).

@@ -36,7 +36,7 @@ from ops.rpc_schemas import ShellInfo
 router = APIRouter()
 _log = logging.getLogger(__name__)
 _shell_probe_failures = metrics.get_meter(__name__).create_counter(
-    "ava.inspect.shell_probe.failures", unit="{failure}"
+    "meiva.inspect.shell_probe.failures", unit="{failure}"
 )
 
 _HEARTBEAT_PAUSE_LOOKBACK = timedelta(hours=24)
@@ -45,7 +45,7 @@ _HEARTBEAT_PAUSE_LOOKBACK = timedelta(hours=24)
 def _heartbeat_last_pause(pool: ConnectionPool[Any], agent_id: int) -> HeartbeatLastPause | None:
     """Read the newest recent committed pause from the indexed durable trail.
 
-    ``ava.self.pause_heartbeat`` inserts this row in the same transaction as
+    ``meiva.self.pause_heartbeat`` inserts this row in the same transaction as
     the pause deadline. The fixed 24-hour display horizon is unchanged;
     current-state reads never depend on telemetry delivery or Loki health.
     """

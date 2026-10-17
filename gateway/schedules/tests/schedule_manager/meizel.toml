@@ -1,6 +1,6 @@
 [debt.env-patch]
-"test_manager_pty.py#monkeypatch.setenv os.environ.AVA_HOME" = 1
-"test_manager_pty.py#monkeypatch.setitem os.environ.AVA_HOME" = 1
+"test_manager_pty.py#monkeypatch.setenv os.environ.MEIVA_HOME" = 1
+"test_manager_pty.py#monkeypatch.setitem os.environ.MEIVA_HOME" = 1
 
 [debt.first-party-patch]
 "test_manager_pty.py#monkeypatch.setattr services.wake.schedule_manager.manager.REPO_ROOT" = 1

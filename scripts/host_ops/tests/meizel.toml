@@ -1,8 +1,8 @@
 [debt.env-patch]
-"test_update_schedule_script.py#monkeypatch.delenv os.environ.AVA_DB_GENERATION" = 1
-"test_update_schedule_script.py#monkeypatch.delenv os.environ.AVA_PROCESS_PROFILE" = 1
+"test_update_schedule_script.py#monkeypatch.delenv os.environ.MEIVA_DB_GENERATION" = 1
+"test_update_schedule_script.py#monkeypatch.delenv os.environ.MEIVA_PROCESS_PROFILE" = 1
 "test_update_schedule_script.py#monkeypatch.setenv os.environ" = 1
-"test_update_schedule_script.py#monkeypatch.setenv os.environ.AVA_HOME" = 2
+"test_update_schedule_script.py#monkeypatch.setenv os.environ.MEIVA_HOME" = 2
 
 [debt.first-party-patch]
 "test_update_schedule_script.py#monkeypatch.setattr base.db.Database.from_settings" = 2

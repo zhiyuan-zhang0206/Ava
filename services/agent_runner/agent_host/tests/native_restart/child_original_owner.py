@@ -25,21 +25,21 @@ from services.agent_runner.agent_host.invocation.native_work import (
 async def main() -> None:
     image = LoadedCommit.capture()
     gate = ProcessDbGate(version=CodeVersion(image).get, process="native-original-owner-test")
-    settings.data_plane.db_url = os.environ["AVA_TEST_NATIVE_DB"]
+    settings.data_plane.db_url = os.environ["MEIVA_TEST_NATIVE_DB"]
     async with AsyncConnectionPool[AsyncConnection[TupleRow]](
         settings.data_plane.db_url, open=False
     ) as pool:
-        agent = int(os.environ["AVA_TEST_NATIVE_AGENT"])
+        agent = int(os.environ["MEIVA_TEST_NATIVE_AGENT"])
         inc = await admit_hosted_runtime(
             pool,
             agent,
             "claim-test",
             uuid4(),
             db=Database.from_settings(gate=gate),
-            expected_from="running" if os.environ.get("AVA_TEST_NATIVE_SUCCESSOR") else "idling",
+            expected_from="running" if os.environ.get("MEIVA_TEST_NATIVE_SUCCESSOR") else "idling",
         )
         assert inc is not None
-        if os.environ.get("AVA_TEST_NATIVE_SUCCESSOR"):
+        if os.environ.get("MEIVA_TEST_NATIVE_SUCCESSOR"):
             sys.stdout.write(
                 json.dumps({"generation": str(inc.generation), "owner": str(inc.owner)}) + "\n"
             )

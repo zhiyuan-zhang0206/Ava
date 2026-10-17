@@ -8,7 +8,7 @@ Recognition runs in a tiny Swift binary compiled on demand from
 `ocr.swift`: Vision's
 VNRecognizeTextRequest with zh-Hans + en, emitting TSV lines
 `text\tx\ty\tw\th` in physical pixels, top-left origin. The binary lives
-under $AVA_HOME/logs/computer/ocr-bin/ and is rebuilt whenever the source is
+under $MEIVA_HOME/logs/computer/ocr-bin/ and is rebuilt whenever the source is
 newer (swiftc is not invoked per call).
 
 OCR reads a PNG file and needs no TCC grant: the screen-recording

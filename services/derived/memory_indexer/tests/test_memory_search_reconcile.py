@@ -227,7 +227,7 @@ def test_standalone_entry_shares_captured_gated_database_between_backends(
     assert all(call.kwargs["readonly"] for call in backend.call_args_list)
     count.assert_not_called()
     gate = create.call_args.kwargs["gate"]
-    assert gate.application_name() == "ava:readonly-probe:v7"
+    assert gate.application_name() == "meiva:readonly-probe:v7"
     count.assert_called_once_with(tmp_path, image.sha)
 
 

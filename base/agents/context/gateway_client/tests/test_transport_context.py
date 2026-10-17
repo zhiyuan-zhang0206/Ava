@@ -4,14 +4,14 @@ from typing import Any
 import httpx
 import pytest
 
-from base.agents.context import AvaContext
+from base.agents.context import MeivaContext
 from base.agents.context.clients import ClientSet
 from base.agents.context.gateway_client import launch_retry, memory_search, transport
 from base.agents.context.identity import AgentIdentity, ExternalLease
 
 
-def owner() -> AvaContext:
-    return AvaContext(
+def owner() -> MeivaContext:
+    return MeivaContext(
         clients=ClientSet(
             factories={
                 transport.GatewayTransportInputs: lambda: transport.GatewayTransportInputs(
@@ -106,7 +106,7 @@ def test_jitter_revalidates_borrowed_identity_and_propagates_expiration() -> Non
             raise RuntimeError("borrowed lease expired")
         return 321
 
-    context = AvaContext(
+    context = MeivaContext(
         identity=AgentIdentity(
             agent_id=9,
             owns_loop=False,

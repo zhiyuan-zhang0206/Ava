@@ -10,7 +10,7 @@ counts only as a chain from the repository root. `imports/executed.py` retains u
 
 What this module no longer does is decide a home or a layer: placing a test by the former import-linter
 contracts, and judging private patches by that placement, were replaced by meizel
-(`meizel/docs/checker/checker.ava.okf.md`).
+(`meizel/docs/checker/checker.meiva.okf.md`).
 """
 
 from __future__ import annotations
@@ -245,7 +245,7 @@ class _Collector(ast.NodeVisitor):
         last = callee.rsplit(".", 1)[-1]
         constants = _const_strings(node.args)
         if last == "load_skill_script" and constants:
-            self._note_path(node.lineno, "ava_builtins/skills/" + "/".join(constants))
+            self._note_path(node.lineno, "meiva_builtins/skills/" + "/".join(constants))
         if (
             last == "joinpath"
             and constants

@@ -33,7 +33,7 @@ from tests.fixtures.gateway_config import post_spawn
 
 _OBSERVER = (
     Path(__file__).resolve().parents[3]
-    / "ava_builtins/skills/coordination/ava-being-a-long-running-agent/scripts/agent_usage.py"
+    / "meiva_builtins/skills/coordination/meiva-being-a-long-running-agent/scripts/agent_usage.py"
 )
 
 
@@ -111,7 +111,7 @@ def test_usage_reminder_preserves_handoff_across_late_checkpoint_and_restart(
         # Begin polling before the fork exists; it must be rediscovered on a
         # later poll rather than frozen into the observer's initial ID set.
         env = os.environ.copy()
-        env["AVA_AGENT_ID"] = str(owner)
+        env["MEIVA_AGENT_ID"] = str(owner)
         report_path = root / "usage.jsonl"
         with report_path.open("w") as output:
             observer = subprocess.Popen(  # noqa: S603 — fixed interpreter and repository script

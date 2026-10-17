@@ -24,7 +24,7 @@ def _read_agent(field: str):
 def _segment() -> list[AnyMessage]:
     msgs: list[AnyMessage] = [
         SystemMessage(content="head", id="h"),
-        HumanMessage(content="note", id="n", additional_kwargs={"ava_msg_type": "system_note"}),
+        HumanMessage(content="note", id="n", additional_kwargs={"meiva_msg_type": "system_note"}),
     ]
     for i in range(40):
         msgs.append(HumanMessage(content=f"u{i}", id=f"u{i}"))

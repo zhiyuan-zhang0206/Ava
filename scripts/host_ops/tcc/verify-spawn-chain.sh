@@ -5,7 +5,7 @@
 # side-effect-free TCCAccessPreflight queries (Desktop folder, All Files,
 # screen capture). tccd records every query as an AUTHREQ_ATTRIBUTION entry;
 # this script reads those records back and confirms the spawned process
-# resolves to com.ava.permissions-helper -- the attribution the helper-spawn
+# resolves to com.meiva.permissions-helper -- the attribution the helper-spawn
 # path exists to provide.
 #
 # Why preflight queries: a real access (e.g. listing ~/Desktop) blocks on a
@@ -15,7 +15,7 @@
 # spawned a Desktop-listing probe; do not bring that back (task #3205).
 #
 # Verdict: PASS means the probe's requests were attributed to
-# com.ava.permissions-helper. The per-service preflight results are printed
+# com.meiva.permissions-helper. The per-service preflight results are printed
 # for information -- they reflect the helper identity's current grant state
 # (0 granted / 1 denied / 2 not determined) and do NOT change the verdict.
 #
@@ -141,11 +141,11 @@ sleep 2
 LOG_OUTPUT="$(/usr/bin/log show --last 1m --style compact \
     --predicate 'eventMessage CONTAINS "AUTHREQ_ATTRIBUTION"' 2>&1)"
 RESPONSIBLE_LINES="$(printf '%s\n' "$LOG_OUTPUT" \
-    | grep -E 'responsible=\{[^}]*identifier=com\.ava\.permissions-helper' || true)"
+    | grep -E 'responsible=\{[^}]*identifier=com\.meiva\.permissions-helper' || true)"
 
 if printf '%s\n' "$RESPONSIBLE_LINES" \
     | grep -Eq "(accessing|requesting)=\{[^}]*pid=${PROBE_PID}([^0-9]|$)"; then
-    printf 'PASS: probe pid %s is attributed to com.ava.permissions-helper\n' "$PROBE_PID"
+    printf 'PASS: probe pid %s is attributed to com.meiva.permissions-helper\n' "$PROBE_PID"
     if [[ -f "$WORKDIR/probe.results.json" ]]; then
         printf 'helper grant states (informational, not part of the verdict):\n'
         "$PYTHON" - "$WORKDIR/probe.results.json" <<'PY'

@@ -3,12 +3,12 @@
     python3 scripts/verify/container.py --ref origin/main
     python3 scripts/verify/container.py --ref HEAD --evidence-root /path/to/evidence
 
-The container is one Ava machine: production layout (`~/.ava`, source at
-`~/.ava/source`), native Postgres, Redis and PgBouncer, no systemd, no mounts of the
+The container is one Meiva machine: production layout (`~/.meiva`, source at
+`~/.meiva/source`), native Postgres, Redis and PgBouncer, no systemd, no mounts of the
 host's cluster, no published ports. The run resolves the ref to one commit, builds
 the image if the provisioning inputs changed, starts a container, clones the commit
-into it, builds both dependency trees from that commit's lockfiles, runs `ava init`
-and then the first `ava start` (gateway and agent-runner on one box), runs the observer, copies the
+into it, builds both dependency trees from that commit's lockfiles, runs `meiva init`
+and then the first `meiva start` (gateway and agent-runner on one box), runs the observer, copies the
 evidence out, and removes the container with its volumes. The model is scripted;
 no provider key is injected, so nothing secret can reach the container. The design
 is future/infra/engineering/verification-boundaries.md.
@@ -47,8 +47,8 @@ from scripts.verify.boundary import (  # noqa: E402 — standalone script
     resolve_commit,
 )
 
-IMAGE = "ava-verify"
-CACHE_VOLUME = "ava-verify-cache"
+IMAGE = "meiva-verify"
+CACHE_VOLUME = "meiva-verify-cache"
 CONTAINER_HOME = "/home/verify"
 OBJECTS_MOUNT = "/src/objects"
 WORK = f"{CONTAINER_HOME}/verify"
@@ -59,9 +59,9 @@ CONTEXT_TREES = ("scripts/provision",)
 
 PREPARE_SOURCE = """
 set -euo pipefail
-install -d -m 700 "$HOME/.ava"
-git init -q "$HOME/.ava/source"
-cd "$HOME/.ava/source"
+install -d -m 700 "$HOME/.meiva"
+git init -q "$HOME/.meiva/source"
+cd "$HOME/.meiva/source"
 echo {objects} > .git/objects/info/alternates
 git -c advice.detachedHead=false checkout -q --detach "$1"
 git repack -a -d -q
@@ -186,7 +186,7 @@ def build_image(evidence: Evidence) -> str:
 
 
 def run_steps(evidence: Evidence, container: str, commit: str) -> None:
-    source = f"{CONTAINER_HOME}/.ava/source"
+    source = f"{CONTAINER_HOME}/.meiva/source"
     profile = profile_text()
     observer = (RECIPE / "observe.py").read_text()
     observe = f"cd {source} && PYTHONPATH={source} .venv/bin/python {WORK}/observe.py {WORK}/observer.json"
@@ -208,7 +208,7 @@ def collect(evidence: Evidence, container: str) -> None:
     """Copy the observer's JSON and the cluster's logs out, best effort."""
     for name, path in (
         ("observer.json", f"{WORK}/observer.json"),
-        ("cluster-logs", f"{CONTAINER_HOME}/.ava/logs"),
+        ("cluster-logs", f"{CONTAINER_HOME}/.meiva/logs"),
     ):
         copied = subprocess.run(  # noqa: S603 — argv list, never a shell
             ["docker", "cp", f"{container}:{path}", str(evidence.root / name)],
@@ -229,7 +229,7 @@ def run(ref: str, evidence_root: Path, memory: str, shm: str) -> int:
         TIMEOUTS,
     )
     evidence.root.mkdir(parents=True, mode=0o700)
-    container = f"ava-verify-{commit[:8]}-{uuid.uuid4().hex[:6]}"
+    container = f"meiva-verify-{commit[:8]}-{uuid.uuid4().hex[:6]}"
     evidence.result["container"] = container
     print(f"evidence: {evidence.root}\ncommit: {commit}", flush=True)
     failure: BaseException | None = None
@@ -272,7 +272,7 @@ def main() -> int:
     parser.add_argument(
         "--evidence-root",
         type=Path,
-        default=Path(tempfile.gettempdir()) / "ava-verify",
+        default=Path(tempfile.gettempdir()) / "meiva-verify",
         help="parent directory of the per-run evidence directory",
     )
     parser.add_argument("--memory", default="8g", help="container memory limit")

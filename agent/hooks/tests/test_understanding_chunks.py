@@ -109,7 +109,7 @@ async def test_a_segments_first_turn_only_records_the_baseline_past_the_head(
     compacted: list[AnyMessage] = [
         SystemMessage(content="head", id="h"),
         HumanMessage(
-            content="summary", id="s", additional_kwargs={"ava_msg_type": "compact_summary"}
+            content="summary", id="s", additional_kwargs={"meiva_msg_type": "compact_summary"}
         ),
         HumanMessage(content="next", id="n"),
     ]
@@ -324,7 +324,9 @@ async def test_closing_chunk_stops_before_an_unanswered_tool_call(
 
 
 def _framework(kind: str, id_: str) -> HumanMessage:
-    return HumanMessage(content=f"[system] {id_}", id=id_, additional_kwargs={"ava_msg_type": kind})
+    return HumanMessage(
+        content=f"[system] {id_}", id=id_, additional_kwargs={"meiva_msg_type": kind}
+    )
 
 
 def _new_agent_segment() -> list[AnyMessage]:
@@ -334,7 +336,9 @@ def _new_agent_segment() -> list[AnyMessage]:
         _framework("system_note", "tz"),
         _framework("system_note", "agent-id"),
         _framework("system_note", "memory-index"),
-        HumanMessage(content="first task", id="u1", additional_kwargs={"ava_msg_type": "inbound"}),
+        HumanMessage(
+            content="first task", id="u1", additional_kwargs={"meiva_msg_type": "inbound"}
+        ),
         AIMessage(content="ok", id="a1"),
     ]
 
@@ -349,7 +353,7 @@ def _compacted_segment() -> list[AnyMessage]:
         _framework("compact_summary", "summary"),
         _framework("system_note", "dump-path"),
         AIMessage(content="continuing", id="a1"),
-        HumanMessage(content="later", id="u2", additional_kwargs={"ava_msg_type": "inbound"}),
+        HumanMessage(content="later", id="u2", additional_kwargs={"meiva_msg_type": "inbound"}),
     ]
 
 
@@ -422,7 +426,7 @@ def _stamped(seconds: int) -> HumanMessage:
     return HumanMessage(
         content="m",
         id=f"s{seconds}",
-        additional_kwargs={"ava_created_at": f"2026-10-07T12:00:{seconds:02d}+00:00"},
+        additional_kwargs={"meiva_created_at": f"2026-10-07T12:00:{seconds:02d}+00:00"},
     )
 
 
@@ -470,9 +474,9 @@ def _inbound_picked_up(pickup: str, created: str) -> HumanMessage:
         content="in",
         id="in1",
         additional_kwargs={
-            "ava_msg_type": "inbound",
-            "ava_created_at": created,
-            "ava_picked_up_at": pickup,
+            "meiva_msg_type": "inbound",
+            "meiva_created_at": created,
+            "meiva_picked_up_at": pickup,
         },
     )
 
@@ -499,7 +503,7 @@ async def test_a_last_message_without_a_usable_time_is_not_waved_through_or_an_e
     """Old messages have no timezone (or no stamp at all): the check cannot pass, so it is the
     timeout path at once: no exception, the boundary is stamped, the lag event says so."""
     polls = _checkpoint_clock(monkeypatch, [99])
-    kwargs = {} if stamp is None else {"ava_created_at": stamp}
+    kwargs = {} if stamp is None else {"meiva_created_at": stamp}
     last = HumanMessage(content="old", id="old", additional_kwargs=kwargs)
     await uc.await_snapshot(MagicMock(), _State([*_request(3), last]), 3, read_agent=_read_agent)
     assert emitted_events.names() == ["understanding_snapshot_lag"] and polls == []

@@ -12,7 +12,7 @@ from scripts.structure.tests.patch_repo import make_repo
 
 def evidence(root: Path, text: str, path: str = "cli/tests/test_probe.py") -> facts.Evidence:
     return facts.collect(
-        ast.parse(text), path, placement.ModuleIndex(root), tops=("base", "ava", "cli")
+        ast.parse(text), path, placement.ModuleIndex(root), tops=("base", "meiva", "cli")
     )
 
 
@@ -72,7 +72,7 @@ def test_relative_literal_dynamic_import_and_opaque_input(tmp_path: Path) -> Non
 def test_local_shadow_does_not_pollute_global_dynamic_alias(tmp_path: Path) -> None:
     found = evidence(
         make_repo(tmp_path),
-        "import importlib as loader\ndef unrelated(loader):\n loader.import_module('ava.missing')\nloader.import_module('base.net.retry')\n",
+        "import importlib as loader\ndef unrelated(loader):\n loader.import_module('meiva.missing')\nloader.import_module('base.net.retry')\n",
     )
     assert [fact.target for fact in found.records] == ["base.net.retry"]
     assert found.unknown == ()
@@ -299,7 +299,7 @@ def test_comprehension_binding_does_not_hide_enclosing_import(
 def test_comprehension_first_iterator_uses_parent_but_body_uses_local_scope(tmp_path: Path) -> None:
     found = evidence(
         make_repo(tmp_path),
-        "import importlib\n[importlib.import_module('ava') "
+        "import importlib\n[importlib.import_module('meiva') "
         "for importlib in importlib.import_module('base.net.retry')]\n",
     )
     assert [fact.target for fact in found.records] == ["base.net.retry"]
@@ -407,7 +407,7 @@ def test_module_name_and_literal_tables_bound_dynamic_imports(tmp_path: Path) ->
         make_repo(tmp_path),
         "import importlib\n"
         "_LAZY = {'retry': '.retry', 'pool': 'base.db.pool'}\n"
-        "_MODULES = {'base.config': 1, 'ava.agents.api': 2}\n"
+        "_MODULES = {'base.config': 1, 'meiva.agents.api': 2}\n"
         "def load(name):\n"
         "    return importlib.import_module(_LAZY[name], 'base.net')\n"
         "def every():\n"
@@ -422,7 +422,7 @@ def test_module_name_and_literal_tables_bound_dynamic_imports(tmp_path: Path) ->
         "base.net.retry",
         "base.db.pool",
         "base.config",
-        "ava.agents.api",
+        "meiva.agents.api",
         "base.net",
     ]
     assert len(found.unknown) == 2
@@ -682,7 +682,7 @@ def test_shadowed_file_loader_is_not_an_importlib_operation(tmp_path: Path) -> N
 def test_file_loader_gap_blocks_otherwise_complete_python_subject_lca(tmp_path: Path) -> None:
     root = make_repo(tmp_path)
     source = (
-        "from base.net import retry\nfrom ava.agents import api\n"
+        "from base.net import retry\nfrom meiva.agents import api\n"
         "from pathlib import Path\nfrom importlib.util import spec_from_file_location\n"
         "resource = Path(__file__).resolve().parents[2] / 'base/net/retry.py'\n"
         "resource.read_text()\nretry.backoff()\napi.spawn()\n"

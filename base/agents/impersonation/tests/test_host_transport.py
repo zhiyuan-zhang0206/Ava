@@ -41,7 +41,7 @@ def _endpoint(path: Path) -> str:
 def short_socket() -> Iterator[Path]:
     """A bind path short enough for macOS's 104-char AF_UNIX limit.
 
-    pytest's ``tmp_path`` is too deep on macOS (ava/mcps/tests/test_daemon.py precedent:
+    pytest's ``tmp_path`` is too deep on macOS (meiva/mcps/tests/test_daemon.py precedent:
     the limit bites during bind, not connect); a short /tmp directory keeps
     every bind path legal on both platforms. Self-managed and removed on
     teardown.
@@ -143,7 +143,7 @@ def test_live_submit_delivers_over_the_control_socket(short_socket: Path) -> Non
         "initialized",
         "turn/start",
     ]
-    assert server.received[0]["params"]["clientInfo"]["name"] == "ava-impersonation-relay"
+    assert server.received[0]["params"]["clientInfo"]["name"] == "meiva-impersonation-relay"
     assert server.received[-1]["params"] == {
         "threadId": str(THREAD_ID),
         "input": [{"type": "text", "text": "hello host"}],

@@ -1,0 +1,8 @@
+from base.agents.tasks.model import Task
+from base.cluster.machine.tests.identity import machine_identity as machine_identity
+
+
+def test_fleet_task_model_remains_the_shared_model() -> None:
+    from meiva_builtins.plugins.meiva_fleet.task_registry import Task as FleetTask
+
+    assert FleetTask is Task

@@ -20,7 +20,7 @@ def _manifest(**overrides: object) -> pm.PluginManifest:
         "apiVersion": 2,
         "name": "acme",
         "version": "1.0.0",
-        "engines": {"ava": ">=0.1.0"},
+        "engines": {"meiva": ">=0.1.0"},
     }
     data.update(overrides)
     return pm.validate(cast(dict[str, Any], data))
@@ -97,7 +97,7 @@ def test_minimal_manifest_valid() -> None:
     m = _manifest()
     assert m.name == "acme"
     assert m.version == "1.0.0"
-    assert m.engines == {"ava": ">=0.1.0"}
+    assert m.engines == {"meiva": ">=0.1.0"}
     assert m.dependencies.plugins == {}
     assert m.dependencies.python_packages == {}
     assert m.dependencies.host_capabilities == {}
@@ -112,7 +112,7 @@ def test_validation_reports_every_problem() -> None:
                 "apiVersion": 3,
                 "name": "BadName",
                 "version": "not-semver",
-                "engines": {"ava": ">=0.1.0", "node": ">=1"},
+                "engines": {"meiva": ">=0.1.0", "node": ">=1"},
                 "bogus": 1,
             }
         )
@@ -136,7 +136,7 @@ def test_engines_required() -> None:
 
 def test_bad_engine_range_fails() -> None:
     with pytest.raises(ManifestError):
-        _manifest(engines={"ava": ">=1.*"})
+        _manifest(engines={"meiva": ">=1.*"})
 
 
 def test_hook_points_validated() -> None:
@@ -217,7 +217,7 @@ def test_python_packages_duplicate_fails() -> None:
                 "apiVersion": 2,
                 "name": "acme",
                 "version": "1.0.0",
-                "engines": {"ava": ">=0.1.0"},
+                "engines": {"meiva": ">=0.1.0"},
                 "dependencies": {"pythonPackages": ["mcp>=1,<2", "mcp>=1,<1.5"]},
             }
         )
@@ -234,18 +234,18 @@ def test_plugin_dependencies_range_validated() -> None:
 
 
 def test_check_host_engine() -> None:
-    m = _manifest(engines={"ava": ">=0.1.38"})
+    m = _manifest(engines={"meiva": ">=0.1.38"})
     assert pm.check_host_engine(m, "0.1.38") == []
     assert pm.check_host_engine(m, "0.2.0") == []
     errors = pm.check_host_engine(m, "0.1.5")
     assert len(errors) == 1
-    assert "requires Ava >=0.1.38" in errors[0]
+    assert "requires Meiva >=0.1.38" in errors[0]
 
 
 def test_check_host_engine_refuses_prerelease_without_explicit_opt_in() -> None:
-    m = _manifest(engines={"ava": ">=1.2.3"})
+    m = _manifest(engines={"meiva": ">=1.2.3"})
     assert pm.check_host_engine(m, "1.2.3-alpha")
-    m = _manifest(engines={"ava": ">=1.2.3-alpha"})
+    m = _manifest(engines={"meiva": ">=1.2.3-alpha"})
     assert pm.check_host_engine(m, "1.2.3-alpha") == []
 
 
@@ -370,7 +370,7 @@ def test_pyproject_missing(tmp_path: Path) -> None:
 
 
 def test_load_manifest_missing_file_is_refused(tmp_path: Path) -> None:
-    with pytest.raises(ManifestError, match=r"ava-plugin\.json not found") as exc:
+    with pytest.raises(ManifestError, match=r"meiva-plugin\.json not found") as exc:
         pm.load_manifest(tmp_path)
     assert '"apiVersion": 2' in str(exc.value)
 
@@ -380,27 +380,27 @@ def test_load_optional_manifest_missing_file_is_none(tmp_path: Path) -> None:
 
 
 def test_load_optional_manifest_validates_a_present_manifest(tmp_path: Path) -> None:
-    (tmp_path / "ava-plugin.json").write_text('{"apiVersion": 99}', encoding="utf-8")
+    (tmp_path / "meiva-plugin.json").write_text('{"apiVersion": 99}', encoding="utf-8")
     with pytest.raises(ManifestError, match="apiVersion"):
         pm.load_optional_manifest(tmp_path)
 
 
 def test_load_manifest_invalid_json(tmp_path: Path) -> None:
-    (tmp_path / "ava-plugin.json").write_text("not json", encoding="utf-8")
+    (tmp_path / "meiva-plugin.json").write_text("not json", encoding="utf-8")
     with pytest.raises(ManifestError, match="not valid JSON"):
         pm.load_manifest(tmp_path)
 
 
 def test_load_manifest_non_object(tmp_path: Path) -> None:
-    (tmp_path / "ava-plugin.json").write_text("[1]", encoding="utf-8")
+    (tmp_path / "meiva-plugin.json").write_text("[1]", encoding="utf-8")
     with pytest.raises(ManifestError, match="JSON object"):
         pm.load_manifest(tmp_path)
 
 
 def test_load_manifest_roundtrip(tmp_path: Path) -> None:
-    (tmp_path / "ava-plugin.json").write_text(
+    (tmp_path / "meiva-plugin.json").write_text(
         '{"apiVersion": 2, "name": "acme", "version": "1.0.0", '
-        '"engines": {"ava": ">=0.1.0"}, "dependencies": {"pythonPackages": ["mcp>=1.27,<2"]}}',
+        '"engines": {"meiva": ">=0.1.0"}, "dependencies": {"pythonPackages": ["mcp>=1.27,<2"]}}',
         encoding="utf-8",
     )
     m = pm.load_manifest(tmp_path)
@@ -494,7 +494,7 @@ def test_requires_commit_bad_format_fails() -> None:
 
 def test_both_engines_and_requires_commit_are_accepted() -> None:
     m = _manifest(requires_commit="d" * 40)
-    assert m.engines == {"ava": ">=0.1.0"}
+    assert m.engines == {"meiva": ">=0.1.0"}
     assert m.requires_commit == "d" * 40
 
 

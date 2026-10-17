@@ -124,8 +124,8 @@ def _run_permitted(context: OwnerContext) -> None:
     if datetime.now(UTC) >= context.allocation.deadline:
         raise RuntimeError("exec deadline expired while waiting for owner permit")
     if (
-        Path(os.environ["AVA_EXEC_REQUEST_FILE"]) != context.request_path
-        or Path(os.environ["AVA_EXEC_RESULT_FILE"]) != context.result_path
+        Path(os.environ["MEIVA_EXEC_REQUEST_FILE"]) != context.request_path
+        or Path(os.environ["MEIVA_EXEC_RESULT_FILE"]) != context.result_path
         or hashlib.sha256(
             # Defensive ceiling for hashing the launcher-written request
             # envelope: far above any legitimate request, still a bounded read

@@ -25,7 +25,7 @@ The unsolved, high-value problem is **where the tasks come from**:
 ## Task capture = a task-intake skill (simpler than it first looks)
 
 The capture mechanism is not a harvesting machine — it is **a skill** (general,
-read by Claude Code *and* the Ava agent alike, not repo-specific). When the user
+read by Claude Code *and* the Meiva agent alike, not repo-specific). When the user
 brings a raw task, the skill makes the agent:
 
 1. **brainstorm with the user first** — align on what the task actually is

@@ -310,8 +310,8 @@ mod tests {
     #[test]
     fn full_url_passes_through() {
         assert_eq!(
-            parse_entry("https://ava.example.com/").map(|u| u.to_string()),
-            Some("https://ava.example.com/".to_string())
+            parse_entry("https://meiva.example.com/").map(|u| u.to_string()),
+            Some("https://meiva.example.com/".to_string())
         );
     }
 
@@ -493,7 +493,7 @@ mod tests {
 
     #[test]
     fn tls_is_exempt_from_the_range_policy() {
-        assert!(is_private_host(&url("https://ava.example.com/")));
+        assert!(is_private_host(&url("https://meiva.example.com/")));
     }
 
     #[test]

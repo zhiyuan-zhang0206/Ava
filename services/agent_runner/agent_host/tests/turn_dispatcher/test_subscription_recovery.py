@@ -82,7 +82,7 @@ class TestSubscriptionRecovery:
         task = asyncio.create_task(disp.run())
         try:
             await asyncio.wait_for(first_failure.wait(), timeout=1.0)
-            pubsub.messages.put_nowait({"type": "pmessage", "channel": "ava:inbound:23"})
+            pubsub.messages.put_nowait({"type": "pmessage", "channel": "meiva:inbound:23"})
             await asyncio.wait_for(scheduler.woken_event.wait(), timeout=1.0)
 
             assert scheduler.woken == [23]

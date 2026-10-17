@@ -2,12 +2,12 @@
 
 ## Context
 
-The `ava_code` after_exec hook read per-turn state from the host process, raised
+The `meiva_code` after_exec hook read per-turn state from the host process, raised
 `PluginStateOutsideTurnError` on every call, and a `contextlib.suppress(Exception)` ate it. The
 hook was a no-op from the day it shipped and wrote not one log line. Nothing about the failure was
 distinguishable from a feature that works.
 
-An AST sweep of production code (`agent`, `ava`, `ava_builtins`, `base`, `cli`, `gateway`, `ops`,
+An AST sweep of production code (`agent`, `meiva`, `meiva_builtins`, `base`, `cli`, `gateway`, `ops`,
 `services`, `scripts`) found 207 sites of the same shape: broad `except` / `suppress(Exception)`
 whose body neither re-raises nor reports, or reports only at debug/info. They fell in three groups:
 cleanup and probe code where the failure had a known, expected type; code that wrapped a call

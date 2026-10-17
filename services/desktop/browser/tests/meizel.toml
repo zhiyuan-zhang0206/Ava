@@ -3,10 +3,10 @@
 "test_browser_mcp_daemon_tab_groups.py" = ["test_browser_mcp_daemon.py"]
 
 [debt.env-patch]
-"test_browser_macos_readiness.py#monkeypatch.setenv os.environ.AVA_HOME" = 1
-"test_browser_session.py#monkeypatch.delenv os.environ.AVA_API_TOKEN" = 1
-"test_browser_session.py#monkeypatch.setenv os.environ.AVA_API_TOKEN" = 1
-"test_browser_session.py#monkeypatch.setenv os.environ.AVA_PROCESS_PROFILE" = 2
+"test_browser_macos_readiness.py#monkeypatch.setenv os.environ.MEIVA_HOME" = 1
+"test_browser_session.py#monkeypatch.delenv os.environ.MEIVA_API_TOKEN" = 1
+"test_browser_session.py#monkeypatch.setenv os.environ.MEIVA_API_TOKEN" = 1
+"test_browser_session.py#monkeypatch.setenv os.environ.MEIVA_PROCESS_PROFILE" = 2
 
 [debt.first-party-patch]
 "test_browser_daemon.py#monkeypatch.setattr base.config.settings.gateway.gateway_url" = 1

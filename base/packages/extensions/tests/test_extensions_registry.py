@@ -293,7 +293,7 @@ class TestEnablementIsClusterPolicy:
             assert names == ["s-on"]
 
     def test_set_default_enabled_reports_an_unknown_name(self, db_conn: psycopg.Connection) -> None:
-        """False rather than a silent success — the caller's `ava skill enable
+        """False rather than a silent success — the caller's `meiva skill enable
         <typo>` has to be able to say so."""
         with db_conn.transaction(force_rollback=True):
             assert reg.set_default_enabled(db_conn, "no-such-extension", enabled=True) is False

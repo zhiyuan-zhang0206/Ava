@@ -44,7 +44,7 @@ def test_jsonl_and_otlp_use_one_byte_identity(
         span_id="ef01" * 4,
         agent_id=8902,
         machine="test-mac",
-        cluster=".ava-test",
+        cluster=".meiva-test",
         process="test-proc",
         category="audit",
         event_name="send_message",

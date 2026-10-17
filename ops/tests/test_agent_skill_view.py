@@ -12,12 +12,12 @@ from langgraph.checkpoint.base import empty_checkpoint
 from langgraph.checkpoint.postgres import PostgresSaver
 from psycopg.types.json import Jsonb
 
-from ava.mcps import config as mcp_config
 from base.db import create_agent
 from base.packages import composer_commands
 from base.packages.extensions import install_registry
 from base.packages.plugins import mcp_enabled
-from base.paths import ava_home, skills_dir
+from base.paths import meiva_home, skills_dir
+from meiva.mcps import config as mcp_config
 from ops.cluster import operations as cluster
 
 
@@ -32,7 +32,7 @@ def _write_skill(root: Path, name: str, description: str = "project skill") -> N
 
 @pytest.fixture
 def load_dir(unit_home: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
-    root = skills_dir(ava_home())
+    root = skills_dir(meiva_home())
     root.mkdir()
     _write_skill(root, "load-skill", "converged skill")
     monkeypatch.setattr(install_registry, "loadable_skill_names", lambda: {"load-skill"})
@@ -101,14 +101,14 @@ def test_agent_skill_view_inputs_read_checkpointed_cwd_and_pinned_narrowing(
         ),
     )
     checkpoint = empty_checkpoint()
-    checkpoint["channel_values"] = {"ava_code__cwd": str(tmp_path)}
-    checkpoint["channel_versions"] = {"ava_code__cwd": "1", "__start__": "1"}
+    checkpoint["channel_values"] = {"meiva_code__cwd": str(tmp_path)}
+    checkpoint["channel_versions"] = {"meiva_code__cwd": "1", "__start__": "1"}
     saver = PostgresSaver(conn=cast(Any, db_conn))
     saver.put(
         config={"configurable": {"thread_id": str(agent_id), "checkpoint_ns": ""}},
         checkpoint=checkpoint,
         metadata={"source": "input", "step": 1, "parents": {}},
-        new_versions={"ava_code__cwd": "1"},
+        new_versions={"meiva_code__cwd": "1"},
     )
 
     cwd, wanted = cluster.agent_skill_view_inputs(_OneConnectionPool(db_conn), agent_id)

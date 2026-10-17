@@ -219,7 +219,7 @@ def definition_identities(definitions: list[Symbol]) -> list[Symbol]:
     return result
 
 
-# ava:ref scripts/content_lint/code_comments/docs/code_comments.ava.okf.md#python-entry-shebang
+# meiva:ref scripts/content_lint/code_comments/docs/code_comments.meiva.okf.md#python-entry-shebang
 def parse_python(path: str, text: str) -> Source:
     tree = ast.parse(text, filename=path)
     collector = SymbolCollector(text, fixture_owners(tree))

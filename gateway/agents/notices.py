@@ -1,11 +1,11 @@
-"""The ava.ui.notify() agent_notices endpoints (user-facing).
+"""The meiva.ui.notify() agent_notices endpoints (user-facing).
 
 - GET  /api/notices/open     — cross-fleet open FYI notices (require_response false).
 - POST /api/keyed/v1/agents/{id}/notices/{notice_id}/resolve — resolve one open notice
   (the handler lives here; `notice_operations.router` mounts it).
 
 The unified agent->user queue lives in agent_notices (migration 0053). An agent
-calls ava.ui.notify() to post a notice at one of three rungs (require_response x
+calls meiva.ui.notify() to post a notice at one of three rungs (require_response x
 blocking). Notices that need a response ride the agent snapshot inline (a bounded
 worklist); FYI notices (require_response false) stay off the snapshot — the
 snapshot carries only unread_notice_count — so GET /api/notices/open is the FYI
@@ -13,7 +13,7 @@ feed's content source. Both kinds surface in the resolved page of
 GET /api/notices once resolved.
 
 A notice is resolved by the user (answer / dismiss / read) via the POST here, or
-withdrawn by the agent via ava.ui.dismiss_notice(); either sets resolved_at +
+withdrawn by the agent via meiva.ui.dismiss_notice(); either sets resolved_at +
 resolution. When the user supplies a reply it is cached on the row (reply column)
 and delivered to the agent as a chat inbound — the reply column is a cache, not
 the delivery channel. Every notice resolution is a notice-system event, not
@@ -458,7 +458,7 @@ async def post_notice_resolve(
 
 # ── unified notice write API (R3 door ④) ─────────────────────────────────
 # The agent->user queue has ONE write path: the agent SDK calls these
-# endpoints (ava.ui.notify here; edit_notice / dismiss_notice through the
+# endpoints (meiva.ui.notify here; edit_notice / dismiss_notice through the
 # guarded routes in `notice_operations`), which perform the whole lifecycle
 # atomically in one transaction — supersede+insert for notify, observed-row
 # update for edit/dismiss — plus the event publishes. The agent_notices table

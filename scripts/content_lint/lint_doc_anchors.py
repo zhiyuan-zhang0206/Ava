@@ -4,7 +4,7 @@
 The procedural docs cite code by anchor — `` `base/telemetry/tracing.py:turn_span` `` — so a
 reader can jump straight at the thing being described. Nothing validated them.
 `lint_doc_symbols.py` looks like the guard but is not: its pattern is
-`ava.<name>`, which validates the **SDK namespace** surface; a `file:symbol`
+`meiva.<name>`, which validates the **SDK namespace** surface; a `file:symbol`
 anchor falls entirely outside it. The one lint that ever resolved this shape
 (`lint_trace_anchors.py`) covered `traces/` only and retired with that axis.
 
@@ -47,19 +47,19 @@ backticked, so the miss is latent rather than live.
 ## Scope: the procedural axis, the built-in skills, and the OKF axis
 
 `docs/conventions/`, the repo's own dev skills under `.agents/skills/`, and the
-built-in skills under `ava_builtins/skills/` — all three tell an agent what to
+built-in skills under `meiva_builtins/skills/` — all three tell an agent what to
 do *right now*, so a stale anchor there is a live instruction to open something
 that no longer exists. `docs/decisions/` is a never-rewritten archive and `future/`
 is design space that may name not-yet-built symbols; both stay out, exactly as
 they are for `lint_doc_symbols.py` and `check_doc_references.py`.
 
-The **OKF axis** — every `*.ava.okf.md` under the repo root — is scanned too.
+The **OKF axis** — every `*.meiva.okf.md` under the repo root — is scanned too.
 Its `## Entry Points` sections are *made* of `file.py:symbol` anchors, so it is
 the densest and least guarded surface (issue #112). Hidden directories are not
 descended, with the same single exception the OKF graph makes: `.github/`.
 
 **Anchors are repo-relative on every axis.** The OKF axis once wrote 15 anchors
-relative to the citing doc's own directory (`agent/graph/docs/graph.ava.okf.md`
+relative to the citing doc's own directory (`agent/graph/docs/graph.meiva.okf.md`
 citing `` `_build.py:build_graph` `` for `agent/graph/_build.py`). That
 convention was normalised away rather than resolved two ways (issue #112): one
 shape, one meaning, and the resolver stays the trivial single-root lookup that
@@ -86,7 +86,7 @@ from pathlib import Path
 _REPO_ROOT = Path(__file__).resolve().parent.parent.parent
 DOCS_CONVENTIONS = _REPO_ROOT / "docs" / "conventions"
 DEV_SKILLS = _REPO_ROOT / ".agents" / "skills"
-BUILTIN_SKILLS = _REPO_ROOT / "ava_builtins" / "skills"
+BUILTIN_SKILLS = _REPO_ROOT / "meiva_builtins" / "skills"
 
 # Inline-code span: text between single backticks, no embedded backtick or
 # newline. Same span definition as `lint_doc_symbols.py`.
@@ -174,7 +174,7 @@ _OKF_SKIP_DIRS = {".venv", "node_modules", "__pycache__", ".cache"}
 
 
 def iter_okf_docs() -> list[Path]:
-    """Every `*.ava.okf.md` under the repo root.
+    """Every `*.meiva.okf.md` under the repo root.
 
     Hidden directories are not descended, with the one exception the OKF graph
     itself makes (`.github/` carries an overview node). `.venv` / `node_modules`
@@ -193,7 +193,7 @@ def iter_okf_docs() -> list[Path]:
                 keep.append(name)
         dirnames[:] = keep
         for name in filenames:
-            if name.endswith(".ava.okf.md"):
+            if name.endswith(".meiva.okf.md"):
                 files.append(Path(dirpath) / name)
     return sorted(files)
 
@@ -256,7 +256,7 @@ def check() -> int:
             print(v, file=sys.stderr)
         print(
             f"\n{len(violations)} dangling file:symbol anchor(s) across the scanned docs "
-            "(conventions, .agents/skills, ava_builtins/skills, *.ava.okf.md). A rename or "
+            "(conventions, .agents/skills, meiva_builtins/skills, *.meiva.okf.md). A rename or "
             "deletion left a doc pointing at code that is no longer there — update the "
             "anchor to the new name (or drop it).",
             file=sys.stderr,

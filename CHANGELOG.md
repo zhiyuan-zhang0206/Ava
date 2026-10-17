@@ -1,7 +1,7 @@
 # Changelog
 
 Notable changes, newest first. Format follows
-[Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Ava is pre-1.0; the
+[Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Meiva is pre-1.0; the
 per-release PR-level detail lives in the annotated release tags (`git tag -n99`)
 and the matching GitHub Releases.
 
@@ -16,8 +16,8 @@ and the matching GitHub Releases.
   stop, so live agent shells stay mounted and the shared Chrome keeps its sessions when their code
   did not change. A touched component — or any decision failure — restarts as before, and
   `--restart-all` skips the decision.
-- An external agent (Claude Code, Codex, an MCP client) can message an Ava agent
-  through `ava agents send --source ...`, the SDK or MCP `send_message` in two
+- An external agent (Claude Code, Codex, an MCP client) can message an Meiva agent
+  through `meiva agents send --source ...`, the SDK or MCP `send_message` in two
   ways: `user` delivers as the user, and `external_agent:<subject>[:<instance>]`
   delivers as a message from that declared agent (shown with its name in the
   agent's context and in the web timeline). The runtime-protocol negotiation
@@ -35,7 +35,7 @@ and the matching GitHub Releases.
   tab retries, with the `auth401_rejected` aggregate still counting every
   rejection. `delivery_stalled` is the single stall signal (its log line is
   INFO) and the agent db pool reports a slow borrow after
-  `AVA_DB_POOL_SLOW_ACQUIRE_WARN_SECONDS` (default 10s, was 3s).
+  `MEIVA_DB_POOL_SLOW_ACQUIRE_WARN_SECONDS` (default 10s, was 3s).
 - Alert notification is Grafana Alerting's alone
   ([decision](docs/decisions/observability/alerts/2026-10-04-alerting-on-grafana-alerting.md)): signal ->
   rule (`for:` is the debounce) -> notification policy (grouping, repeat) ->
@@ -44,44 +44,44 @@ and the matching GitHub Releases.
   inspector-metrics gap, the impersonation event log, the root unit episodes
   and the IM push watchdog no longer write alert rows or push IM themselves;
   each emits a declared event and a rule in `rules.yml` carries its alert. The
-  in-code gates are gone with their keys: `AVA_ALERTS_TRANSITION_WARNING_SECONDS`,
-  `AVA_ALERTS_TRANSITION_ERROR_SECONDS`,
-  `AVA_ALERTS_INSPECT_METRICS_DEGRADED_COOLDOWN_SECONDS`,
-  `AVA_DELIVERY_WATCHDOG_ALERT_GRACE_SECONDS`,
-  `AVA_DB_POOL_SLOW_ACQUIRE_WARN_COOLDOWN_SECONDS`,
-  `AVA_VENV_PROBE_FAILURE_THRESHOLD`, `AVA_BREW_PIN_PROBE_FAILURE_THRESHOLD` and
-  `AVA_BROWSER_REACH_FAILURE_THRESHOLD`, the root-unit episode store,
+  in-code gates are gone with their keys: `MEIVA_ALERTS_TRANSITION_WARNING_SECONDS`,
+  `MEIVA_ALERTS_TRANSITION_ERROR_SECONDS`,
+  `MEIVA_ALERTS_INSPECT_METRICS_DEGRADED_COOLDOWN_SECONDS`,
+  `MEIVA_DELIVERY_WATCHDOG_ALERT_GRACE_SECONDS`,
+  `MEIVA_DB_POOL_SLOW_ACQUIRE_WARN_COOLDOWN_SECONDS`,
+  `MEIVA_VENV_PROBE_FAILURE_THRESHOLD`, `MEIVA_BREW_PIN_PROBE_FAILURE_THRESHOLD` and
+  `MEIVA_BROWSER_REACH_FAILURE_THRESHOLD`, the root-unit episode store,
   `terminal_escalate_rounds`, the boot-defer streak ledger (`hosted_boot_recovery_stalled`
   is now `hosted_boot_recovery_deferred`, one event per deferred boot) and the
   deploy-window gates of the delivery watchdog and the shell reaper.
   `python -m cli.fleet_update down` opens one Grafana silence over every alert
-  (the disk alerts excepted) and `up` expires it; `ava cluster health-probe`
+  (the disk alerts excepted) and `up` expires it; `meiva cluster health-probe`
   emits `health_probe_ran` every run, and its absence is itself a rule.
 - Agent shells live in one `pty-sessions` roster service per machine instead of one detached
-  host process each. A session outlives an agent, an agent host and a gateway restarting; `ava
-  stop`, `ava restart`, an update, a service crash and a reboot end every session, and `ava stop`
-  and `ava restart` notify the owners of busy ones. A shell's base environment is the service's
+  host process each. A session outlives an agent, an agent host and a gateway restarting; `meiva
+  stop`, `meiva restart`, an update, a service crash and a reboot end every session, and `meiva stop`
+  and `meiva restart` notify the owners of busy ones. A shell's base environment is the service's
   plus the forwarded env, so a variable only the creating process held is not carried over
   ([decision](docs/decisions/runtime/processes/sessions/2026-10-03-pty-sessions-service.md)).
 - Owners of busy shells are also told when a `pty-sessions` service dies uncleanly (a crash, a
-  SIGKILL, a reboot): the next service start, or an `ava stop` that finds no service, writes a
+  SIGKILL, a reboot): the next service start, or an `meiva stop` that finds no service, writes a
   notice for each session the ledger last saw running a job. A database that cannot be reached
   only logs
   ([decision](docs/decisions/agents/messages/2026-10-04-pty-crash-notices.md)).
 
-- `ava start` settles a maintenance hold's failed continuation receipts instead of refusing
+- `meiva start` settles a maintenance hold's failed continuation receipts instead of refusing
   to run: once the unit serves, each failed agent's restart pointer is re-delivered with the
   hold's release, an agent whose pointer is gone is logged at ERROR and its owner told (alert
-  row plus IM push), and the hold releases. `ava start` is also the exit for a hold that never
-  stopped services. `ava status` prints the maintenance hold, and `ava status --json` prints
+  row plus IM push), and the hold releases. `meiva start` is also the exit for a hold that never
+  stopped services. `meiva status` prints the maintenance hold, and `meiva status --json` prints
   only it as one JSON object (`{"hold": {...}}`)
-  ([decision](docs/decisions/agents/graph/2026-10-04-delete-ava-maintenance.md)).
+  ([decision](docs/decisions/agents/graph/2026-10-04-delete-meiva-maintenance.md)).
 
 ### Removed
-- `ava maintenance` in full (`status`, `repair`, `cancel`), with `repair`'s operator-identity
+- `meiva maintenance` in full (`status`, `repair`, `cancel`), with `repair`'s operator-identity
   record in the hold journal (`repaired`, `repair_record`; a journal that carries them still
   reads) and the agent-host absence probe only it used
-  ([decision](docs/decisions/agents/graph/2026-10-04-delete-ava-maintenance.md)).
+  ([decision](docs/decisions/agents/graph/2026-10-04-delete-meiva-maintenance.md)).
 - Zero-effect CLI surfaces: `restart --force-reap` (identical to `--mode force`), the
   unreachable `boot` lite-verbs entry, the `mcp ls` / `plugins ls` aliases, the no-op
   `stop --stop-browser`, and `cluster health-probe`'s `--agent-min` /
@@ -90,7 +90,7 @@ and the matching GitHub Releases.
   stay; the flags now fail at argument parsing
   ([decision](docs/decisions/engineering/design/simplification/2026-10-03-deletion-sweep.md)).
 - Four read endpoints with no consumer: `GET /api/agents/{id}/activity` (its writer went
-  with `ava.self.log` in 2026-08-02; the `agent_activity` table drops separately — the
+  with `meiva.self.log` in 2026-08-02; the `agent_activity` table drops separately — the
   "remain (history)" note in the notice-SDK-slimming decision is overturned),
   `GET /api/agents/{id}/completion-notice-policy`, and `GET /api/notices/escalations` /
   `GET /api/notices/resolved` (the unified `GET /api/notices` feed carries the resolved
@@ -100,23 +100,23 @@ and the matching GitHub Releases.
   `retention_floor`, the read-era/slice/plan types) and `INDEX_LABEL_CUTOVER_AT`: the last
   Loki event readers went in the telemetry-readers-on-postgres move
   ([decision](docs/decisions/engineering/design/simplification/2026-10-03-deletion-sweep.md)).
-- The mcp-daemon pre-rename compatibility (the `ava._mcps_daemon` argv arm): a
+- The mcp-daemon pre-rename compatibility (the `meiva._mcps_daemon` argv arm): a
   four-machine process census shows no pre-rename process left
   ([decision](docs/decisions/engineering/design/simplification/2026-10-03-deletion-sweep.md)).
-- The `AVA_RUNNER_MODE` setting in the visual-baselines workflow and the lazy-import
+- The `MEIVA_RUNNER_MODE` setting in the visual-baselines workflow and the lazy-import
   tests' clean-env strips: nothing reads it
   ([decision](docs/decisions/engineering/design/simplification/2026-10-03-deletion-sweep.md)).
-- `ava maintenance prepare`, `drain`, `stop`, `start`, `resume` and `stop-data-plane`, with
-  `--keep-terminals` and `--gateway-last`: the same kernel as `ava stop` and `ava start`, taken
-  one step at a time, with no caller. `ava maintenance` kept `status`, `repair` and `cancel`
+- `meiva maintenance prepare`, `drain`, `stop`, `start`, `resume` and `stop-data-plane`, with
+  `--keep-terminals` and `--gateway-last`: the same kernel as `meiva stop` and `meiva start`, taken
+  one step at a time, with no caller. `meiva maintenance` kept `status`, `repair` and `cancel`
   (formerly `resume --cancel`) until it was deleted whole
   ([decision](docs/decisions/runtime/updates/execution/converge/2026-10-03-delete-manual-maintenance-verbs.md)).
 - The per-session pty hosts with their records, orphan reaper, envfile handoff and CLI transport,
-  `ava restart` no longer keeps shells; the generic `--keep-service pty-sessions` does.
-- `ava pause`: a stop that kept the data plane, browser, helper and persistent shells.
-  `ava stop --keep-infra --keep-service NAME` names the retained services, and `ava
+  `meiva restart` no longer keeps shells; the generic `--keep-service pty-sessions` does.
+- `meiva pause`: a stop that kept the data plane, browser, helper and persistent shells.
+  `meiva stop --keep-infra --keep-service NAME` names the retained services, and `meiva
   restart` keeps the data plane, browser and helper as before
-  ([decision](docs/decisions/agents/graph/2026-10-03-delete-ava-pause.md)).
+  ([decision](docs/decisions/agents/graph/2026-10-03-delete-meiva-pause.md)).
 - Port-block allocation and the start-time port scan and `.env` drift check:
   every home records one fixed port table (25 slots,
   `base/host/env/port_table.py`) at birth, and the health-port-base start option
@@ -130,41 +130,41 @@ and the matching GitHub Releases.
   ([decision](docs/decisions/runtime/updates/release/2026-09-30-remove-release-image-path.md)).
 - The update straggler reap: a drain that truncated and released an agent still
   in a long turn, with its `reaped` hold receipts, settle-at-boot, four events
-  and the `AVA_UPDATE_STRAGGLER_REAP_SECONDS` and
-  `AVA_UPDATE_QUIESCE_TIMEOUT_SECONDS` settings. A stop still never kills a
+  and the `MEIVA_UPDATE_STRAGGLER_REAP_SECONDS` and
+  `MEIVA_UPDATE_QUIESCE_TIMEOUT_SECONDS` settings. A stop still never kills a
   straggler; it waits out `--timeout` and the operator escalates with `--force`
   ([decision](docs/decisions/runtime/updates/recovery/2026-09-30-remove-straggler-reap.md)).
 - The managed-writer publication fence (`base/deploy/writers/`): hosted admission
   no longer locks `deployment_state` or defers a birth on its phase, and always
   advertises protocol zero ([decision](docs/decisions/runtime/updates/publication/2026-09-30-remove-publication.md)).
-- The cluster deploy lease (`base.deploy.state.cluster_lock`), `ava cluster
+- The cluster deploy lease (`base.deploy.state.cluster_lock`), `meiva cluster
   recover`, the roster's `deploy_hold` field and banner, and the lease readers in
-  the deploy window, heartbeat, log sink, package refresh and `ava stop`. A
-  stranded pause is read with `ava maintenance status` and ended with
-  `ava maintenance cancel` or `repair`; an unreadable journal is removed
+  the deploy window, heartbeat, log sink, package refresh and `meiva stop`. A
+  stranded pause is read with `meiva maintenance status` and ended with
+  `meiva maintenance cancel` or `repair`; an unreadable journal is removed
   by hand ([decision](docs/decisions/runtime/updates/release/2026-09-30-remove-deployment-lease.md)).
 
 ### Changed
-- `lint_ava_okf` no longer reports `[[wikilinks]]` quoted inside inline code spans or
+- `lint_meiva_okf` no longer reports `[[wikilinks]]` quoted inside inline code spans or
   fenced blocks (the same code-sample exemption `check_doc_references` applies): a sample
   documents the syntax, it is not a node-graph edge.
 - The venv diagnostic probe reports only after
-  `AVA_VENV_PROBE_FAILURE_THRESHOLD` consecutive failing rounds (default 2)
+  `MEIVA_VENV_PROBE_FAILURE_THRESHOLD` consecutive failing rounds (default 2)
   instead of the first: a single 5s subprocess deadline miss under high churn
   is not damage evidence, and the episode stays quiet until a healthy round
   re-arms it (task #4712).
-- The bottom-layer package `shared` is now `base` (`base < ava < agent <
+- The bottom-layer package `shared` is now `base` (`base < meiva < agent <
   gateway < cli`), with no compatibility aliases: external plugins, schedules
   and skills that import `shared.*` must import `base.*`.
 - The internal database plane always authenticates, whatever
-  `AVA_CLUSTER_SECRET` says: `pg_hba` admits only the OS-user administrator by
+  `MEIVA_CLUSTER_SECRET` says: `pg_hba` admits only the OS-user administrator by
   peer on the owner-only socket and SCRAM application logins; PgBouncer always
   uses SCRAM against the active write generation's verifier userlist (plus the
-  `ava_pooler_admin` console entry) and restarts when it changes. The schema
-  owner is NOLOGIN, `AVA_DB_ADMIN_PASSWORD` and local `AVA_RUNNER_DB_PASSWORD`
-  are retired, and `.env` holds a credential-free `AVA_DB_URL`. First start
-  mints write generation 0 (`ava_g0_gateway` / `ava_g0_runner`, inheriting the
-  NOLOGIN groups `ava_gateway` / `ava_runner`); the root launcher delivers each
+  `meiva_pooler_admin` console entry) and restarts when it changes. The schema
+  owner is NOLOGIN, `MEIVA_DB_ADMIN_PASSWORD` and local `MEIVA_RUNNER_DB_PASSWORD`
+  are retired, and `.env` holds a credential-free `MEIVA_DB_URL`. First start
+  mints write generation 0 (`meiva_g0_gateway` / `meiva_g0_runner`, inheriting the
+  NOLOGIN groups `meiva_gateway` / `meiva_runner`); the root launcher delivers each
   service its class login. A home born earlier (no ledger) is refused, and no
   conversion exists; `scripts/data_plane_ops/rotate_data_plane_secrets.py` now rotates Redis
   credentials only.
@@ -182,7 +182,7 @@ and the matching GitHub Releases.
   the Exec outcomes other bucket (PM ruling 2026-08-31). A rising request
   band is state/payload inflation; a write-side serialize step is a
   dump-cost regression.
-- `ava impersonate send <session_id> --agent <agent_id> --to <target> --content '<text>'`
+- `meiva impersonate send <session_id> --agent <agent_id> --to <target> --content '<text>'`
   — the attested CLI form of sending to another agent as a leased identity
   (previously reachable only through the SDK attachment); it delivers source
   `agent:<id>`, the same borrowed identity the attachment stamps (task #4102).
@@ -193,17 +193,17 @@ and the matching GitHub Releases.
   #3884 stall telemetry): the Ops dashboard's LLM section gains a
   "Provider stalls (per minute)" panel — `stream_stalled_retry` sliced by
   vendor plus the `stream_stall_pair_terminated` pair count — and the
-  `ava-ops` alert group gains `ava-ops-llm-stall-pair` (fires on the first
-  two-adjacent-stall termination) and `ava-ops-llm-stall-burst` (≥5 stalled
+  `meiva-ops` alert group gains `meiva-ops-llm-stall-pair` (fires on the first
+  two-adjacent-stall termination) and `meiva-ops-llm-stall-burst` (≥5 stalled
   streams per vendor per 15m; trailing-7d calibration: benign ≤2/15m, the
   2026-09-14/15 deepseek wave ran 2-9/15m). The pair event stays outside
   `LLM_ERROR_FAMILY` (it co-emits with the adjacent stall the family already
   counts); the new panel and rule are its display surface (task #3948).
 - The cluster health probe gains two alert-only provider-account checks: a
-  balance minimum (`AVA_PROVIDER_GUARD_BALANCE_MIN_CNY`, default 500 CNY)
+  balance minimum (`MEIVA_PROVIDER_GUARD_BALANCE_MIN_CNY`, default 500 CNY)
   read from the provider's balance endpoint fires *before* the account runs
   dry, and a halted-agents check fires while at least
-  `AVA_PROVIDER_GUARD_BLOCKED_AGENTS_MIN` agents sit halted by permanent
+  `MEIVA_PROVIDER_GUARD_BLOCKED_AGENTS_MIN` agents sit halted by permanent
   provider rejections — both ride the existing 300s probe tick and edge-alert
   pipeline on the gateway host (task #3918).
 - The watchdog gains a `browser-reach` check (agent-runner, browser-enabled
@@ -212,12 +212,12 @@ and the matching GitHub Releases.
   read of the gateway health URL, so "the browser's own network face cannot
   reach the gateway" (the 2026-09-18 stale-tab pool hang, task #3921) is
   detected instead of staying green. Report-only after
-  `AVA_BROWSER_REACH_FAILURE_THRESHOLD` consecutive failing probes (one ERROR
+  `MEIVA_BROWSER_REACH_FAILURE_THRESHOLD` consecutive failing probes (one ERROR
   with both readings and the recovery pointer); throttled by
-  `AVA_BROWSER_REACH_PROBE_INTERVAL_S`, bounded by `AVA_BROWSER_REACH_TIMEOUT_S`.
+  `MEIVA_BROWSER_REACH_PROBE_INTERVAL_S`, bounded by `MEIVA_BROWSER_REACH_TIMEOUT_S`.
 - Chrome pages created through the shared browser (an explicit `new_page`, or
   the auto-created page on a page-less first navigate) carry a hard TTL —
-  `AVA_CHROME_PAGE_DEFAULT_TTL_SECONDS`, 24h default — and the browser-mcp
+  `MEIVA_CHROME_PAGE_DEFAULT_TTL_SECONDS`, 24h default — and the browser-mcp
   daemon's sweep closes them once the deadline passes; activity never extends
   it. A daemon-owned `renew_page` tool, appended after the upstream tool list,
   moves the caller's page deadline to now + ttl (at most 24h per call); a page
@@ -228,12 +228,12 @@ and the matching GitHub Releases.
 
 ### Changed
 - Redis always authenticates, including a single box with an empty
-  `AVA_CLUSTER_SECRET`: first start mints `AVA_REDIS_ADMIN_PASSWORD` (the
-  `requirepass`) and the runtime ACL password in `AVA_REDIS_URL`, and no ACL user
-  is ever created `nopass`. The passwords do not rotate per rollout. `ava start`
+  `MEIVA_CLUSTER_SECRET`: first start mints `MEIVA_REDIS_ADMIN_PASSWORD` (the
+  `requirepass`) and the runtime ACL password in `MEIVA_REDIS_URL`, and no ACL user
+  is ever created `nopass`. The passwords do not rotate per rollout. `meiva start`
   refuses a home born without them; re-birth it as a new home. The bearer
   still decides only Redis's network reach.
-- The ops-facing `ava` CLI moves its remaining argument checks to the parse
+- The ops-facing `meiva` CLI moves its remaining argument checks to the parse
   layer (task #4092 batch B4, user ruling 2026-09-20): `schedules create`
   requires exactly one of `--script` / `--script-file`; `schedules update`
   and `presets update` require at least one field; `presets create|update
@@ -254,9 +254,9 @@ and the matching GitHub Releases.
   one of `--json` / `--command` and validates both at the parse layer (bad or
   non-object JSON, a `--env` pair without `=`, and `--arg`/`--env` without
   `--command` are usage errors), `mcp install --env` validates `KEY=VALUE`,
-  and `ava packages policy` requires at least one field with `--check-every`
+  and `meiva packages policy` requires at least one field with `--check-every`
   validated at parse time.
-- `ava impersonate request` / `renew` state their time parameters explicitly
+- `meiva impersonate request` / `renew` state their time parameters explicitly
   (task #4102): `request --ttl` and `--batch-window` and `renew --ttl` are
   required — missing values are usage errors before any command runs — the
   request's relay shape is validated at the CLI boundary, and the takeover
@@ -276,23 +276,23 @@ and the matching GitHub Releases.
   terminated, and an end-of-session note naming the cause. The single
   restart-shaped exception — a codex relay minted by an earlier incarnation,
   last beat before this process start, inside the fresh-start window
-  (`AVA_IMPERSONATION_REPROVISION_WINDOW_SECONDS`, default 120 s, 0 disables)
+  (`MEIVA_IMPERSONATION_REPROVISION_WINDOW_SECONDS`, default 120 s, 0 disables)
   — is re-provisioned instead of stopped.
 - The impersonation relay delivers routine inbox arrivals immediately unless a
   lease's merge window says otherwise: the per-lease window
   (`relay_batch_window_seconds`) is stated explicitly at request time
   (`--batch-window`, 0..300 seconds since task #4102); user chats, cancels and
   renewal reminders never wait in any case (task #3997).
-- A macOS `ava start` whose own chain runs outside the GUI login session no
+- A macOS `meiva start` whose own chain runs outside the GUI login session no
   longer brings services up in place (they would inherit the wrong launchd
   domain — the state that wedges the shared browser): an operator-shaped start
   hands the bring-up to the cluster's GUI-domain autostart job (`kickstart -p`,
   which never kills a running instance), waits for the job to reach its launch
   step, and answers with the same readiness exit contract as a normal start.
-  Internal restart legs (update / `ava restart` / the stop compensator) keep
+  Internal restart legs (update / `meiva restart` / the stop compensator) keep
   their in-place behavior — their credential-handover marker cannot cross
   domains and their flags are not equivalent to the canonical job — and
-  `AVA_START_GUI_HANDOVER=0` restores the previous warn-only behavior
+  `MEIVA_START_GUI_HANDOVER=0` restores the previous warn-only behavior
   (task #3348).
 - PR merge automation now uses Trunk Merge Queue: queued PRs are tested
   together in batches (target 4, max wait 5 min) via draft-PR runs on `trunk-merge/*`
@@ -305,7 +305,7 @@ and the matching GitHub Releases.
 - Inbound state semantics converge sooner and never double-show during a
   takeover (task #3999, from the #3683 duplicate display): every finished
   hosted turn now reconciles its own claimed `chat` rows at settlement — the
-  throttled checkpoint tail is flushed first (`AVA_HOST_TURN_RECONCILE_ENABLED`)
+  throttled checkpoint tail is flushed first (`MEIVA_HOST_TURN_RECONCILE_ENABLED`)
   — so a handled message reaches `done` without waiting for the next boot or
   abort, and the pending strip (`GET /api/agents/{id}/pending`) hides a chat
   the active session absorbed: while an unexpired active session exists, a
@@ -326,7 +326,7 @@ and the matching GitHub Releases.
   process reference and no live host process, it is quarantined (bytes
   preserved with a receipt) and counted, raising the
   `exec_request_bounded_quarantine` anomaly event; the retention switch is
-  `AVA_EXEC_REQUEST_BOUNDED_QUARANTINE_ENABLED`. Exec envelopes are also
+  `MEIVA_EXEC_REQUEST_BOUNDED_QUARANTINE_ENABLED`. Exec envelopes are also
   written atomically (temp file + fsync + rename), so a killed writer cannot
   produce that remnant in the first place, and a boot recovery that stays
   deferred across three consecutive boots escalates to the
@@ -338,14 +338,14 @@ and the matching GitHub Releases.
   re-raising that `CancelledError` — upstream psycopg#1345, still present in
   3.3.1), which left the cancelled task looping forever with its canceller hung
   in `await task` (task #3513).
-- Every automatic ava-browser rebuild now routes through the GUI domain when
+- Every automatic meiva-browser rebuild now routes through the GUI domain when
   the healthcheck's own chain runs outside the macOS GUI login session — the
   session-gone sweep and the live-session dead-CDP respawn stop the stuck
   session and kickstart the cluster's GUI-domain autostart job instead of
   re-creating a context-less session in place (the residual path that kept the
   wrong-domain loop alive after the task #3149 heal). The rebuild line is a
   WARNING naming the trigger and a cumulative attempt count, service respawns
-  record their chain's launchd domain for attribution, and `ava start` warns
+  record their chain's launchd domain for attribution, and `meiva start` warns
   loudly when an agent-runner host is started from a chain outside the GUI
   login session (task #3346).
 - A browser daemon chain that lost the GUI login session no longer waits
@@ -371,7 +371,7 @@ and the matching GitHub Releases.
 - Listener discovery no longer reads a restricted inspection context as
   absence: the lsof fallback resolves through standard absolute locations when
   a context's PATH omits it (macOS keeps lsof in /usr/sbin, which cron's
-  /usr/bin:/bin PATH never reaches — company-air `ava status` reported a
+  /usr/bin:/bin PATH never reaches — company-air `meiva status` reported a
   healthy collector as "nothing listening on port 4318" for exactly this
   reason), and a psutil scan that cannot attribute the port's LISTEN socket
   (a `pid is None` row) falls back to lsof instead of reporting empty; when
@@ -380,10 +380,10 @@ and the matching GitHub Releases.
 - New shell session transcripts start with a unique host-written identity line,
   preventing filelog fingerprint collisions from shared login or CLI banners.
 - Single-machine dual-unit telemetry port deviation: a unit whose local
-  collector deviates (`AVA_TELEMETRY_OTLP_PORT` 4319, e.g. the WSL unit beside
+  collector deviates (`MEIVA_TELEMETRY_OTLP_PORT` 4319, e.g. the WSL unit beside
   a Windows collector on 4318/8888) no longer derives its remote-station
   export target from its own port — station relays and probes use the station's
-  advertised ingress (or `AVA_OBSERVABILITY_OTLP_PORT`), so telemetry stops
+  advertised ingress (or `MEIVA_OBSERVABILITY_OTLP_PORT`), so telemetry stops
   black-holing to a port the station never listens on. Local collector liveness
   probes bind the unit's own receiver port independently of the producer export
   override, and a failed listener inspection reports `unavailable` instead of
@@ -395,17 +395,17 @@ and the matching GitHub Releases.
   blocking failure — the hold stays resumable, and the host re-drives the
   held-control path (explicit re-flush before the restart claim) on the next
   wake, so a drain can never certify through an un-flushed tail. Blocking
-  failures get a sanctioned exit: `ava maintenance repair --operation <op>
+  failures get a sanctioned exit: `meiva maintenance repair --operation <op>
   --acquired-at <ts> [--operator ...]` moves them into an audited `repaired`
-  record (operator identity + timestamp, both CAS sides visible in `ava
+  record (operator identity + timestamp, both CAS sides visible in `meiva
   maintenance status`) and releases the hold (2026-09-08 network degradation:
   38 PoolTimeout receipts permanently wedged the machine with no repair path).
 - Plugin loading is fail-soft: a plugin whose `plugin.py` raises at import (or
   a config entry whose plugin directory is gone) is skipped with a loud
-  `plugin_load_failed` event + log instead of crashing `import ava` cluster-wide
-  (2026-08-28 ava_ledger incident). External plugins' `from . import x` relative
+  `plugin_load_failed` event + log instead of crashing `import meiva` cluster-wide
+  (2026-08-28 meiva_ledger incident). External plugins' `from . import x` relative
   imports now resolve via a framework-registered `plugins.<name>` namespace
-  regardless of sys.path/cwd, and `ava plugins install`/`upgrade` land the
+  regardless of sys.path/cwd, and `meiva plugins install`/`upgrade` land the
   plugin tree atomically (staging + rename, previous version restored on
   failure) so a half-installed plugin can no longer exist.
 - Plugin-load containment now covers every load path, not just the graph build
@@ -417,7 +417,7 @@ and the matching GitHub Releases.
   `plugins_config.json` is imported by no production path (the boot loader
   previously ignored the enable set). The same per-plugin containment now
   covers `provider.py`, `services.py`, `setup.py`, a built-in `metrics.py`, and
-  the launched child's `import ava` self-load. Deliberately still fail-closed
+  the launched child's `import meiva` self-load. Deliberately still fail-closed
   (no guess at operator intent): duplicate plugin names, a malformed
   `plugins_config.json`, plugin-config schema drift, provider
   registration-contract violations, and the provider loader's post-load
@@ -469,8 +469,8 @@ and the matching GitHub Releases.
 
 ### Changed
 - Cross-machine file transfer no longer hard-requires a shared Google Drive
-  folder: `AVA_REQUIRE_GOOGLE_DRIVE` is replaced by the configurable
-  `AVA_CROSS_MACHINE_TRANSFER_BACKEND` (`drive` | `none`, default `drive`), and
+  folder: `MEIVA_REQUIRE_GOOGLE_DRIVE` is replaced by the configurable
+  `MEIVA_CROSS_MACHINE_TRANSFER_BACKEND` (`drive` | `none`, default `drive`), and
   the agent-runner converge step probes the backend and warns instead of
   blocking start when Drive is unavailable.
 - The local trace mirror now stays disk-bounded end to end: the collector's
@@ -480,7 +480,7 @@ and the matching GitHub Releases.
   timberjack-suffixed rotated names (`spans-<ts>-size.jsonl`), the manual
   `spans.cut-*` shape, and `.gz` variants — previously those files were
   invisible to retention and could even outlive the active file in a cap
-  prune. `ava trace ship` and the inspect-a-trace mirror fetcher read gzipped
+  prune. `meiva trace ship` and the inspect-a-trace mirror fetcher read gzipped
   segments transparently, continuing from the same per-file watermark.
 - Pure agent-runners now relay OTLP traces/logs/metrics through a
   bearer-authenticated gateway collector receiver instead of writing to
@@ -497,12 +497,12 @@ and the matching GitHub Releases.
 ### Removed
 - The one-time fleet cutover tooling: `scripts/cutover_*` (home adoption,
   inventory, legacy OS jobs, data-plane authority conversion, database-records
-  survey and repair), `cli/cutover_hold.py` with the start / `ava maintenance`
-  / `ava cluster recover` refusals of the cutover hold,
+  survey and repair), `cli/cutover_hold.py` with the start / `meiva maintenance`
+  / `meiva cluster recover` refusals of the cutover hold,
   `shared/predecessor_closure.py`, the `CutoverAuthority` ledger capability
   and their runbooks. A home born before the always-authenticated data plane
   is refused and no longer names a conversion.
-- `ava logs` CLI (list live sessions / tail one session's log) — replaced by
+- `meiva logs` CLI (list live sessions / tail one session's log) — replaced by
   the Loki query path above; see `deploy/lgtm/README.md`.
 
 ### Security

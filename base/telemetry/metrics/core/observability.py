@@ -20,12 +20,12 @@ _SDK_ATTR = {k: f"attributes_{k}" for k in SDK_CALL_KEYS}
 
 
 def core_metrics() -> list[MetricSpec]:
-    # ava:ref base/telemetry/metrics/docs/core-observability.ava.okf.md#query-measurement-scope
-    # ava:ref base/telemetry/metrics/docs/core-observability.ava.okf.md#compaction-effectiveness-denominator
+    # meiva:ref base/telemetry/metrics/docs/core-observability.meiva.okf.md#query-measurement-scope
+    # meiva:ref base/telemetry/metrics/docs/core-observability.meiva.okf.md#compaction-effectiveness-denominator
     specs: list[MetricSpec] = []
     specs.append(
         MetricSpec(
-            name="ava_obs_llm_cost_usd",
+            name="meiva_obs_llm_cost_usd",
             title="LLM cost",
             time_basis="per_minute",
             description=(
@@ -56,7 +56,7 @@ def core_metrics() -> list[MetricSpec]:
 
     specs.append(
         MetricSpec(
-            name="ava_obs_agent_llm_cost_usd",
+            name="meiva_obs_agent_llm_cost_usd",
             title="Agent LLM cost (USD)",
             description=(
                 "Inspector-only (W13b): the same cost read as llm_cost_usd, "
@@ -81,7 +81,7 @@ def core_metrics() -> list[MetricSpec]:
 
     specs.append(
         MetricSpec(
-            name="ava_obs_llm_error_rate",
+            name="meiva_obs_llm_error_rate",
             title="LLM errors",
             time_basis="per_minute",
             description=(
@@ -112,7 +112,7 @@ def core_metrics() -> list[MetricSpec]:
 
     specs.append(
         MetricSpec(
-            name="ava_obs_turn_ok_rate",
+            name="meiva_obs_turn_ok_rate",
             title="Turn success rate",
             description=(
                 "Share of turn_end with ok='true' per bucket — turn-level health "
@@ -139,13 +139,13 @@ def core_metrics() -> list[MetricSpec]:
 
     specs.append(
         MetricSpec(
-            name="ava_obs_turn_duration_s",
+            name="meiva_obs_turn_duration_s",
             title="Turn duration (p50/p95)",
             description=(
-                "p50 and p95 of the Prometheus ava_turn_end_duration_seconds "
+                "p50 and p95 of the Prometheus meiva_turn_end_duration_seconds "
                 "histogram. The p95 uses the same source and quantile as alert rule "
                 "R18: histogram_quantile(0.95, sum by (le) "
-                "(rate(ava_turn_end_duration_seconds_bucket[10m])))."
+                "(rate(meiva_turn_end_duration_seconds_bucket[10m])))."
             ),
             event_name="turn_end",
             category="telemetry",
@@ -154,11 +154,11 @@ def core_metrics() -> list[MetricSpec]:
             query_type="promql",
             query=(
                 "histogram_quantile(0.95, sum by (le) "
-                "(rate(ava_turn_end_duration_seconds_bucket[10m])))"
+                "(rate(meiva_turn_end_duration_seconds_bucket[10m])))"
             ),
             targets=[
                 "histogram_quantile(0.5, sum by (le) "
-                "(rate(ava_turn_end_duration_seconds_bucket[10m])))",
+                "(rate(meiva_turn_end_duration_seconds_bucket[10m])))",
             ],
             target_names=["p95_s", "p50_s"],
             field_defaults={"color": {"mode": "palette-classic"}},
@@ -173,7 +173,7 @@ def core_metrics() -> list[MetricSpec]:
 
     specs.append(
         MetricSpec(
-            name="ava_obs_compaction_summary_history_ratio",
+            name="meiva_obs_compaction_summary_history_ratio",
             title="Compaction ratio (summary/history)",
             description=(
                 "Mean percentage of discarded conversation characters retained in "
@@ -203,7 +203,7 @@ def core_metrics() -> list[MetricSpec]:
 
     specs.append(
         MetricSpec(
-            name="ava_obs_compaction_rate",
+            name="meiva_obs_compaction_rate",
             title="Completed compactions",
             time_basis="per_minute",
             description=(
@@ -267,7 +267,7 @@ def core_metrics() -> list[MetricSpec]:
     )
     specs.append(
         MetricSpec(
-            name="ava_obs_compaction_soft_share",
+            name="meiva_obs_compaction_soft_share",
             title="Soft compactions (target >=95% after reminder)",
             description=(
                 "Agent-authored completed compactions / (agent-authored + hard automatic). "
@@ -297,7 +297,7 @@ def core_metrics() -> list[MetricSpec]:
 
     specs.append(
         MetricSpec(
-            name="ava_obs_exec_success_rate",
+            name="meiva_obs_exec_success_rate",
             title="Exec outcomes",
             time_basis="per_minute",
             description=(
@@ -357,7 +357,7 @@ def core_metrics() -> list[MetricSpec]:
 
     specs.append(
         MetricSpec(
-            name="ava_obs_syntax_fix_by_kind",
+            name="meiva_obs_syntax_fix_by_kind",
             title="Syntax fix triggers by kind",
             time_basis="per_minute",
             description=(
@@ -428,7 +428,7 @@ def core_metrics() -> list[MetricSpec]:
 
     specs.append(
         MetricSpec(
-            name="ava_obs_spawn_by_spawner",
+            name="meiva_obs_spawn_by_spawner",
             title="Agent spawns / minute (by source)",
             description=(
                 "Spawn rate per minute: counts bucketed at $__interval and "
@@ -457,7 +457,7 @@ def core_metrics() -> list[MetricSpec]:
 
     specs.append(
         MetricSpec(
-            name="ava_obs_lifecycle_counts",
+            name="meiva_obs_lifecycle_counts",
             title="Agent lifecycle / minute",
             description=(
                 "Lifecycle-event rate per minute: counts bucketed at $__interval and "
@@ -486,7 +486,7 @@ def core_metrics() -> list[MetricSpec]:
 
     specs.append(
         MetricSpec(
-            name="ava_obs_sdk_call_top",
+            name="meiva_obs_sdk_call_top",
             title="SDK calls (Top 20)",
             description=(
                 "Top 20 sdk_call grouped by attributes.fn — runtime call-"
@@ -513,7 +513,7 @@ def core_metrics() -> list[MetricSpec]:
 
     specs.append(
         MetricSpec(
-            name="ava_obs_agent_llm_usage_table",
+            name="meiva_obs_agent_llm_usage_table",
             title="Per-agent LLM usage (Top 20)",
             description=(
                 "Per-agent LLM call count / in / out tokens / cost (window-"
@@ -555,7 +555,7 @@ def core_metrics() -> list[MetricSpec]:
 
     specs.append(
         MetricSpec(
-            name="ava_obs_halt_breakdown",
+            name="meiva_obs_halt_breakdown",
             title="Halt classes",
             time_basis="per_minute",
             description=(
@@ -604,7 +604,7 @@ def core_metrics() -> list[MetricSpec]:
 
     specs.append(
         MetricSpec(
-            name="ava_obs_delivery_stalled_count",
+            name="meiva_obs_delivery_stalled_count",
             title="Delivery stalled",
             time_basis="window",
             description=(
@@ -632,7 +632,7 @@ def core_metrics() -> list[MetricSpec]:
 
     specs.append(
         MetricSpec(
-            name="ava_obs_agent_delivery_stalled_count",
+            name="meiva_obs_agent_delivery_stalled_count",
             title="Agent delivery backlog",
             description=(
                 "Inspector-only (W13b): same as delivery_stalled_count, filtered "
@@ -656,7 +656,7 @@ def core_metrics() -> list[MetricSpec]:
 
     specs.append(
         MetricSpec(
-            name="ava_obs_events_rate",
+            name="meiva_obs_events_rate",
             title="Event rate (events/s)",
             description=(
                 "Total event-stream rate per bucket — rate() over the whole "

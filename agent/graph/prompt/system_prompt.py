@@ -1,4 +1,4 @@
-# ava:ref agent/graph/prompt/docs/composition.ava.okf.md#sdk-expansion
+# meiva:ref agent/graph/prompt/docs/composition.meiva.okf.md#sdk-expansion
 import contextlib
 import hashlib
 import inspect
@@ -41,13 +41,13 @@ def _resolved(setting: str, slices: AgentSlices, catalog: ModelCatalog) -> Any:
 
 def discover_all_namespaces(sdk_disable: Sequence[str]) -> list[str]:
 
-    import ava
+    import meiva
 
     discovered: list[str] = []
 
     def _collect(parent: ModuleType, prefix: str) -> None:
 
-        for name in ava.agent_visible_names(parent):
+        for name in meiva.agent_visible_names(parent):
             full = f"{prefix}.{name}" if prefix else name
             if full in CAPABILITY_SURFACES or disabled_by_sdk_config(full, sdk_disable):
                 continue
@@ -55,10 +55,10 @@ def discover_all_namespaces(sdk_disable: Sequence[str]) -> list[str]:
             if inspect.ismodule(attr) or isinstance(attr, SimpleNamespace):
                 discovered.append(full)
 
-                if inspect.ismodule(attr) and hasattr(attr, "__all_for_ava__"):
+                if inspect.ismodule(attr) and hasattr(attr, "__all_for_meiva__"):
                     _collect(attr, full)
 
-    _collect(ava, "")
+    _collect(meiva, "")
     return sorted(discovered)
 
 
@@ -66,7 +66,7 @@ def effective_sdk_expand(
     sdk_disable: Sequence[str], *, configured_expansions: Sequence[str]
 ) -> list[str]:
 
-    from ava.sdk_surface import install
+    from meiva.sdk_surface import install
 
     configured: list[str] = []
     for entry in configured_expansions:
@@ -88,7 +88,7 @@ def effective_sdk_expand(
                 "capability surface would render that skill's whole body (or that "
                 "server's tool schemas) into every prompt and record a bogus 'loaded' "
                 "attribution. Preload a skill with skills_to_expand_at_start; leave a "
-                "server's tools to ava.help(ava.mcps.<server>)",
+                "server's tools to meiva.help(meiva.mcps.<server>)",
                 path,
             )
             continue
@@ -104,26 +104,26 @@ def sdk_expand_section(slices: AgentSlices, *, catalog: ModelCatalog) -> str:
     )
     if not wanted:
         return ""
-    import ava
-    from ava.sdk_surface.help import render as render_help
+    import meiva
+    from meiva.sdk_surface.help import render as render_help
 
     pieces: list[str] = []
     seen_targets: set[int] = set()
 
-    hidden: frozenset[str] = ava.sdk_surface.attachment_transport.media_gated_members(
+    hidden: frozenset[str] = meiva.sdk_surface.attachment_transport.media_gated_members(
         slices.brain.llm_model, catalog=catalog
     )
     for path in wanted:
         if disabled_by_sdk_config(path, slices.prompt.sdk_disable):
             continue
-        target: object = ava
+        target: object = meiva
         try:
             for segment in path.split("."):
                 target = getattr(target, segment)
         except AttributeError:
             logging.getLogger(__name__).warning(
-                "sdk_expand_in_system_prompt: ava.%s does not resolve and is not covered "
-                "by AVA_SDK_DISABLE (typo, or a plugin namespace whose plugin is not "
+                "sdk_expand_in_system_prompt: meiva.%s does not resolve and is not covered "
+                "by MEIVA_SDK_DISABLE (typo, or a plugin namespace whose plugin is not "
                 "loaded?), skipping",
                 path,
             )
@@ -156,7 +156,7 @@ def _prefer_sdk_section(slices: AgentSlices, *, catalog: ModelCatalog) -> str:
         return ""
     return (
         "# Prefer your SDK\n\n"
-        "When an `ava.*` tool covers an operation, use it over a plain-Python "
+        "When an `meiva.*` tool covers an operation, use it over a plain-Python "
         "or raw-shell equivalent."
     )
 
@@ -278,9 +278,9 @@ def align_before_action_section(slices: AgentSlices, *, catalog: ModelCatalog) -
 _STEP_SKILL_INDEX = (
     "Does a skill already cover this? Read the `# Capabilities` index "
     "and match the task against descriptions and expected outputs before "
-    "starting work. Load applicable skills with ava.help(ava.skills.<name>). "
+    "starting work. Load applicable skills with meiva.help(meiva.skills.<name>). "
     "For non-trivial, ambiguous, consequential, sustained, or parallel work, "
-    "load ava-workflow when available (`ava.help(ava.skills.ava_workflow)`) "
+    "load meiva-workflow when available (`meiva.help(meiva.skills.meiva_workflow)`) "
     "to choose how to work. Its lightweight "
     "entry selects only the needed methods; it does not mandate an interview, "
     "goal supervision, or a plan document."
@@ -296,7 +296,7 @@ _STEP_NEIGHBORS = (
 _STEP_TOOLS = (
     "Does someone else have better tools? Tools are per-MACHINE, so this "
     "is about where an agent runs. Consider a peer on a machine with the "
-    "needed email or headed-browser access, or ava-guide.external-agents for "
+    "needed email or headed-browser access, or meiva-guide.external-agents for "
     "coding work when appropriate. Check actual capabilities and authority. "
     "A peer brief names relevant skills when needed, the outcome, and "
     "acceptance evidence; peers discover skills through their own index."
@@ -382,7 +382,7 @@ def temporal_awareness_section(slices: AgentSlices, *, catalog: ModelCatalog) ->
         "AI agent capability is the fastest-moving of these: development speed, what "
         "can be automated, and what AI can verify or earn evolve continuously past "
         "your cutoff. Before scheduling, estimating, or judging the feasibility of "
-        "such work, load ava.skills.ava_workflow.capability_timescale and check the shared "
+        "such work, load meiva.skills.meiva_workflow.capability_timescale and check the shared "
         "memory pool and current primary sources for task-relevant evidence. "
         "State verified capability and uncertainty instead of assuming a fixed improvement."
     )
@@ -433,14 +433,14 @@ def agent_workspace_pointer(slices: AgentSlices, *, agent_id: int | None) -> str
         "workspace. Other agents have their own; share a file by sending its "
         "absolute path."
         + workspace_section_hint(slices.history_dump)
-        + f"\n\nYour workspace file `{DOCUMENT_FILENAME}` is displayed next to your messages in Ava. "
+        + f"\n\nYour workspace file `{DOCUMENT_FILENAME}` is displayed next to your messages in Meiva. "
         "Use it to maintain shared context with the user. The user may return hours later "
         "and may not read every message; keep this document current, especially while "
         "waiting for a reply. File edits appear automatically; there is no publish step. "
         "Its current contents are included again after compaction. Choose the document's "
         "structure freely using Markdown; raw HTML, CSS and scripts are not rendered. "
         "Link local files and images directly: relative paths resolve from this document's "
-        "directory, absolute paths and ~/ paths refer to files on your machine. Ava "
+        "directory, absolute paths and ~/ paths refer to files on your machine. Meiva "
         "serves referenced files to the user; no copying, registration or server is needed. "
         "Keep linked files available. Use notifications when you need a reply; this "
         "document does not itself send a notification. If you previously maintained "
@@ -483,7 +483,7 @@ def _long_running_operation_section(_slices: AgentSlices) -> str:
         "unnecessary wakes, and repeated context, while preserving required "
         "verification, instruction delivery, deadlines, and timely response.\n\n"
         "For waiting, heartbeat pauses, monitor recovery, and persistence "
-        "procedures, load the ava-being-a-long-running-agent skill when available."
+        "procedures, load the meiva-being-a-long-running-agent skill when available."
     )
 
 
@@ -521,7 +521,7 @@ def build_system_prompt(
         BASE_SYSTEM_PROMPT,
         CODE_ACTION_PREAMBLE,
         SEQUENTIAL_TOOL_CALLS_NOTE,
-        get_ava_overview,
+        get_meiva_overview,
     )
 
     sequential = (
@@ -530,7 +530,7 @@ def build_system_prompt(
     if slices.read("agent", "prompt_sdk_overview_enabled"):
         parts = [
             BASE_SYSTEM_PROMPT.format(
-                _SEQUENTIAL_TOOL_CALLS=sequential, _AVA_OVERVIEW=get_ava_overview()
+                _SEQUENTIAL_TOOL_CALLS=sequential, _MEIVA_OVERVIEW=get_meiva_overview()
             )
         ]
     else:

@@ -45,7 +45,7 @@ def test_draft_spawns_writer_agent(
     )
     assert r.status_code == 200
     assert r.json()["agent_id"] == 4242
-    assert calls["label"] == "ava-schedule-writer"
+    assert calls["label"] == "meiva-schedule-writer"
     prompt = str(calls["prompt"])
     assert "consolidate memory nightly" in prompt
-    assert "ava.skills.ava_guide.schedules" in prompt
+    assert "meiva.skills.meiva_guide.schedules" in prompt

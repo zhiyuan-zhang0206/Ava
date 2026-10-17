@@ -534,9 +534,9 @@ def test_relocated_project_docs_skip_backend_tests(tmp_path: Path, path: str) ->
 def test_component_docs_skip_only_the_regular_pr_suite(tmp_path: Path) -> None:
     _selector_repo(tmp_path)
     paths = [
-        "scripts/lint/docs/lint.ava.okf.md",
-        "base/lm/docs/lm.ava.okf.md",
-        "ui/web/src/docs/components.ava.okf.md",
+        "scripts/lint/docs/lint.meiva.okf.md",
+        "base/lm/docs/lm.meiva.okf.md",
+        "ui/web/src/docs/components.meiva.okf.md",
     ]
     result = test_selector.select_tests(paths, repo_root=tmp_path)
     assert (result.decision, result.reason) == ("SKIP", "docs-only")
@@ -550,7 +550,7 @@ def test_component_docs_skip_only_the_regular_pr_suite(tmp_path: Path) -> None:
 
 def test_component_docs_preserve_selection_for_other_changes(tmp_path: Path) -> None:
     repo_root = _selector_repo(tmp_path)
-    docs = ["scripts/lint/docs/lint.ava.okf.md", "base/lm/docs/lm.ava.okf.md"]
+    docs = ["scripts/lint/docs/lint.meiva.okf.md", "base/lm/docs/lm.meiva.okf.md"]
     for changed_path, expected_tests in [
         ("tests/unit/test_changed.py", ("tests/unit/test_changed.py",)),
         ("cli/commands.py", ("cli/tests/test_owner.py", "tests/unit/test_imports.py")),
@@ -568,13 +568,13 @@ def test_okf_test_data_and_operational_markdown_are_not_documentation(tmp_path: 
     Markdown stay code-directory files that the owner rules select tests for."""
     repo_root = _selector_repo(tmp_path)
     checkout_paths = [
-        "scripts/lint/tests/docs/expected.ava.okf.md",
-        "base/lm/tests/docs/expected.ava.okf.md",
-        "tests/docs/expected.ava.okf.md",
-        "schedules/docs/example.ava.okf.md",
+        "scripts/lint/tests/docs/expected.meiva.okf.md",
+        "base/lm/tests/docs/expected.meiva.okf.md",
+        "tests/docs/expected.meiva.okf.md",
+        "schedules/docs/example.meiva.okf.md",
         "gateway/docs/AGENTS.md",
-        "ava_builtins/skills/ava-guide/docs/SKILL.md",
-        "gateway/gateway.ava.okf.md",
+        "meiva_builtins/skills/meiva-guide/docs/SKILL.md",
+        "gateway/gateway.meiva.okf.md",
     ]
     for path in checkout_paths:
         _write(repo_root, path)

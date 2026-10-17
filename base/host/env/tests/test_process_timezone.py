@@ -20,7 +20,7 @@ def test_process_timezone_uses_only_explicit_name(name: str | None) -> None:
             str(CHILD),
             json.dumps(name),
         ],
-        env={**os.environ, "TZ": "UTC", "AVA_TIMEZONE": "Europe/London"},
+        env={**os.environ, "TZ": "UTC", "MEIVA_TIMEZONE": "Europe/London"},
         capture_output=True,
         text=True,
         timeout=30,

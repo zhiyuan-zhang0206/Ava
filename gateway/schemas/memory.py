@@ -90,7 +90,7 @@ class MemorySearchResultItem(BaseModel):
 class MemorySearchResponse(BaseModel):
     """POST /api/memory/search response — RELATIVE paths from memory pool root.
 
-    Caller (SDK `ava.memory.search`) uses `ava.memory.PATH / p` to
+    Caller (SDK `meiva.memory.search`) uses `meiva.memory.PATH / p` to
     reconstruct absolute paths. fs-neutral makes mismatched gateway
     (e.g. /Users/x) and agent-runner (/home/y) filesystems work.
 
@@ -121,8 +121,8 @@ class MemoryGraphNode(BaseModel):
     tags: list[str]
     primary_tag: str
     timestamp: str | None
-    ava_agent: str | None
-    ava_machine: str | None
+    meiva_agent: str | None
+    meiva_machine: str | None
 
 
 class MemoryGraphEdge(BaseModel):
@@ -157,7 +157,7 @@ class MemoryNoteResponse(BaseModel):
     markdown with the YAML frontmatter removed (base.parse_note's body), so
     the frontend renders the note itself rather than re-parsing frontmatter
     (frontmatter values arrive as structured fields: title / description /
-    tags / timestamp / ava_agent / ava_machine).
+    tags / timestamp / meiva_agent / meiva_machine).
     """
 
     model_config = ConfigDict(frozen=True)
@@ -167,6 +167,6 @@ class MemoryNoteResponse(BaseModel):
     description: str | None
     tags: list[str]
     timestamp: str | None
-    ava_agent: str | None
-    ava_machine: str | None
+    meiva_agent: str | None
+    meiva_machine: str | None
     body: str

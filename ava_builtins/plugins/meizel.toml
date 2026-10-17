@@ -1,9 +1,0 @@
-exports = ["ava_fleet"]
-
-[uses]
-"ava_memory" = ["ava_code"]
-"tests" = ["ava_code", "ava_fleet", "ava_memory", "ava_sdk_reminder", "ava_syntax_fix"]
-
-[debt.private-module]
-"tests/ava_sdk_reminder_plugin/test_agent_reply_rearms_after_compaction.py -> ava_sdk_reminder/_state.py" = 1
-"tests/test_ava_sdk_reminder_plugin.py -> ava_sdk_reminder/_state.py" = 1

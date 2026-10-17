@@ -9,7 +9,7 @@ from pathlib import Path
 import pytest
 
 from agent.graph.exec.protocol import read_result, write_request
-from ava.tests.fixtures.pin_agent import exec_context
+from meiva.tests.fixtures.pin_agent import exec_context
 
 
 @pytest.mark.parametrize("error_type", ["AttributeError", "RuntimeError", "OSError"])
@@ -37,13 +37,13 @@ def test_child_plugin_binding_failure_keeps_original_boot_error(
         "def contribute():\n"
         "    return PluginContributions(config=Config)\n"
     )
-    (plugin / "ava-plugin.json").write_text(
+    (plugin / "meiva-plugin.json").write_text(
         json.dumps(
             {
                 "apiVersion": 2,
                 "name": "boot_failure",
                 "version": "1.0.0",
-                "engines": {"ava": ">=0.1.0"},
+                "engines": {"meiva": ">=0.1.0"},
                 "contributions": {
                     "sdkNamespaces": ["boot_failure"],
                     "config": {"schema": "default_config.py"},
@@ -65,13 +65,13 @@ def test_child_plugin_binding_failure_keeps_original_boot_error(
         incarnation=None,
     )
     env = os.environ | {
-        "AVA_HOME": str(home),
-        "AVA_PROCESS_PROFILE": "agent",
-        "AVA_EXEC_REQUEST_FILE": str(request),
-        "AVA_EXEC_RESULT_FILE": str(result),
-        "AVA_AGENT_CONFIG_OVERLAY": json.dumps({"value": 2}),
+        "MEIVA_HOME": str(home),
+        "MEIVA_PROCESS_PROFILE": "agent",
+        "MEIVA_EXEC_REQUEST_FILE": str(request),
+        "MEIVA_EXEC_RESULT_FILE": str(result),
+        "MEIVA_AGENT_CONFIG_OVERLAY": json.dumps({"value": 2}),
     }
-    env.pop("AVA_AGENT_ID", None)
+    env.pop("MEIVA_AGENT_ID", None)
     process = subprocess.run(
         [sys.executable, "-I", "-X", "utf8", "-m", "agent.execution.child"],
         env=env,

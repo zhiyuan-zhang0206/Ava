@@ -3,7 +3,7 @@
 "services.backup.artifact.tests.passphrase" = [
     ".",
 ]
-"ava.tests.fixtures.sdk" = [
+"meiva.tests.fixtures.sdk" = [
     "backup/test_run_with_progress_without_a_sink_defers.py",
     "test_backup.py",
     "test_backup_part2.py"

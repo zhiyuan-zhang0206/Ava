@@ -1,0 +1,52 @@
+exports = ["child_sdk_probes.py"]
+
+[uses]
+"test_config_boot_lite_meiva.py" = ["child_sdk_probes.py"]
+"test_sdk_disable.py" = ["child_sdk_disable.py"]
+"test_sdk_import_initialization.py" = ["child_sdk_probes.py"]
+"test_session_venv_projection.py" = ["child_sdk_probes.py"]
+
+[debt.env-patch]
+"test_external_caller_meiva.py#monkeypatch.delenv os.environ.MEIVA_AGENT_ID" = 1
+"test_external_caller_meiva.py#monkeypatch.setenv os.environ.MEIVA_CALLER_IDENTITY" = 2
+"test_packages_refresh_meiva.py#monkeypatch.setenv os.environ.MEIVA_HOME" = 1
+"test_session_venv_projection.py#monkeypatch.delenv os.environ.MEIVA_LAUNCHER_PROFILE" = 6
+"test_session_venv_projection.py#monkeypatch.delenv os.environ.MEIVA_PROCESS_PROFILE" = 4
+"test_session_venv_projection.py#monkeypatch.setenv os.environ" = 1
+"test_session_venv_projection.py#monkeypatch.setenv os.environ.MEIVA_HOME" = 4
+"test_session_venv_projection.py#monkeypatch.setenv os.environ.MEIVA_PROCESS_PROFILE" = 3
+"test_session_venv_projection.py#monkeypatch.setitem os.environ.MEIVA_CLUSTER_SECRET" = 4
+"test_session_venv_projection.py#monkeypatch.setitem os.environ.MEIVA_DB_URL" = 6
+"test_session_venv_projection.py#monkeypatch.setitem os.environ.MEIVA_REDIS_URL" = 7
+
+[debt.first-party-patch]
+"child_sdk_probes.py#assignment meiva.sdk_surface.installation.installed" = 2
+"child_sdk_probes.py#assignment base.agents.sdk.call_policy.policy" = 1
+"child_sdk_probes.py#assignment base.telemetry.emit" = 1
+"test_connect_fail_fast.py#monkeypatch.setattr meiva.sdk_surface.agent_identity.agent_id" = 2
+"test_connect_fail_fast.py#monkeypatch.setattr base.config.settings.data_plane.db_url" = 2
+"test_mcp_config.py#monkeypatch.setattr meiva.mcps.config.builtin_mcp_paths" = 9
+"test_mcp_config.py#monkeypatch.setattr meiva.mcps.config.display_available" = 5
+"test_mcp_config.py#monkeypatch.setattr meiva.mcps.config.plugin_config_paths" = 14
+"test_mcp_config_enable_filter.py#monkeypatch.setattr meiva.mcps.config.builtin_mcp_paths" = 1
+"test_mcp_config_enable_filter.py#monkeypatch.setattr meiva.mcps.config.plugin_config_paths" = 1
+"test_mcps_help.py#monkeypatch.setattr meiva.mcps.config.builtin_mcp_paths" = 1
+"test_packages_refresh_meiva.py#monkeypatch.setattr base.paths.repo_root" = 1
+"test_plugin_config_meiva.py#monkeypatch.setattr meiva.__plugin_installation__" = 1
+"test_session_venv_projection.py#monkeypatch.setattr meiva.shell.sessions.create_session" = 1
+"test_session_venv_projection.py#monkeypatch.setattr meiva.shell.sessions.forward_env_dict" = 1
+"test_session_venv_projection.py#monkeypatch.setattr meiva.shell.sessions.repo_root" = 2
+"test_session_venv_projection.py#monkeypatch.setattr meiva.shell.sessions.shell_sessions" = 1
+"test_session_venv_projection.py#monkeypatch.setattr meiva.shell.sessions.workspace_dir" = 1
+"test_session_venv_projection.py#monkeypatch.setattr base.host.env.bootstrap.config_source_is_local" = 3
+
+[debt.restricted-python]
+"test_lazy_boot_import.py#python -c" = 1
+"test_lazy_lm_import.py#python -c" = 1
+
+[debt.third-party-patch]
+"test_connect_fail_fast.py#monkeypatch.setattr psycopg.connect" = 1
+"test_sdk_redis_resilience.py#monkeypatch.setattr redis.Redis.from_url" = 1
+
+[debt.unresolved-patch]
+"test_session_venv_projection.py#monkeypatch.setattr backend.new_session" = 1

@@ -1,8 +1,8 @@
 """Reach the Chrome that left the supervised process tree.
 
-`ava stop` and `ava cluster destroy` are the two paths that mean
+`meiva stop` and `meiva cluster destroy` are the two paths that mean
 "this cluster's headed Chrome goes down too", and they say it by killing the
-`ava-browser` session's process tree. That is enough while Chrome is *in* the
+`meiva-browser` session's process tree. That is enough while Chrome is *in* the
 tree. It stops being enough after a `SingletonLock` handoff: Chrome's launched
 process forwards its command line to another browser process and exits, and the
 survivor is no longer a descendant of the session. The session kill then reports
@@ -12,7 +12,7 @@ next launch meets the daemon's port guard and refuses.
 A better tree walk cannot fix this. `base.host.proc.kill_process_tree` resolves
 descendants by ppid, and the ppid link to the session is exactly what the handoff
 destroyed — the orphan is not a descendant of anything we hold. What is missing is
-a way to *name* Ava's Chrome without walking to it. That is this module: naming it
+a way to *name* Meiva's Chrome without walking to it. That is this module: naming it
 by the cluster's own profile directory, and only then handing the named root to
 `kill_process_tree` (which does the right thing once the root is correct, since
 Chrome's renderers/GPU/utility children really are its descendants).
@@ -22,21 +22,21 @@ Chrome's renderers/GPU/utility children really are its descendants).
 `is_cluster_chrome` selects a process only when ALL of these hold:
 
 1. its argv carries the exact token ``--user-data-dir=<this cluster's profile>``
-   (`profile.profile_dir()`, i.e. `$AVA_HOME/chrome-profile`);
+   (`profile.profile_dir()`, i.e. `$MEIVA_HOME/chrome-profile`);
 2. its argv carries no ``--type=`` — Chrome tags every child process it spawns
    with one, so this narrows the match to the *browser* process and leaves the
    helpers to be reaped as its descendants;
 3. its executable name looks like Chrome/Chromium (`_CHROME_NAME_MARKER`).
 
 (1) is the authorizing signal and it is strictly positive. The profile path is
-minted per cluster under a `$AVA_HOME` that belongs to this install alone, so no
+minted per cluster under a `$MEIVA_HOME` that belongs to this install alone, so no
 Chrome that is not ours is launched with it: the operator's daily Chrome runs on
 the platform-default profile and passes no `--user-data-dir` at all, and any other
 explicitly-profiled Chrome on the box passes a different one (both shapes measured
 side by side on the dev Mac — a daily Chrome with a flagless 60-character argv, and
 a `chrome-devtools-mcp` Chrome on its own cache profile). The one process that
 *can* satisfy (1) without being the daemon's own child is a Chrome someone started
-by hand against Ava's profile — which is holding Ava's profile lock and Ava's CDP
+by hand against Meiva's profile — which is holding Meiva's profile lock and Meiva's CDP
 port, is precisely the squatter the port guard complains about, and is a thing a
 full teardown is right to take down.
 
@@ -167,8 +167,8 @@ def reap_cluster_chrome() -> list[int]:
     Two callers:
 
     - the teardown paths that explicitly asked for the browser down
-      (`ava stop`, `ava cluster destroy`), and only after the
-      `ava-browser` session and the watchdog are already dead — a live watchdog
+      (`meiva stop`, `meiva cluster destroy`), and only after the
+      `meiva-browser` session and the watchdog are already dead — a live watchdog
       would relaunch Chrome straight back onto the port we just cleared. It does
       not fight the daemon's port guard either: no launch is in flight during a
       teardown, and the guard's whole complaint is the Chrome this removes.
@@ -188,7 +188,7 @@ def reap_cluster_chrome() -> list[int]:
         return []
     logger.info(
         "reaping {n} Chrome process tree(s) on this cluster's profile {profile}: {pids} "
-        "(left outside the ava-browser session by a SingletonLock handoff)",
+        "(left outside the meiva-browser session by a SingletonLock handoff)",
         n=len(pids),
         profile=profile_dir(),
         pids=pids,

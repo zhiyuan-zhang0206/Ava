@@ -1,6 +1,6 @@
 """Checkpoint-compatible plugin delta codec for external SDK attachments.
 
-The agent layer owns it; `ava.impersonation.attach` reaches this module by name.
+The agent layer owns it; `meiva.impersonation.attach` reaches this module by name.
 
 The existing serializer preserves reducer inputs exactly, including partial
 mappings, sets, nested models and message objects. The JSON envelope fits the

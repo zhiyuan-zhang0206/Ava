@@ -12,7 +12,7 @@ from typing import Any, cast
 
 from langchain_core.messages import AIMessage, AnyMessage, HumanMessage
 
-from base.agents.messages.kwargs import AvaMsgType, read_ava_kwargs
+from base.agents.messages.kwargs import MeivaMsgType, read_meiva_kwargs
 from base.lm.reasoning import content_blocks
 
 # How many recent conversation messages form the query.
@@ -41,7 +41,7 @@ def build_conversation_query(messages: Collection[AnyMessage]) -> str:
     """Concatenate the last few genuine conversation messages into a query.
 
     Genuine = agent replies (AIMessage) and inbound chat (HumanMessage tagged
-    `ava_msg_type='inbound'`). Framework system-notes (heartbeat, lifecycle
+    `meiva_msg_type='inbound'`). Framework system-notes (heartbeat, lifecycle
     markers, and prior recall notes themselves) are excluded so the query
     reflects the conversation, not our own injections -- otherwise recall would
     feed on its own output.
@@ -50,7 +50,7 @@ def build_conversation_query(messages: Collection[AnyMessage]) -> str:
     for msg in reversed(list(messages)):
         if isinstance(msg, AIMessage) or (
             isinstance(msg, HumanMessage)
-            and read_ava_kwargs(msg).get("ava_msg_type") == AvaMsgType.INBOUND
+            and read_meiva_kwargs(msg).get("meiva_msg_type") == MeivaMsgType.INBOUND
         ):
             text = _message_text(msg)
         else:

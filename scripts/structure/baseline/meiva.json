@@ -1,0 +1,5 @@
+{
+  "ambient_state": {
+    "meiva/__init__.py::import-time-call:meiva.ensure_plugins_loaded": 1
+  }
+}

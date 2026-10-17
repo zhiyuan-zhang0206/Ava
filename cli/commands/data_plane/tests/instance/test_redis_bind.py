@@ -83,7 +83,7 @@ def test_start_redis_on_macos_binds_loopback_only_and_authenticates(
             with_redis_admin(data_plane_config, "redis-admin"),
             6380,
             "redis-runtime",
-            "ava",
+            "meiva",
             machine=command_machine,
         )
         == 0
@@ -95,7 +95,7 @@ def test_start_redis_on_macos_binds_loopback_only_and_authenticates(
     assert conf.endswith('requirepass "redis-admin"\n')
 
 
-def test_the_redis_daemon_inherits_no_ava_authority(
+def test_the_redis_daemon_inherits_no_meiva_authority(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
     *,
@@ -105,11 +105,11 @@ def test_the_redis_daemon_inherits_no_ava_authority(
     """The boot pass may have delivered the gateway login, the generation and
     the API token to this process; the daemon it spawns keeps none of them."""
     delivered = {
-        "AVA_DB_URL": "postgresql://ava_g0_gateway:gen-password@127.0.0.1:6433/ava",
-        "AVA_DB_GENERATION": "0",
-        "AVA_API_TOKEN": "gateway-api-token-" + "t" * 32,
-        "AVA_CLUSTER_SECRET": "human-" + "h" * 40,
-        "AVA_REDIS_ADMIN_PASSWORD": "redis-admin",
+        "MEIVA_DB_URL": "postgresql://meiva_g0_gateway:gen-password@127.0.0.1:6433/meiva",
+        "MEIVA_DB_GENERATION": "0",
+        "MEIVA_API_TOKEN": "gateway-api-token-" + "t" * 32,
+        "MEIVA_CLUSTER_SECRET": "human-" + "h" * 40,
+        "MEIVA_REDIS_ADMIN_PASSWORD": "redis-admin",
     }
     for key, value in {**delivered, "PATH": "/usr/bin:/bin", "TZ": "Asia/Shanghai"}.items():
         monkeypatch.setenv(key, value)
@@ -126,7 +126,7 @@ def test_the_redis_daemon_inherits_no_ava_authority(
             with_redis_admin(data_plane_config, "redis-admin"),
             6380,
             "redis-runtime",
-            "ava",
+            "meiva",
             machine=command_machine,
         )
         == 0
@@ -135,7 +135,7 @@ def test_the_redis_daemon_inherits_no_ava_authority(
     assert isinstance(captured, dict)
     env = cast("dict[str, str]", captured)
     assert env["PATH"] == "/usr/bin:/bin" and env["TZ"] == "Asia/Shanghai"
-    assert not [key for key in env if key.startswith("AVA_")]
+    assert not [key for key in env if key.startswith("MEIVA_")]
     assert not set(delivered.values()) & set(env.values())
 
 
@@ -164,7 +164,7 @@ def test_start_redis_refuses_missing_credentials_before_effects(
             with_redis_admin(data_plane_config, admin),
             6380,
             runtime,
-            "ava",
+            "meiva",
             machine=command_machine,
         )
     assert started == []
@@ -204,7 +204,7 @@ def test_macos_start_redis_does_not_use_shared_pg_bind_addrs(
             with_redis_admin(data_plane_config, "redis-admin"),
             6380,
             "redis-runtime",
-            "ava",
+            "meiva",
             machine=command_machine,
         )
         == 0
@@ -248,7 +248,7 @@ def test_linux_redis_bind_follows_the_declared_reachable_host_not_the_secret(
             with_redis_admin(data_plane_config, "admin"),
             6380,
             "runtime",
-            "ava",
+            "meiva",
             machine=command_machine,
         )
         == 0
@@ -277,7 +277,7 @@ def test_linux_redis_refuses_start_when_reachable_address_is_unavailable(
             with_redis_admin(data_plane_config, "admin"),
             6380,
             "runtime",
-            "ava",
+            "meiva",
             machine=command_machine,
         )
         == 1
@@ -304,7 +304,7 @@ def test_running_redis_persists_the_authenticated_password_to_its_config(
             with_redis_admin(data_plane_config, "journal-password"),
             6380,
             "runtime",
-            "ava",
+            "meiva",
             machine=command_machine,
         )
         == 0
@@ -352,7 +352,7 @@ def test_redis_conf_always_renders_rdb_save_schedule(
             with_redis_admin(data_plane_config, "admin"),
             6380,
             "runtime",
-            "ava",
+            "meiva",
             machine=command_machine,
         )
         == 0
@@ -371,7 +371,7 @@ def test_force_stop_shuts_redis_down_as_admin_not_runtime_user(
     the explicit force teardown must authenticate with the admin password."""
     data_plane_config = dataclasses.replace(
         data_plane_config,
-        redis_url="redis://ava:runtime-pw@127.0.0.1:16380/0",
+        redis_url="redis://meiva:runtime-pw@127.0.0.1:16380/0",
         redis_admin_password="admin-pw",  # noqa: S106
     )
     monkeypatch.setattr(_ci.owned_postgres, "stop", lambda _data, **_kw: None)  # pyright: ignore[reportUnknownArgumentType]

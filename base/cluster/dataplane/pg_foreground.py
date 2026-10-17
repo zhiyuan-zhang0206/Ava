@@ -35,7 +35,7 @@ def wait_foreground_postgres(
             with psycopg.connect(
                 host="127.0.0.1",
                 port=port,
-                user="ava",
+                user="meiva",
                 dbname="postgres",
                 connect_timeout=1,
                 options="-c statement_timeout=1000",

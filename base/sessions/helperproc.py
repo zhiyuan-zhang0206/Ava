@@ -2,7 +2,7 @@
 
 The helper's in-memory child table is intentionally not lifecycle state: it is
 lost whenever the helper restarts. The ordinary ``SessionRecord`` files under
-``$AVA_HOME/run/sessions`` remain the durable session registry, so liveness,
+``$MEIVA_HOME/run/sessions`` remain the durable session registry, so liveness,
 enumeration, timestamps, and kills keep working across helper replacement.
 """
 
@@ -25,7 +25,7 @@ from base.log import logger
 from base.native_process import pid_starttime_ticks
 from base.native_process.os_platform import Platform
 from base.native_process.ownership import stable_create_time
-from base.paths import ava_home, logs_dir, permissions_helper_socket, run_dir
+from base.paths import logs_dir, meiva_home, permissions_helper_socket, run_dir
 from base.sessions.protocol import SessionBackend
 from base.sessions.record import SessionRecord
 
@@ -39,7 +39,7 @@ _KILL_CONFIRM_TIMEOUT_S = 5.0
 
 
 def _sessions_dir() -> Path:
-    directory = run_dir(ava_home()) / "sessions"
+    directory = run_dir(meiva_home()) / "sessions"
     directory.mkdir(parents=True, exist_ok=True)
     return directory
 
@@ -103,7 +103,7 @@ def helper_client() -> PermissionsHelperClient:
     from base.config import settings
 
     return PermissionsHelperClient(
-        permissions_helper_socket(ava_home(), settings.services.permissions_helper_port)
+        permissions_helper_socket(meiva_home(), settings.services.permissions_helper_port)
     )
 
 
@@ -158,7 +158,7 @@ def spawn_via_helper(
     except (RuntimeError, OSError) as exc:
         raise RuntimeError(
             f"permissions helper is down or refused spawn for session {name!r}; "
-            "run `ava converge` and inspect the permissions helper log "
+            "run `meiva converge` and inspect the permissions helper log "
             f"before retrying: {exc}"
         ) from exc
     return result["pid"]

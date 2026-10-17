@@ -57,7 +57,7 @@ def converge(
 
 def converge_context(
     repo: Path,
-    ava_home: Path,
+    meiva_home: Path,
     roles: MachineRoles | None = None,
     *,
     operator_database: Callable[[], Any],
@@ -70,7 +70,7 @@ def converge_context(
         machine.set(role=roles)
     return converge_host.ConvergeCtx(
         repo=repo,
-        ava_home=ava_home,
+        meiva_home=meiva_home,
         roles=roles,
         config=config,
         machine=machine,
@@ -120,7 +120,7 @@ def pgbouncer_context(
         tmp_path / "repo", tmp_path, operator_database=operator_database, producer=producer
     )
     if db_url is not None:
-        (tmp_path / ".env").write_text(f"AVA_DB_URL={db_url}\n")
+        (tmp_path / ".env").write_text(f"MEIVA_DB_URL={db_url}\n")
     return ctx
 
 
@@ -132,9 +132,9 @@ def capable_helper_context(
     producer: Callable[[], EventPipeline],
     helper: HelperFactory | None = refuse_helper,
 ) -> converge_host.ConvergeCtx:
-    ava_home = tmp_path / "avahome"
-    ava_home.mkdir()
-    (ava_home / ".env").write_text("")
+    meiva_home = tmp_path / "meivahome"
+    meiva_home.mkdir()
+    (meiva_home / ".env").write_text("")
 
     def fake_permissions_helper_incapability(*, host: Host) -> str | None:
         return None
@@ -145,7 +145,7 @@ def capable_helper_context(
     ctx = replace(
         converge_context(
             tmp_path,
-            ava_home,
+            meiva_home,
             operator_database=operator_database,
             producer=producer,
             helper=helper,
@@ -164,7 +164,7 @@ def screen_capture_environment(
     enabled: bool = True,
     incapability: str | None = None,
 ) -> None:
-    monkeypatch.setattr(screen_capture, "ava_home", lambda: tmp_path)
+    monkeypatch.setattr(screen_capture, "meiva_home", lambda: tmp_path)
     config.set_field("permissions_helper_enabled", enabled)
 
     def fake_permissions_helper_incapability(*, host: Host) -> str | None:
@@ -183,7 +183,7 @@ def accessibility_environment(
     enabled: bool = True,
     incapability: str | None = None,
 ) -> None:
-    monkeypatch.setattr(accessibility, "ava_home", lambda: tmp_path)
+    monkeypatch.setattr(accessibility, "meiva_home", lambda: tmp_path)
     config.set_field("permissions_helper_enabled", enabled)
 
     def fake_permissions_helper_incapability(*, host: Host) -> str | None:

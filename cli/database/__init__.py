@@ -22,7 +22,7 @@ __all__ = [
 
 # `open_database(config, gate, direct_url)`: builds one handle. The parameters are `DbConfig`,
 # `ProcessDbGate` and `ClusterDirectUrl` and the result a `Database`; none is imported here
-# because `ava --help` must not load the configuration chain.
+# because `meiva --help` must not load the configuration chain.
 OpenDatabase = Callable[[Any, Any, Any], Any]
 
 
@@ -161,7 +161,8 @@ class OperatorEventPipeline:
 
                 if result.status is DrainStatus.UNFINISHED:
                     print(
-                        "ava: command telemetry writer did not finish before exit", file=sys.stderr
+                        "meiva: command telemetry writer did not finish before exit",
+                        file=sys.stderr,
                     )
         except BaseException as cleanup:
             if primary is None:

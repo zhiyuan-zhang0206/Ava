@@ -6,7 +6,7 @@ panels) and the Grafana dashboard supply — so they live in the plugin's own `m
 with only its field filled). A process builds its registry from whichever of those modules it loads:
 
 - `load_declaration(plugin, importer, gate)` runs one face fail-soft: an import that raises, a
-  missing `contribute()`, a result that is not a `PluginContributions`, or an `ava-plugin.json` in the
+  missing `contribute()`, a result that is not a `PluginContributions`, or an `meiva-plugin.json` in the
   plugin directory that is missing or disagrees with the declaration on the face's own key is reported
   (`load_report`) and the plugin contributes nothing from that face. The manifest is checked here, while
   the plugin's tree exists (an unpacked installed plugin is deleted right after its import);
@@ -70,7 +70,7 @@ def load_declaration(
 
     `importer` does the import (by dotted name, or by file for an unpacked tree) so the caller owns
     where the module comes from and what it caches. `gate` is `(plugin directory, manifest key)` to
-    check the plugin's `ava-plugin.json` against the declaration, or None to skip the check. A
+    check the plugin's `meiva-plugin.json` against the declaration, or None to skip the check. A
     failure is the plugin's: reported through `load_report`, never raised.
     """
     try:

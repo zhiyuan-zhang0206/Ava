@@ -3,9 +3,9 @@ from uuid import uuid4
 import psycopg
 import pytest
 
-import ava
-from ava.tests.fixtures.pin_agent import pin_agent
+import meiva
 from base.api_contracts.agent_contract import InvalidModelConfig
+from meiva.tests.fixtures.pin_agent import pin_agent
 
 pytestmark = pytest.mark.usefixtures("sdk_model_owner")
 
@@ -20,7 +20,7 @@ def _inbound_rows(conn: psycopg.Connection, agent_id: int) -> list[tuple[str, st
 
 
 def _spawn_self(monkeypatch: pytest.MonkeyPatch) -> int:
-    aid = ava.agents.spawn(idempotency_key=str(uuid4()))
+    aid = meiva.agents.spawn(idempotency_key=str(uuid4()))
     pin_agent(aid)
     return aid
 
@@ -30,8 +30,8 @@ class TestSelfTerminate:
         self, db_conn: psycopg.Connection, gateway_client, monkeypatch: pytest.MonkeyPatch
     ):
         aid = _spawn_self(monkeypatch)
-        with pytest.raises(ava.self.AgentTermination):
-            ava.self.terminate()
+        with pytest.raises(meiva.self.AgentTermination):
+            meiva.self.terminate()
         rows = _inbound_rows(db_conn, aid)
         assert any(r[1] == "terminate" and r[2] == "self" for r in rows)
 
@@ -40,12 +40,12 @@ class TestSelfRestart:
     def test_rejects_incompatible_effort_without_overlay_or_inbound(
         self, db_conn: psycopg.Connection, gateway_client
     ) -> None:
-        aid = ava.agents.spawn(
+        aid = meiva.agents.spawn(
             config_overlay={"llm_model": "deepseek-flash"}, idempotency_key=str(uuid4())
         )
         pin_agent(aid)
         with pytest.raises(InvalidModelConfig, match="unsupported reasoning effort"):
-            ava.self.restart(config_overlay={"reasoning_effort": "low"})
+            meiva.self.restart(config_overlay={"reasoning_effort": "low"})
         assert db_conn.execute(
             "SELECT config_overlay FROM agents_meta WHERE id=%s", (aid,)
         ).fetchone() == ({"llm_model": "deepseek-flash"},)
@@ -54,14 +54,14 @@ class TestSelfRestart:
     def test_model_and_effort_change_commit_with_the_restart(
         self, db_conn: psycopg.Connection, gateway_client
     ) -> None:
-        aid = ava.agents.spawn(
+        aid = meiva.agents.spawn(
             config_overlay={"llm_model": "gpt-5.6-sol", "reasoning_effort": "low"},
             idempotency_key=str(uuid4()),
         )
         pin_agent(aid)
         overlay: dict[str, object] = {"llm_model": "deepseek-flash", "reasoning_effort": "max"}
-        with pytest.raises(ava.self.AgentRestart):
-            ava.self.restart(config_overlay=overlay)
+        with pytest.raises(meiva.self.AgentRestart):
+            meiva.self.restart(config_overlay=overlay)
         assert db_conn.execute(
             "SELECT config_overlay FROM agents_meta WHERE id=%s", (aid,)
         ).fetchone() == (overlay,)
@@ -71,7 +71,7 @@ class TestSelfRestart:
         self, db_conn: psycopg.Connection, gateway_client, monkeypatch: pytest.MonkeyPatch
     ):
         aid = _spawn_self(monkeypatch)
-        with pytest.raises(ava.self.AgentRestart):
-            ava.self.restart()
+        with pytest.raises(meiva.self.AgentRestart):
+            meiva.self.restart()
         rows = _inbound_rows(db_conn, aid)
         assert any(r[1] == "restart" and r[2] == "self" for r in rows)

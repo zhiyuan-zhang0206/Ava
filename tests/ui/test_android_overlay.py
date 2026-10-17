@@ -33,7 +33,7 @@ GENERATED_MANIFEST = """<?xml version="1.0" encoding="utf-8"?>
     <application
         android:icon="@mipmap/ic_launcher"
         android:label="@string/app_name"
-        android:theme="@style/Theme.ava"
+        android:theme="@style/Theme.meiva"
         android:usesCleartextTraffic="true">
         <activity
             android:configChanges="orientation|keyboardHidden|keyboard|screenSize|locale|smallestScreenSize|screenLayout|uiMode"
@@ -50,7 +50,7 @@ GENERATED_MANIFEST = """<?xml version="1.0" encoding="utf-8"?>
 
         <provider
           android:name="androidx.core.content.FileProvider"
-          android:authorities="com.ava.app.fileprovider"
+          android:authorities="com.meiva.app.fileprovider"
           android:exported="false"
           android:grantUriPermissions="true">
           <meta-data
@@ -200,11 +200,11 @@ def test_overlay_carries_the_keystore_secret_plugin() -> None:
     """The generated Android tree is ignored, so the source overlay is the
     only durable home for the Keystore implementation and its plugin bridge."""
     java_dir = _OVERLAY.parent / "java"
-    store = (java_dir / "AvaSecretStore.kt").read_text()
-    plugin = (java_dir / "AvaSecretPlugin.kt").read_text()
+    store = (java_dir / "MeivaSecretStore.kt").read_text()
+    plugin = (java_dir / "MeivaSecretPlugin.kt").read_text()
     assert "AndroidKeyStore" in store
     assert "AES/GCM/NoPadding" in store
-    assert "class AvaSecretPlugin" in plugin
+    assert "class MeivaSecretPlugin" in plugin
     assert all(command in plugin for command in ("fun save", "fun get", "fun clear"))
 
 
@@ -218,8 +218,8 @@ def test_apply_copies_the_keystore_sources_into_the_generated_package(tmp_path: 
     overlay.apply(_OVERLAY.parent, tmp_path)
 
     package = main / "java" / Path(*overlay.PACKAGE.split("."))
-    assert (package / "AvaSecretStore.kt").is_file()
-    assert (package / "AvaSecretPlugin.kt").is_file()
+    assert (package / "MeivaSecretStore.kt").is_file()
+    assert (package / "MeivaSecretPlugin.kt").is_file()
 
 
 def test_apply_copies_the_update_installer_plugin_into_the_generated_package(
@@ -234,8 +234,8 @@ def test_apply_copies_the_update_installer_plugin_into_the_generated_package(
     overlay.apply(_OVERLAY.parent, tmp_path)
 
     package = main / "java" / Path(*overlay.PACKAGE.split("."))
-    plugin = (package / "AvaUpdatePlugin.kt").read_text()
-    assert "class AvaUpdatePlugin" in plugin
+    plugin = (package / "MeivaUpdatePlugin.kt").read_text()
+    assert "class MeivaUpdatePlugin" in plugin
     assert "getPackageArchiveInfo" in plugin
     assert "FileProvider.getUriForFile" in plugin
 
@@ -252,7 +252,7 @@ def test_apply_copies_the_cookie_injection_plugin_into_the_generated_package(
     overlay.apply(_OVERLAY.parent, tmp_path)
 
     package = main / "java" / Path(*overlay.PACKAGE.split("."))
-    assert (package / "AvaCookiePlugin.kt").is_file()
+    assert (package / "MeivaCookiePlugin.kt").is_file()
 
 
 def test_apply_copies_the_proguard_rules_that_preserve_plugin_reflection(
@@ -267,5 +267,5 @@ def test_apply_copies_the_proguard_rules_that_preserve_plugin_reflection(
     overlay.apply(_OVERLAY.parent, tmp_path)
     overlay.apply(_OVERLAY.parent, tmp_path)
 
-    rules = (tmp_path / "app" / "proguard-ava.pro").read_text()
-    assert "-keep class com.ava.app.** { *; }" in rules
+    rules = (tmp_path / "app" / "proguard-meiva.pro").read_text()
+    assert "-keep class com.meiva.app.** { *; }" in rules

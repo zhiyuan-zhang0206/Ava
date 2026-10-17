@@ -114,7 +114,7 @@ def test_the_client_rejects_an_answer_to_another_request(
 
 def test_queries_read_a_missing_service_as_no_sessions(unit_home: Path) -> None:
     del unit_home
-    assert client.has_session("ava-test-anything") is False
+    assert client.has_session("meiva-test-anything") is False
     assert client.list_sessions() == []
 
 
@@ -124,7 +124,7 @@ def test_a_mutating_request_without_a_service_raises(
 ) -> None:
     pty_service.stop()
     with pytest.raises(client.ServiceUnavailableError):
-        support.new("ava-test-nobody-home", unit_home, config=PtyClientConfig(connect_wait_s=0.2))
+        support.new("meiva-test-nobody-home", unit_home, config=PtyClientConfig(connect_wait_s=0.2))
 
 
 def test_a_mutating_request_waits_for_a_service_that_is_still_starting(
@@ -134,7 +134,7 @@ def test_a_mutating_request_waits_for_a_service_that_is_still_starting(
     starter = threading.Timer(0.5, pty_service.start)
     starter.start()
     try:
-        assert support.new("ava-test-early-bird", unit_home) is True
+        assert support.new("meiva-test-early-bird", unit_home) is True
     finally:
         starter.join()
 
@@ -144,7 +144,11 @@ def test_a_second_service_refuses_to_start_over_a_live_one(
 ) -> None:
     from base.sessions.pty.tests.pty_service import REPO
 
-    env = {"AVA_HOME": str(pty_service.home), "PATH": "/usr/bin:/bin", "AVA_CONFIG_FETCH": "skip"}
+    env = {
+        "MEIVA_HOME": str(pty_service.home),
+        "PATH": "/usr/bin:/bin",
+        "MEIVA_CONFIG_FETCH": "skip",
+    }
     result = subprocess.run(
         [sys.executable, "-m", "services.agent_runner.pty_sessions.daemon"],
         cwd=REPO,

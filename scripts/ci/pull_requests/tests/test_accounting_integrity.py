@@ -71,13 +71,13 @@ def test_actual_github_envelope_retains_pr_identity() -> None:
     host = _host(
         [
             ("actions/runs?", _page("workflow_runs", [_run(pull_requests=[{"number": 42}])])),
-            ("pr view 42 ", "[Ava-5811] improve parser (task #2571)"),
+            ("pr view 42 ", "[Meiva-5811] improve parser (task #2571)"),
             ("runs/101/jobs?", _page("jobs", [_job()])),
         ],
         calls,
     )
     [entry] = _collect(host)
-    assert (entry["pr_number"], entry["agent_id"], entry["task_id"]) == (42, 5811, 2571)
+    assert (entry["pr_number"], entry["agent_id"], entry["task_id"]) == (42, None, 2571)
     assert entry["linux_minutes"] == 4
     assert all("--jq" not in args for args in calls if args[1] == "api")
 

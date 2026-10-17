@@ -494,7 +494,7 @@ TOOLS: list[dict[str, Any]] = [
             "focus_app and capture again. include_ax is available only for whole-screen "
             "geometry; include_ocr returns boxes in this capture's pixel space. "
             "OCR failure returns ocr:[] and ocr_error without failing the capture. "
-            "The PNG is saved at the returned path; attach it (ava.self.attach) to look at it. "
+            "The PNG is saved at the returned path; attach it (meiva.self.attach) to look at it. "
             "To read small text or fine detail, capture just that area with region: a crop keeps "
             "the display's full native resolution (a whole-screen image is large, and a model "
             "provider may scale a large image down before it is read), and the returned frame "

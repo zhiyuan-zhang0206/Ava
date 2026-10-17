@@ -29,7 +29,7 @@ def test_component_omits_unknown_state_and_calculates_success_age() -> None:
 
 def test_render_uses_component_worst_state_and_explains_it() -> None:
     status, body = render(
-        {"name": "scheduler", "home": "/var/ava"},
+        {"name": "scheduler", "home": "/var/meiva"},
         [
             component("loop", OK, progress="serving"),
             component("backup", DEGRADED, detail="dump failed"),
@@ -40,7 +40,7 @@ def test_render_uses_component_worst_state_and_explains_it() -> None:
     assert status == 503
     assert json.loads(body) == {
         "name": "scheduler",
-        "home": "/var/ava",
+        "home": "/var/meiva",
         "status": "degraded",
         "readiness": "degraded",
         "components": [

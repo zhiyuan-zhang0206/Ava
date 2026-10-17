@@ -26,8 +26,8 @@ def test_fetch_bootstrap_config_against_live_endpoint(
     # An authenticated gateway: the runner presents its delivered machine API
     # token (the active generation's runner token), never the human secret.
     monkeypatch.setattr(config.settings.data_plane, "cluster_secret", "live-secret")
-    monkeypatch.setitem(os.environ, "AVA_API_TOKEN", served_gateway_home.api.runner)
-    monkeypatch.delitem(os.environ, "AVA_CLUSTER_SECRET")
+    monkeypatch.setitem(os.environ, "MEIVA_API_TOKEN", served_gateway_home.api.runner)
+    monkeypatch.delitem(os.environ, "MEIVA_CLUSTER_SECRET")
 
     # Route base.host.env.bootstrap's dial_get (base.host.net.http_dial.get) through the
     # in-process ASGI app.
@@ -46,7 +46,7 @@ def test_fetch_bootstrap_config_against_live_endpoint(
     reachable = self_machine_host()
     if not is_loopback_host(reachable):
         expected = url_with_host(expected, reachable)
-    actual_parts = urlsplit(values["AVA_DB_URL"])
+    actual_parts = urlsplit(values["MEIVA_DB_URL"])
     expected_parts = urlsplit(expected)
     # libpq dial hints such as hostaddr are implementation-specific query
     # parameters. The endpoint's connection identity must still match.
@@ -67,5 +67,5 @@ def test_fetch_bootstrap_config_against_live_endpoint(
     )
     assert runner.password not in "".join(values.values())
     # Nor does it serve the human secret: a remote unit never holds it.
-    assert "AVA_CLUSTER_SECRET" not in values
+    assert "MEIVA_CLUSTER_SECRET" not in values
     assert "test-cluster-secret" not in "".join(values.values())

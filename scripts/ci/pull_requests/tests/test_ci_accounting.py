@@ -38,7 +38,7 @@ def _run(**overrides: object) -> dict[str, object]:
         "status": "completed",
         "conclusion": "success",
         "created_at": "2026-09-06T10:00:00Z",
-        "head_branch": "ava-5811-demo",
+        "head_branch": "meiva-5811-demo",
         "head_commit_msg": "",
         "pull_requests": [],
     }
@@ -84,7 +84,7 @@ def test_pr_run_attribution_and_minute_split() -> None:
                     ]
                 ),
             ),
-            ("pr view 42 ", "[Ava-5811] feat(ci): script queue ops (task #2571)"),
+            ("pr view 42 ", "[Meiva-5811] feat(ci): script queue ops (task #2571)"),
             (
                 "runs/101/jobs",
                 _jobs(
@@ -106,7 +106,7 @@ def test_pr_run_attribution_and_minute_split() -> None:
     entries = accounting.collect(accounting.DEFAULT_REPO, _WINDOW_SINCE, _WINDOW_UNTIL, host=host)
     assert len(entries) == 1
     entry = entries[0]
-    assert entry["agent_id"] == 5811
+    assert entry["agent_id"] is None
     assert entry["task_id"] == 2571
     assert entry["pr_number"] == 42
     assert entry["linux_minutes"] == 6
@@ -129,13 +129,14 @@ def test_trunk_synthetic_pr_resolves_to_real_pr() -> None:
                     ]
                 ),
             ),
-            ("pr view 42 ", "[Ava-5814] feat(gateway): schedule catch-up (task #2492)"),
+            ("pr view 42 ", "feat(gateway): schedule catch-up (task #2492)"),
             ("runs/102/jobs", _jobs()),
         ]
     )
     entries = accounting.collect(accounting.DEFAULT_REPO, _WINDOW_SINCE, _WINDOW_UNTIL, host=host)
     assert entries[0]["pr_number"] == 42
-    assert entries[0]["agent_id"] == 5814
+    assert entries[0]["agent_id"] is None
+    assert entries[0]["task_id"] == 2492
 
 
 def test_push_run_attributes_from_commit_subject() -> None:
@@ -148,7 +149,7 @@ def test_push_run_attributes_from_commit_subject() -> None:
                         _run(
                             id=103,
                             head_branch="main",
-                            head_commit_msg="[Ava-5814] feat(web): refine graph (task #2561)",
+                            head_commit_msg="feat(web): refine graph (task #2561)",
                         )
                     ]
                 ),
@@ -157,7 +158,7 @@ def test_push_run_attributes_from_commit_subject() -> None:
         ]
     )
     entries = accounting.collect(accounting.DEFAULT_REPO, _WINDOW_SINCE, _WINDOW_UNTIL, host=host)
-    assert entries[0]["agent_id"] == 5814
+    assert entries[0]["agent_id"] is None
     assert entries[0]["task_id"] == 2561
 
 
@@ -180,7 +181,7 @@ def test_append_ledger_is_idempotent(tmp_path: Path) -> None:
         [
             (
                 "actions/runs",
-                _runs([_run(id=105, head_commit_msg="[Ava-5811] x")]),
+                _runs([_run(id=105, head_commit_msg="[Meiva-5811] x")]),
             ),
             ("runs/105/jobs", _jobs()),
         ]
@@ -267,13 +268,14 @@ def test_trunk_branch_without_pr_payload_attributes_by_branch() -> None:
                     ]
                 ),
             ),
-            ("pr view 42 ", "[Ava-5814] feat(gateway): schedule catch-up (task #2492)"),
+            ("pr view 42 ", "feat(gateway): schedule catch-up (task #2492)"),
             ("runs/106/jobs", _jobs()),
         ]
     )
     entries = accounting.collect(accounting.DEFAULT_REPO, _WINDOW_SINCE, _WINDOW_UNTIL, host=host)
     assert entries[0]["pr_number"] == 42
-    assert entries[0]["agent_id"] == 5814
+    assert entries[0]["agent_id"] is None
+    assert entries[0]["task_id"] == 2492
 
 
 def test_main_push_run_resolves_pr_via_merge_commit() -> None:
@@ -293,13 +295,14 @@ def test_main_push_run_resolves_pr_via_merge_commit() -> None:
                 ),
             ),
             ("commits/dddd3333dddd3333dddd3333dddd3333dddd3333/pulls", '[{"number":1872}]'),
-            ("pr view 1872 ", "[Ava-5814] fix: hosted continuations (task #2566)"),
+            ("pr view 1872 ", "fix: hosted continuations (task #2566)"),
             ("runs/107/jobs", _jobs()),
         ]
     )
     entries = accounting.collect(accounting.DEFAULT_REPO, _WINDOW_SINCE, _WINDOW_UNTIL, host=host)
     assert entries[0]["pr_number"] == 1872
-    assert entries[0]["agent_id"] == 5814
+    assert entries[0]["agent_id"] is None
+    assert entries[0]["task_id"] == 2566
 
 
 def test_branch_name_attributes_nonprefix_subject() -> None:
@@ -311,7 +314,7 @@ def test_branch_name_attributes_nonprefix_subject() -> None:
                     [
                         _run(
                             id=108,
-                            head_branch="ava-5810-workfailed-bounds",
+                            head_branch="meiva-5810-workfailed-bounds",
                             head_commit_msg="Bound the work-failed webhook text columns (task #2531)",
                         )
                     ]
@@ -321,7 +324,7 @@ def test_branch_name_attributes_nonprefix_subject() -> None:
         ]
     )
     entries = accounting.collect(accounting.DEFAULT_REPO, _WINDOW_SINCE, _WINDOW_UNTIL, host=host)
-    assert entries[0]["agent_id"] == 5810
+    assert entries[0]["agent_id"] is None
     assert entries[0]["task_id"] == 2531
 
 
@@ -335,7 +338,7 @@ def test_cancelled_before_start_jobs_bill_zero() -> None:
                         _run(
                             id=109,
                             head_branch="main",
-                            head_commit_msg="[Ava-5895] fix(ci): null job timestamps (task #2673)",
+                            head_commit_msg="fix(ci): null job timestamps (task #2673)",
                         )
                     ]
                 ),
@@ -353,7 +356,7 @@ def test_cancelled_before_start_jobs_bill_zero() -> None:
     entries = accounting.collect(accounting.DEFAULT_REPO, _WINDOW_SINCE, _WINDOW_UNTIL, host=host)
     assert len(entries) == 1
     entry = entries[0]
-    assert entry["agent_id"] == 5895
+    assert entry["agent_id"] is None
     assert entry["task_id"] == 2673
     assert entry["linux_minutes"] == 4
     assert entry["jobs"] == 3

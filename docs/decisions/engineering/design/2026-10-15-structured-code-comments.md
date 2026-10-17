@@ -11,7 +11,7 @@ visible migration work, without a stored baseline or per-file waiver.
 The motivating failure was high-volume concurrent agent contributions retaining
 or adding plausible prose that duplicated code or contradicted behavior. A
 skill alone could not enforce a durable source/document boundary. The first
-migration covered gateway memory-search constraints, Ava Code host hooks,
+migration covered gateway memory-search constraints, Meiva Code host hooks,
 browser content security policy and SDK compaction help.
 
 ## Prior art and simplest sufficient mechanism

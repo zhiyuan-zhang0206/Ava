@@ -189,7 +189,7 @@ class Desktop:
 def desktop(monkeypatch: pytest.MonkeyPatch, *, database_gate: ProcessDbGate) -> Iterator[Desktop]:
     errors: list[BaseException] = []
     stopped = threading.Event()
-    with tempfile.TemporaryDirectory(prefix="ava-input-", dir="/tmp") as directory:
+    with tempfile.TemporaryDirectory(prefix="meiva-input-", dir="/tmp") as directory:
         path = Path(directory) / "helper.sock"
         target = Desktop(database_gate=database_gate, helper=PermissionsHelperClient(path))
 

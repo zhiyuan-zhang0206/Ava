@@ -38,7 +38,7 @@ class PackageDraftResponse(BaseModel):
 
 @router.post(
     "/api/keyed/v1/packages/draft",
-    description="Spawn an ava-package-installer agent for a natural-language install request\nand return its id so the UI can open the conversation. Replays one raw draft\nintent and its original birth; 422 on an unknown kind.",
+    description="Spawn an meiva-package-installer agent for a natural-language install request\nand return its id so the UI can open the conversation. Replays one raw draft\nintent and its original birth; 422 on an unknown kind.",
 )
 async def guarded_draft_package(
     body: PackageDraftRequest, request: Request, key: str = Depends(guarded_draft_key)
@@ -46,7 +46,7 @@ async def guarded_draft_package(
 
     prompt = (
         "You are installing a package for the user. Read and follow "
-        "ava.skills.ava_guide.packages.install and run the whole lifecycle it describes: "
+        "meiva.skills.meiva_guide.packages.install and run the whole lifecycle it describes: "
         "clarify what is actually wanted, find candidates, confirm with the user "
         "before installing anything that runs code, install, spawn a test agent to "
         "verify it works, read the package to judge whether it is any good, and "
@@ -58,7 +58,7 @@ async def guarded_draft_package(
         spawner="user",
         prompt=prompt,
         prompt_source="user",
-        label="ava-package-installer",
+        label="meiva-package-installer",
     )
     spawned = await create_and_launch_agent(
         body_obj,

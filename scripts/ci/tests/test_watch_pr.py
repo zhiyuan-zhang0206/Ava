@@ -28,7 +28,7 @@ class _Result:
         self.error_detail = ""
 
 
-class _FakeAva:
+class _FakeMeiva:
     def __init__(
         self,
         files_root: Path,
@@ -75,12 +75,12 @@ def _run_watcher(
     tmp_path: Path,
     verdicts: list[Any],
     *,
-    fake: _FakeAva | None = None,
+    fake: _FakeMeiva | None = None,
     raise_on_poll: Exception | None = None,
     run_name: str = "__ci_watcher__",
     forbid_sleep: bool = False,
     on_atexit: Callable[..., None] | None = None,
-) -> tuple[list[tuple[int, str]], list[Any], _FakeAva]:
+) -> tuple[list[tuple[int, str]], list[Any], _FakeMeiva]:
     polled: list[Any] = []
     timers = ManualTimers()
     clock = Clock(
@@ -107,7 +107,7 @@ def _run_watcher(
         polled.append(verdict)
         return _Result(verdict)
 
-    fake_ava = fake if fake is not None else _FakeAva(tmp_path)
+    fake_meiva = fake if fake is not None else _FakeMeiva(tmp_path)
     monkeypatch.chdir(tmp_path)
 
     def workspace_for_test(_agent_id: int) -> Path:
@@ -122,7 +122,7 @@ def _run_watcher(
         ('CI_UTILS = ""', f'CI_UTILS = "{tmp_path}"'),
         ("WATCHER_ID = 0", "WATCHER_ID = 42"),
         ("import atexit\n", ""),
-        ("import ava\n", ""),
+        ("import meiva\n", ""),
         ("from base.clock import Clock\n", ""),
         ("from base.host.system.hostport import Host\n", ""),
         ("from scripts.ci.pull_requests.status import CIStatus, check_ci  # noqa: E402\n", ""),
@@ -138,7 +138,7 @@ def _run_watcher(
                 "atexit": types.SimpleNamespace(
                     register=on_atexit if on_atexit is not None else lambda *_a, **_kw: None
                 ),
-                "ava": fake_ava,
+                "meiva": fake_meiva,
                 "Clock": types.SimpleNamespace(from_settings=lambda: clock),
                 "Host": types.SimpleNamespace(system=lambda: host),
                 "CIStatus": CIStatus,
@@ -150,7 +150,7 @@ def _run_watcher(
             sys.path.remove(str(tmp_path))
         if forbid_sleep:
             assert timers.sleeps == [], f"slept {timers.sleeps} after a failed wake"
-    return fake_ava.wakes, polled, fake_ava
+    return fake_meiva.wakes, polled, fake_meiva
 
 
 def test_attach_window_does_not_wake_as_no_checks(
@@ -218,7 +218,7 @@ def test_wake_is_sent_once_after_the_verdict_is_persisted(
 def test_failed_delivery_exits_2_after_one_send_and_keeps_the_verdict(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    fake = _FakeAva(tmp_path, send_failures=100)
+    fake = _FakeMeiva(tmp_path, send_failures=100)
     with pytest.raises(SystemExit) as excinfo:
         _run_watcher(monkeypatch, tmp_path, [CIStatus.FAILED], fake=fake, forbid_sleep=True)
 
@@ -233,7 +233,7 @@ def test_failed_delivery_exits_2_after_one_send_and_keeps_the_verdict(
 def test_probe_error_is_persisted_then_exits_1(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    fake = _FakeAva(tmp_path, send_failures=100)
+    fake = _FakeMeiva(tmp_path, send_failures=100)
     error = RuntimeError("gh exploded")
     with pytest.raises(SystemExit) as excinfo:
         _run_watcher(monkeypatch, tmp_path, [], fake=fake, raise_on_poll=error, forbid_sleep=True)
@@ -260,7 +260,7 @@ def test_owner_url_error_reports_its_cause_with_absolute_fallback(
 
     with pytest.raises(ValidationError) as error:
         _Guarded()
-    fake = _FakeAva(tmp_path, send_error=error.value)
+    fake = _FakeMeiva(tmp_path, send_error=error.value)
     with pytest.raises(SystemExit) as exited:
         _run_watcher(monkeypatch, tmp_path, [CIStatus.ALL_PASSED], fake=fake)
 
@@ -297,7 +297,7 @@ def test_exit_notice_tail_keeps_path_and_cause_after_boot_cleanup(
             monkeypatch,
             tmp_path,
             [CIStatus.ALL_PASSED],
-            fake=_FakeAva(tmp_path, send_error=error.value),
+            fake=_FakeMeiva(tmp_path, send_error=error.value),
             run_name="__main__",
             on_atexit=record_callback,
         )
@@ -314,7 +314,7 @@ def test_exit_notice_tail_keeps_path_and_cause_after_boot_cleanup(
 def test_persist_failure_does_not_claim_a_stored_verdict(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    fake = _FakeAva(tmp_path, send_failures=100, write_failures=100)
+    fake = _FakeMeiva(tmp_path, send_failures=100, write_failures=100)
     with pytest.raises(SystemExit) as excinfo:
         _run_watcher(monkeypatch, tmp_path, [CIStatus.FAILED], fake=fake, forbid_sleep=True)
 

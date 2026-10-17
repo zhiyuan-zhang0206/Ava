@@ -10,7 +10,7 @@ import httpx
 import psutil
 import pytest
 
-from base.paths import ava_home
+from base.paths import meiva_home
 from base.sessions.tests.poll_until import poll_until
 from tests.e2e._db import chat_and_wait
 from tests.e2e._ports import GATEWAY_URL
@@ -84,7 +84,7 @@ def test_files_edit_reports_missing_and_ambiguous_matches_and_read_flags_injecti
 
 @pytest.fixture
 def probe_command() -> Iterator[None]:
-    path = ava_home() / "commands" / f"{world.COMMAND_NAME}.md"
+    path = meiva_home() / "commands" / f"{world.COMMAND_NAME}.md"
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(
         f"---\ndescription: E2E probe command\ninstruction-hint: <question>\n---\n\n"
@@ -111,7 +111,7 @@ def test_uploaded_file_is_announced_to_the_agent_and_readable(
     spawned_agent: int, clean_world: None
 ) -> None:
     agent = spawned_agent
-    saved_dir = Path.home() / "Downloads" / f"AvaAgent-{agent}"
+    saved_dir = Path.home() / "Downloads" / f"MeivaAgent-{agent}"
     try:
         resp = httpx.post(
             f"{GATEWAY_URL}/api/keyed/v1/agents/{agent}/uploads",

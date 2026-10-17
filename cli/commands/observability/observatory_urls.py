@@ -1,6 +1,6 @@
 """Observatory-station URL derivation for the LGTM consumers.
 
-Two-state on AVA_OBSERVABILITY_URL (task #1791, A3+A4): empty (default) keeps
+Two-state on MEIVA_OBSERVABILITY_URL (task #1791, A3+A4): empty (default) keeps
 every consumer on its current local loopback endpoint; non-empty switches the
 Grafana Loki/Prometheus datasources, the alert webhook target, and the
 otel-collector gateway fan-out to the remote observatory station (the PG
@@ -25,7 +25,7 @@ from base.telemetry.station_endpoint import validated_observability_base
 def observability_datasource_urls(*, database_factory: DatabaseFactory) -> tuple[str, str, str]:
     """The (loki, prometheus, pg) datasource URLs for the rendered Grafana tree.
 
-    Two-state on AVA_OBSERVABILITY_URL: empty (default) keeps the current
+    Two-state on MEIVA_OBSERVABILITY_URL: empty (default) keeps the current
     loopback endpoints (from the per-service settings, which default to this
     host's native backends); non-empty points Loki/Prometheus at the remote
     observatory station (base URL + the service's own port). PG keeps its
@@ -58,7 +58,7 @@ def _pg_datasource_host_port(*, remote_observatory: bool, database_factory: Data
     PG externalization (#1752) is an independent track from the observatory
     (stage C moves the observatory while PG stays on the gateway), so the
     datasource host must derive from the data plane, not from
-    AVA_OBSERVABILITY_URL. The existing direct_db_url derivation resolves a
+    MEIVA_OBSERVABILITY_URL. The existing direct_db_url derivation resolves a
     local registry's pooler port to its actual Postgres port. libpq parsing
     preserves query-string host/port settings; a Unix socket uses the local
     TCP listener for Grafana. No database credentials enter the result. A
@@ -75,7 +75,7 @@ def _pg_datasource_host_port(*, remote_observatory: bool, database_factory: Data
     port = connection.get("port") or "5432"
     if remote_observatory and host in ("127.0.0.1", "localhost", "::1"):
         print(
-            "lgtm native: AVA_OBSERVABILITY_URL is set but the data-plane db_url "
+            "lgtm native: MEIVA_OBSERVABILITY_URL is set but the data-plane db_url "
             f"still names {host} — the rendered PG datasource will dial the "
             "Grafana host's own loopback; point db_url at the cluster's "
             "data-plane host (task #1752) for a remote observatory.",
@@ -121,7 +121,7 @@ def alerts_webhook_url(*, machine: MachineIdentity) -> str:
             "Grafana consumes the rendered contact.yml (delivery lands with the "
             "observatory deployment, stage B). With a local Grafana consumer, "
             "self-dialing a tailnet address can hit VPN hairpin filtering; keep "
-            "AVA_OBSERVABILITY_URL empty until the remote mechanism exists.",
+            "MEIVA_OBSERVABILITY_URL empty until the remote mechanism exists.",
             file=sys.stderr,
         )
         return f"{base}/api/alerts"

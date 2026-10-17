@@ -75,7 +75,7 @@ async def test_start_seeds_owner_open_id_from_switch_state(
     """The restart regression: with exactly one feishu chat recorded, boot
     restores the owner open id before the link goes live."""
     async with owned_tasks() as _owned_tasks:
-        monkeypatch.setenv("AVA_HOME", str(tmp_path))
+        monkeypatch.setenv("MEIVA_HOME", str(tmp_path))
         _write_switch_state(tmp_path, {"feishu:ou_owner_1": 405, "telegram:12345": 405})
         core = FakeCore()
         adapter = _boot_adapter(
@@ -94,7 +94,7 @@ async def test_start_without_credentials_does_not_seed_or_alert(
     """A disabled feishu link (no credentials) has no outbound leg to rescue:
     no seed, no alert — the alert exists for a live-but-blind leg."""
     async with owned_tasks() as _owned_tasks:
-        monkeypatch.setenv("AVA_HOME", str(tmp_path))
+        monkeypatch.setenv("MEIVA_HOME", str(tmp_path))
         _write_switch_state(tmp_path, {"feishu:ou_owner_1": 405})
         core = FakeCore()
         adapter = _boot_adapter(feishu_config(feishu_app_id="", feishu_app_secret=""), core)
@@ -112,7 +112,7 @@ async def test_seed_lets_send_to_owner_reach_the_seeded_owner(
 ) -> None:
     """Positive case: after the seed, send_to_owner resolves the owner instead
     of raising 'no known user chat' (send call stubbed at the seam)."""
-    monkeypatch.setenv("AVA_HOME", str(tmp_path))
+    monkeypatch.setenv("MEIVA_HOME", str(tmp_path))
     _write_switch_state(tmp_path, {"feishu:ou_owner_1": 405})
     adapter = FeishuAdapter(FakeCore(), feishu_config())
     await adapter._seed_owner_from_switch_state()
@@ -133,7 +133,7 @@ async def test_seed_never_overwrites_a_known_owner(
 ) -> None:
     """First-writer: an owner already known (e.g. from an inbound message) is
     never replaced by the persisted state — the rule _register_sent_chat keeps."""
-    monkeypatch.setenv("AVA_HOME", str(tmp_path))
+    monkeypatch.setenv("MEIVA_HOME", str(tmp_path))
     _write_switch_state(tmp_path, {"feishu:ou_state": 405})
     adapter = FeishuAdapter(FakeCore(), feishu_config())
     adapter._last_open_id = "ou_known"
@@ -156,7 +156,7 @@ async def test_seed_without_a_source_emits_the_failure_event_and_stays_blind(
 ) -> None:
     """No usable source (state missing / empty / no feishu chat) -> stay empty
     and emit the failure event, so the blind leg is observable."""
-    monkeypatch.setenv("AVA_HOME", str(tmp_path))
+    monkeypatch.setenv("MEIVA_HOME", str(tmp_path))
     if state is not None:
         _write_switch_state(tmp_path, state)
     adapter = FeishuAdapter(FakeCore(), feishu_config())
@@ -172,7 +172,7 @@ async def test_seed_with_multiple_feishu_chats_emits_the_ambiguity_event(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path, loguru_records: list[dict[str, Any]]
 ) -> None:
     """Two recorded feishu chats are ambiguous: never guess one — emit instead."""
-    monkeypatch.setenv("AVA_HOME", str(tmp_path))
+    monkeypatch.setenv("MEIVA_HOME", str(tmp_path))
     _write_switch_state(tmp_path, {"feishu:ou_a": 405, "feishu:ou_b": 405})
     adapter = FeishuAdapter(FakeCore(), feishu_config())
 
@@ -187,7 +187,7 @@ async def test_seed_with_invalid_state_fails_without_blind_fallback(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path, loguru_records: list[dict[str, Any]]
 ) -> None:
     """An existing invalid switch-state image fails startup."""
-    monkeypatch.setenv("AVA_HOME", str(tmp_path))
+    monkeypatch.setenv("MEIVA_HOME", str(tmp_path))
     path = tmp_path / "state" / "im_bridge" / "switch_state.json"
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text("[1, 2, 3]", encoding="utf-8")

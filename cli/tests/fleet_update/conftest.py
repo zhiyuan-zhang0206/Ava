@@ -30,7 +30,7 @@ def env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> tuple[Cluster, Calla
     monkeypatch.setattr(fleet_update, "REPO", repo)
     monkeypatch.setattr(fleet_update, "ssh", cluster.ssh)
     monkeypatch.setattr(fleet_update, "time", cluster)
-    monkeypatch.delenv("AVA_AGENT_ID", raising=False)
+    monkeypatch.delenv("MEIVA_AGENT_ID", raising=False)
     stub_decision(repo, {"changed_files": 0, "components": [], "keep_services": []})
     hosts = [
         *shlex.split("--gateway gw --runner mac --runner lin --log-dir"),

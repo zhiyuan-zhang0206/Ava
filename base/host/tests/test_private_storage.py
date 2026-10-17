@@ -238,7 +238,7 @@ def test_converge_skips_foreign_owned_root(monkeypatch: pytest.MonkeyPatch, tmp_
 
 
 def test_private_tree_skips_live_unix_socket(monkeypatch: pytest.MonkeyPatch) -> None:
-    root = Path(tempfile.mkdtemp(prefix="ava-converge-", dir="/tmp"))
+    root = Path(tempfile.mkdtemp(prefix="meiva-converge-", dir="/tmp"))
     server = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
     try:
         root.chmod(0o755)

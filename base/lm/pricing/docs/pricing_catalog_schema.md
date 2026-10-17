@@ -1,7 +1,7 @@
 ---
 type: doc
 title: Provider Metadata Schema v1 — Pricing Catalog
-description: Cross-line provider metadata contract implemented by Ava's reviewed pricing catalog.
+description: Cross-line provider metadata contract implemented by Meiva's reviewed pricing catalog.
 tags:
 - base
 - lm
@@ -11,7 +11,7 @@ tags:
 
 # Provider Metadata Schema v1 — Pricing Catalog
 
-Source: authored by CTO #3230 (2026-09-01). Ava is the reference
+Source: authored by CTO #3230 (2026-09-01). Meiva is the reference
 implementation for this cross-line schema.
 
 ## Top-level fields

@@ -8,7 +8,7 @@ from pathlib import Path
 
 from pydantic import TypeAdapter
 
-from base.paths import ava_home
+from base.paths import meiva_home
 
 _log = logging.getLogger("services.entrypoints.im_bridge.state")
 
@@ -16,7 +16,7 @@ _log = logging.getLogger("services.entrypoints.im_bridge.state")
 def _switch_state_path() -> Path:
     """Per-chat switch persistence — survives daemon restarts/updates."""
 
-    path = ava_home() / "state" / "im_bridge" / "switch_state.json"
+    path = meiva_home() / "state" / "im_bridge" / "switch_state.json"
     path.parent.mkdir(parents=True, exist_ok=True)
     return path
 

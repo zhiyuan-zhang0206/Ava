@@ -33,7 +33,7 @@ class PosixProcSessionBackend(SessionBackend):
         login_shell: bool = True,
         exec_cmd: bool = True,
     ) -> bool:
-        # ava:ref base/sessions/docs/session-backend.ava.okf.md#native-shell-launch
+        # meiva:ref base/sessions/docs/session-backend.meiva.okf.md#native-shell-launch
         from base.sessions.env_forwarding import exec_into, venv_activation_prefix
 
         if login_shell:
@@ -52,7 +52,7 @@ class PosixProcSessionBackend(SessionBackend):
         timeout: float = 15.0,
         expected: bool = False,
     ) -> tuple[bool, str]:
-        # ava:ref base/sessions/docs/session-backend.ava.okf.md#native-kill-parity
+        # meiva:ref base/sessions/docs/session-backend.meiva.okf.md#native-kill-parity
         del expected
         from base.sessions import posixproc
 
@@ -98,7 +98,7 @@ class PtySessionBackend(SessionBackend):
         login_shell: bool = True,
         exec_cmd: bool = True,  # noqa: ARG002
     ) -> bool:
-        # ava:ref base/sessions/docs/session-backend.ava.okf.md#pty-allocation
+        # meiva:ref base/sessions/docs/session-backend.meiva.okf.md#pty-allocation
         if not login_shell:
             raise NotImplementedError(f"{type(self).__name__} only creates login shells")
         if env is None:
@@ -124,7 +124,7 @@ class PtySessionBackend(SessionBackend):
 
     @staticmethod
     def _call[T](op: str, name: str, call: Callable[..., T], *args: Any, **kwargs: Any) -> T:
-        # ava:ref base/sessions/docs/session-backend.ava.okf.md#pty-failure-verdict
+        # meiva:ref base/sessions/docs/session-backend.meiva.okf.md#pty-failure-verdict
         try:
             return call(*args, **kwargs)
         except (client.ServiceError, client.ServiceUnavailableError) as exc:
@@ -151,7 +151,7 @@ class PtySessionBackend(SessionBackend):
         timeout: float = 15.0,
         expected: bool = False,
     ) -> tuple[bool, str, bool]:
-        # ava:ref base/sessions/docs/session-backend.ava.okf.md#pty-failure-verdict
+        # meiva:ref base/sessions/docs/session-backend.meiva.okf.md#pty-failure-verdict
         del timeout, expected
         try:
             verdict = client.kill(name, graceful=graceful)
@@ -167,7 +167,7 @@ class PtySessionBackend(SessionBackend):
         return self.session_started_ats([name])[name]
 
     def session_started_ats(self, names: list[str]) -> dict[str, float | None]:
-        # ava:ref base/sessions/docs/session-backend.ava.okf.md#pty-timestamp-batch
+        # meiva:ref base/sessions/docs/session-backend.meiva.okf.md#pty-timestamp-batch
         if not names:
             return {}
         started = {info.name: info.started_at for info in client.list_sessions()}
@@ -183,7 +183,7 @@ class PtySessionBackend(SessionBackend):
         return logs_dir() / f"{name}.out.log"
 
 
-# ava:ref base/sessions/docs/session-backend.ava.okf.md#backend-routing
+# meiva:ref base/sessions/docs/session-backend.meiva.okf.md#backend-routing
 def helper_spawn_enabled() -> bool:
     if not is_macos():
         return False
@@ -203,13 +203,13 @@ def helper_spawn_enabled() -> bool:
         return False
 
 
-# ava:ref base/sessions/docs/session-backend.ava.okf.md#backend-routing
+# meiva:ref base/sessions/docs/session-backend.meiva.okf.md#backend-routing
 def get_backend() -> SessionBackend:
     if helper_spawn_enabled():
         return HelperProcSessionBackend(helper_client)
     return PosixProcSessionBackend()
 
 
-# ava:ref base/sessions/docs/session-backend.ava.okf.md#backend-routing
+# meiva:ref base/sessions/docs/session-backend.meiva.okf.md#backend-routing
 def get_shell_backend() -> SessionBackend:
     return PtySessionBackend(client.PtyClientConfig())

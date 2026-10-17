@@ -17,9 +17,9 @@ import pytest
 
 from agent.graph.exec.output import format_elapsed, wrap_code_output
 from agent.graph.exec.tests.output_inputs import CropConfig
-from ava.tests.fixtures.pin_agent import pin_agent
 from base.clock import SYSTEM_TIMERS, Clock
 from base.config import settings
+from meiva.tests.fixtures.pin_agent import pin_agent
 
 _TIMESTAMP = "[2026-05-06 14:32:05]"
 _TS = _TIMESTAMP  # shorthand
@@ -299,7 +299,7 @@ def test_wrap_code_output_timed_out_carries_strategy_hint(
         elapsed_seconds=1.0,
     ).text
     assert "run_background" in out
-    assert "ava.watcher.launch" in out
+    assert "meiva.watcher.launch" in out
     assert (
         "run_background"
         not in wrap_code_output(

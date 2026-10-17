@@ -48,5 +48,5 @@ def test_contextvars_import_outside_allowlist_is_rejected(tmp_path: Path) -> Non
 
     assert result.returncode == 1
     violation = next(item for item in json.loads(result.stdout) if item["code"] == "TID251")
-    assert "LangGraph Runtime[AvaContext]" in violation["message"]
+    assert "LangGraph Runtime[MeivaContext]" in violation["message"]
     assert "explicit parameters outside a graph run" in violation["message"]

@@ -53,7 +53,7 @@ figures at max's rate produced 0.4125/1.65/0.0825 against the published
 model page's own USD column.
 
 Rates are also region-specific, and the endpoint is configurable
-(`AVA_DASHSCOPE_BASE_URL`): these entries are Beijing, and Singapore prices the
+(`MEIVA_DASHSCOPE_BASE_URL`): these entries are Beijing, and Singapore prices the
 same models differently (qwen3.8-max $2.00/$0.25/$6.00 against Beijing's
 $1.65/$0.206/$4.951). Repointing the base URL at another region means
 re-checking this catalog, not just the URL.

@@ -65,10 +65,10 @@ def test_login_shell_session_records_the_daemon_not_a_wrapper_shell(tmp_path: Pa
     started, marker = tmp_path / "started", tmp_path / "clean"
     script = tmp_path / "daemon.py"
     script.write_text(_DAEMON.format(started=str(started), marker=str(marker)))
-    _launch("ava-test-shape", script, tmp_path)
+    _launch("meiva-test-shape", script, tmp_path)
     try:
         assert _wait_for(started), "daemon never started"
-        proc = _recorded("ava-test-shape")
+        proc = _recorded("meiva-test-shape")
         cmdline = " ".join(proc.cmdline())
         assert str(script) in cmdline, f"recorded pid is not the daemon: {cmdline!r}"
         assert "bash" not in proc.name(), (
@@ -77,9 +77,9 @@ def test_login_shell_session_records_the_daemon_not_a_wrapper_shell(tmp_path: Pa
         descendants = [(p.pid, p.name()) for p in proc.children(recursive=True)]
         shells = [d for d in descendants if d[1] in {"sh", "bash", "dash", "zsh"}]
         assert not shells, f"a shell survives under the daemon: {shells} (all: {descendants})"
-        assert posixproc.has_session("ava-test-shape")
+        assert posixproc.has_session("meiva-test-shape")
     finally:
-        posixproc.kill_session("ava-test-shape", graceful=False)
+        posixproc.kill_session("meiva-test-shape", graceful=False)
 
 
 def test_graceful_signal_reaches_the_daemon_and_runs_its_cleanup(tmp_path: Path, unit_home):
@@ -87,18 +87,18 @@ def test_graceful_signal_reaches_the_daemon_and_runs_its_cleanup(tmp_path: Path,
     started, marker = tmp_path / "started", tmp_path / "clean"
     script = tmp_path / "daemon.py"
     script.write_text(_DAEMON.format(started=str(started), marker=str(marker)))
-    _launch("ava-test-graceful", script, tmp_path)
+    _launch("meiva-test-graceful", script, tmp_path)
     try:
         assert _wait_for(started), "daemon never started"
         t0 = time.monotonic()
-        assert posixproc.graceful_signal("ava-test-graceful") is True
+        assert posixproc.graceful_signal("meiva-test-graceful") is True
         assert _wait_for(marker, timeout=10.0), (
             "the daemon never ran its finally — SIGTERM did not reach it"
         )
         elapsed = time.monotonic() - t0
         assert elapsed < 5.0, f"daemon took {elapsed:.1f}s to react to SIGTERM"
     finally:
-        posixproc.kill_session("ava-test-graceful", graceful=False)
+        posixproc.kill_session("meiva-test-graceful", graceful=False)
 
 
 def test_kill_session_reports_forced_when_the_daemon_ignores_sigterm(tmp_path: Path, unit_home):
@@ -106,14 +106,14 @@ def test_kill_session_reports_forced_when_the_daemon_ignores_sigterm(tmp_path: P
     started = tmp_path / "started"
     script = tmp_path / "deaf.py"
     script.write_text(_DEAF.format(started=str(started)))
-    _launch("ava-test-deaf", script, tmp_path)
+    _launch("meiva-test-deaf", script, tmp_path)
     try:
         assert _wait_for(started), "daemon never started"
-        ok, mode = posixproc.kill_session("ava-test-deaf", graceful=True, timeout=1.0)
+        ok, mode = posixproc.kill_session("meiva-test-deaf", graceful=True, timeout=1.0)
         assert ok is True, "the SIGKILL fallback must still confirm the process is gone"
         assert mode == "forced"
     finally:
-        posixproc.kill_session("ava-test-deaf", graceful=False)
+        posixproc.kill_session("meiva-test-deaf", graceful=False)
 
 
 def test_install_graceful_shutdown_raises_keyboardinterrupt():
@@ -197,7 +197,7 @@ def test_orchestration_session_keeps_its_wrapper_shell(monkeypatch: pytest.Monke
     monkeypatch.setattr(posixproc, "new_session", _fake_new)
     backend = PosixProcSessionBackend()
     pipeline = "update-command | tee -a log"
-    assert backend.new_session("ava-updater", pipeline, Path("/repo"), env={}, exec_cmd=False)
+    assert backend.new_session("meiva-updater", pipeline, Path("/repo"), env={}, exec_cmd=False)
     assert seen[0].endswith(f"&& {pipeline}'")
     assert f"exec {pipeline}" not in seen[0]
     assert seen[0].startswith("exec bash -lc ")

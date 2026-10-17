@@ -18,13 +18,13 @@ children first, so a *spawned* session died before its spawner.
 
 That closed the Windows agent-runner's self-update. A gateway-triggered update
 POSTs `/ops`, the ops daemon calls `spawn_update()` in-process, and the
-`ava-updater` session is born as `ava-ops`'s child. The updater's own `ava
-restart` then stops this host's services — `ava-ops` among them — and killed
-itself doing it. Observed on `win` 2026-07-29: `ava-updater.out.log` ends one
-line after `✓ ava-agent-runner-watchdog`, with `ava-ops` next in the stop list;
+`meiva-updater` session is born as `meiva-ops`'s child. The updater's own `meiva
+restart` then stops this host's services — `meiva-ops` among them — and killed
+itself doing it. Observed on `win` 2026-07-29: `meiva-updater.out.log` ends one
+line after `✓ meiva-agent-runner-watchdog`, with `meiva-ops` next in the stop list;
 the box was left stopped, un-updated, and dependent on the watchdog to come back.
-Agent processes were exposed identically — `ava update`'s stop deliberately
-leaves them running for the rollout to quiesce, yet stopping `ava-ops`
+Agent processes were exposed identically — `meiva update`'s stop deliberately
+leaves them running for the rollout to quiesce, yet stopping `meiva-ops`
 force-killed every agent it had launched.
 
 ## Decision
@@ -40,7 +40,7 @@ belongs only to the caller that names it — the same invariant the session serv
 - **Reparent at launch (a Windows analog of `shared/_reparent`).** Spawn a
   short-lived helper that launches the real child detached and exits, so the
   recorded pid's parent is already dead. It is the closer mirror of POSIX and it
-  would also survive a tree kill Ava did not issue. Rejected because it changes
+  would also survive a tree kill Meiva did not issue. Rejected because it changes
   the launch shape of *every* Windows session — daemons, agents, orchestration —
   to fix a defect that lives entirely in the kill, and because the property it
   buys cannot be asserted off-box: a test can only mock the very `Popen` call
@@ -53,16 +53,16 @@ belongs only to the caller that names it — the same invariant the session serv
 - **Reparent the updater onto Task Scheduler (`schtasks /create … /run`), so the
   ops daemon is not its parent at all.** Task names are host-global while
   clusters are home-scoped, so two co-located clusters would collide on one
-  `ava-updater` task; it also puts a registered OS job on the critical path of
+  `meiva-updater` task; it also puts a registered OS job on the critical path of
   every update and needs its own cleanup story for a task that exists only for
   the duration of one run.
-- **Reorder `_do_stop` to kill `ava-ops` last.** Only narrows the window: the
+- **Reorder `_do_stop` to kill `meiva-ops` last.** Only narrows the window: the
   updater still dies, just at the end of the stop instead of the middle, and the
   agent-kill half of the defect is untouched.
 
 ## Consequences
 
-- Ava's own stops no longer cross session boundaries on Windows. A tree kill
+- Meiva's own stops no longer cross session boundaries on Windows. A tree kill
   issued by something else (`taskkill /T`, Task Scheduler ending a task) still
   takes descendants with it — that residue is what launch-side reparenting would
   have removed.

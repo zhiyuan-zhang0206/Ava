@@ -1,21 +1,21 @@
-# Grafana alerting — Ava ops alert rules (as code)
+# Grafana alerting — Meiva ops alert rules (as code)
 
-Grafana Alerting rules for the Ava event system, provisioned as code. Since
+Grafana Alerting rules for the Meiva event system, provisioned as code. Since
 the LGTM cutover (Task #1224) they evaluate against the **LGTM read side**:
 R1-R2, R5-R7, R13, R17, and R19 query **Loki** (every event is one OTLP log
 line under `{service_name="unknown_service"}`, body = the full event JSON, so
 `| json` flattens each line to labels), while R4, the gateway-metrics silence
 rule, and the root-health round freshness rule query **Prometheus** (the
-`ava_llm_usage_latency_milliseconds` histogram,
-`ava_gateway_latency_count_total` heartbeat,
-`ava_root_health_tick_last_tick_timestamp_seconds` and
-`ava_root_health_expected_expected_since_timestamp_seconds` gauges, and R18 turn-duration
+`meiva_llm_usage_latency_milliseconds` histogram,
+`meiva_gateway_latency_count_total` heartbeat,
+`meiva_root_health_tick_last_tick_timestamp_seconds` and
+`meiva_root_health_expected_expected_since_timestamp_seconds` gauges, and R18 turn-duration
 histogram); R24 queries Prometheus's own too-old-samples counter. The retired
 Postgres events read path (#1197) is gone — nothing
 queries the `ops` datasource from these rules.
 
 Datasources are provisioned beside this file (`datasources.yml`, uids
-`loki` / `prometheus`; the `ops` Postgres datasource stays for the ava-ops
+`loki` / `prometheus`; the `ops` Postgres datasource stays for the meiva-ops
 dashboards).
 
 ### LogQL migration (task #1467, complete)
@@ -40,27 +40,27 @@ Grafana does not delete a file-provisioned rule that disappears from
 removed here must also be listed in `delete-rules.yml` (a `deleteRules:`
 tombstone): file provisioning deletes the UID on the next alerting reload or
 restart, and entries are idempotent, so tombstones stay after the rule is
-gone. Tombstoned so far: R23 (`ava-ops-pitr-storage-growth`, retired
+gone. Tombstoned so far: R23 (`meiva-ops-pitr-storage-growth`, retired
 2026-10-02, removed from the station 2026-10-05) and R3
-(`ava-ops-agent-restart-spike`, which counted an event nothing emits).
+(`meiva-ops-agent-restart-spike`, which counted an event nothing emits).
 
 ## Where these run (LGTM stack)
 
 Native Grafana on the LGTM host (port 3003 by default, 53003 on the station via
-`AVA_LGTM_GRAFANA_PORT`) evaluates these rules from the converge-rendered
-provisioning tree (`$AVA_HOME/lgtm/native/config/
+`MEIVA_LGTM_GRAFANA_PORT`) evaluates these rules from the converge-rendered
+provisioning tree (`$MEIVA_HOME/lgtm/native/config/
 provisioning/`, copied verbatim by `cli/commands/observability/lgtm_native.py` from the
 source checkout's `deploy/lgtm/config/grafana/provisioning` — rendered files
 carry content-hash user-edit protection; the webhook URL is a Grafana-native
-`$__env{AVA_ALERTS_WEBHOOK_URL}` reference resolved from the process env).
+`$__env{MEIVA_ALERTS_WEBHOOK_URL}` reference resolved from the process env).
 The contact point posts to the gateway's alert ingest endpoint — loopback
 `127.0.0.1:8000` when the observatory is local, the gateway's reachable
-address when `AVA_OBSERVABILITY_URL` points at a remote station.
+address when `MEIVA_OBSERVABILITY_URL` points at a remote station.
 
 ## Rules
 
-The rules are split between `ava-ops` (evaluated every minute) and
-`ava-ops-slow` (evaluated every five minutes). Each rule retains its own
+The rules are split between `meiva-ops` (evaluated every minute) and
+`meiva-ops-slow` (evaluated every five minutes). Each rule retains its own
 `for` window and threshold. `rules.yml` is the condition catalog: events without a
 matching rule do not create an alert of their own (aggregate rules may still count
 them). The Warning / Error statistics card counts events separately.
@@ -97,55 +97,55 @@ Application layer — the Loki event stream plus the LLM latency histogram:
 
 | uid | Group | Metric | Condition | `for` | Severity |
 |-----|-------|--------|-----------|-------|----------|
-| `ava-ops-warning-error-spike` | `ava-ops` | WARNING+ERROR+CRITICAL spike | 5m count > 3× prior-15m rate AND ≥ 30 (Loki) | 5m | error |
-| `ava-ops-sse-drop-backlog` | `ava-ops` | sse_drop + event_log_drop backlog | SUM(payload.n) in 10m > 100 (Loki unwrap) | 5m | warning |
-| `ava-ops-llm-latency-p95` | `ava-ops` | llm_usage latency p95 | histogram p95 in 10m > 60000 ms (Prometheus) | 10m | error |
-| `ava-ops-delivery-stalled-backlog` | `ava-ops` | delivery_stalled fresh backlog | fresh (age_s<600) count in 10m > 50 (Loki) | 5m | warning |
-| `ava-ops-events-freshness` | `ava-ops` | event stream stalled | no events in Loki for 5m (absent_over_time) | 5m | error |
-| `ava-ops-root-health-stale` | `ava-ops` | root health round freshness | a machine+home+process expecting rounds within 24h has its last completed round >3m stale, or none since startup (Prometheus) | 0m | error |
-| `ava-ops-gateway-metrics-silent` | `ava-ops` | gateway_latency heartbeat | no samples in Prometheus for 5m (absent_over_time) | 5m | error |
-| `ava-ops-trace-disk-watermark` | `ava-ops-slow` | trace recording auto-degraded | recording_disabled_disk_watermark count in 24h > 0 (Loki) | 5m | error |
-| `ava-ops-llm-billing-quota` | `ava-ops-slow` | LLM key out of credit / quota | llm_provider_error with billing=true in 15m > 0 (Loki) | 0m | critical |
-| `ava-ops-gateway-latency-route-warning` | `ava-ops-slow` | Gateway latency: fast route p95 | p95 > 3s for 5m (Loki, LLM-bound + inherently-slow routes excluded) | 5m | warning |
-| `ava-ops-gateway-latency-route-error` | `ava-ops-slow` | Gateway latency: fast route p95 | p95 > 10s for 5m (same route filter) | 5m | error |
-| `ava-ops-turn-duration-p95` | `ava-ops-slow` | Turn duration p95 (collective slowdown) | histogram p95 > 75s for 10m (Prometheus, 24h baseline 37.6s × 2) | 10m | warning |
-| `ava-ops-gw-latency-slow-warning` | `ava-ops-slow` | Gateway latency: slow route p95 | p95 > 5s for 5m (Loki, slow route class) | 5m | warning |
-| `ava-ops-gw-latency-slow-error` | `ava-ops-slow` | Gateway latency: slow route p95 | p95 > 10s for 5m (same route class) | 5m | error |
-| `ava-ops-tempo-backend-down` | `ava-ops-slow` | Tempo backend reachable | up{job="tempo"}=0 for 1h (Prometheus) | 1h | warning |
-| `ava-ops-events-low-water` | `ava-ops` | event stream below low-water mark | count in 5m < 150 (Loki) | 10m | warning |
-| `ava-ops-telemetry-queue-loss` | `ava-ops` | telemetry queue lost events | a machine+process+queue's last drop < 300s old (Prometheus) | 0s | error |
-| `ava-ops-recovery-drill-failed` | `ava-ops` | scheduled recovery drill failed | `recovery_drill_failed` (level=error) by drill in 1h > 0 (Loki) | 0m | error |
-| `ava-ops-backup-dump-failed` | `ava-ops` | scheduled logical dump failed | `backup_dump_failed` (level=error) in 24h > 0 (Loki) | 0m | error |
-| `ava-ops-llm-rate-limit` | `ava-ops-slow` | LLM provider rate-limit burst | HTTP 429s by vendor in 5m > 5 (Loki) | 0m | warning |
+| `meiva-ops-warning-error-spike` | `meiva-ops` | WARNING+ERROR+CRITICAL spike | 5m count > 3× prior-15m rate AND ≥ 30 (Loki) | 5m | error |
+| `meiva-ops-sse-drop-backlog` | `meiva-ops` | sse_drop + event_log_drop backlog | SUM(payload.n) in 10m > 100 (Loki unwrap) | 5m | warning |
+| `meiva-ops-llm-latency-p95` | `meiva-ops` | llm_usage latency p95 | histogram p95 in 10m > 60000 ms (Prometheus) | 10m | error |
+| `meiva-ops-delivery-stalled-backlog` | `meiva-ops` | delivery_stalled fresh backlog | fresh (age_s<600) count in 10m > 50 (Loki) | 5m | warning |
+| `meiva-ops-events-freshness` | `meiva-ops` | event stream stalled | no events in Loki for 5m (absent_over_time) | 5m | error |
+| `meiva-ops-root-health-stale` | `meiva-ops` | root health round freshness | a machine+home+process expecting rounds within 24h has its last completed round >3m stale, or none since startup (Prometheus) | 0m | error |
+| `meiva-ops-gateway-metrics-silent` | `meiva-ops` | gateway_latency heartbeat | no samples in Prometheus for 5m (absent_over_time) | 5m | error |
+| `meiva-ops-trace-disk-watermark` | `meiva-ops-slow` | trace recording auto-degraded | recording_disabled_disk_watermark count in 24h > 0 (Loki) | 5m | error |
+| `meiva-ops-llm-billing-quota` | `meiva-ops-slow` | LLM key out of credit / quota | llm_provider_error with billing=true in 15m > 0 (Loki) | 0m | critical |
+| `meiva-ops-gateway-latency-route-warning` | `meiva-ops-slow` | Gateway latency: fast route p95 | p95 > 3s for 5m (Loki, LLM-bound + inherently-slow routes excluded) | 5m | warning |
+| `meiva-ops-gateway-latency-route-error` | `meiva-ops-slow` | Gateway latency: fast route p95 | p95 > 10s for 5m (same route filter) | 5m | error |
+| `meiva-ops-turn-duration-p95` | `meiva-ops-slow` | Turn duration p95 (collective slowdown) | histogram p95 > 75s for 10m (Prometheus, 24h baseline 37.6s × 2) | 10m | warning |
+| `meiva-ops-gw-latency-slow-warning` | `meiva-ops-slow` | Gateway latency: slow route p95 | p95 > 5s for 5m (Loki, slow route class) | 5m | warning |
+| `meiva-ops-gw-latency-slow-error` | `meiva-ops-slow` | Gateway latency: slow route p95 | p95 > 10s for 5m (same route class) | 5m | error |
+| `meiva-ops-tempo-backend-down` | `meiva-ops-slow` | Tempo backend reachable | up{job="tempo"}=0 for 1h (Prometheus) | 1h | warning |
+| `meiva-ops-events-low-water` | `meiva-ops` | event stream below low-water mark | count in 5m < 150 (Loki) | 10m | warning |
+| `meiva-ops-telemetry-queue-loss` | `meiva-ops` | telemetry queue lost events | a machine+process+queue's last drop < 300s old (Prometheus) | 0s | error |
+| `meiva-ops-recovery-drill-failed` | `meiva-ops` | scheduled recovery drill failed | `recovery_drill_failed` (level=error) by drill in 1h > 0 (Loki) | 0m | error |
+| `meiva-ops-backup-dump-failed` | `meiva-ops` | scheduled logical dump failed | `backup_dump_failed` (level=error) in 24h > 0 (Loki) | 0m | error |
+| `meiva-ops-llm-rate-limit` | `meiva-ops-slow` | LLM provider rate-limit burst | HTTP 429s by vendor in 5m > 5 (Loki) | 0m | warning |
 
 
 Infrastructure layer (issue #46) — the per-machine OTel Collector sidecar's
 own scrapes, labelled `host` (OS hostname / physical identity) and
-`machine_name` (Ava roster identity). Per the 2026-08-24 user ruling, alerts
+`machine_name` (Meiva roster identity). Per the 2026-08-24 user ruling, alerts
 group by `machine_name`, so units on one host remain separate series. These
 thresholds are deployment facts, not framework constants — what counts as
 "too much CPU" depends on box specs and co-tenancy:
 
 | uid | Metric | Condition | `for` | Severity |
 |-----|--------|-----------|-------|----------|
-| `ava-ops-host-cpu-saturated` | non-idle CPU | avg by machine_name > 0.90 (Prometheus) | 15m | warning |
-| `ava-ops-host-memory-pressure` | memory utilization | avg by machine_name > 0.90 (Prometheus) | 15m | warning |
-| `ava-ops-host-disk-watermark` | filesystem utilization | max by machine_name+mountpoint > 0.90, excluding read-only/optical-image filesystems and /Volumes/*, /private/tmp/*, /private/var/folders/* (Prometheus) | 15m | warning |
-| `ava-ops-host-disk-watermark-93` | filesystem utilization | same series > 0.93 — approaching the Loki WAL hard stop (Prometheus) | 15m | warning |
-| `ava-ops-host-disk-watermark-95` | filesystem utilization | same series > 0.95 — at the Loki WAL hard stop (Prometheus) | 5m | critical |
-| `ava-ops-pg-connection-saturation` | Postgres backends vs max | ratio > 0.80 (Prometheus) | 15m | warning |
-| `ava-ops-redis-memory` | Redis resident set | > 2 GiB (Prometheus) | 15m | warning |
+| `meiva-ops-host-cpu-saturated` | non-idle CPU | avg by machine_name > 0.90 (Prometheus) | 15m | warning |
+| `meiva-ops-host-memory-pressure` | memory utilization | avg by machine_name > 0.90 (Prometheus) | 15m | warning |
+| `meiva-ops-host-disk-watermark` | filesystem utilization | max by machine_name+mountpoint > 0.90, excluding read-only/optical-image filesystems and /Volumes/*, /private/tmp/*, /private/var/folders/* (Prometheus) | 15m | warning |
+| `meiva-ops-host-disk-watermark-93` | filesystem utilization | same series > 0.93 — approaching the Loki WAL hard stop (Prometheus) | 15m | warning |
+| `meiva-ops-host-disk-watermark-95` | filesystem utilization | same series > 0.95 — at the Loki WAL hard stop (Prometheus) | 5m | critical |
+| `meiva-ops-pg-connection-saturation` | Postgres backends vs max | ratio > 0.80 (Prometheus) | 15m | warning |
+| `meiva-ops-redis-memory` | Redis resident set | > 2 GiB (Prometheus) | 15m | warning |
 
 Collector delivery layer — each sidecar scrapes its per-unit loopback
-self-metrics endpoint (`AVA_OTELCOL_METRICS_PORT`, default 8888) and relays it
+self-metrics endpoint (`MEIVA_OTELCOL_METRICS_PORT`, default 8888) and relays it
 through `metrics/infra`. Prometheus's OTLP translation adds `_total` to the raw
 monotonic counters:
 
 | uid | Metric | Condition | `for` | Severity |
 |-----|--------|-----------|-------|----------|
-| `ava-ops-otelcol-queue-pressure` | exporter queue size/capacity | current ratio > 0.80 per machine_name+exporter+signal | 5m | error |
-| `ava-ops-otelcol-enqueue-failures` | new enqueue rejections | `increase(otelcol_exporter_enqueue_failed_*_total[5m]) > 0` | 0m | error |
-| `ava-ops-otelcol-host-silent` | recently-seen collector absent | machine seen in 24h has no `otelcol_process_uptime_total` in 5m | 0m | error |
+| `meiva-ops-otelcol-queue-pressure` | exporter queue size/capacity | current ratio > 0.80 per machine_name+exporter+signal | 5m | error |
+| `meiva-ops-otelcol-enqueue-failures` | new enqueue rejections | `increase(otelcol_exporter_enqueue_failed_*_total[5m]) > 0` | 0m | error |
+| `meiva-ops-otelcol-host-silent` | recently-seen collector absent | machine seen in 24h has no `otelcol_process_uptime_total` in 5m | 0m | error |
 
 The queue rule uses current gauges so it resolves after recovery; the reject
 rule uses a bounded counter delta so one historical drop does not keep
@@ -159,25 +159,25 @@ than its out-of-order intake window:
 
 | uid | Metric | Condition | `for` | Severity |
 |-----|--------|-----------|-------|----------|
-| `ava-ops-prom-too-old-samples` | too-old OTLP samples dropped | `increase(prometheus_tsdb_too_old_samples_total[10m]) > 0` | 0m | warning |
+| `meiva-ops-prom-too-old-samples` | too-old OTLP samples dropped | `increase(prometheus_tsdb_too_old_samples_total[10m]) > 0` | 0m | warning |
 
 The counter covers both whole-batch HTTP 400 loss and silent partial drops;
 collector logs alone miss the latter. The window rationale and acceptance
 runbook are in the [LGTM README](../../../../README.md#otlp-late-sample-window-out-of-order-intake).
 
 Storage and store growth — absolute-size gauges from the OTLP metric mirror
-(`ava_checkpoint_table_sizes` / `ava_memory_search_stats`), queried from Prometheus. The exporter's unit
+(`meiva_checkpoint_table_sizes` / `meiva_memory_search_stats`), queried from Prometheus. The exporter's unit
 translation renders the dimensionless gauges with a `_ratio` suffix — the
-series the rules read are e.g. `ava_checkpoint_table_sizes_blobs_bytes_ratio`:
+series the rules read are e.g. `meiva_checkpoint_table_sizes_blobs_bytes_ratio`:
 
 | uid | Group | Metric | Condition | `for` | Severity |
 |-----|-------|--------|-----------|-------|----------|
-| `ava-ops-checkpoint-blobs-warning` | `ava-ops` | checkpoint_blobs physical size | > 2.5 GiB (Prometheus) | 2h | warning |
-| `ava-ops-checkpoint-blobs-error` | `ava-ops` | checkpoint_blobs physical size | > 4 GiB (Prometheus) | 2h | error |
-| `ava-ops-checkpoint-blobs-freshness` | `ava-ops` | checkpoint_blobs emitter silence | no samples in Prometheus for 2h (absent_over_time) | 5m | warning |
-| `ava-ops-checkpoint-blobs-growth` | `ava-ops` | checkpoint_blobs growth rate | +1 GiB in the trailing 6h (Prometheus) | 1h | warning |
-| `ava-ops-memory-search-rows-warning` | `ava-ops` | memory-search store rows | > 30000 (Prometheus) | 2h | warning |
-| `ava-ops-memory-search-rows-critical` | `ava-ops` | memory-search store rows | > 100000 (Prometheus) | 2h | critical |
+| `meiva-ops-checkpoint-blobs-warning` | `meiva-ops` | checkpoint_blobs physical size | > 2.5 GiB (Prometheus) | 2h | warning |
+| `meiva-ops-checkpoint-blobs-error` | `meiva-ops` | checkpoint_blobs physical size | > 4 GiB (Prometheus) | 2h | error |
+| `meiva-ops-checkpoint-blobs-freshness` | `meiva-ops` | checkpoint_blobs emitter silence | no samples in Prometheus for 2h (absent_over_time) | 5m | warning |
+| `meiva-ops-checkpoint-blobs-growth` | `meiva-ops` | checkpoint_blobs growth rate | +1 GiB in the trailing 6h (Prometheus) | 1h | warning |
+| `meiva-ops-memory-search-rows-warning` | `meiva-ops` | memory-search store rows | > 30000 (Prometheus) | 2h | warning |
+| `meiva-ops-memory-search-rows-critical` | `meiva-ops` | memory-search store rows | > 100000 (Prometheus) | 2h | critical |
 
 The two checkpoint guards came out of the #4002 evaluation items (#4004/#4005).
 The freshness rule fires on the silent-NoData class itself — the absolute tiers
@@ -222,7 +222,7 @@ a new provider is covered by adding its string there, with no edit to
   freshness discriminator is the numeric comparison
   `| attributes_age_s < 600` on the flattened label.
 - **R4** — p95 now comes from `histogram_quantile(0.95,
-  sum by (le) (rate(ava_llm_usage_latency_milliseconds_bucket[10m])))`,
+  sum by (le) (rate(meiva_llm_usage_latency_milliseconds_bucket[10m])))`,
   an approximation of the exact SQL percentile (the same read the Insights
   Ops panel uses). Absent samples → NoData → OK (no spurious night fires).
 - **R6** — semantics changed with the stream: the old rule measured the
@@ -240,15 +240,15 @@ a new provider is covered by adding its string there, with no edit to
 ## Sync to the live Grafana
 
 Converge renders the provisioning tree into this home's native configuration.
-Alert-rule changes require a new root generation. Use normal `ava stop -y` then
-`ava start`; readiness alone cannot prove that a running Grafana reloaded a file.
+Alert-rule changes require a new root generation. Use normal `meiva stop -y` then
+`meiva start`; readiness alone cannot prove that a running Grafana reloaded a file.
 There is no independent launchd or systemd Grafana restart path.
 
 ## How to add a rule
 
-1. Add a rule to `rules.yml` (uid must be unique; keep `folder: Ava`). Put fast
-   rules in `ava-ops` (`interval: 1m`) and expensive slow-request rules in
-   `ava-ops-slow` (`interval: 5m`). Loki queries: stream selector
+1. Add a rule to `rules.yml` (uid must be unique; keep `folder: Meiva`). Put fast
+   rules in `meiva-ops` (`interval: 1m`) and expensive slow-request rules in
+   `meiva-ops-slow` (`interval: 5m`). Loki queries: stream selector
    `{service_name="unknown_service"}` + `| json` before any field filter,
    and wrap every count in `sum(...)` — the unknown_service family has >500
    streams over a day and an unaggregated count hits Loki's per-query
@@ -257,7 +257,7 @@ There is no independent launchd or systemd Grafana restart path.
    (rule provisioning does not hot-reload).
 3. Verify via native Grafana's admin API:
    `GET /api/v1/provisioning/alert-rules`. Synthetic events are no longer SQL
-   inserts — push a test event through the emitter (any Ava process emits
+   inserts — push a test event through the emitter (any Meiva process emits
    on activity; e.g. trigger a real event or use the Loki push API), then
    watch `GET /api/prometheus/grafana/api/v1/rules` for the state
    transition.
@@ -273,29 +273,29 @@ and trailing window carry the debounce. A condition that stops resolves itself w
 
 | uid | Event | `for` | Severity | Replaces |
 |-----|-------|-------|----------|----------|
-| `ava-ops-health-probe-warning` / `-error` | `health_probe_failing` per `attributes_check` | 3m / 10m | warning / error | the probe's time-graded owner alert |
-| `ava-ops-health-probe-silent` | absent `health_probe_ran` for 15m | 0m | error | nothing: a stopped probe was silent (routes to Telegram too) |
-| `ava-ops-service-start-unready` | `service_start_unready` | 0m | warning | start-readiness alert rows |
-| `ava-ops-boot-retries-exhausted` | `boot_retries_exhausted` | 0m | error | nothing: the boot job's endless retry never reported a permanent failure |
-| `ava-ops-schedule-verify-failed` | `schedule_verify_failed` | 0m | error | the verify sweep's direct post |
-| `ava-ops-agent-continuation-lost` | `agent_continuation_lost` per agent | 0m | error | the agent host's alert for a turn that failed while its continuation was owed to a maintenance hold |
-| `ava-ops-schedule-stalled` | `schedule_stalled` (24h) | 0m | warning | the event had no rule |
-| `ava-ops-schedule-convergence-abandoned` | `schedule_convergence_abandoned` (24h) | 0m | warning | nothing: the manager's reap and sync retries had no bound and no report |
-| `ava-ops-maintenance-hold-overdue` | `maintenance_hold_overdue` (24h) | 0m | warning | nothing: a forgotten maintenance hold froze the machine's wakes unreported |
-| `ava-ops-machine-offline-warning` / `-error` | `machine_probe_failed` per machine | 3m / 10m | warning / error | the machine-offline rows and their clock |
-| `ava-ops-exec-child-boot-failed` | `exec_child_boot_failed` | 0s | warning | the exec child's direct post and 600s limit |
-| `ava-ops-inspect-metrics-gap` | `inspect_metrics_coverage_gap` | 0s | warning | the inspector's cooldown and direct row |
-| `ava-ops-impersonation-seal-stuck` / `-capture-failed` | `impersonation_event_log_incomplete` | 0s | warning | the impersonation event-log rows |
-| `ava-ops-impersonation-notice-failed` | `impersonation_terminal_notice_failed` per lease | 0s | warning | the ended-lease notice's durable retry ledger (a failed single submission is now reported, not retried) |
-| `ava-ops-im-push-failed` | `im_push_failed` (weixin, 2+ failures) | 0s | warning | the push watchdog's cross-channel alert and cooldown |
-| `ava-ops-im-feishu-owner-seed-failed` | `im_feishu_owner_seed_failed` | 0s | warning | a direct owner message |
-| `ava-ops-im-push-stall` | `im_push_health` per leg (`attributes_channel`; pending > 0, last delivery age > 900s) | 2m | warning | nothing: an outbound IM leg could stall with no alert (10-08: Telegram leg silent 54 min, 2 pushes stranded) |
-| `ava-ops-lifecycle-pointer-stuck` | `lifecycle_pointer_stuck` (2h) | 0s | warning | the settle of an unobserved force-terminate fence (boot recovery and the absent-machine sweep): now an operator settles it by hand |
-| `ava-ops-delivery-stalled` | `delivery_stalled` per agent | 1m | warning | the deploy-window hold and settle grace |
-| `ava-ops-db-pool-acquire-slow` | `db_pool_acquire_slow` per machine | 2m | warning | the per-host cooldown marker |
-| `ava-ops-root-unit-restart-failed` / `-breaker-open` | `root_unit_failure_state` per `attributes_kind` | 0m | error / critical | the root unit episode store and its posts |
-| `ava-ops-root-unit-not-revivable` | `root_unit_not_revivable` >1 in 2m | 0m | error | `terminal_escalate_rounds` |
-| `ava-ops-root-diagnostic-venv` / `-brew-pin` / `-browser-reach` | `root_diagnostic` non-alive, >1 / >1 / >2 samples | 0m | warning | the per-probe consecutive-failure thresholds |
+| `meiva-ops-health-probe-warning` / `-error` | `health_probe_failing` per `attributes_check` | 3m / 10m | warning / error | the probe's time-graded owner alert |
+| `meiva-ops-health-probe-silent` | absent `health_probe_ran` for 15m | 0m | error | nothing: a stopped probe was silent (routes to Telegram too) |
+| `meiva-ops-service-start-unready` | `service_start_unready` | 0m | warning | start-readiness alert rows |
+| `meiva-ops-boot-retries-exhausted` | `boot_retries_exhausted` | 0m | error | nothing: the boot job's endless retry never reported a permanent failure |
+| `meiva-ops-schedule-verify-failed` | `schedule_verify_failed` | 0m | error | the verify sweep's direct post |
+| `meiva-ops-agent-continuation-lost` | `agent_continuation_lost` per agent | 0m | error | the agent host's alert for a turn that failed while its continuation was owed to a maintenance hold |
+| `meiva-ops-schedule-stalled` | `schedule_stalled` (24h) | 0m | warning | the event had no rule |
+| `meiva-ops-schedule-convergence-abandoned` | `schedule_convergence_abandoned` (24h) | 0m | warning | nothing: the manager's reap and sync retries had no bound and no report |
+| `meiva-ops-maintenance-hold-overdue` | `maintenance_hold_overdue` (24h) | 0m | warning | nothing: a forgotten maintenance hold froze the machine's wakes unreported |
+| `meiva-ops-machine-offline-warning` / `-error` | `machine_probe_failed` per machine | 3m / 10m | warning / error | the machine-offline rows and their clock |
+| `meiva-ops-exec-child-boot-failed` | `exec_child_boot_failed` | 0s | warning | the exec child's direct post and 600s limit |
+| `meiva-ops-inspect-metrics-gap` | `inspect_metrics_coverage_gap` | 0s | warning | the inspector's cooldown and direct row |
+| `meiva-ops-impersonation-seal-stuck` / `-capture-failed` | `impersonation_event_log_incomplete` | 0s | warning | the impersonation event-log rows |
+| `meiva-ops-impersonation-notice-failed` | `impersonation_terminal_notice_failed` per lease | 0s | warning | the ended-lease notice's durable retry ledger (a failed single submission is now reported, not retried) |
+| `meiva-ops-im-push-failed` | `im_push_failed` (weixin, 2+ failures) | 0s | warning | the push watchdog's cross-channel alert and cooldown |
+| `meiva-ops-im-feishu-owner-seed-failed` | `im_feishu_owner_seed_failed` | 0s | warning | a direct owner message |
+| `meiva-ops-im-push-stall` | `im_push_health` per leg (`attributes_channel`; pending > 0, last delivery age > 900s) | 2m | warning | nothing: an outbound IM leg could stall with no alert (10-08: Telegram leg silent 54 min, 2 pushes stranded) |
+| `meiva-ops-lifecycle-pointer-stuck` | `lifecycle_pointer_stuck` (2h) | 0s | warning | the settle of an unobserved force-terminate fence (boot recovery and the absent-machine sweep): now an operator settles it by hand |
+| `meiva-ops-delivery-stalled` | `delivery_stalled` per agent | 1m | warning | the deploy-window hold and settle grace |
+| `meiva-ops-db-pool-acquire-slow` | `db_pool_acquire_slow` per machine | 2m | warning | the per-host cooldown marker |
+| `meiva-ops-root-unit-restart-failed` / `-breaker-open` | `root_unit_failure_state` per `attributes_kind` | 0m | error / critical | the root unit episode store and its posts |
+| `meiva-ops-root-unit-not-revivable` | `root_unit_not_revivable` >1 in 2m | 0m | error | `terminal_escalate_rounds` |
+| `meiva-ops-root-diagnostic-venv` / `-brew-pin` / `-browser-reach` | `root_diagnostic` non-alive, >1 / >1 / >2 samples | 0m | warning | the per-probe consecutive-failure thresholds |
 
 Unhealthy-for-3-minutes and unhealthy-for-10-minutes are two coexisting rules per condition
 (Grafana's file provisioning has no inhibition rules), so a long outage holds a warning and an
@@ -324,7 +324,7 @@ writes alert rows, posts to the endpoint or pushes an alert to IM on its own
 
 A planned outage is a silence, not a gate in the services: `python -m cli.fleet_update down` creates
 one silence in this Grafana (matcher `alertname=~".+"`, disk alerts excepted: `metric="host_disk"`,
-`attributes_check="disk_usage"`; createdBy `ava-fleet-update`; expiry and a comment naming the
+`attributes_check="disk_usage"`; createdBy `meiva-fleet-update`; expiry and a comment naming the
 target) and `up` expires it. Silenced rules keep evaluating, so a condition that outlives the window
 notifies when the silence ends.
 
@@ -342,4 +342,4 @@ Type annotations do not always determine the emitted runtime metric kind.
 with emit sites. Its non-derived metric table is currently empty. Any proposed addition requires
 a live Prometheus check and a recorded reason; historical samples do not
 establish current emission. Naming and type translation remain owned by the
-[metrics mapping](../../../../../../base/telemetry/otlp/docs/telemetry-otlp/metrics-mapping.ava.okf.md).
+[metrics mapping](../../../../../../base/telemetry/otlp/docs/telemetry-otlp/metrics-mapping.meiva.okf.md).

@@ -21,7 +21,7 @@ from langchain_core.messages import AnyMessage
 import agent.graph.recall.memory_recall as recall
 from agent.messages import inbound_message
 from base import config
-from base.agents.context import AvaContext
+from base.agents.context import MeivaContext
 from base.agents.context.clients import ClientSet
 from base.agents.context.gateway_client.memory_search import MemorySearchResult
 from base.agents.context.gateway_client.transport import GatewayTransportInputs
@@ -119,7 +119,7 @@ def _set_search(search: _MemoryGateway, results: list[MemorySearchResult]) -> li
 
 
 @pytest.fixture
-def context(search: _MemoryGateway) -> Iterator[AvaContext]:
+def context(search: _MemoryGateway) -> Iterator[MeivaContext]:
     ctx = _context()
     try:
         with (
@@ -145,8 +145,8 @@ def _agent(**changes: Any) -> AgentSlices:
     return AgentSlices.resolve(default_reader=defaults(**changes))
 
 
-def _context(agent_id: int | None = None) -> AvaContext:
-    return AvaContext(
+def _context(agent_id: int | None = None) -> MeivaContext:
+    return MeivaContext(
         identity=AgentIdentity(agent_id=agent_id, owns_loop=True) if agent_id is not None else None,
         catalog=build_model_catalog(),
         clock_factory=Clock.from_settings,
@@ -163,7 +163,7 @@ def _context(agent_id: int | None = None) -> AvaContext:
 
 
 async def _recall(
-    context: AvaContext, injected: set[str] | None = None
+    context: MeivaContext, injected: set[str] | None = None
 ) -> recall.PassiveRecall | None:
     return await recall.passive_memory_recall(
         _conversation(),
@@ -183,7 +183,7 @@ def _content(result: recall.PassiveRecall) -> str:
 
 
 async def test_renders_path_score_description_and_matched_passage(
-    memory_root: Path, context: AvaContext, search: _MemoryGateway
+    memory_root: Path, context: MeivaContext, search: _MemoryGateway
 ) -> None:
     _write_note(memory_root, "a.md", "note a")
     _write_note(memory_root, "sub/b.md", "note b")
@@ -211,7 +211,7 @@ async def test_renders_path_score_description_and_matched_passage(
 
 
 async def test_tags_are_not_rendered(
-    memory_root: Path, context: AvaContext, search: _MemoryGateway
+    memory_root: Path, context: MeivaContext, search: _MemoryGateway
 ) -> None:
     _write_note(memory_root, "a.md", "note a")
     _set_search(
@@ -226,7 +226,7 @@ async def test_tags_are_not_rendered(
 
 
 async def test_empty_description_is_not_synthesized(
-    memory_root: Path, context: AvaContext, search: _MemoryGateway
+    memory_root: Path, context: MeivaContext, search: _MemoryGateway
 ) -> None:
     """A hit with no frontmatter description renders no description -- recall does NOT fall back
     to the note's title or first body line (the injected note carries only what search returns)."""
@@ -243,7 +243,7 @@ async def test_empty_description_is_not_synthesized(
 
 
 async def test_passage_equal_to_the_description_is_not_repeated(
-    memory_root: Path, context: AvaContext, search: _MemoryGateway
+    memory_root: Path, context: MeivaContext, search: _MemoryGateway
 ) -> None:
     """A description-line hit matched the description itself; the passage would only repeat it."""
     _write_note(memory_root, "a.md", "note a")
@@ -256,7 +256,7 @@ async def test_passage_equal_to_the_description_is_not_repeated(
 
 
 async def test_description_and_passage_are_not_truncated(
-    memory_root: Path, context: AvaContext, search: _MemoryGateway
+    memory_root: Path, context: MeivaContext, search: _MemoryGateway
 ) -> None:
     long_desc, long_chunk = "x" * 300, "y" * 1800
     _write_note(memory_root, "a.md", "note a")
@@ -272,7 +272,10 @@ async def test_description_and_passage_are_not_truncated(
 
 
 async def test_only_results_reaching_the_threshold_are_injected(
-    memory_root: Path, monkeypatch: pytest.MonkeyPatch, context: AvaContext, search: _MemoryGateway
+    memory_root: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    context: MeivaContext,
+    search: _MemoryGateway,
 ) -> None:
     monkeypatch.setattr(config.settings.agent, "memory_recall_inject_threshold", 0.7)
     for name in ("hi", "edge", "lo"):
@@ -289,7 +292,7 @@ async def test_only_results_reaching_the_threshold_are_injected(
 
 
 async def test_nothing_is_injected_when_no_result_reaches_the_threshold(
-    memory_root: Path, context: AvaContext, search: _MemoryGateway
+    memory_root: Path, context: MeivaContext, search: _MemoryGateway
 ) -> None:
     """Vector search always returns something; a turn where nothing scores high enough
     injects nothing rather than the best of a weak lot."""
@@ -300,7 +303,10 @@ async def test_nothing_is_injected_when_no_result_reaches_the_threshold(
 
 
 async def test_the_cap_keeps_the_best_scores_whatever_order_search_returned(
-    memory_root: Path, monkeypatch: pytest.MonkeyPatch, context: AvaContext, search: _MemoryGateway
+    memory_root: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    context: MeivaContext,
+    search: _MemoryGateway,
 ) -> None:
     monkeypatch.setattr(config.settings.agent, "memory_recall_inject_max", 2)
     scores = {"a": 0.75, "b": 0.99, "c": 0.8, "d": 0.9}
@@ -317,7 +323,10 @@ async def test_the_cap_keeps_the_best_scores_whatever_order_search_returned(
 
 
 async def test_zero_cap_disables_injection_without_searching(
-    memory_root: Path, monkeypatch: pytest.MonkeyPatch, context: AvaContext, search: _MemoryGateway
+    memory_root: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    context: MeivaContext,
+    search: _MemoryGateway,
 ) -> None:
     monkeypatch.setattr(config.settings.agent, "memory_recall_inject_max", 0)
     asked = _set_search(search, [])
@@ -327,7 +336,10 @@ async def test_zero_cap_disables_injection_without_searching(
 
 
 async def test_skips_path_not_synced_to_this_machine(
-    memory_root: Path, monkeypatch: pytest.MonkeyPatch, context: AvaContext, search: _MemoryGateway
+    memory_root: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    context: MeivaContext,
+    search: _MemoryGateway,
 ) -> None:
     """Search can return a path this machine has not synced yet; the missing file is skipped
     rather than crashing on read, and does not use up a slot."""
@@ -350,7 +362,7 @@ async def test_search_asks_for_the_cap_whatever_the_session_has_injected(
     memory_root: Path,
     monkeypatch: pytest.MonkeyPatch,
     already_count: int,
-    context: AvaContext,
+    context: MeivaContext,
     search: _MemoryGateway,
 ) -> None:
     """Notes injected earlier ride along as an exclusion list; the number of results asked for
@@ -365,7 +377,10 @@ async def test_search_asks_for_the_cap_whatever_the_session_has_injected(
 
 
 async def test_search_is_bounded_by_the_recall_deadline(
-    memory_root: Path, monkeypatch: pytest.MonkeyPatch, context: AvaContext, search: _MemoryGateway
+    memory_root: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    context: MeivaContext,
+    search: _MemoryGateway,
 ) -> None:
     """The search request carries the pass's budget, so the gateway stops ranking when the
     pass has given up."""
@@ -379,7 +394,7 @@ async def test_search_is_bounded_by_the_recall_deadline(
 
 
 async def test_search_is_issued_for_recall_not_as_an_agent_search(
-    memory_root: Path, context: AvaContext, search: _MemoryGateway
+    memory_root: Path, context: MeivaContext, search: _MemoryGateway
 ) -> None:
     """The gateway asks a different relevance question for a conversation than for a query."""
     await _recall(context)
@@ -405,7 +420,7 @@ def test_defaults_are_the_calibrated_values() -> None:
 async def test_http_error_degrades_to_no_recall_and_logs_error(
     memory_root: Path,
     loguru_records: list[dict],
-    context: AvaContext,
+    context: MeivaContext,
     search: _MemoryGateway,
 ) -> None:
     """A gateway 500 leaves the turn with no recall instead of killing it, and
@@ -427,7 +442,7 @@ async def test_http_error_degrades_to_no_recall_and_logs_error(
 async def test_modelled_outage_degrades_without_an_error_log(
     memory_root: Path,
     loguru_records: list[dict],
-    context: AvaContext,
+    context: MeivaContext,
     search: _MemoryGateway,
 ) -> None:
     """The gateway naming its own outage in the wire contract — including a failed ranking
@@ -448,7 +463,7 @@ async def test_modelled_outage_degrades_without_an_error_log(
 
 
 async def test_programming_error_in_search_still_propagates(
-    memory_root: Path, context: AvaContext, search: _MemoryGateway
+    memory_root: Path, context: MeivaContext, search: _MemoryGateway
 ) -> None:
     """The degradation covers infrastructure failure only. A bug in the call
     path is not a memory-index outage and must still fail fast, or this handler
@@ -464,7 +479,7 @@ async def test_programming_error_in_search_still_propagates(
 
 
 async def test_returns_none_when_disabled(
-    monkeypatch: pytest.MonkeyPatch, context: AvaContext, search: _MemoryGateway
+    monkeypatch: pytest.MonkeyPatch, context: MeivaContext, search: _MemoryGateway
 ) -> None:
     monkeypatch.setattr(config.settings.agent, "passive_memory_recall_enabled", False)
 
@@ -473,7 +488,7 @@ async def test_returns_none_when_disabled(
 
 
 async def test_returns_none_when_eval_isolated(
-    monkeypatch: pytest.MonkeyPatch, context: AvaContext, search: _MemoryGateway
+    monkeypatch: pytest.MonkeyPatch, context: MeivaContext, search: _MemoryGateway
 ) -> None:
     """Eval isolation must stop the direct index call that passive recall bypasses."""
     monkeypatch.setattr(config.settings.agent, "eval_isolation", True)
@@ -484,7 +499,7 @@ async def test_returns_none_when_eval_isolated(
 
 
 async def test_returns_none_when_no_query(
-    memory_root: Path, context: AvaContext, search: _MemoryGateway
+    memory_root: Path, context: MeivaContext, search: _MemoryGateway
 ) -> None:
     """An empty conversation yields no query, so recall no-ops before searching."""
     asked = _set_search(search, [])
@@ -498,10 +513,10 @@ async def test_returns_none_when_no_query(
 async def test_recall_logs_search_time_and_injected_count(
     memory_root: Path,
     loguru_records: list[dict],
-    context: AvaContext,
+    context: MeivaContext,
     search: _MemoryGateway,
 ) -> None:
-    """The completed-pass event the `ava_memory` panels read carries `search_ms` and `injected`."""
+    """The completed-pass event the `meiva_memory` panels read carries `search_ms` and `injected`."""
     _write_note(memory_root, "a.md", "note a")
     _set_search(search, [_result("a.md", score=0.9), _result("b.md", score=0.1)])
 

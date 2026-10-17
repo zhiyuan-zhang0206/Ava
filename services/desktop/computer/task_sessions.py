@@ -10,7 +10,7 @@ The sweep is lazy (no background task): endings are only noticed while the
 daemon is doing something. A task that goes idle forever never emits `end` —
 its start + actions remain complete facts for replay, so this is fine.
 
-Config via env: AVA_COMPUTER_SESSION_IDLE_S (default 600).
+Config via env: MEIVA_COMPUTER_SESSION_IDLE_S (default 600).
 """
 
 from __future__ import annotations

@@ -4,7 +4,7 @@
 "test_resurrection_fences.py" = ["resurrection_setup.py"]
 
 [debt.env-patch]
-"test_termination_message.py#monkeypatch.setenv os.environ.AVA_HOME" = 1
+"test_termination_message.py#monkeypatch.setenv os.environ.MEIVA_HOME" = 1
 "test_termination_message.py#monkeypatch.setenv os.environ.HOME" = 1
 
 [debt.first-party-patch]

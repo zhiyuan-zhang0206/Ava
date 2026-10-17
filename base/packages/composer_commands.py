@@ -12,22 +12,22 @@ from base.log import logger
 from base.packages.docs.frontmatter import FrontmatterError, parse_frontmatter
 from base.packages.skills.names import display_name, match_key
 from base.packages.skills.tree import Skill, identifier, target
-from base.paths import ava_home, repo_plugins_dir, repo_root
+from base.paths import meiva_home, repo_plugins_dir, repo_root
 
 
-# ava:ref base/packages/docs/composer-commands.ava.okf.md#catalog-lazy-boundary
+# meiva:ref base/packages/docs/composer-commands.meiva.okf.md#catalog-lazy-boundary
 def _commands_enabled() -> bool:
     if settings.has_domain("agent"):
         return settings.agent.commands_enabled
     from base.host.env.dotenv_file import read_env_aliases
 
-    value = read_env_aliases().get("AVA_COMMANDS_ENABLED")
+    value = read_env_aliases().get("MEIVA_COMMANDS_ENABLED")
     if value is None:
         return True
     return value.strip().lower() in {"1", "true", "yes", "on"}
 
 
-# ava:ref base/packages/docs/composer-commands.ava.okf.md#command-expansion
+# meiva:ref base/packages/docs/composer-commands.meiva.okf.md#command-expansion
 class Command(TypedDict):
     name: str
     description: str
@@ -36,11 +36,11 @@ class Command(TypedDict):
     skill_target: str | None
 
 
-# ava:ref base/packages/docs/composer-commands.ava.okf.md#command-discovery
+# meiva:ref base/packages/docs/composer-commands.meiva.okf.md#command-discovery
 def command_dirs(skills: Sequence[Skill]) -> list[tuple[Path, tuple[str, ...]]]:
     dirs: list[tuple[Path, tuple[str, ...]]] = [
-        (repo_root() / "ava_builtins" / "commands", ()),
-        (ava_home() / "commands", ()),
+        (repo_root() / "meiva_builtins" / "commands", ()),
+        (meiva_home() / "commands", ()),
     ]
     for base in (repo_plugins_dir(), external_plugin_read_root()):
         if base.is_dir():
@@ -54,7 +54,7 @@ def command_dirs(skills: Sequence[Skill]) -> list[tuple[Path, tuple[str, ...]]]:
     return dirs
 
 
-# ava:ref base/packages/docs/composer-commands.ava.okf.md#command-discovery
+# meiva:ref base/packages/docs/composer-commands.meiva.okf.md#command-discovery
 def scan_dir(d: Path, base_ns: tuple[str, ...]) -> dict[str, Command]:
     out: dict[str, Command] = {}
     if not d.is_dir():
@@ -81,7 +81,7 @@ def scan_dir(d: Path, base_ns: tuple[str, ...]) -> dict[str, Command]:
     return out
 
 
-# ava:ref base/packages/docs/composer-commands.ava.okf.md#command-discovery
+# meiva:ref base/packages/docs/composer-commands.meiva.okf.md#command-discovery
 def skill_commands(skills: Sequence[Skill]) -> dict[str, Command]:
     out: dict[str, Command] = {}
     for sk in skills:
@@ -96,7 +96,7 @@ def skill_commands(skills: Sequence[Skill]) -> dict[str, Command]:
     return out
 
 
-# ava:ref base/packages/docs/composer-commands.ava.okf.md#command-discovery
+# meiva:ref base/packages/docs/composer-commands.meiva.okf.md#command-discovery
 def discover_commands(skills: Sequence[Skill]) -> list[Command]:
     if not _commands_enabled():
         return []
@@ -106,7 +106,7 @@ def discover_commands(skills: Sequence[Skill]) -> list[Command]:
     return [out[name] for name in sorted(out)]
 
 
-# ava:ref base/packages/docs/composer-commands.ava.okf.md#command-expansion
+# meiva:ref base/packages/docs/composer-commands.meiva.okf.md#command-expansion
 class Invocation(NamedTuple):
     command: Command
     typed_name: str
@@ -116,7 +116,7 @@ class Invocation(NamedTuple):
 _INVOCATION = re.compile(r"(?:\A|(?<=\s))/(\S+)")
 
 
-# ava:ref base/packages/docs/composer-commands.ava.okf.md#command-expansion
+# meiva:ref base/packages/docs/composer-commands.meiva.okf.md#command-expansion
 def split_commands(content: str, commands: Sequence[Command]) -> list[Invocation] | None:
     catalog = {match_key(c["name"]): c for c in commands}
     hits = [
@@ -133,13 +133,13 @@ def split_commands(content: str, commands: Sequence[Command]) -> list[Invocation
     return chain
 
 
-# ava:ref base/packages/docs/composer-commands.ava.okf.md#command-expansion
+# meiva:ref base/packages/docs/composer-commands.meiva.okf.md#command-expansion
 def _expand_one(inv: Invocation) -> str:
     name = inv.typed_name
     if inv.command["skill_target"]:
         out = (
             f"/{name} invokes the {name} skill. Load it with "
-            f"ava.help(ava.skills.{inv.command['skill_target']}) and follow it for this task."
+            f"meiva.help(meiva.skills.{inv.command['skill_target']}) and follow it for this task."
         )
     else:
         out = f"Command /{name}:\n{inv.command['body']}"
@@ -148,7 +148,7 @@ def _expand_one(inv: Invocation) -> str:
     return out
 
 
-# ava:ref base/packages/docs/composer-commands.ava.okf.md#command-expansion
+# meiva:ref base/packages/docs/composer-commands.meiva.okf.md#command-expansion
 def expand_command(content: str, commands: Sequence[Command]) -> str:
     if not content.startswith("/"):
         return content
@@ -158,7 +158,7 @@ def expand_command(content: str, commands: Sequence[Command]) -> str:
     return "\n\n".join(_expand_one(inv) for inv in chain)
 
 
-# ava:ref base/packages/docs/composer-commands.ava.okf.md#catalog-lazy-boundary
+# meiva:ref base/packages/docs/composer-commands.meiva.okf.md#catalog-lazy-boundary
 @dataclass(frozen=True)
 class CommandCatalog:
     skills: Callable[[], Sequence[Skill]]

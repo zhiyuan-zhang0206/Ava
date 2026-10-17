@@ -24,7 +24,7 @@ def _routes() -> dict[str, dict[str, Any]]:
     routes: dict[str, dict[str, Any]] = {}
     for route in _policy()["routes"]:
         label = route["object_matchers"][0][0]
-        if route["receiver"] == "ava-alerts-telegram":
+        if route["receiver"] == "meiva-alerts-telegram":
             routes[f"telegram:{label}"] = route
         else:
             routes["critical" if label == "severity" else "catch-all"] = route
@@ -33,11 +33,11 @@ def _routes() -> dict[str, dict[str, Any]]:
 
 def test_every_alert_reaches_the_webhook_receiver() -> None:
     contacts = {c["name"]: c for c in _document()["contactPoints"]}
-    (receiver,) = contacts["ava-alerts-webhook"]["receivers"]
+    (receiver,) = contacts["meiva-alerts-webhook"]["receivers"]
     assert receiver["type"] == "webhook"
     assert receiver["disableResolveMessage"] is False
     policy = _policy()
-    assert policy["receiver"] == "ava-alerts-webhook"
+    assert policy["receiver"] == "meiva-alerts-webhook"
     assert policy["matchers"] == []
     assert _routes()["catch-all"]["object_matchers"] == [["alertname", "=~", ".+"]]
     assert list(_routes()) == [
@@ -78,11 +78,11 @@ def test_critical_alerts_skip_the_batching_wait() -> None:
 
 def test_gateway_liveness_also_reaches_telegram_directly_and_still_the_webhook() -> None:
     contacts = {c["name"]: c for c in _document()["contactPoints"]}
-    (receiver,) = contacts["ava-alerts-telegram"]["receivers"]
+    (receiver,) = contacts["meiva-alerts-telegram"]["receivers"]
     assert receiver["type"] == "telegram"
     assert receiver["settings"] == {
-        "bottoken": "$__env{AVA_ALERTS_TELEGRAM_BOT_TOKEN}",
-        "chatid": "$__env{AVA_ALERTS_TELEGRAM_CHAT_ID}",
+        "bottoken": "$__env{MEIVA_ALERTS_TELEGRAM_BOT_TOKEN}",
+        "chatid": "$__env{MEIVA_ALERTS_TELEGRAM_CHAT_ID}",
     }
     for key, matcher in (
         ("telegram:attributes_check", ["attributes_check", "=", "gateway_liveness"]),

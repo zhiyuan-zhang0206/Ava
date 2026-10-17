@@ -1,8 +1,8 @@
-"""Publish Ava's operator skill into already-present external agent homes.
+"""Publish Meiva's operator skill into already-present external agent homes.
 
-The external homes remain user-owned.  Ava's authority is bound by a private
-ledger under ``AVA_HOME`` and every mutation is serialized and limited to each
-named skill target (plus transaction siblings bearing an Ava generation ID).
+The external homes remain user-owned.  Meiva's authority is bound by a private
+ledger under ``MEIVA_HOME`` and every mutation is serialized and limited to each
+named skill target (plus transaction siblings bearing an Meiva generation ID).
 """
 
 from __future__ import annotations
@@ -46,8 +46,8 @@ from cli.commands.extensions.external_skill_host.ledger import (
     write_ledger,
 )
 
-_SKILL_NAMES: tuple[str, ...] = ("ava-guide",)
-_MARKER_NAME = ".ava-managed.json"
+_SKILL_NAMES: tuple[str, ...] = ("meiva-guide",)
+_MARKER_NAME = ".meiva-managed.json"
 _CLIENTS = (("Codex", ".codex", "codex"), ("Claude Code", ".claude", "claude"))
 
 
@@ -59,7 +59,7 @@ def verify_marker(
     root: Path, installation_id: str, generation_id: str, *, skill_name: str = SKILL_NAME
 ) -> None:
     if not stat.S_ISDIR(lstat(root).st_mode):
-        raise ClientConflictError("Ava-managed target is not a regular directory")
+        raise ClientConflictError("Meiva-managed target is not a regular directory")
     record = parse_record(root / _MARKER_NAME)
     if (
         record is None
@@ -67,7 +67,7 @@ def verify_marker(
         or record.get("installation_id") != installation_id
         or record.get("generation_id") != generation_id
     ):
-        raise ClientConflictError("Ava-managed target ownership marker does not match its ledger")
+        raise ClientConflictError("Meiva-managed target ownership marker does not match its ledger")
 
 
 def _require_digest(root: Path, expected: str, reason: str) -> None:
@@ -240,10 +240,10 @@ def _activate(
     stage = transaction_path(skills_root, "stage", generation_id, skill_name=target.name)
     previous = transaction_path(skills_root, "previous", generation_id, skill_name=target.name)
     if transaction["stage_state"] != "published" or not exists(stage):
-        raise ClientConflictError("incomplete Ava transaction was preserved")
+        raise ClientConflictError("incomplete Meiva transaction was preserved")
     verify_marker(stage, ledger["installation_id"], generation_id, skill_name=target.name)
     if tree_manifest(stage) != transaction["expected_manifest"]:
-        raise ClientConflictError("staged Ava transaction was modified")
+        raise ClientConflictError("staged Meiva transaction was modified")
     old = ledger["installed"]
     action = "installed" if old is None else "updated"
     if exists(target):
@@ -275,7 +275,7 @@ def _activate(
         raise
     verify_marker(target, ledger["installation_id"], generation_id, skill_name=target.name)
     if tree_digest(target) != transaction["expected_digest"]:
-        raise ClientConflictError("activated Ava target failed verification")
+        raise ClientConflictError("activated Meiva target failed verification")
     commit_activation(ledger_path, ledger, transaction, previous)
     return action
 
@@ -293,10 +293,10 @@ def _validate_source_path(repo: Path, source: Path) -> None:
 
 
 def _ensure_ledger_root(ctx: ConvergeCtx) -> Path:
-    for path in (ctx.ava_home, ctx.ava_home / "configs"):
+    for path in (ctx.meiva_home, ctx.meiva_home / "configs"):
         if not stat.S_ISDIR(lstat(path).st_mode):
             raise ClientConflictError("private ownership ledger parent is not a directory")
-    root = ctx.ava_home / "configs" / "external-agent-skills"
+    root = ctx.meiva_home / "configs" / "external-agent-skills"
     ensure_private_dir(root)
     return root
 
@@ -378,8 +378,8 @@ def _converge_locked(
         # looked at the residue and removed the ledger.
         raise ClientConflictError(
             "an earlier publication was interrupted and is not resumed; inspect the "
-            f"Ava stage/previous directories beside skills/{skill_name}, then remove "
-            f"{ledger_path} (and skills/{skill_name} if it is Ava's copy) and run `ava start`"
+            f"Meiva stage/previous directories beside skills/{skill_name}, then remove "
+            f"{ledger_path} (and skills/{skill_name} if it is Meiva's copy) and run `meiva start`"
         )
     if _managed_target_current(ledger, target, source_digest):
         return
@@ -408,7 +408,7 @@ def _converge_locked(
 
 
 def converge_external_agent_skill(ctx: ConvergeCtx, *, host_home: Path | None = None) -> None:
-    """Copy the complete Ava Guide into present Codex and Claude Code homes.
+    """Copy the complete Meiva Guide into present Codex and Claude Code homes.
 
     Legacy standalone targets and their ledgers remain untouched; the guide
     uses a separate per-client ledger and never adopts or overwrites them.
@@ -430,7 +430,7 @@ def converge_external_agent_skill(ctx: ConvergeCtx, *, host_home: Path | None = 
             _warn(label, f"private ownership ledger unavailable ({type(exc).__name__})")
         return
     for skill_name in _SKILL_NAMES:
-        source = ctx.repo / "ava_builtins" / "skills" / "platform" / skill_name
+        source = ctx.repo / "meiva_builtins" / "skills" / "platform" / skill_name
         _validate_source_path(ctx.repo, source)
         snapshot = source_snapshot(source)
         source_manifest = snapshot.manifest()

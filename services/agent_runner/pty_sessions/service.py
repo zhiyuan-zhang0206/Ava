@@ -51,7 +51,7 @@ from base.sessions.record import SessionRecord
 from services.agent_runner.pty_sessions import ledger, session
 
 # Session names ride the transcript filename; keep the conservative slug shape
-# ava/shell/sessions.py enforces for its names.
+# meiva/shell/sessions.py enforces for its names.
 _NAME_RE = re.compile(r"[a-z][a-z0-9-]*")
 
 # Reading one request must not hold a connection forever.
@@ -109,14 +109,14 @@ def _child_env(overlay: object) -> dict[str, str]:
 
     The service environment is the base (the creator's own variables, an
     `SSH_AUTH_SOCK`, are not carried; the caller forwards what a shell needs);
-    a service-profile marker must never leak into a shell child (`import ava`
+    a service-profile marker must never leak into a shell child (`import meiva`
     under a runner profile fails fast), nor an activated virtualenv the caller
     did not ask for. An explicit overlay entry for either wins.
     """
     if not isinstance(overlay, dict):
         raise RequestError(protocol.BAD_REQUEST, "env must be an object of strings")
     env = child_env.inherited_process_env()
-    env.pop("AVA_PROCESS_PROFILE", None)
+    env.pop("MEIVA_PROCESS_PROFILE", None)
     env.pop("VIRTUAL_ENV", None)
     for key, value in cast("dict[object, object]", overlay).items():
         if not isinstance(key, str) or not isinstance(value, str):

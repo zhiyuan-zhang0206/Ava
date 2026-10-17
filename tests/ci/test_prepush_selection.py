@@ -97,7 +97,7 @@ def test_branch_lint_runs_whatever_the_load_and_without_a_lock(tmp_path: Path) -
         text=True,
         check=False,
         timeout=10,
-        env={**os.environ, "AVA_PREPUSH_MAX_LOAD_PER_CORE": "0"},
+        env={**os.environ, "MEIVA_PREPUSH_MAX_LOAD_PER_CORE": "0"},
     )
     assert result.returncode == 0, result.stderr
     assert "SKIPPED" not in result.stderr
@@ -286,14 +286,14 @@ def test_a_branch_that_only_deletes_an_input_reruns_that_hook_over_the_repo(
     freshness_repo: tuple[Path, Path],
 ) -> None:
     repo, calls = freshness_repo
-    _branch_from(repo, {"docs/gone.ava.okf.md": "x\n", "README.txt": "x\n"})
-    subprocess.run(["git", "-C", str(repo), "rm", "-q", "docs/gone.ava.okf.md"], check=True)
+    _branch_from(repo, {"docs/gone.meiva.okf.md": "x\n", "README.txt": "x\n"})
+    subprocess.run(["git", "-C", str(repo), "rm", "-q", "docs/gone.meiva.okf.md"], check=True)
     _commit_all(repo, "delete only")
     result = _run_freshness(repo)
     assert result.returncode == 0, result.stderr
-    # The OKF doc is gone and nothing added or changed a markdown path: lint-ava-okf and
+    # The OKF doc is gone and nothing added or changed a markdown path: lint-meiva-okf and
     # check-doc-references both match the deleted path, and no other path of the branch.
-    assert sorted(_hooks_run(calls)) == ["check-doc-references", "lint-ava-okf"]
+    assert sorted(_hooks_run(calls)) == ["check-doc-references", "lint-meiva-okf"]
     assert "--all-files" in calls.read_text()
 
 
@@ -314,29 +314,29 @@ def test_a_whole_repo_hook_is_left_to_the_branch_diff_run_when_the_branch_also_c
 def test_a_per_file_hook_sees_the_deletion_only_through_the_sweep(
     freshness_repo: tuple[Path, Path],
 ) -> None:
-    """lint-ava-okf judges only the documents it is handed, so a branch that deletes one OKF
+    """lint-meiva-okf judges only the documents it is handed, so a branch that deletes one OKF
     document and changes another still needs the whole-set re-check for links into the deleted
     one; the whole-repository markdown check is already covered by the nested run."""
     repo, calls = freshness_repo
-    _branch_from(repo, {"docs/gone.ava.okf.md": "x\n", "docs/kept.ava.okf.md": "x\n"})
-    subprocess.run(["git", "-C", str(repo), "rm", "-q", "docs/gone.ava.okf.md"], check=True)
-    (repo / "docs/kept.ava.okf.md").write_text("changed\n")
+    _branch_from(repo, {"docs/gone.meiva.okf.md": "x\n", "docs/kept.meiva.okf.md": "x\n"})
+    subprocess.run(["git", "-C", str(repo), "rm", "-q", "docs/gone.meiva.okf.md"], check=True)
+    (repo / "docs/kept.meiva.okf.md").write_text("changed\n")
     _commit_all(repo, "delete one, change another")
     assert _run_freshness(repo).returncode == 0
-    assert _hooks_run(calls) == ["lint-ava-okf"]
+    assert _hooks_run(calls) == ["lint-meiva-okf"]
 
 
 def test_moving_an_input_out_of_a_hook_pattern_counts_as_deleting_it(
     freshness_repo: tuple[Path, Path],
 ) -> None:
     repo, calls = freshness_repo
-    _branch_from(repo, {"docs/a.ava.okf.md": "same text\n" * 5})
-    subprocess.run(["git", "-C", str(repo), "mv", "docs/a.ava.okf.md", "docs/a.md"], check=True)
+    _branch_from(repo, {"docs/a.meiva.okf.md": "same text\n" * 5})
+    subprocess.run(["git", "-C", str(repo), "mv", "docs/a.meiva.okf.md", "docs/a.md"], check=True)
     _commit_all(repo, "rename out of the OKF pattern")
     assert _run_freshness(repo).returncode == 0
     # The old path leaves the OKF pattern; the new one is still markdown, which the branch-diff
     # run hands to check-doc-references, so only the OKF hook is left for the sweep.
-    assert _hooks_run(calls) == ["lint-ava-okf"]
+    assert _hooks_run(calls) == ["lint-meiva-okf"]
 
 
 def test_a_branch_touching_no_artifact_input_runs_nothing(
@@ -510,8 +510,8 @@ def repo(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
         (probe / name).chmod(0o755)
     monkeypatch.setenv("PATH", str(probe) + os.pathsep + os.environ["PATH"])
     monkeypatch.setenv("CALLS", str(result / "calls.jsonl"))
-    monkeypatch.setenv("AVA_PREPUSH_MAX_LOAD_PER_CORE", "1000000")
-    monkeypatch.setenv("AVA_PREPUSH_LOCK_DIR", str(tmp_path / "locks"))
+    monkeypatch.setenv("MEIVA_PREPUSH_MAX_LOAD_PER_CORE", "1000000")
+    monkeypatch.setenv("MEIVA_PREPUSH_LOCK_DIR", str(tmp_path / "locks"))
     return result
 
 

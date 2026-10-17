@@ -14,19 +14,19 @@
 # agents_meta (column is `id`), causing every UPDATE status='terminated' to 5xx.
 #
 # Usage:
-#   AVA_DB_URL=postgresql://ava@host:5432/ scripts/ci/test_migrations_apply.sh
-#   (or directly PGHOST=postgres PGUSER=ava scripts/ci/test_migrations_apply.sh)
+#   MEIVA_DB_URL=postgresql://meiva@host:5432/ scripts/ci/test_migrations_apply.sh
+#   (or directly PGHOST=postgres PGUSER=meiva scripts/ci/test_migrations_apply.sh)
 # Default: connect to postgres:5432 (CI container service sidecar default name).
 set -euo pipefail
 
-PGHOST="${PGHOST:-${AVA_PGHOST:-postgres}}"
-PGUSER="${PGUSER:-${AVA_PGUSER:-ava}}"
+PGHOST="${PGHOST:-${MEIVA_PGHOST:-postgres}}"
+PGUSER="${PGUSER:-${MEIVA_PGUSER:-meiva}}"
 PGPORT="${PGPORT:-5432}"
-ADMIN_DB="${PGDATABASE:-ava}"
+ADMIN_DB="${PGDATABASE:-meiva}"
 export PGHOST PGUSER PGPORT
 
-TEST_DB="ava_migration_smoke_$$"
-FULL_DB="ava_migration_full_$$"
+TEST_DB="meiva_migration_smoke_$$"
+FULL_DB="meiva_migration_full_$$"
 
 cleanup() {
     psql -d "$ADMIN_DB" -c "DROP DATABASE IF EXISTS $TEST_DB" >/dev/null 2>&1 || true
@@ -34,7 +34,7 @@ cleanup() {
 }
 trap cleanup EXIT
 
-REPO_ROOT="${AVA_REPO_ROOT:-$(cd "$(dirname "$0")/../.." && pwd)}"
+REPO_ROOT="${MEIVA_REPO_ROOT:-$(cd "$(dirname "$0")/../.." && pwd)}"
 cd "$REPO_ROOT"
 
 echo "-> create $TEST_DB on $PGHOST:$PGPORT"

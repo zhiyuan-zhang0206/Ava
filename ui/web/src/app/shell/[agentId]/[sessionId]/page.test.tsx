@@ -65,7 +65,7 @@ function shellData(overrides: Partial<ShellCapture> = {}): ShellCapture {
   return {
     agent_id: 5,
     session_id: 12,
-    session_name: "ava-main-agent-5-shell-12-dev-server",
+    session_name: "meiva-main-agent-5-shell-12-dev-server",
     lines: ["$ npm run dev", "> ready on :3000"],
     // Offsets from fixture-build time so the tick-computed title-bar meta
     // lands on stable formatted spans; the meta tests freeze Date for
@@ -96,7 +96,7 @@ describe("ShellMonitorPage", () => {
     render();
 
     await waitFor(() =>
-      expect(screen.getByText("ava-main-agent-5-shell-12-dev-server")).toBeTruthy(),
+      expect(screen.getByText("meiva-main-agent-5-shell-12-dev-server")).toBeTruthy(),
     );
   });
 

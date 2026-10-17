@@ -64,7 +64,7 @@ def test_service_probes_skips_gated_but_rejects_unknown_specs(
         return (  # pyright: ignore[reportUnknownArgumentType]
             (dead, None),
             (alive, None),
-            (gated, "disabled (AVA_BROWSER_ENABLED off)"),
+            (gated, "disabled (MEIVA_BROWSER_ENABLED off)"),
             (probeless, None),
         )
 
@@ -104,7 +104,7 @@ def test_service_probes_skips_gated_otel_collector_on_non_lgtm_gateway(
     tmp_home.mkdir()
     recorded_sessions: list[str] = []
 
-    monkeypatch.delitem(os.environ, "AVA_TELEMETRY_OTLP_ENDPOINT", raising=False)
+    monkeypatch.delitem(os.environ, "MEIVA_TELEMETRY_OTLP_ENDPOINT", raising=False)
     monkeypatch.setattr(_repo_commands, "roles_or_none", read_roles)
 
     def fake_gateway_observability_home(_machine: MachineIdentity, *, home: Path) -> Path:
@@ -146,7 +146,9 @@ def test_service_probes_checks_otel_collector_on_non_lgtm_gateway_with_explicit_
     tmp_home.mkdir()
     recorded_sessions: list[str] = []
 
-    monkeypatch.setitem(os.environ, "AVA_TELEMETRY_OTLP_ENDPOINT", "http://collector.invalid:4318")
+    monkeypatch.setitem(
+        os.environ, "MEIVA_TELEMETRY_OTLP_ENDPOINT", "http://collector.invalid:4318"
+    )
     monkeypatch.setattr(_repo_commands, "roles_or_none", read_roles)
 
     def fake_gateway_observability_home(_machine: MachineIdentity, *, home: Path) -> Path:
@@ -245,12 +247,12 @@ def test_service_probes_carry_the_failing_fact(
         _probe_commands,
         "probe_service",
         lambda _spec: _probe_commands.ServiceProbe(
-            False, "identity", "home='/home/ava/.ava' != '/u/.ava'"
+            False, "identity", "home='/home/meiva/.meiva' != '/u/.meiva'"
         ),  # pyright: ignore[reportUnknownArgumentType]
     )
 
     assert cluster_health.service_probes(machine=command_runtime.machine, host=fake_host()) == [
-        "ops (home='/home/ava/.ava' != '/u/.ava')"
+        "ops (home='/home/meiva/.meiva' != '/u/.meiva')"
     ]
 
 

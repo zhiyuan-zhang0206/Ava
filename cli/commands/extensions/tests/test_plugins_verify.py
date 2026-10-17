@@ -7,15 +7,15 @@ from pathlib import Path
 
 import pytest
 
-from ava.sdk_surface import extensions
 from base import paths
 from base.packages.plugins import load_report
 from base.packages.plugins.enable_config import write_local
 from base.telemetry.tests.capture.event_capture import EmittedEvents
 from base.telemetry.tests.capture.event_capture import emitted_events as emitted_events
 from cli.commands.extensions.plugins_inspect import cmd_plugins_verify
+from meiva.sdk_surface import extensions
 
-_PLUGIN_MODULE_PREFIXES = ("ava_builtins.plugins.", "plugins.")
+_PLUGIN_MODULE_PREFIXES = ("meiva_builtins.plugins.", "plugins.")
 
 
 @pytest.fixture(autouse=True)
@@ -39,13 +39,13 @@ def _plugin(name: str, plugin_py: str, **siblings: str) -> None:
     directory = paths.plugins_dir() / name
     directory.mkdir()
     (directory / "plugin.py").write_text(plugin_py)
-    (directory / "ava-plugin.json").write_text(
+    (directory / "meiva-plugin.json").write_text(
         json.dumps(
             {
                 "apiVersion": 2,
                 "name": name,
                 "version": "1.0.0",
-                "engines": {"ava": ">=0.1.0"},
+                "engines": {"meiva": ">=0.1.0"},
             }
         )
     )
@@ -90,7 +90,7 @@ def test_a_plugin_using_a_deleted_framework_api_is_red_and_the_rest_still_count(
 def test_a_plugin_without_a_manifest_is_red(capsys: pytest.CaptureFixture[str]) -> None:
     _plugin("good", "LOADED = True\n")
     _plugin("bare", "LOADED = True\n")
-    (paths.plugins_dir() / "bare" / "ava-plugin.json").unlink()
+    (paths.plugins_dir() / "bare" / "meiva-plugin.json").unlink()
     _enable("good", "bare")
 
     assert cmd_plugins_verify() == 1

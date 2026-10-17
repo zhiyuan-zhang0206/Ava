@@ -1,2 +1,0 @@
-[debt.first-party-patch]
-"test_task_maintenance_pidfile_guard.py#monkeypatch.setattr ava_builtins.plugins.ava_fleet.task_maintenance.daemon.pidfile_holds_daemon" = 1

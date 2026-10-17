@@ -1,7 +1,7 @@
 """The data model of the skill tree: one skill's metadata and the namespace nodes that hold it.
 
 Pure values and functions of them - no scan, no files, no ambient state. The scan lives in
-`ava/skills/skill_index.py` and the `ava.skills` facade serves the tree to the agent; the
+`meiva/skills/skill_index.py` and the `meiva.skills` facade serves the tree to the agent; the
 composer commands (`base.packages.composer_commands`) and the agent's prompt read skills as
 `Skill` values and render them with `identifier` / `target`.
 """
@@ -33,7 +33,7 @@ class Skill(TypedDict):
     is the tuple of folder segments above the skill (raw folder names; `()` = a
     bare top-level skill). Both fields keep the RAW spelling found on disk —
     `identifier(skill)` renders the canonical dash display id and
-    `target(skill)` the `ava.skills` access path."""
+    `target(skill)` the `meiva.skills` access path."""
 
     name: str
     description: str
@@ -60,12 +60,12 @@ def identifier(skill: Skill) -> str:
     itself with underscores (a hand-installed legacy package, a plugin whose
     directory must stay a Python package) still presents the ecosystem
     spelling. `:` separates namespace segments in display; `target()` renders
-    the loadable `ava.skills` spelling of the same path (`-`/`:` -> `_`/`.`)."""
+    the loadable `meiva.skills` spelling of the same path (`-`/`:` -> `_`/`.`)."""
     return ":".join(display_name(seg) for seg in (*skill["namespace"], skill["name"]))
 
 
 def target(skill: Skill) -> str:
-    """`ava.skills` access path (attr form): `.`-joined, hyphens→underscores,
+    """`meiva.skills` access path (attr form): `.`-joined, hyphens→underscores,
     e.g. `superpowers.test_driven_development`, or bare `goal`. The Python
     projection of `identifier` — the two are the same path in two spellings."""
     return ".".join(match_key(seg) for seg in (*skill["namespace"], skill["name"]))

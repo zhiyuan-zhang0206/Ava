@@ -65,7 +65,7 @@ from langgraph.runtime import Runtime
 from agent import state as _state
 from agent.hooks._registry import Hook
 from agent.messages import exec_output_message
-from base.agents.context import AvaContext, agent_id_from_config
+from base.agents.context import MeivaContext, agent_id_from_config
 from base.agents.messages.kwargs import ExecStatus
 from base.log import logger
 
@@ -196,7 +196,7 @@ class _RepairDanglingToolPairingHook(Hook):
     async def __call__(
         self,
         state: _state.AgentState,
-        _runtime: Runtime[AvaContext],
+        _runtime: Runtime[MeivaContext],
         config: RunnableConfig,
         /,
     ) -> dict | None:

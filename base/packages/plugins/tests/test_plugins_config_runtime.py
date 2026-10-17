@@ -17,8 +17,8 @@ def _isolate(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     user = tmp_path / "plugins"
     user.mkdir()
     monkeypatch.setattr(paths, "plugins_dir", lambda: user)
-    monkeypatch.setenv("AVA_HOME", str(tmp_path / "ava"))
-    monkeypatch.setattr(paths, "ava_home", lambda: tmp_path)
+    monkeypatch.setenv("MEIVA_HOME", str(tmp_path / "meiva"))
+    monkeypatch.setattr(paths, "meiva_home", lambda: tmp_path)
 
 
 def test_load_for_runtime_drops_dangling_and_reports_each_name(

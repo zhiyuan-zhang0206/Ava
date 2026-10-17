@@ -20,22 +20,22 @@ _CONCRETE_BACKENDS = {
 def _run_fresh_daemon_import(tmp_path: Path, *args: str) -> subprocess.CompletedProcess[str]:
     """Import the daemon in a fresh interpreter with an isolated unit home."""
     (tmp_path / ".env").write_text(
-        "AVA_MACHINE_NAME=test-box\n"
-        "AVA_MACHINE_SERVE_GATEWAY=true\n"
-        "AVA_MACHINE_SERVE_AGENT_RUNNER=true\n"
-        "AVA_DB_URL=postgresql://unprovisioned@127.0.0.1:1/unprovisioned\n"
-        "AVA_REDIS_URL=redis://127.0.0.1:1/0\n"
-        "AVA_CLUSTER_SECRET=test-cluster-secret\n"
-        "AVA_OS_JOBS_ENABLED=false\n"
-        "AVA_TELEMETRY_OTLP_ENABLED=false\n"
-        "AVA_PGBOUNCER_ENABLED=false\n"
-        "AVA_TRANSPORT_ENCRYPTION=overlay\n"
+        "MEIVA_MACHINE_NAME=test-box\n"
+        "MEIVA_MACHINE_SERVE_GATEWAY=true\n"
+        "MEIVA_MACHINE_SERVE_AGENT_RUNNER=true\n"
+        "MEIVA_DB_URL=postgresql://unprovisioned@127.0.0.1:1/unprovisioned\n"
+        "MEIVA_REDIS_URL=redis://127.0.0.1:1/0\n"
+        "MEIVA_CLUSTER_SECRET=test-cluster-secret\n"
+        "MEIVA_OS_JOBS_ENABLED=false\n"
+        "MEIVA_TELEMETRY_OTLP_ENABLED=false\n"
+        "MEIVA_PGBOUNCER_ENABLED=false\n"
+        "MEIVA_TRANSPORT_ENCRYPTION=overlay\n"
     )
     env = os.environ.copy()
-    env["AVA_HOME"] = str(tmp_path)
-    env["AVA_CONFIG_FETCH"] = "skip"
-    env.pop("AVA_PROCESS_PROFILE", None)
-    env.pop("AVA_AGENT_ID", None)
+    env["MEIVA_HOME"] = str(tmp_path)
+    env["MEIVA_CONFIG_FETCH"] = "skip"
+    env.pop("MEIVA_PROCESS_PROFILE", None)
+    env.pop("MEIVA_AGENT_ID", None)
     return subprocess.run(  # noqa: S603 — fixed interpreter and repository-owned code
         [sys.executable, str(_PROBE), *args],
         cwd=_REPO_ROOT,

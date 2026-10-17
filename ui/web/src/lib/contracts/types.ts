@@ -232,7 +232,7 @@ export type InspectWidgetTask = Schemas["InspectWidgetTask"];
 
 // --- Shell monitor page (GET /api/agents/{id}/shell/{sid}) ---
 //
-// --- ava.ui.show panel ---
+// --- meiva.ui.show panel ---
 
 export type PageRow = Schemas["PageRow"];
 export type PageRegisterRequest = Schemas["PageRegisterRequest"];
@@ -636,7 +636,7 @@ export type SystemStatus = Schemas["SystemStatus"];
 // --- Plugin console contributions (GET /api/ui/contributions) ---
 //
 // What the cluster's enabled plugins declare under `contributions.ui` in their
-// ava-plugin.json. Declarations are data the console's own components render —
+// meiva-plugin.json. Declarations are data the console's own components render —
 // no plugin JavaScript ever enters this bundle.
 
 export type UiThemeContribution = Schemas["UiThemeContribution"];
@@ -666,7 +666,7 @@ export type ScheduleRunView = Schemas["ScheduleRunView"];
 export type ScheduleLogsView = Schemas["ScheduleLogsView"];
 export type ScheduleDraftResponse = Schemas["ScheduleDraftResponse"];
 
-// --- Ava Guide (natural-language ops assistant; POST /api/keyed/v1/guide/draft) ---
+// --- Meiva Guide (natural-language ops assistant; POST /api/keyed/v1/guide/draft) ---
 export type GuideDraftResponse = Schemas["GuideDraftResponse"];
 
 // --- Package install (POST /api/keyed/v1/packages/draft) ---

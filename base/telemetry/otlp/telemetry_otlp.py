@@ -3,7 +3,7 @@
 Exports unified emitter batches when the startup OTLP flag is enabled. The
 JSONL mirror precedes this ordinary observation sink; OTLP does not replace it.
 
-The endpoint (``AVA_TELEMETRY_OTLP_ENDPOINT``, default 127.0.0.1:4318) is the LOCAL OTel
+The endpoint (``MEIVA_TELEMETRY_OTLP_ENDPOINT``, default 127.0.0.1:4318) is the LOCAL OTel
 Collector sidecar on every machine (task #1266, 2026-08-14): agents never dial a backend
 directly. A gateway collector fans out logs -> loopback Loki and metrics -> loopback
 Prometheus; a pure runner collector relays them to the gateway collector's authenticated
@@ -20,7 +20,7 @@ first hop is still its own sidecar. Three signals:
   Tempo spans.
 - **metrics** — telemetry-category events become OTLP metrics (Prometheus).
   Each numeric payload field maps to one instrument named
-  ``ava_<event_name>_<field>``: int -> Counter, float -> Histogram, with
+  ``meiva_<event_name>_<field>``: int -> Counter, float -> Histogram, with
   explicitly declared absolute-state fields exported as Observable Gauges
   (see ``_record_metrics`` for the rules); datapoint attributes are the
   process dimensions + declared payload scalars only (never loguru decoration
@@ -29,7 +29,7 @@ first hop is still its own sidecar. Three signals:
   not a measurement.
 - **traces** — NOT exported here. ``base/telemetry/tracing.py`` exports them to the same
   local collector, whose file exporter writes the standard OTLP/JSON mirror.
-  ``ava trace ship`` is the separate recovery replay: gateway units dial Tempo
+  ``meiva trace ship`` is the separate recovery replay: gateway units dial Tempo
   directly; pure runners use the authenticated gateway collector ingress.
 
 Exporter log mapping and SDK failures retain their named isolation scopes.
@@ -140,7 +140,7 @@ _MAX_METRIC_ATTR_CHARS = 64
 #     ~50 series per (agent, model) and their distribution is meaningless.
 #   llm_usage.cost_usd — money is summed, never percentiled: a float Counter
 #     (OTel Counter.add takes floats; Prometheus counters are float64), so
-#     `increase(ava_llm_usage_cost_usd_total[...])` is the exact windowed
+#     `increase(meiva_llm_usage_cost_usd_total[...])` is the exact windowed
 #     spend at usage-time rates.
 METRIC_DISPOSITION: dict[tuple[str, str], str | None] = {
     ("event_log_drop", "last_dropped_at"): "gauge",
@@ -209,7 +209,7 @@ NO_EMITTER = "_no_emitter"
 
 def observability_export_allowed(machine: MachineIdentity, *, home: Path) -> bool:
     """Decide export eligibility from the caller's machine and unit home."""
-    if endpoint_override_is_explicit("AVA_TELEMETRY_OTLP_ENDPOINT"):
+    if endpoint_override_is_explicit("MEIVA_TELEMETRY_OTLP_ENDPOINT"):
         return True
     if not production_identity(machine, home=home):
         return False
@@ -225,7 +225,7 @@ def observability_export_allowed(machine: MachineIdentity, *, home: Path) -> boo
         logger.bind(**{NO_EMITTER: True}).warning(
             "[otlp-exporter] OTLP export disabled: gateway home is not the "
             "observability station (no {} marker and no observability-station "
-            "capability); set AVA_TELEMETRY_OTLP_ENDPOINT to use an explicit collector",
+            "capability); set MEIVA_TELEMETRY_OTLP_ENDPOINT to use an explicit collector",
             gateway_home / "lgtm-host",
         )
     return allowed
@@ -250,7 +250,7 @@ def endpoint_reachable(endpoint: str) -> bool:
     defaulted to application/x-www-form-urlencoded, the collector answered
     415, HTTPError was suppressed as "not answering", and every process
     that restarted after the #1214 rollout silently disabled its OTLP
-    export — no events in Loki, no ava_* metrics in Prometheus.
+    export — no events in Loki, no meiva_* metrics in Prometheus.
     """
     import urllib.error
     import urllib.request
@@ -423,7 +423,7 @@ class OtlpBackend:
 
     def shutdown(self, timeout: float = 2.0) -> DrainResult:
         """Close admission and observe this exporter within one local deadline."""
-        # ava:ref base/telemetry/otlp/docs/telemetry-otlp/exit-flush.ava.okf.md#two-wait-classes-one-deadline
+        # meiva:ref base/telemetry/otlp/docs/telemetry-otlp/exit-flush.meiva.okf.md#two-wait-classes-one-deadline
         if not math.isfinite(timeout) or timeout < 0:
             raise ValueError("OTLP timeout must be finite and non-negative")
         deadline = time.monotonic() + timeout
@@ -591,7 +591,7 @@ class OtlpBackend:
                     keep_reader=lambda reader: setattr(worker, "metric_reader", reader),
                     keep_metrics=lambda provider: setattr(worker, "metrics", provider),
                 )
-            meter = worker.metrics.get_meter("ava.telemetry")
+            meter = worker.metrics.get_meter("meiva.telemetry")
             self._logs, self._metric_provider, self._meter = worker.logs, worker.metrics, meter
         except Exception as exc:
             self._init_failed_at = time.monotonic()
@@ -702,7 +702,7 @@ class OtlpBackend:
         inst = self._instruments.get(key)
         if inst is not None:
             return inst
-        name = f"ava_{event_name}_{strip_unit_suffix(field)}"
+        name = f"meiva_{event_name}_{strip_unit_suffix(field)}"
         try:
             if kind == "counter":
                 inst = self._meter.create_counter(

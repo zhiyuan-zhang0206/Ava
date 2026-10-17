@@ -8,7 +8,7 @@ answers /v1/logs with 415 unless the body carries an OTLP content type, and
 urlopen raises HTTPError on 4xx/5xx. The original probe sent no Content-Type
 (urllib defaults to application/x-www-form-urlencoded), misread the 415 as
 "no collector", and silently disabled OTLP export for every process that
-restarted after the #1214 rollout — no events in Loki, no ava_* metrics.
+restarted after the #1214 rollout — no events in Loki, no meiva_* metrics.
 """
 
 from __future__ import annotations

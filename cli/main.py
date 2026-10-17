@@ -1,8 +1,8 @@
-"""`ava` CLI entry — argparse dispatch to the `cmd_*` implementations in `cli.commands`.
+"""`meiva` CLI entry — argparse dispatch to the `cmd_*` implementations in `cli.commands`.
 
-Registered in `pyproject.toml [project.scripts] ava = "cli.main:entry"`; after
-`uv sync`, `.venv/bin/ava` is callable. Ops layer only, decoupled from the
-`ava.*` SDK — agent should not see cron / infra plumbing.
+Registered in `pyproject.toml [project.scripts] meiva = "cli.main:entry"`; after
+`uv sync`, `.venv/bin/meiva` is callable. Ops layer only, decoupled from the
+`meiva.*` SDK — agent should not see cron / infra plumbing.
 
 The argparse tree is composed by `cli.parsers.build_parser`. Settings-free
 parser modules own both builders and `_h_*` adapters: agents/notices live
@@ -45,7 +45,7 @@ __all__ = ["entry", "main", "run_command"]
 # (stop and status must remain available for recovery inspection), so
 # `cli.main` opts them out of the gateway config fetch that every other process
 # performs at Settings build. The fetch decision itself is role-derived
-# (base.host.env.bootstrap.config_source_is_local; AVA_CONFIG_SOURCE is gone).
+# (base.host.env.bootstrap.config_source_is_local; MEIVA_CONFIG_SOURCE is gone).
 _LITE_VERBS = frozenset(
     {
         "stop",
@@ -84,12 +84,12 @@ def normalize_process_profile() -> None:
     the launcher's injected runner DB / Redis projections through the authority
     pass only under a live-or-recorded agent profile (base/host/env/dotenv_boot.py
     `_enforce_cluster_env_authority`), so popping without recording made that
-    exemption unreachable on every CLI path — `ava cluster health-probe` run
+    exemption unreachable on every CLI path — `meiva cluster health-probe` run
     from an agent child on a pure agent-runner fell back to the sentinel
     (#4334). The record is never cleared: a nested CLI overwrites it only when
     it carries a fresh live marker of its own.
     """
-    launcher_profile = os.environ.pop("AVA_PROCESS_PROFILE", None)
+    launcher_profile = os.environ.pop("MEIVA_PROCESS_PROFILE", None)
     if launcher_profile:
         os.environ[LAUNCHER_PROFILE_ENV_KEY] = launcher_profile
 
@@ -105,7 +105,7 @@ def _opt_into_lite_config(args_in: list[str]) -> None:
         and args_in[0] in _LITE_VERBS
         and (args_in[0] != "stop" or "--force" in args_in or unit_already_stopped())
     ):
-        os.environ.setdefault("AVA_CONFIG_FETCH", "skip")
+        os.environ.setdefault("MEIVA_CONFIG_FETCH", "skip")
         _deliver_lite_api_token()
 
 
@@ -120,7 +120,7 @@ def _deliver_lite_api_token() -> None:
     from base.host.env.bootstrap import config_source_is_local
     from base.host.env.dotenv_boot import launcher_context
     from base.host.net.auth import API_TOKEN_ENV
-    from base.paths.home import resolve_ava_home
+    from base.paths.home import resolve_meiva_home
 
     if os.environ.get(API_TOKEN_ENV) or launcher_context() is not None:
         return
@@ -131,7 +131,7 @@ def _deliver_lite_api_token() -> None:
     from base.host.db_authority.unit import consume_unit
 
     try:
-        capability = consume_unit(resolve_ava_home().resolve())
+        capability = consume_unit(resolve_meiva_home().resolve())
     except (AuthorityRefusedError, OSError, ValueError):
         return
     os.environ[API_TOKEN_ENV] = capability.api.token
@@ -189,15 +189,15 @@ def run_command(
     if args_in[:1] == ["init"]:
         return args.func(args)
     if args_in[:1] == ["start"]:
-        from base.paths.home import resolve_ava_home
+        from base.paths.home import resolve_meiva_home
         from cli.start_identity import require_initialized
 
         try:
-            require_initialized(resolve_ava_home().resolve())
+            require_initialized(resolve_meiva_home().resolve())
         except (ValueError, TypeError, RuntimeError, OSError) as exc:
-            print(f"ava start: {exc}", file=sys.stderr)
+            print(f"meiva start: {exc}", file=sys.stderr)
             return 1
-    from base.paths import ava_home
+    from base.paths import meiva_home
     from cli.database import operator_database_factory
     from cli.database.runtime import CommandRuntime
 
@@ -210,7 +210,7 @@ def run_command(
     )
     args.database_factory = database_factory
     args.database_for_url = database_factory.for_url
-    producer = producer_factory(database_factory, machine=command.machine, home=ava_home())
+    producer = producer_factory(database_factory, machine=command.machine, home=meiva_home())
     args.producer = producer
     try:
         if args_in[:1] not in (["init"], ["start"]):  # these two open their own, after admission
@@ -218,7 +218,7 @@ def run_command(
         return args.func(args)
     except LockTimeoutError as exc:
         print(
-            f"ava: another local lifecycle operation is active; retry after it finishes: {exc}",
+            f"meiva: another local lifecycle operation is active; retry after it finishes: {exc}",
             file=sys.stderr,
         )
         return 1
@@ -227,7 +227,7 @@ def run_command(
     except BootstrapFetchError as exc:
         # A pure agent-runner whose gateway is unreachable (or which was never
         # enrolled) fails fast with an actionable message.
-        print(f"✗ ava: {exc}", file=sys.stderr)
+        print(f"✗ meiva: {exc}", file=sys.stderr)
         return 1
     finally:
         # A quiet verb's first batch can otherwise reach OTLP only in atexit,

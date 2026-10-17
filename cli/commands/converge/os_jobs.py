@@ -1,6 +1,6 @@
 """Converge steps that register this host's OS-level scheduled jobs.
 
-Six jobs, one concept — everything Ava asks the platform scheduler (launchd /
+Six jobs, one concept — everything Meiva asks the platform scheduler (launchd /
 crontab) to run on its behalf:
 
 - **health probe** — periodic cluster health check reporting observations
@@ -11,7 +11,7 @@ crontab) to run on its behalf:
 - **PR flow** — the daily merge-pipeline sampler, credential-gated to the
   production home that can reach GitHub and Trunk (task #2139).
 - **WAL-G tick** — the daily physical backup, present exactly while
-  `AVA_WALG_CONFIG_FILE` is set.
+  `MEIVA_WALG_CONFIG_FILE` is set.
 
 They share a shape worth keeping together: each is idempotent, each delegates the
 platform branching to a ``base.os_*`` module, and each fails the converge loudly
@@ -52,8 +52,8 @@ def ensure_packages_refresh_job(ctx: ConvergeCtx) -> None:
 
     Every serving unit runs it: skills are per-machine state, so each home owns
     its own pass. Delegates to `base.host.system.packages_job`, which no-ops when
-    `AVA_OS_JOBS_ENABLED` is off and skips registration when the refresh channel
-    itself is disabled (`AVA_PACKAGES_REFRESH_ENABLED`); the registered command
+    `MEIVA_OS_JOBS_ENABLED` is off and skips registration when the refresh channel
+    itself is disabled (`MEIVA_PACKAGES_REFRESH_ENABLED`); the registered command
     re-checks both at run time. Idempotent."""
     from base.host.system.packages_job import register_packages_job
 
@@ -79,7 +79,7 @@ def ensure_pr_flow_job(ctx: ConvergeCtx) -> None:
 
     register_pr_flow_job(
         enabled_reader=lambda: ctx.read_config().view.general.os_jobs_enabled,
-        production=production_identity(machine=ctx.machine, home=ctx.ava_home),
+        production=production_identity(machine=ctx.machine, home=ctx.meiva_home),
         host=ctx.host,
     )
 
@@ -91,7 +91,7 @@ def ensure_walg_job(ctx: ConvergeCtx) -> None:
     configuration left behind, so turning WAL-G off leaves no schedule that runs
     a command which now does nothing. Both directions only act in the default
     home (`owns_os_jobs`), and registration is a no-op where
-    `AVA_OS_JOBS_ENABLED` is off. Delegates to `base.host.system.walg_job`."""
+    `MEIVA_OS_JOBS_ENABLED` is off. Delegates to `base.host.system.walg_job`."""
     from base.host.system.walg_job import register_walg_job, unregister_walg_job
     from services.backup.walg.config import enabled
 
@@ -107,7 +107,7 @@ def ensure_walg_job(ctx: ConvergeCtx) -> None:
 
 def ensure_cluster_autostart(ctx: ConvergeCtx) -> None:
     """Register the boot-time autostart job so a machine reboot brings this
-    cluster's gateway / agents / daemons back up without a manual `ava start`
+    cluster's gateway / agents / daemons back up without a manual `meiva start`
     (macOS launchd RunAtLoad / Linux systemd).
 
     host_global-gated to the prod install, so a dev worktree cluster never

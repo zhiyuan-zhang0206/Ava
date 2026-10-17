@@ -1,8 +1,8 @@
-"""Settings-free input boundary of ``ava start``.
+"""Settings-free input boundary of ``meiva start``.
 
-Start admits a home `ava init` initialized; it takes no identity input of its own
+Start admits a home `meiva init` initialized; it takes no identity input of its own
 (`cli/init_intent.py` does). Runtime Settings are imported only after the home is
-admitted. The home and checkout resolution below is shared with `ava init`.
+admitted. The home and checkout resolution below is shared with `meiva init`.
 """
 
 from __future__ import annotations
@@ -20,7 +20,7 @@ from base.host.env.registry import derived_env_keys, env_identity_keys
 from base.host.permissions_helper.client import HelperFactory
 from base.host.system.hostport import Host
 from base.native_process.os_platform import file_lock
-from base.paths.home import home_checkout_error, resolve_ava_home
+from base.paths.home import home_checkout_error, resolve_meiva_home
 from base.paths.private_dir import ensure_private_dir
 from base.telemetry import EventPipeline
 from cli.start_identity import require_initialized
@@ -32,7 +32,7 @@ def checkout() -> Path:
 
 
 def _home() -> Path:
-    """The home this start acts on: `$AVA_HOME`, else `~/.ava`.
+    """The home this start acts on: `$MEIVA_HOME`, else `~/.meiva`.
 
     A home that carries its own `<home>/source` checkout starts only from that
     checkout (`base.paths.home.home_checkout_error`).
@@ -40,7 +40,7 @@ def _home() -> Path:
     error = home_checkout_error(checkout())
     if error is not None:
         raise ValueError(error)
-    return resolve_ava_home().resolve()
+    return resolve_meiva_home().resolve()
 
 
 def _enter_home(home: Path) -> None:
@@ -49,11 +49,11 @@ def _enter_home(home: Path) -> None:
     re-admits database authority for this home."""
     for key in derived_env_keys() | env_identity_keys() | {GENERATION_ENV}:
         os.environ.pop(key, None)
-    os.environ["AVA_HOME"] = str(home)
+    os.environ["MEIVA_HOME"] = str(home)
 
 
 def run_start_command(**kwargs: Any) -> int:
-    """`ava start`'s runtime delivery, imported on first use so admission stays settings-free."""
+    """`meiva start`'s runtime delivery, imported on first use so admission stays settings-free."""
     from cli.commands.lifecycle.start import cmd_start
 
     return cmd_start(**kwargs)
@@ -99,7 +99,7 @@ def run_start(
     try:
         home = _home()
     except ValueError as exc:
-        print(f"ava start: {exc}", file=sys.stderr)
+        print(f"meiva start: {exc}", file=sys.stderr)
         return 1
     return _run_boot_attempt(home, lambda: start(boot=True))
 
@@ -122,8 +122,8 @@ def _run_boot_attempt(home: Path, start: Callable[[], int]) -> int:
     from base import telemetry
 
     print(
-        f"ava start --boot: attempt {attempt} of {boot_policy.BOOT_MAX_ATTEMPTS} failed "
-        f"(exit {code}); not retrying until an operator runs `ava start`",
+        f"meiva start --boot: attempt {attempt} of {boot_policy.BOOT_MAX_ATTEMPTS} failed "
+        f"(exit {code}); not retrying until an operator runs `meiva start`",
         file=sys.stderr,
     )
     telemetry.emit(
@@ -191,5 +191,5 @@ def start_once(
             from cli.startup_support import print_settings_load_failure
 
             return print_settings_load_failure(exc)
-        print(f"ava start: {exc}", file=sys.stderr)
+        print(f"meiva start: {exc}", file=sys.stderr)
         return 1

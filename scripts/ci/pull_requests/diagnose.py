@@ -16,7 +16,7 @@ _DIAGNOSE_LOG_TAIL = 4000
 _DIAGNOSE_MAX_JOB_LOGS = 8
 _DIAGNOSE_MAX_SYNTHETIC_PRS = 3
 
-# ava:ref scripts/ci/pull_requests/docs/diagnostics.ava.okf.md#failure-signature-table
+# meiva:ref scripts/ci/pull_requests/docs/diagnostics.meiva.okf.md#failure-signature-table
 _FAILURE_SIGNATURES: list[tuple[str, str, str]] = [
     (
         r"over the 800-line hard ceiling",
@@ -46,7 +46,7 @@ _FAILURE_SIGNATURES: list[tuple[str, str, str]] = [
 ]
 
 
-# ava:ref scripts/ci/pull_requests/docs/diagnostics.ava.okf.md#best-effort-evidence
+# meiva:ref scripts/ci/pull_requests/docs/diagnostics.meiva.okf.md#best-effort-evidence
 def _pr_view(pr: str, repo: str, fields: str, *, host: Host) -> dict[str, object] | None:
     try:
         result = host.run(
@@ -133,7 +133,7 @@ def _synthetic_test_prs(pr: str, repo: str, *, host: Host) -> list[dict[str, obj
     ][:_DIAGNOSE_MAX_SYNTHETIC_PRS]
 
 
-# ava:ref scripts/ci/pull_requests/docs/diagnostics.ava.okf.md#pr-level-issues
+# meiva:ref scripts/ci/pull_requests/docs/diagnostics.meiva.okf.md#pr-level-issues
 def _pr_level_issues(
     view: dict[str, object], pr: str, repo: str, *, host: Host
 ) -> list[dict[str, object]]:

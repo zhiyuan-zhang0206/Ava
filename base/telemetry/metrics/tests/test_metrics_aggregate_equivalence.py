@@ -177,7 +177,7 @@ def test_equivalence_full_thread(fake: TelemetryStream) -> None:
 def test_plugin_activation_section_is_the_obsolescence_gauge(fake: TelemetryStream) -> None:
     """Philosophy §6 asks a shim to measure its own obsolescence. The section
     counts activations per contribution (the `<plugin>/<surface>/<identifier>`
-    key `ava plugins inspect` lists as registered) and per plugin x model, so a
+    key `meiva plugins inspect` lists as registered) and per plugin x model, so a
     shim that fired under one model and never under another is visible as data
     rather than as an opinion."""
 
@@ -195,24 +195,24 @@ def test_plugin_activation_section_is_the_obsolescence_gauge(fake: TelemetryStre
             },
         )
 
-    _act("ava_syntax_fix", "hooks", "before_exec", "old-model")
-    _act("ava_syntax_fix", "hooks", "before_exec", "old-model")
-    _act("ava_code", "sdkWraps", "files.read", "new-model")
+    _act("meiva_syntax_fix", "hooks", "before_exec", "old-model")
+    _act("meiva_syntax_fix", "hooks", "before_exec", "old-model")
+    _act("meiva_code", "sdkWraps", "files.read", "new-model")
 
     text, data, _roll = _run_aggregate(fake)
     section = data["metrics"]["plugin_activation"]
     assert section["total_activations"] == 3
     assert section["distinct_plugins"] == 2
     assert section["by_contribution"] == [
-        {"contribution": "ava_syntax_fix/hooks/before_exec", "count": 2},
-        {"contribution": "ava_code/sdkWraps/files.read", "count": 1},
+        {"contribution": "meiva_syntax_fix/hooks/before_exec", "count": 2},
+        {"contribution": "meiva_code/sdkWraps/files.read", "count": 1},
     ]
     assert section["by_plugin_model"] == {
-        "ava_syntax_fix@old-model": 2,
-        "ava_code@new-model": 1,
+        "meiva_syntax_fix@old-model": 2,
+        "meiva_code@new-model": 1,
     }
     assert "plugin activations: 3 across 2 plugins" in text
-    assert "ava_syntax_fix/hooks/before_exec" in text
+    assert "meiva_syntax_fix/hooks/before_exec" in text
 
 
 def test_plugin_activation_section_empty_when_nothing_fired(fake: TelemetryStream) -> None:

@@ -10,7 +10,7 @@ code: `shared/message_kwargs.py:NoteTag`, the exhaustiveness assertion at
 
 A change added one member to the `NoteTag` enum in `shared/message_kwargs.py`.
 The pre-push test selection was chosen the natural way — the directories where
-the edits were — so `tests/agent tests/shared tests/cli tests/ava` ran and were
+the edits were — so `tests/agent tests/shared tests/cli tests/meiva` ran and were
 all green. CI failed on `tests/gateway/test_timeline.py`, which asserts
 `shown | hidden == set(NoteTag)`: a deliberate forcing function that lives in the
 *consumer's* test file, precisely so that adding a tag cannot skip the show/hide
@@ -22,7 +22,7 @@ for `shared/` the blast radius is the whole suite.
 
 The change added a member to `NoteTag`. Before pushing, the repo rule
 "run pytest for touched areas" was followed by listing the directories containing
-the edits: `tests/agent`, `tests/shared`, `tests/cli`, `tests/ava`. All green.
+the edits: `tests/agent`, `tests/shared`, `tests/cli`, `tests/meiva`. All green.
 
 CI failed. `tests/gateway/test_timeline.py` classifies every `NoteTag` into a
 `shown` set and a `hidden` set, then asserts their union equals `set(NoteTag)`.
@@ -37,14 +37,14 @@ a red PR, a CI cycle, and a second push.
 
 Two facts multiply.
 
-First, `shared/` is the bottom of the import layering (`shared < ava < agent <
+First, `shared/` is the bottom of the import layering (`shared < meiva < agent <
 gateway < cli`), so a change there is by construction visible to every layer
 above. There is no such thing as a local `shared/` change.
 
 Second, this repo uses hardcoded exhaustiveness assertions over enums and field
 sets as **review forcing functions** — `set(NoteTag)` in the gateway's timeline
 tests, `{m.value for m in TerminateResult} == set(get_args(literal))` and its two
-siblings in `tests/ava/test_agents_sdk.py`. A forcing function is deliberately
+siblings in `tests/meiva/test_agents_sdk.py`. A forcing function is deliberately
 placed at the point where the *decision* must be made, which is the consumer, not
 the definition. Its value comes from being somewhere the author of the enum change
 was not looking.

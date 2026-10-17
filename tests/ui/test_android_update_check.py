@@ -42,7 +42,7 @@ body.appendChild = function (child) {
 };
 
 const window = {
-  __AVA_APP__: scenario.config,
+  __MEIVA_APP__: scenario.config,
   __TAURI_INTERNALS__: {
     invoke: async function (command, args) {
       invocations.push({ command: command, args: args });
@@ -99,7 +99,7 @@ const tick = () => new Promise((resolve) => setTimeout(resolve, 0));
 })();
 """
 
-_DOWNLOAD_PAGE = "https://github.com/zhiyuan-zhang0206/Ava/releases/tag/android-latest"
+_DOWNLOAD_PAGE = "https://github.com/zhiyuan-zhang0206/Meiva/releases/tag/android-latest"
 
 
 def _available(version_name: str = "1.0.0", version_code: int = 4003) -> dict[str, object]:
@@ -132,7 +132,7 @@ def _run(
     interact: bool = False,
     platform: str = "android",
 ) -> dict[str, object]:
-    # ava:ref tests/docs/tests.ava.okf.md#android-update-prompt-harness
+    # meiva:ref tests/docs/tests.meiva.okf.md#android-update-prompt-harness
     scenario = {
         "config": {
             "platform": platform,
@@ -155,7 +155,7 @@ def _run(
 def test_offers_a_newer_build_with_an_install_action() -> None:
     result = _run(check=_available())
     assert result["banner"] is True
-    assert result["text"] == "Ava 1.0.0 (build 4003) is available"
+    assert result["text"] == "Meiva 1.0.0 (build 4003) is available"
     assert result["actions"] == ["Update", "Later"]
     assert result["commands"] == ["app_check_update"]
 
@@ -167,7 +167,7 @@ def test_notifies_only_when_the_setting_is_on() -> None:
     announced = _run(check=_available(), notifications=True)
     assert announced["notifications"] == [
         {
-            "title": "Ava 1.0.0 (build 4003) is available",
+            "title": "Meiva 1.0.0 (build 4003) is available",
             "body": "Tap Update in the app to install it.",
         }
     ]

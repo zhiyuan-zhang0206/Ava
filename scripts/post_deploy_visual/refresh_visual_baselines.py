@@ -200,7 +200,7 @@ def _regenerate(*, host: Host) -> int:
         missing = ", ".join(str(path.relative_to(_REPO_ROOT)) for path in missing_originals)
         raise BaselineRefreshError(f"cannot regenerate without committed references: {missing}")
 
-    with tempfile.TemporaryDirectory(prefix="ava-visual-baselines-") as temporary_directory:
+    with tempfile.TemporaryDirectory(prefix="meiva-visual-baselines-") as temporary_directory:
         backup_root = Path(temporary_directory)
         backups: dict[Path, Path] = {}
         try:

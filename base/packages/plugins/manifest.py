@@ -12,7 +12,7 @@ from base.host.git import host_version as host_version_module
 from base.host.git.host_version import Version, parse_version
 from base.packages.plugins.surface.ui_contributions import validate_ui_contributions
 
-MANIFEST_FILENAME = "ava-plugin.json"
+MANIFEST_FILENAME = "meiva-plugin.json"
 API_VERSION = 2
 
 
@@ -33,7 +33,7 @@ class Clause:
     version: Version
 
 
-# ava:ref base/packages/plugins/docs/manifest.ava.okf.md#closed-manifest-grammar
+# meiva:ref base/packages/plugins/docs/manifest.meiva.okf.md#closed-manifest-grammar
 def parse_range(raw: str) -> tuple[Clause, ...]:
     parts = [p for p in CLAUSE_SPLIT_RE.split(raw.strip()) if p]
     if not parts:
@@ -57,7 +57,7 @@ def _has_upper(clauses: tuple[Clause, ...]) -> bool:
     return any(c.op in UPPER_OPS for c in clauses)
 
 
-# ava:ref base/packages/plugins/docs/manifest.ava.okf.md#closed-manifest-grammar
+# meiva:ref base/packages/plugins/docs/manifest.meiva.okf.md#closed-manifest-grammar
 def range_allows(raw: str, version: str) -> bool:
     ver = parse_version(version)
     if ver is None:
@@ -174,7 +174,7 @@ def _validate_identity(
 
     if data.get("apiVersion") != API_VERSION:
         errors.append(
-            f"apiVersion must be {API_VERSION} (this Ava only knows spec v2); "
+            f"apiVersion must be {API_VERSION} (this Meiva only knows spec v2); "
             f"got {data.get('apiVersion')!r}"
         )
 
@@ -202,20 +202,20 @@ def _validate_engines(data: dict[str, Any], errors: list[str]) -> dict[str, str]
         if data.get("requires_commit") is None:
             errors.append(
                 "engines (or requires_commit) is required; engines must be an "
-                'object, e.g. {"ava": ">=0.1.38"}'
+                'object, e.g. {"meiva": ">=0.1.38"}'
             )
         return parsed
     for host, raw_range in engines.items():
-        if host != "ava":
-            errors.append(f"engines: unknown host {host!r} (only 'ava')")
+        if host != "meiva":
+            errors.append(f"engines: unknown host {host!r} (only 'meiva')")
             continue
         if not isinstance(raw_range, str):
-            errors.append(f"engines.ava must be a version range string; got {raw_range!r}")
+            errors.append(f"engines.meiva must be a version range string; got {raw_range!r}")
             continue
         try:
             parse_range(raw_range)
         except ManifestError as e:
-            errors.append(f"engines.ava: {e}")
+            errors.append(f"engines.meiva: {e}")
         else:
             parsed[host] = raw_range
     return parsed
@@ -440,15 +440,15 @@ def validate(data: dict[str, Any]) -> PluginManifest:
     )
 
 
-# ava:ref base/packages/plugins/docs/manifest.ava.okf.md#closed-manifest-grammar
+# meiva:ref base/packages/plugins/docs/manifest.meiva.okf.md#closed-manifest-grammar
 def load_manifest(pkg_dir: Path) -> PluginManifest:
     path = pkg_dir / MANIFEST_FILENAME
     if not path.is_file():
         raise ManifestError(
-            f"{path} not found: every Ava plugin ships {MANIFEST_FILENAME} at its package root. "
+            f"{path} not found: every Meiva plugin ships {MANIFEST_FILENAME} at its package root. "
             f"A plugin that contributes nothing the loader gates needs only "
             f'{{"apiVersion": 2, "name": "<plugin name>", "version": "1.0.0", '
-            f'"engines": {{"ava": ">=<YYYY.M.D>"}}}}; one that does must also list them under '
+            f'"engines": {{"meiva": ">=<YYYY.M.D>"}}}}; one that does must also list them under '
             f'"contributions" (docs/conventions/extensions/plugin-spec-v2.md)'
         )
     try:
@@ -464,20 +464,20 @@ def load_manifest(pkg_dir: Path) -> PluginManifest:
     return validate(data)
 
 
-# ava:ref base/packages/plugins/docs/manifest.ava.okf.md#closed-manifest-grammar
+# meiva:ref base/packages/plugins/docs/manifest.meiva.okf.md#closed-manifest-grammar
 def load_optional_manifest(pkg_dir: Path) -> PluginManifest | None:
     if not (pkg_dir / MANIFEST_FILENAME).is_file():
         return None
     return load_manifest(pkg_dir)
 
 
-# ava:ref base/packages/plugins/docs/manifest.ava.okf.md#host-compatibility-fails-closed
+# meiva:ref base/packages/plugins/docs/manifest.meiva.okf.md#host-compatibility-fails-closed
 def check_host_engine(manifest: PluginManifest, host_version: str) -> list[str]:
     errors: list[str] = []
     for _host, raw_range in manifest.engines.items():
         if not range_allows(raw_range, host_version):
             errors.append(
-                f"engines: this package requires Ava {raw_range} but the host "
+                f"engines: this package requires Meiva {raw_range} but the host "
                 f"checkout is {host_version}"
             )
     return errors
@@ -486,7 +486,7 @@ def check_host_engine(manifest: PluginManifest, host_version: str) -> list[str]:
 _COMMIT_TIMEOUT_S = 10.0
 
 
-# ava:ref base/packages/plugins/docs/manifest.ava.okf.md#host-compatibility-fails-closed
+# meiva:ref base/packages/plugins/docs/manifest.meiva.okf.md#host-compatibility-fails-closed
 def host_contract_errors_dir(pkg_dir: Path, *, repo: Path | None = None) -> list[str]:
     try:
         manifest = load_optional_manifest(pkg_dir)
@@ -502,7 +502,7 @@ def host_contract_errors_dir(pkg_dir: Path, *, repo: Path | None = None) -> list
     return check_host_engine(manifest, host) + check_host_commit(manifest, target)
 
 
-# ava:ref base/packages/plugins/docs/manifest.ava.okf.md#host-compatibility-fails-closed
+# meiva:ref base/packages/plugins/docs/manifest.meiva.okf.md#host-compatibility-fails-closed
 def check_host_commit(manifest: PluginManifest, repo: Path) -> list[str]:
     sha = manifest.requires_commit
     if sha is None:

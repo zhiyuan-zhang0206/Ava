@@ -2,9 +2,9 @@ exports = ["test_mcp_endpoint.py"]
 
 [debt.env-patch]
 "test_mcp_endpoint.py#patch.dict os.environ" = 1
-"test_plugin_ui.py#monkeypatch.setenv os.environ.AVA_HOME" = 1
-"test_schedule_runner.py#monkeypatch.delenv os.environ.AVA_SCHEDULE_ID" = 1
-"test_ui_contributions.py#monkeypatch.setenv os.environ.AVA_HOME" = 1
+"test_plugin_ui.py#monkeypatch.setenv os.environ.MEIVA_HOME" = 1
+"test_schedule_runner.py#monkeypatch.delenv os.environ.MEIVA_SCHEDULE_ID" = 1
+"test_ui_contributions.py#monkeypatch.setenv os.environ.MEIVA_HOME" = 1
 
 [debt.first-party-patch]
 "test_guarded_tool_admission.py#monkeypatch.setattr gateway.mcp_server.endpoint.build_manager" = 1
@@ -27,7 +27,7 @@ exports = ["test_mcp_endpoint.py"]
 "test_plugin_ui.py#monkeypatch.setattr base.paths.repo_plugins_dir" = 1
 "test_plugin_ui.py#monkeypatch.setattr gateway.app.build_model_catalog" = 1
 "test_schedule_draft.py#monkeypatch.setattr gateway.schedules.router.create_and_launch_agent" = 1
-"test_schedule_runner.py#monkeypatch.setattr ava.ensure_plugins_loaded" = 2
+"test_schedule_runner.py#monkeypatch.setattr meiva.ensure_plugins_loaded" = 2
 "test_schedule_runner.py#monkeypatch.setattr base.config.settings.gateway.schedule_stall_timeout_seconds" = 2
 "test_schedule_runner.py#monkeypatch.setattr services.wake.schedule_manager.engine.Database.connect" = 2
 "test_schedule_runner.py#monkeypatch.setattr services.wake.schedule_manager.engine.base.host.proc.kill_process_tree" = 1
@@ -38,8 +38,8 @@ exports = ["test_mcp_endpoint.py"]
 "test_schedules_api.py#monkeypatch.setattr base.config.settings.display.schedules_runs_default_limit" = 1
 "test_schedules_api.py#monkeypatch.setattr gateway.schedules.session_control.capture" = 2
 "test_schedules_api.py#monkeypatch.setattr gateway.schedules.session_control.wait_consumed" = 3
-"test_ui.py#monkeypatch.setattr ava.gateway_client.register_page" = 3
-"test_ui.py#monkeypatch.setattr ava.ui.page_host" = 1
+"test_ui.py#monkeypatch.setattr meiva.gateway_client.register_page" = 3
+"test_ui.py#monkeypatch.setattr meiva.ui.page_host" = 1
 "test_ui_contributions.py#monkeypatch.setattr base.paths.plugins_dir" = 1
 "test_ui_contributions.py#monkeypatch.setattr base.paths.repo_plugins_dir" = 1
 "test_ui_contributions.py#monkeypatch.setattr gateway.app.build_model_catalog" = 1

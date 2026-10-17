@@ -187,7 +187,7 @@ def test_bounded_age_resolves_profile_safely_without_the_sandbox_domain(
 
     monkeypatch.setattr(config_module, "settings", _NoSandbox())
     monkeypatch.setattr(
-        dotenv_file, "read_env_aliases", lambda: {"AVA_EXEC_NODE_TIMEOUT_SECONDS": "600"}
+        dotenv_file, "read_env_aliases", lambda: {"MEIVA_EXEC_NODE_TIMEOUT_SECONDS": "600"}
     )
     assert exec_request_evidence.exec_node_ceiling_s() == 600.0
 
@@ -230,12 +230,12 @@ def test_live_reference_of_any_process_shape_is_never_excluded(
     request = _write_envelope(exec_dir, owner=uuid4())
     child = subprocess.Popen(
         [sys.executable, "-c", "import time; time.sleep(30)"],
-        env={**os.environ, "AVA_EXEC_REQUEST_FILE": str(request)},
+        env={**os.environ, "MEIVA_EXEC_REQUEST_FILE": str(request)},
     )
     try:
         deadline = time.monotonic() + 5
         while time.monotonic() < deadline:
-            shown = psutil.Process(child.pid).environ().get("AVA_EXEC_REQUEST_FILE")
+            shown = psutil.Process(child.pid).environ().get("MEIVA_EXEC_REQUEST_FILE")
             if shown == str(request):
                 break
             time.sleep(0.05)
@@ -480,7 +480,7 @@ def test_cli_entry_captures_once_and_keeps_the_database_gated(
     gate = create.call_args.kwargs["gate"]
     assert isinstance(gate, ProcessDbGate)
     count.assert_not_called()
-    assert gate.application_name() == "ava:diagnostic:v7"
+    assert gate.application_name() == "meiva:diagnostic:v7"
     count.assert_called_once_with(tmp_path, image.sha)
     gate.observe_minimum(7)
     assert not gate.min_read_due()

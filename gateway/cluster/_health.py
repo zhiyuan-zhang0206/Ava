@@ -10,7 +10,7 @@ from fastapi.responses import JSONResponse
 from psycopg_pool import PoolTimeout
 
 from base.daemon.health_schema import DEGRADED, OK, component, render
-from base.paths import ava_home
+from base.paths import meiva_home
 
 
 def get_health(request: Request) -> dict[str, object] | JSONResponse:
@@ -19,7 +19,7 @@ def get_health(request: Request) -> dict[str, object] | JSONResponse:
     "healthy" enough for the watchdog to leave alone.
 
     The identity fields answer the questions a 200 alone cannot: `name` is
-    which *service* answered, `home` this gateway's `$AVA_HOME` (its cluster
+    which *service* answered, `home` this gateway's `$MEIVA_HOME` (its cluster
     identity), `machine` its host, `started_at` this process's birth, and `sha`
     the code frozen at boot. A 200 on this port only proves *something* listens
     there, so the watchdog verifies the stable identity too rather than the status
@@ -40,7 +40,7 @@ def get_health(request: Request) -> dict[str, object] | JSONResponse:
     identity: dict[str, object] = {
         "status": "ok",
         "name": "gateway",
-        "home": str(ava_home()),
+        "home": str(meiva_home()),
         "machine": request.app.state.machine.name(),
         "started_at": request.app.state.started_at,
         "sha": request.app.state.process_image.sha,

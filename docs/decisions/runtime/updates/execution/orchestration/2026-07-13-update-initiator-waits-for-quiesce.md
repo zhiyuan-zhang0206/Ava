@@ -1,12 +1,12 @@
-# `ava.self.update()`: the initiator waits for the quiesce signal instead of restarting itself
+# `meiva.self.update()`: the initiator waits for the quiesce signal instead of restarting itself
 
-> **Superseded 2026-08** — `ava.self.update()` was removed; the only update
-> entry point is the CLI `ava cluster update`, whose trigger is a detached
-> `ava-rollout` session (not an agent) that never waits on the quiesce. Kept as
+> **Superseded 2026-08** — `meiva.self.update()` was removed; the only update
+> entry point is the CLI `meiva cluster update`, whose trigger is a detached
+> `meiva-rollout` session (not an agent) that never waits on the quiesce. Kept as
 > history for why `backend_changed` rides the rollout 202 and how the quiesce
 > convergence loop was designed.
 
-**Decision.** On a backend rollout, the agent that calls `ava.self.update()` no
+**Decision.** On a backend rollout, the agent that calls `meiva.self.update()` no
 longer inserts its own `self:update` restart and exits immediately. It blocks
 inside its `execute_code` (up to 180s, well under the 300s exec timeout)
 until a `restart` inbound with `source='system:update'` is pending for it —
@@ -63,4 +63,4 @@ the #411 convergence loop.
 
 ---
 
-Superseded by: [decisions/2026-08-05-cli-only-updates.md](../converge/2026-08-05-cli-only-updates.md) — `ava.self.update()` was removed entirely; the CLI is the only update entry point.
+Superseded by: [decisions/2026-08-05-cli-only-updates.md](../converge/2026-08-05-cli-only-updates.md) — `meiva.self.update()` was removed entirely; the CLI is the only update entry point.

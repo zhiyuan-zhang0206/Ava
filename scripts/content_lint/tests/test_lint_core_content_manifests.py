@@ -1,7 +1,7 @@
 """scripts/content_lint/lint_core_content_manifests.py — the core-content manifest gate.
 
 Hard checks (red): a builtin plugin without a manifest, a core manifest that
-fails validation, whose `engines.ava` excludes the repo's derived host version,
+fails validation, whose `engines.meiva` excludes the repo's derived host version,
 or whose `requires_commit` is not an ancestor of HEAD. Audit (report-only):
 non-core manifests are judged against the derived host version without failing
 the run.
@@ -82,15 +82,15 @@ def test_derived_version_resolves_from_fixture_commit(repo: Path) -> None:
 def test_valid_core_manifest_passes(repo: Path) -> None:
     _write(
         repo,
-        "ava_builtins/skills/foo/ava-plugin.json",
-        {"apiVersion": 2, "name": "foo", "version": "1.0.0", "engines": {"ava": ">=2026.1.1"}},
+        "meiva_builtins/skills/foo/meiva-plugin.json",
+        {"apiVersion": 2, "name": "foo", "version": "1.0.0", "engines": {"meiva": ">=2026.1.1"}},
     )
     assert lint.main([]) == 0
 
 
 def _write_plugin(repo: Path, name: str, *, manifest: bool) -> None:
     """Write + STAGE a builtin plugin's `plugin.py`, and its manifest when `manifest`."""
-    plugin_py = repo / "ava_builtins" / "plugins" / name / "plugin.py"
+    plugin_py = repo / "meiva_builtins" / "plugins" / name / "plugin.py"
     plugin_py.parent.mkdir(parents=True, exist_ok=True)
     plugin_py.write_text("", encoding="utf-8")
     subprocess.run(  # noqa: S603 — fixed argv, test-local fixture repo
@@ -101,8 +101,8 @@ def _write_plugin(repo: Path, name: str, *, manifest: bool) -> None:
     if manifest:
         _write(
             repo,
-            f"ava_builtins/plugins/{name}/ava-plugin.json",
-            {"apiVersion": 2, "name": name, "version": "1.0.0", "engines": {"ava": ">=2026.1.1"}},
+            f"meiva_builtins/plugins/{name}/meiva-plugin.json",
+            {"apiVersion": 2, "name": name, "version": "1.0.0", "engines": {"meiva": ">=2026.1.1"}},
         )
 
 
@@ -118,28 +118,28 @@ def test_builtin_plugin_without_a_manifest_is_red(
     _write_plugin(repo, "bar", manifest=False)
     assert lint.main([]) == 1
     out = capsys.readouterr().out  # pyright: ignore[reportUnknownMemberType]
-    assert "ava_builtins/plugins/bar: builtin plugin ships no ava-plugin.json" in out
-    assert "ava_builtins/plugins/foo" not in out
+    assert "meiva_builtins/plugins/bar: builtin plugin ships no meiva-plugin.json" in out
+    assert "meiva_builtins/plugins/foo" not in out
 
 
 def test_core_manifest_excluding_current_version_is_red(repo: Path) -> None:
     _write(
         repo,
-        "ava_builtins/skills/foo/ava-plugin.json",
-        {"apiVersion": 2, "name": "foo", "version": "1.0.0", "engines": {"ava": ">=0.1.0,<1"}},
+        "meiva_builtins/skills/foo/meiva-plugin.json",
+        {"apiVersion": 2, "name": "foo", "version": "1.0.0", "engines": {"meiva": ">=0.1.0,<1"}},
     )
     assert lint.main([]) == 1
 
 
 def test_core_manifest_invalid_is_red(repo: Path) -> None:
-    _write(repo, "ava_builtins/skills/foo/ava-plugin.json", {"apiVersion": 2})
+    _write(repo, "meiva_builtins/skills/foo/meiva-plugin.json", {"apiVersion": 2})
     assert lint.main([]) == 1
 
 
 def test_core_requires_commit_ancestor_passes(repo: Path) -> None:
     _write(
         repo,
-        "ava_builtins/skills/foo/ava-plugin.json",
+        "meiva_builtins/skills/foo/meiva-plugin.json",
         {
             "apiVersion": 2,
             "name": "foo",
@@ -153,7 +153,7 @@ def test_core_requires_commit_ancestor_passes(repo: Path) -> None:
 def test_core_requires_commit_unresolvable_is_red(repo: Path) -> None:
     _write(
         repo,
-        "ava_builtins/skills/foo/ava-plugin.json",
+        "meiva_builtins/skills/foo/meiva-plugin.json",
         {"apiVersion": 2, "name": "foo", "version": "1.0.0", "requires_commit": "f" * 40},
     )
     assert lint.main([]) == 1
@@ -162,16 +162,16 @@ def test_core_requires_commit_unresolvable_is_red(repo: Path) -> None:
 def test_non_core_manifest_is_audited_not_failed(
     repo: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    """A third-party/fixture manifest outside ava_builtins gets the derived
+    """A third-party/fixture manifest outside meiva_builtins gets the derived
     verdict printed without reddening the run."""
     _write(
         repo,
-        "examples/thing/ava-plugin.json",
-        {"apiVersion": 2, "name": "thing", "version": "1.0.0", "engines": {"ava": "<1"}},
+        "examples/thing/meiva-plugin.json",
+        {"apiVersion": 2, "name": "thing", "version": "1.0.0", "engines": {"meiva": "<1"}},
     )
     assert lint.main([]) == 0
     out = capsys.readouterr().out  # pyright: ignore[reportUnknownMemberType]
-    assert "audit examples/thing/ava-plugin.json" in out
+    assert "audit examples/thing/meiva-plugin.json" in out
     assert "derived 2026.1.2: FAIL" in out
 
 

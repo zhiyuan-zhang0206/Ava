@@ -9,7 +9,7 @@ from base.host.net.auth import API_TOKEN_ENV, bearer_header
 
 SECRET = "human-" + "h" * 40
 TOKEN = "delivered-" + "t" * 32
-LAUNCHER_PROFILE_ENV = "AVA_LAUNCHER_PROFILE"
+LAUNCHER_PROFILE_ENV = "MEIVA_LAUNCHER_PROFILE"
 
 
 def _access(secret: str, *, remote_plane: bool = False) -> GatewayAccess:
@@ -26,7 +26,7 @@ def _process(
     recorded_profile: str | None = None,
 ) -> None:
     for name, value in (
-        ("AVA_PROCESS_PROFILE", profile),
+        ("MEIVA_PROCESS_PROFILE", profile),
         (LAUNCHER_PROFILE_ENV, recorded_profile),
         (API_TOKEN_ENV, token),
     ):
@@ -53,7 +53,7 @@ def test_a_process_with_no_credential_fails_instead_of_presenting_nothing(
     monkeypatch: pytest.MonkeyPatch, profile: str | None
 ) -> None:
     _process(monkeypatch, profile=profile, token=None)
-    with pytest.raises(machine.GatewayApiTokenMissing, match="AVA_API_TOKEN"):
+    with pytest.raises(machine.GatewayApiTokenMissing, match="MEIVA_API_TOKEN"):
         gateway_auth_headers(_access(""))
 
 
@@ -71,7 +71,7 @@ def test_agent_and_runner_processes_without_a_token_fail_instead_of_using_the_se
 ) -> None:
     _process(monkeypatch, profile=profile, token=None)
 
-    with pytest.raises(RuntimeError, match="AVA_API_TOKEN") as raised:
+    with pytest.raises(RuntimeError, match="MEIVA_API_TOKEN") as raised:
         gateway_auth_headers(_access(SECRET))
 
     message = str(raised.value)
@@ -89,7 +89,7 @@ def test_a_cli_started_inside_an_agent_is_held_to_the_same_rule(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     _process(monkeypatch, profile=None, token=None, recorded_profile="agent")
-    with pytest.raises(RuntimeError, match="AVA_API_TOKEN"):
+    with pytest.raises(RuntimeError, match="MEIVA_API_TOKEN"):
         gateway_auth_headers(_access(SECRET))
 
 
@@ -107,7 +107,7 @@ def test_a_unit_that_does_not_serve_the_gateway_is_never_exempt(
 ) -> None:
     _process(monkeypatch, profile="runner", token=None)
     _gateway_home_serving(monkeypatch, serves_gateway=False)
-    with pytest.raises(RuntimeError, match="AVA_API_TOKEN"):
+    with pytest.raises(RuntimeError, match="MEIVA_API_TOKEN"):
         gateway_auth_headers(_access(SECRET, remote_plane=True))
 
 

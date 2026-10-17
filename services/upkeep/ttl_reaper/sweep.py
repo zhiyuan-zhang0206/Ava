@@ -2,7 +2,7 @@
 impersonation leases, plus the slow maintenance phases on durable cadences.
 
 One resident loop (`sweep_loop`) runs `sweep_round` every
-`AVA_TTL_REAPER_POLL_INTERVAL_SECONDS`. A round runs its phases in order; each
+`MEIVA_TTL_REAPER_POLL_INTERVAL_SECONDS`. A round runs its phases in order; each
 phase is a bounded batch, and a backlog drains over successive rounds:
 
 - **Pages** — the row is terminalized with ``expired_at`` (the reverse proxy
@@ -10,7 +10,7 @@ phase is a bounded batch, and a backlog drains over successive rounds:
   ``PageClosed`` event is published so the frontend drops the entry, and the
   page-server daemon stops the page session when its reconcile sees the row
   leave the open set (the daemon's existing two-layer teardown). Pages have a
-  hard lifetime (user ruling 2026-08-25; default 24h, ``AVA_PAGE_DEFAULT_TTL_SECONDS``).
+  hard lifetime (user ruling 2026-08-25; default 24h, ``MEIVA_PAGE_DEFAULT_TTL_SECONDS``).
 - **Browser sessions** — expired ``web_sessions`` rows are deleted here, so
   cleanup does not depend on the next login.
 - **Notices** — ``agent_notices`` past ``expire_at`` auto-resolve.
@@ -151,7 +151,7 @@ def reap_expired_pages_blocking(
                     agent_id,
                     f"Page {name!r} (agent {agent_id}) was reclaimed after its TTL "
                     "expired. Stop the page's HTTP server to release its port; "
-                    "re-show with ava.ui.show() to republish.",
+                    "re-show with meiva.ui.show() to republish.",
                 )
             else:
                 notify_owner(
@@ -160,7 +160,7 @@ def reap_expired_pages_blocking(
                     bus,
                     agent_id,
                     f"Page {name!r} (agent {agent_id}) was reclaimed after its TTL "
-                    "expired. Serve it again with ava.ui.serve() to republish.",
+                    "expired. Serve it again with meiva.ui.serve() to republish.",
                 )
             telemetry.emit(
                 "log",

@@ -22,7 +22,7 @@ def record(**fields: object) -> str:
         **fields,
     }
     return (
-        "```ava-contract\n"
+        "```meiva-contract\n"
         + "\n".join(f"{key} = {json.dumps(value)}" for key, value in values.items())
         + "\n```\n"
     )
@@ -30,7 +30,7 @@ def record(**fields: object) -> str:
 
 def files(**fields: object) -> dict[str, str]:
     return {
-        "pkg/core.py": "# ava:ref pkg/docs/core.ava.okf.md#positive-budget\ndef budget():\n    return 1\n",
-        "pkg/docs/core.ava.okf.md": record(**fields),
+        "pkg/core.py": "# meiva:ref pkg/docs/core.meiva.okf.md#positive-budget\ndef budget():\n    return 1\n",
+        "pkg/docs/core.meiva.okf.md": record(**fields),
         "pkg/tests/test_core.py": "def test_budget():\n    assert 1 > 0\n",
     }

@@ -12,7 +12,7 @@ from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 from typing import Literal, TypedDict, cast
 
-from base.paths.home import resolve_ava_home
+from base.paths.home import resolve_meiva_home
 
 _DEFAULT_MANIFEST = Path(__file__).with_name("manifest.json")
 _HASH_CHUNK_SIZE = 1024 * 1024
@@ -171,7 +171,7 @@ def verify(root: Path, manifest: Path) -> list[Outcome]:
 
 
 def _default_root() -> Path:
-    return resolve_ava_home() / "source"
+    return resolve_meiva_home() / "source"
 
 
 def _parse_args(argv: Sequence[str] | None) -> CliArgs:
@@ -182,7 +182,7 @@ def _parse_args(argv: Sequence[str] | None) -> CliArgs:
         "--root",
         type=Path,
         default=None,
-        help="checked tree root (default: the home's source checkout, $AVA_HOME/source)",
+        help="checked tree root (default: the home's source checkout, $MEIVA_HOME/source)",
     )
     verify_parser.add_argument(
         "--manifest",

@@ -5,7 +5,7 @@ A package's own tests live in `<pkg>/**/tests/`. pyright configures by directory
 `executionEnvironments` entry names a root (a plain directory, no globs) and the FIRST
 entry, in list order, whose root contains a file decides that file's rules. A tests
 directory under `base/`, `ops/` or `services/` would inherit the package's seven `error`
-rules; one under `ava/`, `scripts/` or `ava_builtins/` would fall to the global `warning`
+rules; one under `meiva/`, `scripts/` or `meiva_builtins/` would fall to the global `warning`
 and lose the two gated call-signature rules. Either way pyright just stops applying the
 tests standard, silently. So each such directory needs its own entry, listed above the
 entry of its package, and hand-writing one per directory (about 150 are planned) turns
@@ -23,7 +23,7 @@ hand-written and left byte-for-byte alone.
 * The entry sets exactly the two call-signature rules to `error`; the other five rules
   come from the global configuration (`warning`).
 * A tests directory inside a hand-written entry that carries more than rules (the
-  `extraPaths` of `ava_builtins/skills/integrations/web-ai`) repeats those settings, because the
+  `extraPaths` of `meiva_builtins/skills/integrations/web-ai`) repeats those settings, because the
   generated entry takes precedence and would otherwise drop them.
 
 Run after adding, moving or removing a tests directory, or let the pre-commit

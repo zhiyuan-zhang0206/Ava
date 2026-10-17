@@ -10,14 +10,9 @@ from langchain_core.messages import AnyMessage
 from langgraph.graph.message import add_messages
 from pydantic import BaseModel, Field
 
-import ava
+import meiva
 from agent import state as state_module
 from agent.extensions import plugin_state_codec
-from ava import impersonation
-from ava.impersonation import attachment as attachment_module
-from ava.sdk_surface import process_context
-from ava.sdk_surface.installation import Installation
-from ava.tests.fixtures.pin_agent import pin_agent
 from base.agents.impersonation import manifest
 from base.cluster.machine.boot import machine_from_boot
 from base.config import ConfigBoot
@@ -25,6 +20,11 @@ from base.config.service_read import ConfigAuthority
 from base.db import Database
 from base.lm.catalog import ModelCatalog
 from base.packages.plugins.extensions import EMPTY
+from meiva import impersonation
+from meiva.impersonation import attachment as attachment_module
+from meiva.sdk_surface import process_context
+from meiva.sdk_surface.installation import Installation
+from meiva.tests.fixtures.pin_agent import pin_agent
 
 
 def _union(left: set[str], right: set[str]) -> set[str]:
@@ -76,8 +76,8 @@ def attached_runtime(
     process_context.unbind_exec_turn()
     request.addfinalizer(process_context.unbind_exec_turn)
 
-    from ava.sdk_surface import metering
     from base.agents.sdk import call_policy
+    from meiva.sdk_surface import metering
 
     def _policy_for_test(_owner: call_policy.SamplingPolicyOwner) -> call_policy.SamplingPolicy:
         return call_policy.SamplingPolicy()
@@ -98,12 +98,12 @@ def attached_runtime(
         catalog=model_catalog,
         authority=config_authority,
     )
-    monkeypatch.setattr(ava, "__plugin_installation__", installation, raising=False)
+    monkeypatch.setattr(meiva, "__plugin_installation__", installation, raising=False)
 
     def loader_stub(**_kwargs: object) -> None:
         """Accept the `surface` kwarg attach passes (ignored)."""
 
-    monkeypatch.setattr(ava, "ensure_plugins_loaded", loader_stub)
+    monkeypatch.setattr(meiva, "ensure_plugins_loaded", loader_stub)
 
     def load(_agent_id: int, *, database: Database) -> tuple[ExampleState, dict[str, Any], None]:
         return snapshot.model_copy(deep=True), {"llm_model": "external-test"}, None

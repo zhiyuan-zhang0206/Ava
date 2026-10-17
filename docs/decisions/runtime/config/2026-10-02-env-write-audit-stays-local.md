@@ -6,7 +6,7 @@
 `category=audit` event and requires each emit site to record there first. The `env_write` and
 `env_unauthorized_write` events are registered as audit events, but their record was decided
 earlier (`2026-09-16-config-write-audit.md`): a per-home owner-only JSONL
-(`$AVA_HOME/.env.audit.jsonl`), because the writers run in contexts with no database identity
+(`$MEIVA_HOME/.env.audit.jsonl`), because the writers run in contexts with no database identity
 (install and converge, the CLI on a fresh box, secret-rotation scripts) and a cluster table
 would widen where configuration content appears.
 
@@ -23,7 +23,7 @@ instead of baselining it.
   reachability is two truths that disagree exactly when something is wrong; the JSONL already
   exists everywhere a home does.
 - **Reclassify the two events as telemetry.** That moves them out of the audit view and the
-  business tier for no gain in durability; the history query is `ava config audit` over the JSONL.
+  business tier for no gain in durability; the history query is `meiva config audit` over the JSONL.
 
 ## Consequences
 

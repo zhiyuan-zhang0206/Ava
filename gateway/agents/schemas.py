@@ -150,7 +150,7 @@ class NoticeCreateIn(BaseModel):
     """POST /api/agents/{id}/notices request body — the unified notice write API
     (R3 door ④).
 
-    Mirrors the SDK ava.ui.notify() contract: `priority` P0-P3, `blocking`
+    Mirrors the SDK meiva.ui.notify() contract: `priority` P0-P3, `blocking`
     meaningful only when `require_response` is true (an FYI never stalls).
     `task_id` optionally groups the notice under a task in the user's queue.
     `expire_at` specifies the notice lifetime; omitted uses the configured default TTL.
@@ -176,7 +176,7 @@ class NoticeCreateIn(BaseModel):
 class NoticeEditIn(BaseModel):
     """PATCH /api/agents/{id}/notices/current/guarded-v1 request body (with
     `observed_notice_id`) — revise the agent's open notice (the SDK
-    ava.ui.edit_notice contract). All fields optional;
+    meiva.ui.edit_notice contract). All fields optional;
     pass only what changes. `require_response` cannot be changed (turn an FYI
     into a question by dismissing and posting fresh)."""
 

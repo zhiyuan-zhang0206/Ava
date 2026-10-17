@@ -16,10 +16,10 @@ exports = ["adapters", "conftest.py", "slices.py"]
 "test_timeline_selection.py" = ["task_scope.py", "test_im_bridge_core.py", "test_timeline_outbox.py"]
 
 [debt.env-patch]
-"conftest.py#monkeypatch.setenv os.environ.AVA_HOME" = 1
-"test_im_bridge_core.py#monkeypatch.setenv os.environ.AVA_HOME" = 4
-"test_im_bridge_durable_cursors.py#monkeypatch.setenv os.environ.AVA_HOME" = 1
-"test_notice_bridge.py#monkeypatch.setenv os.environ.AVA_HOME" = 2
+"conftest.py#monkeypatch.setenv os.environ.MEIVA_HOME" = 1
+"test_im_bridge_core.py#monkeypatch.setenv os.environ.MEIVA_HOME" = 4
+"test_im_bridge_durable_cursors.py#monkeypatch.setenv os.environ.MEIVA_HOME" = 1
+"test_notice_bridge.py#monkeypatch.setenv os.environ.MEIVA_HOME" = 2
 
 [debt.first-party-patch]
 "conftest.py#monkeypatch.setattr services.entrypoints.im_bridge.tests.test_im_bridge_core.TEST_POOL" = 1

@@ -21,7 +21,7 @@ an op running past that has already been abandoned by its caller.
 above ten times `GATEWAY_PREFLIGHT_BUDGET_S` and below the schedule-stall alert; both
 orderings are declared and checked in `base.deploy.timing`.
 
-The module also holds the agent-lease family, the `ava start` readiness
+The module also holds the agent-lease family, the `meiva start` readiness
 clocks and a remote unit's capability bundle lifetime; each constant's comment
 names its consumer.
 """
@@ -54,7 +54,7 @@ CORPSE_REAP_GRACE_S = 900.0
 
 # How long a pure agent-runner's start preflight keeps re-dialing the gateway
 # before it declines (`cli.commands._repo.probe_gateway_or_die`, run by
-# `ava start`): whether a *single* refused dial is enough to declare the gateway
+# `meiva start`): whether a *single* refused dial is enough to declare the gateway
 # down.
 #
 # 30 s, because the hole it must survive is one gateway restart — measured at
@@ -70,7 +70,7 @@ CORPSE_REAP_GRACE_S = 900.0
 GATEWAY_PREFLIGHT_BUDGET_S = 30.0
 
 
-# How long `ava start` waits for the services it just launched to pass their
+# How long `meiva start` waits for the services it just launched to pass their
 # liveness probes before it reports them unready and exits
 # `SERVICES_NOT_READY_EXIT_CODE` (`cli.commands.lifecycle.start`; the root glue applies the
 # same critical-tier bound).
@@ -102,7 +102,7 @@ NON_CRITICAL_SERVICE_READY_TIMEOUT_S = 45.0
 # whose generation has not yet answered a probe.
 DEFAULT_STARTUP_GRACE_S = 20.0
 
-# How long a unit capability bundle (`ava cluster db-authority issue-unit`,
+# How long a unit capability bundle (`meiva cluster db-authority issue-unit`,
 # `base.host.db_authority.unit.issue_bundle`) stays installable by default
 # (`--ttl-hours`): a day covers the trip to one unit. The most it may ask for is
 # `base.host.db_authority.unit.UNIT_BUNDLE_MAX_TTL_S`.

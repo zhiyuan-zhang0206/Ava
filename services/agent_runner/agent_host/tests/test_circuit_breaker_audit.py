@@ -9,7 +9,7 @@ from psycopg_pool import AsyncConnectionPool
 from agent.graph.llm_errors import FatalProviderError
 from agent.state import CircuitState
 from agent.turn.runloop import _handle_fatal_llm_error
-from base.agents.context import AvaContext
+from base.agents.context import MeivaContext
 from base.agents.tests.units import spawn_agent
 from base.cluster.machine import MachineIdentity
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
@@ -56,7 +56,7 @@ async def test_the_breaker_open_event_is_recorded_in_audit_events(
 
     await _handle_fatal_llm_error(
         _overflow(),
-        AvaContext(
+        MeivaContext(
             ops_pool=aops_pool,
             llm=MagicMock(),
             event_publisher=MagicMock(),
@@ -109,7 +109,7 @@ async def test_a_failed_audit_write_is_reported_and_does_not_undo_the_open_break
 
     update = await _handle_fatal_llm_error(
         _overflow(),
-        AvaContext(
+        MeivaContext(
             ops_pool=aops_pool,
             llm=MagicMock(),
             event_publisher=MagicMock(),

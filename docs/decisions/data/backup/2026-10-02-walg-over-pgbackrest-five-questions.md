@@ -24,7 +24,7 @@ Keep WAL-G as the point-in-time recovery mechanism, behind the thin layer alread
 invariants, a weekly restore drill). The five questions:
 
 1. **Boundary.** WAL-G owns shipping WAL segments, base and incremental backups, the object
-   layout and its encryption, retention deletes, and fetching for restore. Ava owns what
+   layout and its encryption, retention deletes, and fetching for restore. Meiva owns what
    WAL-G does not: when archiving is switched on (Postgres launch arguments), whether it is
    healthy (the probe), whether a retention delete is safe (dry-run plus structural
    invariants before `--confirm`), and whether a restore actually works (the drill).
@@ -52,7 +52,7 @@ invariants, a weekly restore drill). The five questions:
    - `wal-verify` exits 0 while reporting a gap, and a gap within the last upload-concurrency
      window is only a warning; the drill and the archiver probe cover that window.
    - `backup-fetch` brings back the source's `archive_mode=on`; a restored instance must start
-     with archiving forced off or it writes into the live chain. Ava keeps archive settings
+     with archiving forced off or it writes into the live chain. Meiva keeps archive settings
      out of the data directory for this reason.
    - A lost or replaced encryption key makes every object unreadable; the key is pinned by
      fingerprint and escrow is a precondition of enabling.
@@ -72,7 +72,7 @@ Qualitative triggers; any one is a reason to reopen this entry, none is a number
   state, its own storage adapter, or its own translation of the tool's settings.
 - The **same class of failure recurs** (an archive that silently stops, a retention delete that
   removes something restorable, a drill that passes while a restore would fail).
-- The tool's **maintenance or object-store support degrades**, or Ava needs a platform
+- The tool's **maintenance or object-store support degrades**, or Meiva needs a platform
   beyond Linux x86_64 or a store the tool does not speak.
 - pgBackRest's S3 path to OSS is **shown to work** (a scratch drill, not a reading of the
   docs) and its verification and expiry would delete code of ours.

@@ -2,16 +2,16 @@
 
 ## Context
 
-On 2026-08-02 03:15 PDT the v0.13.0 rollout — `ava update --local` inside the detached
-`ava-rollout` session — blocked for 67 minutes inside `converge`, on a `codesign`
+On 2026-08-02 03:15 PDT the v0.13.0 rollout — `meiva update --local` inside the detached
+`meiva-rollout` session — blocked for 67 minutes inside `converge`, on a `codesign`
 child waiting for a GUI authorization that no detached session can ever answer. Phase A
 had already stopped the world, so the cluster sat down for the whole window.
 
 Every self-healing layer stood down, and each of them was right to. `stranded_pause`
 saw a live deploy lease and logged `cluster update holds the lock … not unpausing`. The
-watchdog, resurrected by its OS-scheduled probe after the rollout's own `ava stop` took
+watchdog, resurrected by its OS-scheduled probe after the rollout's own `meiva stop` took
 it down, logged `round blocked by pause (scope=all)` once a minute for 67 minutes. The
-health probe and `ava cluster recover` both refuse while the lock holder's pid is alive.
+health probe and `meiva cluster recover` both refuse while the lock holder's pid is alive.
 **Every one of them asks whether the owner is alive; none asks whether it is getting
 anywhere**, and a process blocked forever on a prompt is maximally alive.
 
@@ -22,7 +22,7 @@ ever *cause* that step to return.
 
 `NO_PROGRESS_TIMEOUT_S` already existed as this repo's one definition of "stopped making
 progress", and `ops/controllers/stalled_updater.py` already turned it into an unattended
-reclaim — but only for `ava-updater`, a host's own self-update. The orchestration that
+reclaim — but only for `meiva-updater`, a host's own self-update. The orchestration that
 pauses the whole fleet was outside every clock in the system.
 
 ## Decision
@@ -109,9 +109,9 @@ gap this closes is a missing *consumer* of that number, not a missing number.
 
 ## Consequences
 
-- An `ava update` that hangs converts to a failure plus in-process recovery in ~15-30
+- An `meiva update` that hangs converts to a failure plus in-process recovery in ~15-30
   minutes with nobody watching, instead of standing until an operator notices.
-- **An operator's Ctrl-C on a foreground `ava update --local` now also rolls the gateway
+- **An operator's Ctrl-C on a foreground `meiva update --local` now also rolls the gateway
   back to last-known-good** instead of exiting on a traceback with the cluster mid-
   transition. That is a behaviour change beyond the unattended case, and the intended
   one: an abort that leaves a working cluster is what Ctrl-C should always have meant.
@@ -123,9 +123,9 @@ gap this closes is a missing *consumer* of that number, not a missing number.
   can block that long without output has to do the same, or it will be interrupted while
   working. This is a deliberate constraint, not an oversight — the alternative is a
   bound nothing can be checked against.
-- The stage-2 force kill is strictly worse than an operator's `ava cluster recover` and
+- The stage-2 force kill is strictly worse than an operator's `meiva cluster recover` and
   says so in its own log line. It exists because a session that outlives its process
-  refuses every subsequent `ava update` cluster-wide via `current_orchestration()`.
+  refuses every subsequent `meiva update` cluster-wide via `current_orchestration()`.
 - `LastUpdate` now carries `holder`. The column was always selected and used only inside
   the `RUNNING`/`ORPHANED` derivation; exposing it is what lets the reclaim name the
   process without a second read of the lease.

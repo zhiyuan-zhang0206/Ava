@@ -80,7 +80,7 @@ def _run_approve_step(tmp_path: Path, gh_script: str) -> subprocess.CompletedPro
         | {
             "PATH": f"{fake}{os.pathsep}{os.environ['PATH']}",
             "GITHUB_REPOSITORY": "owner/repo",
-            "BRANCH": "ava-test-branch",
+            "BRANCH": "meiva-test-branch",
         },
         capture_output=True,
         text=True,

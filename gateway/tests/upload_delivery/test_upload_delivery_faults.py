@@ -190,7 +190,7 @@ async def test_real_remote_receiver_after_fsync_response_loss_one_inbound(
         first["batch_id"],
         local_machine=machine_identity.name(),
     )
-    remote_dir = tmp_path / "remote-disk" / f"AvaAgent-{agent}"
+    remote_dir = tmp_path / "remote-disk" / f"MeivaAgent-{agent}"
 
     def current_target(*, local_machine: str) -> UnitIdentity:
         assert local_machine == machine_identity.name()
@@ -492,7 +492,7 @@ def test_single_connection_receiver_releases_pool_across_http(
         post(client, agent).json()["batch_id"],
         local_machine=machine_identity.name(),
     )
-    remote_dir = tmp_path / "single-native" / f"AvaAgent-{agent}"
+    remote_dir = tmp_path / "single-native" / f"MeivaAgent-{agent}"
 
     def directory(_id: int, **_kwargs: Any) -> Path:
         return remote_dir

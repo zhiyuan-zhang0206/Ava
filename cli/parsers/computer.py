@@ -1,4 +1,4 @@
-"""`ava computer` — computer-use daemon operator verbs.
+"""`meiva computer` — computer-use daemon operator verbs.
 
 Builder plus its `_h_*` handler; the handler lazy-imports the implementation
 from ``cli.commands`` so parser building never loads Settings (see the
@@ -17,7 +17,7 @@ def _h_computer_release(args: argparse.Namespace) -> int:
 
 
 def add_computer_parser(sub: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
-    # `ava computer` — operator commands for the computer-use daemon (the
+    # `meiva computer` — operator commands for the computer-use daemon (the
     # per-machine MCP service that drives the shared desktop).
     computer_p = sub.add_parser(
         "computer",

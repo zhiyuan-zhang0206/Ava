@@ -2,7 +2,7 @@
 
 ## Context
 
-Ava's kernel is a small self-cycling LangGraph (`claim → dispatch → llm/exec → end_turn → claim`)
+Meiva's kernel is a small self-cycling LangGraph (`claim → dispatch → llm/exec → end_turn → claim`)
 running forever inside one agent process. Extending it without bloating the core requires a
 plugin surface that answers four questions at once:
 
@@ -43,7 +43,7 @@ the fallback chain. One set of rules spans both:
 | | State (runtime mutable) | Config (boot snapshot) |
 |---|---|---|
 | Declare | `register_plugin_state(FooState)` | `register_plugin_config(FooConfig)` |
-| Read | `ava.state.foo.x` (auto de-prefixed view) | `ava._settings.plugins.foo.x` |
+| Read | `meiva.state.foo.x` (auto de-prefixed view) | `meiva._settings.plugins.foo.x` |
 | Write | hook returns `{"foo__x": v}` through the reducer | not writable (frozen) |
 | Persist | graph checkpoint | complete on-disk image, not an overlay |
 | Default | `BaseModel` field default | plugin's `default_config.py`, same directory |
@@ -52,7 +52,7 @@ State field-name routing: a name already in the base agent state shares that fie
 (type must match, else fail-fast); a private name auto-prefixes `<plugin>__<field>`; two plugins
 colliding on a private name fail-fast and must negotiate a rename. Config is image-based: disk
 holds a complete snapshot (no default-plus-override fallback chain), schema drift between disk and
-the declared class raises and is reconciled by an explicit `ava plugins update`, never an implicit
+the declared class raises and is reconciled by an explicit `meiva plugins update`, never an implicit
 boot-time auto-merge. Per-agent overrides travel as a CLI argv overlay restricted to fields marked
 `per_agent=True` — not a DB column — so the event trail (spawn/restart inbound) captures them for
 free and restart-drift becomes a feature, not a bug.
@@ -66,7 +66,7 @@ help shows.
 
 **Out-of-process shell hooks (Claude Code model).** Each hook forks a shell, communicating by
 stdin JSON / stdout JSON / exit code. Simple and language-agnostic, but it has no shared state
-(every fork is isolated) and pays process-spawn cost per boundary. Ava's kernel is in-process
+(every fork is isolated) and pays process-spawn cost per boundary. Meiva's kernel is in-process
 Python; state extension via a typed graph-state union is free and typed. A shell escape hatch was
 considered as an *addition* (convenient for trivial formatter/log hooks) and deferred — start
 in-process only, add when a real need appears.
@@ -88,19 +88,19 @@ OpenClaw hooks were rejected on principle, not budget:
 
 One OpenClaw decision was explicitly inverted: its manifest does **not** declare the hook set
 (hooks attach dynamically via `api.on(...)`), so the hook set isn't statically visible, can't be
-selectively disabled, and tooling can't find callers. Ava declares the hook set statically in the
+selectively disabled, and tooling can't find callers. Meiva declares the hook set statically in the
 manifest — IDE- and tooling-visible, no dynamic `on()` attach.
 
 **Deep wrap-only stack with 8 hooks (LangChain model).** Elegant for control flow (retry/cache via
 nested `wrap_model_call`), but its single "whole agent run" boundary (`before_agent`/`after_agent`)
-doesn't fit a forever-cycling graph — Ava has exactly one run (the process lifetime) and instead
+doesn't fit a forever-cycling graph — Meiva has exactly one run (the process lifetime) and instead
 needs a *per-inbound-cycle* boundary. So both styles are kept: wrap for control flow + retry,
 node-style hooks for prompt/state mutation and observation — the same observation-vs-control split
 LangChain draws between node-style and wrap-style APIs, with the immutable-request `.override()`
 and the typed-state-union patterns adopted directly.
 
 **Virtual grouping in help.** Collapsing the top-level namespace into synthetic groups (e.g.
-`ava.action.*`) to stay under an arbitrary limit was rejected: it desyncs the help view the agent
+`meiva.action.*`) to stay under an arbitrary limit was rejected: it desyncs the help view the agent
 *learns* from the import paths it *writes*. If the top level ever genuinely overflows, the fix is a
 real import-path refactor, not a display alias.
 
@@ -136,5 +136,5 @@ overlay (applies on the next boot). Fail-fast over a hidden live-mutation path.
 - **Import path equals help view.** The agent never learns a namespace shape it can't type. The
   cost is no virtual grouping escape hatch — relieving top-level pressure requires a real refactor.
 - **Typed surface, with a type-inference cost.** Pydantic models give IDE completion for framework
-  and plugin config alike, but a dynamically concatenated `ava._settings.plugins.<name>` may need
+  and plugin config alike, but a dynamically concatenated `meiva._settings.plugins.<name>` may need
   generated stubs or a per-plugin type-only export for full static inference.

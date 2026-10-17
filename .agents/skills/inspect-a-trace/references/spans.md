@@ -19,8 +19,8 @@ Three sources, in the order you should reach for them:
 
 | Source | Where | Good for |
 |---|---|---|
-| **Tempo** | the cluster's Tempo query URL — `AVA_TELEMETRY_TEMPO_QUERY_URL` when Tempo is remote (see below), else `http://localhost:3200` | finding traces (indexed, cross-agent) |
-| **Local mirror** | `$AVA_HOME/traces/spans*.jsonl` | fetching one whole trace (complete, no size cap, no network) |
+| **Tempo** | the cluster's Tempo query URL — `MEIVA_TELEMETRY_TEMPO_QUERY_URL` when Tempo is remote (see below), else `http://localhost:3200` | finding traces (indexed, cross-agent) |
+| **Local mirror** | `$MEIVA_HOME/traces/spans*.jsonl` | fetching one whole trace (complete, no size cap, no network) |
 | **Grafana** | `http://localhost:3003`, datasource uid `tempo` | letting a human browse |
 
 Spans are **metadata-only**. Prompts, completions, tool arguments and results
@@ -29,11 +29,11 @@ produce them. Content comes from the checkpoint
 ([find-the-run](find-the-run.md)).
 
 **Tempo may not be on this host.** The LGTM host runs Loki, Prometheus, and
-Grafana natively; Tempo is per-cluster config (`AVA_TELEMETRY_TEMPO_ENDPOINT`
-for intake, `AVA_TELEMETRY_TEMPO_QUERY_URL` for queries — see
+Grafana natively; Tempo is per-cluster config (`MEIVA_TELEMETRY_TEMPO_ENDPOINT`
+for intake, `MEIVA_TELEMETRY_TEMPO_QUERY_URL` for queries — see
 `deploy/lgtm/README.md`), so on a split deployment the query URL is the remote
 Tempo and nothing listens on the local 3200. The scripts inherit
-`AVA_TELEMETRY_TEMPO_QUERY_URL`; `AVA_TRACE_TEMPO_URL` overrides. To find the
+`MEIVA_TELEMETRY_TEMPO_QUERY_URL`; `MEIVA_TRACE_TEMPO_URL` overrides. To find the
 URL by hand, read it from the running Grafana
 (`GET /api/datasources` — the `tempo` datasource's `url` field).
 
@@ -43,11 +43,11 @@ All verified against Tempo 3.0.2.
 
 | Want | Query |
 |---|---|
-| All traces | `{ resource.service.name = "ava" }` |
+| All traces | `{ resource.service.name = "meiva" }` |
 | One trace | `{ trace:id = "<hex-32>" }` |
 | Spans of one agent | `{ span.traceloop.association.properties.agent_id = "3048" }` |
 | All of one agent's turn roots | `{ span.session.id = "3048" }` |
-| One specific turn | `{ span.session.id = "3048" && span.ava.turn = 17 }` |
+| One specific turn | `{ span.session.id = "3048" && span.meiva.turn = 17 }` |
 | Spans in one langgraph node | `{ span.traceloop.association.properties.langgraph_node = "after_exec" }` |
 | Spans by operation | `{ span.gen_ai.operation.name = "goto" }` |
 | Exact span name | `{ name = "goto exec" }` |
@@ -56,12 +56,12 @@ Search parameters: `limit` (traces), `spss` (spans per span set, max 100),
 `start`/`end` (unix seconds). Dotted attribute names work inside `span.*`.
 
 Span attributes worth knowing: the root carries `session.id` (the agent id)
-and `ava.turn` (the per-process turn counter); children carry
+and `meiva.turn` (the per-process turn counter); children carry
 `traceloop.association.properties.langgraph_node` / `.langgraph_step` /
 `.langgraph_path`, `traceloop.association.properties.ls_model_name`, and
 `gen_ai.operation.name`. Since #1964 the root is a placeholder ended at turn
 START (so a trace always has its root even when the process dies mid-turn),
-which means it can no longer carry `ava.checkpoint_id` (an ended span drops
+which means it can no longer carry `meiva.checkpoint_id` (an ended span drops
 attribute writes) — the trace↔checkpoint link now lives DB-side only
 (`checkpoints.metadata.trace_id`; `read_trace.py --with-content` joins it via
 the gateway trace endpoint). These attributes come from OpenLLMetry's
@@ -74,7 +74,7 @@ seen.
 
 ```bash
 # find first — search returns trace ids
-.venv/bin/python <scripts>/fetch_trace.py --search '{ resource.service.name = "ava" && span.traceloop.association.properties.agent_id = "3048" }'
+.venv/bin/python <scripts>/fetch_trace.py --search '{ resource.service.name = "meiva" && span.traceloop.association.properties.agent_id = "3048" }'
 
 # then pull the one trace. Mirror is primary: complete, no cap, no network.
 .venv/bin/python <scripts>/fetch_trace.py --trace-id <hex-32> --source mirror --out trace_raw.json
@@ -82,7 +82,7 @@ seen.
 .venv/bin/python <scripts>/fetch_trace.py --trace-id <hex-32> --source tempo --out trace_raw.json
 ```
 
-`--source mirror` needs filesystem access to `$AVA_HOME` (default `~/.ava`); on
+`--source mirror` needs filesystem access to `$MEIVA_HOME` (default `~/.meiva`); on
 another machine, query Tempo over the network or through the Grafana datasource
 proxy (`/api/datasources/proxy/uid/tempo/...`).
 
@@ -91,7 +91,7 @@ OTLP/JSON request per line, active `spans.jsonl` plus rotated
 `spans-<ISO>-(size|time).jsonl` (64 MiB size rotation; timberjack appends
 the trigger reason). Old segments are gzipped to `.jsonl.gz` by the
 agent-side compression pass and retention-pruned by day; `fetch_trace.py`
-and `ava trace ship` read them transparently. `ava trace ship` replays a
+and `meiva trace ship` read them transparently. `meiva trace ship` replays a
 shed window into Tempo when the sidecar's live fan-out missed it. At peak
 volume (~2.9 GB/day) the collector's 24-backup cap truncates the mirror to
 roughly the last half day of segments — grep/replay windows older than that
@@ -106,7 +106,7 @@ need Tempo, not the mirror.
 
 Produces the span tree (parent/child, ordered), per-span offsets and durations,
 the LLM span list (names ending `.chat`), the langgraph node sequence, and the
-root's `session.id`. `checkpoint_id` comes from the root's `ava.checkpoint_id`
+root's `session.id`. `checkpoint_id` comes from the root's `meiva.checkpoint_id`
 on pre-#1964 traces; on newer traces the root no longer carries it — pass
 `--with-content` to resolve it from the checkpoints table via the gateway.
 
@@ -119,10 +119,10 @@ on pre-#1964 traces; on newer traces the root no longer carries it — pass
   (`events_loki`, `--loki-url`, default `http://127.0.0.1:3100`). Postgres keeps only the
   events a reader queries by name and everything at warning or above, so `events` is a
   subset; Loki holds the whole chain within its 84-hour window, and the JSONL event mirror
-  (`$AVA_HOME/logs/events-*.jsonl`, 7 days, per machine) holds it beyond that.
-- Gateway auth: bearer `AVA_API_TOKEN` (a launched process's machine token),
-  else `AVA_CLUSTER_SECRET` from the environment or the gateway's
-  `$AVA_HOME/.env`. The gateway is port **8000** (8100 is an unrelated service).
+  (`$MEIVA_HOME/logs/events-*.jsonl`, 7 days, per machine) holds it beyond that.
+- Gateway auth: bearer `MEIVA_API_TOKEN` (a launched process's machine token),
+  else `MEIVA_CLUSTER_SECRET` from the environment or the gateway's
+  `$MEIVA_HOME/.env`. The gateway is port **8000** (8100 is an unrelated service).
 
 ## Render
 
@@ -136,8 +136,8 @@ events, message content when present, and a Grafana Explore link. Serve it the o
 supported way:
 
 ```python
-import ava
-ava.ui.serve("report", name="trace-<agent>-<short-id>", title="Trace <hex>")
+import meiva
+meiva.ui.serve("report", name="trace-<agent>-<short-id>", title="Trace <hex>")
 ```
 
 The report and Grafana are complements: Grafana is the interactive browser, the
@@ -164,5 +164,5 @@ link unless the annotation is the point.
   set comes from the mirror or the full-trace endpoint.
 
 Ingest is the sidecar fan-out only. Never point a write path at Tempo directly,
-and never write into `$AVA_HOME/traces/` from a script — `ava trace ship` owns
+and never write into `$MEIVA_HOME/traces/` from a script — `meiva trace ship` owns
 the replay watermark and a hand-written line corrupts it.

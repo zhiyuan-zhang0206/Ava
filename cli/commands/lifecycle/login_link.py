@@ -1,10 +1,10 @@
-"""The one-time browser login link `ava start` prints once the UI is ready.
+"""The one-time browser login link `meiva start` prints once the UI is ready.
 
 The link carries a short-lived, single-use login ticket in the URL *fragment*
 (`<ui>/#ticket=<ticket>`): a fragment never reaches a server log or a Referer.
 The ticket comes from the gateway's `POST /api/auth/login-ticket`, called with
 the home's human cluster secret, and the browser redeems it for the ordinary
-session cookie (gateway/http/auth/docs/web-sessions.ava.okf.md).
+session cookie (gateway/http/auth/docs/web-sessions.meiva.okf.md).
 
 The link is for a person at a terminal: a start whose output is not a terminal
 (a supervisor, a rollout child, a pipe) mints nothing, so no ticket lands in a

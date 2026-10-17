@@ -54,7 +54,7 @@ def _pooler_proc(pgb_dir: Path, *, platform: str) -> _FakeProc:
     Both were measured against a real pgbouncer:
 
       linux  apt 1.18 keeps the absolute ini path in argv and leaves cwd wherever
-             the launcher stood (`/home/ava`, `/tmp` — never the config dir);
+             the launcher stood (`/home/meiva`, `/tmp` — never the config dir);
       macos  brew 1.25 chdir()s into the config dir and rewrites argv to a bare
              `pgbouncer.ini`.
 
@@ -84,10 +84,10 @@ def _write_pidfile(home: Path, pid: int) -> Path:
 
 @pytest.fixture()
 def home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
-    """A scratch $AVA_HOME. Nothing here reaches a real cluster."""
-    h = tmp_path / ".ava-scratch"
+    """A scratch $MEIVA_HOME. Nothing here reaches a real cluster."""
+    h = tmp_path / ".meiva-scratch"
     h.mkdir()
-    monkeypatch.setenv("AVA_HOME", str(h))
+    monkeypatch.setenv("MEIVA_HOME", str(h))
     return h
 
 
@@ -145,12 +145,12 @@ def test_stop_signals_this_homes_own_pooler(
 def test_sibling_home_sharing_a_path_prefix_is_not_ours(
     platform: str, tmp_path: Path, signalled: list[int], monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """`~/.ava` is a prefix of `~/.ava-preview`: a substring match on the home path
+    """`~/.meiva` is a prefix of `~/.meiva-preview`: a substring match on the home path
     would hand the production stop a preview cluster's pooler (and vice versa)."""
-    ours = tmp_path / ".ava"
-    sibling = tmp_path / ".ava-preview"
+    ours = tmp_path / ".meiva"
+    sibling = tmp_path / ".meiva-preview"
     (sibling / "pgbouncer").mkdir(parents=True)
-    monkeypatch.setenv("AVA_HOME", str(ours))
+    monkeypatch.setenv("MEIVA_HOME", str(ours))
     pidfile = _write_pidfile(ours, 4242)
     monkeypatch.setattr(
         psutil,
@@ -175,7 +175,7 @@ def test_start_does_not_reload_a_recycled_pid(
         pgb.ensure_pgbouncer(
             pg_port=15433,
             listen_port=16433,
-            db_name="ava_scratch",
+            db_name="meiva_scratch",
             userlist=b"",
             admin_password="unused-admin-credential",  # noqa: S106 — never presented
             machine=command_machine,

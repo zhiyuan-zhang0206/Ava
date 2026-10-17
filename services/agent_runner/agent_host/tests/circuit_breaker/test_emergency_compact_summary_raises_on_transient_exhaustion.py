@@ -14,8 +14,7 @@ from agent.graph import llm_node
 from agent.graph.llm_errors import FatalProviderError, LlmLedger
 from agent.graph.tests.test_llm_helpers import CONFIG as _LLM_CONFIG
 from agent.graph.tests.test_llm_helpers import make_runtime as _llm_make_runtime
-from ava.tests.fixtures.pin_agent import hosted_resources as hosted_resources
-from base.agents.context import AvaContext
+from base.agents.context import MeivaContext
 from base.agents.tests.units import spawn_agent
 from base.cluster.machine import MachineIdentity
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
@@ -27,6 +26,7 @@ from base.host.env.agent_slices import AgentSlices
 from base.lm.catalog import ModelCatalog
 from base.native_process.turn_identity import HostedTurnResources
 from base.packages.plugin_providers import build_model_catalog
+from meiva.tests.fixtures.pin_agent import hosted_resources as hosted_resources
 from services.agent_runner.agent_host.tests.circuit_breaker.helpers import (
     RecordingPublisher,
     ancestor_halt_notes,
@@ -230,7 +230,7 @@ async def test_completed_turn_resets_the_streak_and_clears_the_marker(
     db_conn.commit()
 
     await persist_last_active(
-        AvaContext(
+        MeivaContext(
             ops_pool=aops_pool,
             llm=MagicMock(),
             event_publisher=MagicMock(),

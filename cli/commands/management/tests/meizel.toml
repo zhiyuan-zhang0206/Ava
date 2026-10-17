@@ -3,9 +3,9 @@
 "test_schedules_verify_foreign_checkout.py" = ["child_schedules_verify.py"]
 
 [debt.env-patch]
-"test_config_cmd.py#monkeypatch.delitem os.environ.AVA_GATEWAY_URL" = 3
-"test_config_cmd.py#monkeypatch.setenv os.environ.AVA_HOME" = 1
-"test_config_cmd.py#monkeypatch.setitem os.environ.AVA_GATEWAY_URL" = 2
+"test_config_cmd.py#monkeypatch.delitem os.environ.MEIVA_GATEWAY_URL" = 3
+"test_config_cmd.py#monkeypatch.setenv os.environ.MEIVA_HOME" = 1
+"test_config_cmd.py#monkeypatch.setitem os.environ.MEIVA_GATEWAY_URL" = 2
 
 [debt.first-party-patch]
 "test_config_cmd.py#monkeypatch.setattr base.host.env.dotenv_file.unit_home" = 2

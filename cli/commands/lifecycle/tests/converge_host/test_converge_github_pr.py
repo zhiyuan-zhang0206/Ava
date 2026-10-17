@@ -29,7 +29,7 @@ def _ctx(
     machine_config = ConfigBoot()
     return cv.ConvergeCtx(
         repo=Path("/repo"),
-        ava_home=home,
+        meiva_home=home,
         roles=roles,
         config=machine_config,
         database_factory=operator_database,

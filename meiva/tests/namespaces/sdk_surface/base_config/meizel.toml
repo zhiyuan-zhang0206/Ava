@@ -1,0 +1,8 @@
+[uses]
+"test_service_read_lite.py" = ["_service_read_lite_child.py"]
+
+[debt.env-patch]
+"test_plugin_config_ownership.py#monkeypatch.setenv os.environ.MEIVA_HOME" = 1
+
+[debt.first-party-patch]
+"test_plugin_config_ownership.py#monkeypatch.setattr base.packages.plugins.load_report.report_plugin_load_failure" = 1

@@ -1,7 +1,7 @@
 """The loud half of the plugin fail-soft contract — one reporter for every load site.
 
 A plugin that fails to load is *contained*: skipped so it can never drag down
-the process around it (user ruling 2026-09-11, after the 2026-08-28 ava_ledger
+the process around it (user ruling 2026-09-11, after the 2026-08-28 meiva_ledger
 and 2026-09-10 agent-host incidents), and this module makes the skip VISIBLE —
 a loguru ERROR carrying the traceback plus one `plugin_load_failed` telemetry
 event (anomaly tier), so ops sees which plugin broke and why wherever it broke.
@@ -20,7 +20,7 @@ Reporter = Callable[[str, BaseException], None]
 
 def reporter(report: Reporter | None) -> Reporter:
     """The reporter a load site calls: the caller's own (a read-only check that wants the failures
-    as values, e.g. `ava plugins verify`), else the canonical one below, looked up at call time."""
+    as values, e.g. `meiva plugins verify`), else the canonical one below, looked up at call time."""
     return report if report is not None else report_plugin_load_failure
 
 

@@ -1,4 +1,4 @@
-# ava:ref agent/execution/docs/child-boundaries.ava.okf.md#exec-child-result-boundary
+# meiva:ref agent/execution/docs/child-boundaries.meiva.okf.md#exec-child-result-boundary
 
 from __future__ import annotations
 
@@ -46,14 +46,14 @@ class _Sdk(Protocol):
 
 @dataclass(frozen=True)
 class ChildContext:
-    ava: _Sdk
+    meiva: _Sdk
     boot_started_at: float
 
 
 def import_runtime(boot_started_at: float) -> ChildContext:
-    import ava
+    import meiva
 
-    return ChildContext(ava=ava, boot_started_at=boot_started_at)
+    return ChildContext(meiva=meiva, boot_started_at=boot_started_at)
 
 
 def line_buffered_output() -> None:
@@ -78,7 +78,7 @@ def _install_signal_handlers() -> None:
 def _arm_watchdog(timeout_s: float) -> None:
     from base.native_process.exec_domain import KILL_GRACE_S
 
-    margin = float(os.environ.get("AVA_EXEC_WATCHDOG_MARGIN_S", WATCHDOG_MARGIN_S))
+    margin = float(os.environ.get("MEIVA_EXEC_WATCHDOG_MARGIN_S", WATCHDOG_MARGIN_S))
     delay = timeout_s + KILL_GRACE_S + margin
 
     def _timeout() -> None:
@@ -126,7 +126,7 @@ def apply_overlay_scope(
 
                 apply_config_overlay(value, scope=scope, set_framework_field=set_framework_field)
             else:
-                from ava.sdk_surface import install
+                from meiva.sdk_surface import install
 
                 install.apply_config_overlay(value)
             applied = True
@@ -178,19 +178,19 @@ def emit_child_boot_timing(child: ChildContext, *, clients: Any) -> None:
 
 
 class _LazyStateSlot:
-    def __init__(self, payload: RequestPayload, ava: _Sdk) -> None:
+    def __init__(self, payload: RequestPayload, meiva: _Sdk) -> None:
         object.__setattr__(self, "_payload", payload)
-        object.__setattr__(self, "_ava", ava)
+        object.__setattr__(self, "_meiva", meiva)
         object.__setattr__(self, "_real", None)
 
     def materialize(self) -> None:
         if object.__getattribute__(self, "_real") is not None:
             return
 
-        ava: _Sdk = object.__getattribute__(self, "_ava")
+        meiva: _Sdk = object.__getattribute__(self, "_meiva")
         from agent.state import build_agent_state, plugin_state_schema
 
-        ava.ensure_plugins_loaded(surface=False, validate_state=plugin_state_schema)
+        meiva.ensure_plugins_loaded(surface=False, validate_state=plugin_state_schema)
         payload: RequestPayload = object.__getattribute__(self, "_payload")
         from base.packages.plugins.loading.registry import build_registry
 
@@ -198,7 +198,7 @@ class _LazyStateSlot:
         snapshot = payload.materialize_state()
         real = state_cls.model_validate(snapshot)
         object.__setattr__(self, "_real", real)
-        ava.state = real
+        meiva.state = real
 
     def __getattr__(self, name: str) -> Any:
         self.materialize()
@@ -212,17 +212,17 @@ class _LazyStateSlot:
 def build_state_slot(child: ChildContext, payload: RequestPayload) -> None:
     if payload.state_raw is None:
         return
-    child.ava.state = _LazyStateSlot(payload, child.ava)
-    child.ava.state_update = {}
+    child.meiva.state = _LazyStateSlot(payload, child.meiva)
+    child.meiva.state_update = {}
 
 
 def _take_result_state_update(child: ChildContext, payload: Any, *, state_injected: bool) -> None:
     if not state_injected:
         return
-    update = child.ava.state_update
+    update = child.meiva.state_update
     if not isinstance(update, dict):
         payload.state_update_error = (
-            f"plugin tampered with ava.state_update: expected dict, got {type(update).__name__}"
+            f"plugin tampered with meiva.state_update: expected dict, got {type(update).__name__}"
         )
         return
 
@@ -235,10 +235,10 @@ def run_code(code: str, payload: Any) -> None:
         format_full_traceback,
         register_agent_source,
     )
-    from ava.sdk_surface import process_context
-    from ava.sdk_surface.help import HelpRouter
-    from ava.sdk_surface.installation import installed
     from base.agents.sdk import telemetry as sdk_usage_telemetry
+    from meiva.sdk_surface import process_context
+    from meiva.sdk_surface.help import HelpRouter
+    from meiva.sdk_surface.installation import installed
 
     register_agent_source(code)
     builtins_source = (
@@ -290,7 +290,7 @@ def finalize_telemetry(*, clients: Any = None) -> None:
         return
     from base import telemetry
 
-    sdk = sys.modules.get("ava")
+    sdk = sys.modules.get("meiva")
     context = None if sdk is None else getattr(sdk, "context", None)
     owned = clients if clients is not None else (None if context is None else context.clients)
     if owned is not None:
@@ -339,12 +339,12 @@ def deliver_run_telemetry(result_path: str, payload: Any) -> None:
 def _bind_identity(
     request: RequestPayload, *, context: Any, clock_factory: Callable[[], Any]
 ) -> None:
-    from ava.sdk_surface import process_context
-    from base.agents.context import AvaContext
+    from base.agents.context import MeivaContext
+    from meiva.sdk_surface import process_context
 
     process_context.bind_context(
         replace(
-            AvaContext.from_description(
+            MeivaContext.from_description(
                 request.context,
                 original_incarnation=request.incarnation,
                 clients=context.clients,
@@ -363,7 +363,7 @@ def _run(
 
     line_buffered_output()
     _install_signal_handlers()
-    raw_agent_id = os.environ.get("AVA_AGENT_ID")
+    raw_agent_id = os.environ.get("MEIVA_AGENT_ID")
     init_logger(
         None if raw_agent_id is None else int(raw_agent_id),
         producer=context.clients.event_pipeline,
@@ -384,22 +384,22 @@ def _run(
     framework_overlay_applied = apply_overlay_scope(
         birth, overlay, scope="framework", set_framework_field=config.set_field
     )
-    import ava
+    import meiva
 
     init_logger(
         request.agent_id,
-        producer=ava.context.clients.event_pipeline,
+        producer=meiva.context.clients.event_pipeline,
         machine_reader=context.require_machine().name,
     )
-    from ava.boot import initialize_context
+    from meiva.boot import initialize_context
 
     initialize_context(
-        ava.context,
+        meiva.context,
         config=config,
         clock_factory=clock_factory,
-        producer=ava.context.clients.event_pipeline,
+        producer=meiva.context.clients.event_pipeline,
     )
-    from ava.sdk_surface import settings as sdk_settings
+    from meiva.sdk_surface import settings as sdk_settings
 
     apply_overlay_scope(birth, overlay, scope="plugin")
 
@@ -444,11 +444,11 @@ def _run(
 
 def main() -> None:
     boot_started_at = time.perf_counter()
-    request_path = os.environ.get("AVA_EXEC_REQUEST_FILE")
-    result_path = os.environ.get("AVA_EXEC_RESULT_FILE")
+    request_path = os.environ.get("MEIVA_EXEC_REQUEST_FILE")
+    result_path = os.environ.get("MEIVA_EXEC_RESULT_FILE")
     if not request_path or not result_path:
         sys.stderr.write(
-            "agent.execution.child needs AVA_EXEC_REQUEST_FILE and AVA_EXEC_RESULT_FILE "
+            "agent.execution.child needs MEIVA_EXEC_REQUEST_FILE and MEIVA_EXEC_RESULT_FILE "
             "in the environment — spawn it via agent.graph.exec._subprocess\n"
         )
         raise SystemExit(2)
@@ -456,23 +456,23 @@ def main() -> None:
     try:
         line_buffered_output()
         _install_signal_handlers()
-        from ava.boot import process_clients
-        from base.agents.context import AvaContext
+        from base.agents.context import MeivaContext
         from base.cluster.machine.boot import machine_from_boot
         from base.config import ConfigBoot
+        from meiva.boot import process_clients
 
         config = ConfigBoot()
         config.boot()
         machine = machine_from_boot(config)
         clients = process_clients(config=config, machine=machine)
-        context = AvaContext(clients=clients, machine=machine)
+        context = MeivaContext(clients=clients, machine=machine)
         _run(request_path, result_path, boot_started_at, config=config, context=context)
     except BaseException as exc:
         write_crashed_result(result_path, exc)
 
         deliver_envelope_telemetry(clients=clients)
     finally:
-        slot = sys.modules.get("ava.sdk_surface.process_context")
+        slot = sys.modules.get("meiva.sdk_surface.process_context")
         context = None if slot is None else slot.unbind_context()
         if context is not None and context.clients is not clients:
             context.clients.close()

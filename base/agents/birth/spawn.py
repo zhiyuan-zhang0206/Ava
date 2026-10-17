@@ -6,7 +6,7 @@ is `ops.agents.wake`, which revives rows that already exist. This side owns the
 and the pre-launch inbound delivery. Task #1236 follow-up: the row must be
 created as the MAIN data-plane identity, so creation happens on the gateway,
 never on the target runner — its ops server dials as the least-privilege
-`ava_runner` role, which by design cannot INSERT agents / agents_meta. The
+`meiva_runner` role, which by design cannot INSERT agents / agents_meta. The
 runner's `launch` op (`ops.lifecycle.launch`) validates the created row and
 wakes its host.
 
@@ -57,7 +57,7 @@ def latest_checkpoint_id(cur: psycopg.Cursor, agent_id: int) -> str | None:
     the gateway resolve).
     """
     # LangGraph PostgresSaver schema: checkpoints.thread_id is framework
-    # column naming (kept as-is); we cast Ava agent_id to str() here.
+    # column naming (kept as-is); we cast Meiva agent_id to str() here.
     # Count consecutive heartbeat inbounds at the top of the stack — each
     # heartbeat that the agent processed created one checkpoint, so skipping
     # N checkpoints lands us on the last pre-heartbeat conversation turn.
@@ -124,7 +124,7 @@ def create_agent_row(
 
     The DB half of what used to be `spawn_agent` (Task #1236 follow-up): the
     row must be created by the GATEWAY as the main data-plane identity — the
-    target runner's ops server runs as the least-privilege `ava_runner` role,
+    target runner's ops server runs as the least-privilege `meiva_runner` role,
     which by design cannot INSERT agents / agents_meta. The gateway resolves
     the fork checkpoint, creates the row (unclaimed status='idling'), and forwards a
     launch-only op to the target runner; the hosted runner validates and wakes

@@ -15,7 +15,7 @@ from cli.commands.data_plane.tests.data_plane_records import remote_cluster_reco
 from tests.path_scoped.cli_tests import operator_database as operator_database
 from tests.path_scoped.cli_tests import operator_pipeline as operator_pipeline
 
-# ─── ava stop: nothing to tear down locally ──────────────────────────────────
+# ─── meiva stop: nothing to tear down locally ──────────────────────────────────
 
 
 def test_stop_remote_is_a_noop_with_message(
@@ -37,7 +37,7 @@ def test_stop_remote_is_a_noop_with_message(
     assert "nothing to stop locally" in out
 
 
-# ─── ava status: probe the URLs, no local pooler line ────────────────────────
+# ─── meiva status: probe the URLs, no local pooler line ────────────────────────
 
 
 def test_status_remote_probes_urls_and_skips_pgbouncer_line(
@@ -102,7 +102,7 @@ def test_stop_remote_warns_about_orphaned_local_instance(
     remote_data_plane_config: DataPlaneConfig,
 ) -> None:
     """A cluster that switched local→remote may still have its old local
-    instance running; `ava stop` no longer manages it, so it must print a
+    instance running; `meiva stop` no longer manages it, so it must print a
     manual-teardown hint instead of silently leaving it (QA P2)."""
     from base import cluster
 

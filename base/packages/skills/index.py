@@ -1,7 +1,7 @@
 """The materialized skill index — doorplate ⑤ (R3).
 
 One scan behind every skill read path. Before this module each consumer walked
-the skill tree itself: the runtime loader (ava.skills), the gateway panel, the
+the skill tree itself: the runtime loader (meiva.skills), the gateway panel, the
 repo frontmatter lint — four traversals, no cache, and the lint's separate
 traversal drifted once (2026-08: a three-deep skill shipped with malformed
 frontmatter because the lint globbed only two levels). This module is the
@@ -13,7 +13,7 @@ The index is an *inventory of skill-bearing folders*, not a namespace tree:
 one entry per folder under a root that carries a SKILL.md and/or an INDEX.md,
 with the parsed frontmatter (name/description), a content hash for cross-root
 dedup, and file stats for cache invalidation. Tree building, namespace
-mounting, gating and collision refusal stay in `ava.skills` (R2's identity
+mounting, gating and collision refusal stay in `meiva.skills` (R2's identity
 entity); this module never builds a filesystem path out of a name — the key
 fold is `base.packages.skills.names.match_key`, the same comparison key every other
 skill surface uses.
@@ -22,7 +22,7 @@ Tolerance contract: `build()` never raises on a bad skill. A malformed or
 unreadable SKILL.md becomes an entry with `error` set; consumers decide — the
 runtime loader skips with a warning, the merge lint fails. One parser: the
 frontmatter checks here (structural parse + required name/description fields)
-are exactly what `ava.skills._parse_frontmatter` enforced before this module
+are exactly what `meiva.skills._parse_frontmatter` enforced before this module
 existed.
 
 Supply-chain gate: every SKILL.md/INDEX.md body is ALSO run through the
@@ -55,7 +55,7 @@ def parse_skill_frontmatter(content: str) -> tuple[dict[str, str], str]:
 
     The ONE strict parse behind every skill surface: the index (below), the
     CLI skill tooling (cli/commands/extensions/{skill,plugins,skill_package,_claude_code_plugin}.py
-    import it as `ava.skills._parse_frontmatter`), and the repo lint. Raises
+    import it as `meiva.skills._parse_frontmatter`), and the repo lint. Raises
     SkillFormatError on malformed frontmatter or a missing required field.
     """
     try:

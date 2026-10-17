@@ -18,7 +18,7 @@ import base.host.system.cron
 from base.host.system.hostport import Host
 
 FAMILY_DAYS = "agent=15,shell=7,gateway=30,ops=30,watchdog=30,snapshot=7,other=3"
-_CRON_MARKER = "# ava-logs-maintenance"
+_CRON_MARKER = "# meiva-logs-maintenance"
 _HOUR = 4
 _MINUTE = 40
 
@@ -31,8 +31,8 @@ def launchd_plist_path() -> Path:
 
 
 def _shell_command(*, host: Host) -> str:
-    ava = shlex.quote(base.host.system.cron.ava_binary_path(host=host))
-    return f"{ava} logs rotate && {ava} logs retention --family-days {FAMILY_DAYS}"
+    meiva = shlex.quote(base.host.system.cron.meiva_binary_path(host=host))
+    return f"{meiva} logs rotate && {meiva} logs retention --family-days {FAMILY_DAYS}"
 
 
 def launchd_plist_content(*, host: Host) -> str:

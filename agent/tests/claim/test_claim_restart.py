@@ -71,8 +71,8 @@ async def test_claim_restart_completed_kind_appends_marker_and_continues(
     lifecycle = msgs[0]
     assert isinstance(lifecycle, HumanMessage)
     assert "You have been restarted by user" in lifecycle.content  # pyright: ignore[reportUnknownMemberType]
-    assert lifecycle.additional_kwargs.get("ava_msg_type") == "system_note"  # pyright: ignore[reportUnknownMemberType]
-    assert lifecycle.additional_kwargs.get("ava_note_tag") == "lifecycle_restart"  # pyright: ignore[reportUnknownMemberType]
+    assert lifecycle.additional_kwargs.get("meiva_msg_type") == "system_note"  # pyright: ignore[reportUnknownMemberType]
+    assert lifecycle.additional_kwargs.get("meiva_note_tag") == "lifecycle_restart"  # pyright: ignore[reportUnknownMemberType]
 
 
 async def test_claim_system_note_kind_appends_system_note_and_continues(
@@ -122,9 +122,9 @@ async def test_claim_system_note_kind_appends_system_note_and_continues(
     note = msgs[0]
     assert isinstance(note, HumanMessage)
     assert 'Task #1 "my task" is now assigned to you (by agent #405).' in note.content  # pyright: ignore[reportUnknownMemberType]
-    assert note.additional_kwargs.get("ava_msg_type") == "system_note"  # pyright: ignore[reportUnknownMemberType]
-    assert note.additional_kwargs.get("ava_note_tag") == "task"  # pyright: ignore[reportUnknownMemberType]
-    assert note.additional_kwargs.get("ava_task_id") == 1  # pyright: ignore[reportUnknownMemberType]
+    assert note.additional_kwargs.get("meiva_msg_type") == "system_note"  # pyright: ignore[reportUnknownMemberType]
+    assert note.additional_kwargs.get("meiva_note_tag") == "task"  # pyright: ignore[reportUnknownMemberType]
+    assert note.additional_kwargs.get("meiva_task_id") == 1  # pyright: ignore[reportUnknownMemberType]
     # The inbound row is consumed (done at claim, like other lifecycle kinds).
     with db_conn.cursor() as cur:
         cur.execute("SELECT status FROM inbound_messages WHERE id = %s", (inbound_id,))
@@ -171,7 +171,7 @@ async def test_claim_co_batched_task_notes_preserve_task_links(
     assert cmd.goto == "before_llm"
     assert cmd.update is not None
     notes = cast(list[AnyMessage], cmd.update["messages"])
-    assert [note.additional_kwargs.get("ava_task_id") for note in notes] == [1, 2]
+    assert [note.additional_kwargs.get("meiva_task_id") for note in notes] == [1, 2]
 
 
 async def test_claim_system_note_unknown_tag_fails_loud(
@@ -246,7 +246,7 @@ async def test_claim_restart_self_source_commits_halted_false(
     database_gate: ProcessDbGate,
     machine_identity: MachineIdentity,
 ):
-    """agent-initiated restart (ava.self.restart) → even if the exec path
+    """agent-initiated restart (meiva.self.restart) → even if the exec path
     set halted to True (turn-end semantics), committed halted must be False — agent has in-flight
     intent, must wake after restart to confirm result and continue."""
     tid = running_agent()
@@ -406,7 +406,7 @@ async def test_claim_restart_completed_while_idle_stays_silent(
     msgs = cmd.update["messages"]  # type: ignore[index]
     assert len(msgs) == 1  # pyright: ignore[reportUnknownArgumentType]
     assert "You have been updated and restarted" in msgs[0].content  # pyright: ignore[reportUnknownMemberType]
-    assert msgs[0].additional_kwargs.get("ava_note_tag") == "lifecycle_restart"  # pyright: ignore[reportUnknownMemberType]
+    assert msgs[0].additional_kwargs.get("meiva_note_tag") == "lifecycle_restart"  # pyright: ignore[reportUnknownMemberType]
 
 
 async def test_claim_restart_completed_with_chat_cobatch_wakes(

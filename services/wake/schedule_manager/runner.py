@@ -1,4 +1,4 @@
-# ava:ref services/wake/schedule_manager/docs/runner-composition.ava.okf.md#runner-revision-admission
+# meiva:ref services/wake/schedule_manager/docs/runner-composition.meiva.okf.md#runner-revision-admission
 
 from __future__ import annotations
 
@@ -9,10 +9,8 @@ from pathlib import Path
 
 from loguru import logger
 
-import ava
-from ava.boot import process_clients
-from ava.sdk_surface import process_context
-from base.agents.context import AvaContext
+import meiva
+from base.agents.context import MeivaContext
 from base.agents.context.clients import ClientSet
 from base.agents.context.identity import AgentIdentity
 from base.clock import SYSTEM_TIMERS, Clock
@@ -28,6 +26,8 @@ from base.db.config import db_config_from_boot
 from base.native_process.code_version import CodeVersion
 from base.paths import prod_service_checkout_error
 from base.telemetry import process_name
+from meiva.boot import process_clients
+from meiva.sdk_surface import process_context
 from services.wake.schedule_manager import engine
 
 
@@ -39,7 +39,7 @@ def _bind_schedule_actor(
     machine: MachineIdentity,
 ) -> None:
     process_context.bind_context(
-        AvaContext(
+        MeivaContext(
             identity=AgentIdentity(agent_id=None, owns_loop=True, actor=f"schedule:{schedule_id}"),
             clients=clients,
             machine=machine,
@@ -80,7 +80,7 @@ def run(schedule_id: int, revision: int | None = None) -> int:
                 _bind_schedule_actor, clients=clients, clock_factory=clock_factory, machine=machine
             ),
             load_plugins=partial(
-                ava.ensure_plugins_loaded,
+                meiva.ensure_plugins_loaded,
                 config=config,
                 clock_factory=clock_factory,
                 producer=clients.event_pipeline,

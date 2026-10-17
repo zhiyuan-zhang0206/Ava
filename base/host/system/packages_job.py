@@ -1,12 +1,12 @@
 """Recurring OS job for the content-refresh pass (design §5.6; task #3267).
 
-One schedule per host runs `ava packages refresh --from-job` every
-`AVA_PACKAGES_REFRESH_TICK_SECONDS` (default 900s). The command owns all the
+One schedule per host runs `meiva packages refresh --from-job` every
+`MEIVA_PACKAGES_REFRESH_TICK_SECONDS` (default 900s). The command owns all the
 gating (the jobs/refresh switches, a cluster update in flight, the per-home
 flock, per-package cadence and backoff), so the job spec stays dumb and
 idempotent — one tick, no re-registration when a policy changes.
 
-POSIX surfaces the run's output in `$AVA_HOME/logs/packages-refresh.log`
+POSIX surfaces the run's output in `$MEIVA_HOME/logs/packages-refresh.log`
 (launchd appends stdout/stderr; the crontab line redirects).
 """
 
@@ -23,7 +23,7 @@ from loguru import logger
 import base.host.system.cron
 from base.host.system.hostport import Host
 
-_CRON_MARKER = "# ava-packages-refresh"
+_CRON_MARKER = "# meiva-packages-refresh"
 
 
 _LABEL = f"{base.host.system.cron.LAUNCHD_LABEL_PREFIX}.packages-refresh"
@@ -38,8 +38,8 @@ def _log_file() -> Path:
 
 
 def _shell_command(*, host: Host) -> str:
-    ava = shlex.quote(base.host.system.cron.ava_binary_path(host=host))
-    return f"{ava} packages refresh --from-job"
+    meiva = shlex.quote(base.host.system.cron.meiva_binary_path(host=host))
+    return f"{meiva} packages refresh --from-job"
 
 
 def _tick_seconds(*, tick_reader: Callable[[], int]) -> int:
@@ -154,7 +154,7 @@ def register_packages_job(
     after home ownership; the tick is read only while generating the job spec
     (and the existing macOS success log). No policy snapshot is retained.
 
-    Skipped when OS jobs are off (`AVA_OS_JOBS_ENABLED`), when this home is not
+    Skipped when OS jobs are off (`MEIVA_OS_JOBS_ENABLED`), when this home is not
     the default home (`owns_os_jobs`) or the refresh channel itself is off — the converge step is the only caller, so a disabled switch
     simply leaves no job behind on machines that never registered one.
     """
@@ -165,7 +165,7 @@ def register_packages_job(
         return
     if not refresh_enabled_reader():
         logger.info(
-            "packages refresh disabled (AVA_PACKAGES_REFRESH_ENABLED=false) — not registering"
+            "packages refresh disabled (MEIVA_PACKAGES_REFRESH_ENABLED=false) — not registering"
         )
         return
     base.host.system.cron.register_platform_job(

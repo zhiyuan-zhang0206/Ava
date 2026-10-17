@@ -12,5 +12,5 @@ from typing import Any
 # What a plugin's state declarations must pass when an agent-runtime face is loaded: the agent
 # kernel's `agent.state.plugin_state_schema`, given the one-plugin `ExtensionRegistry` it checks.
 # The loader sits below the kernel, so the check arrives as an argument from the caller that
-# runs agent code; the argument is typed loosely here to keep `import ava` off the plugin stack.
+# runs agent code; the argument is typed loosely here to keep `import meiva` off the plugin stack.
 StateGate = Callable[[Any], object]

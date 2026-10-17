@@ -28,9 +28,9 @@ __all__ = [
 
 
 def _sess(service: str) -> str:
-    """Expected composed session name (`ava-<service>` — no cluster segment;
+    """Expected composed session name (`meiva-<service>` — no cluster segment;
     the per-home session backend scopes sessions)."""
-    return f"ava-{service}"
+    return f"meiva-{service}"
 
 
 class FakeResult:
@@ -41,7 +41,7 @@ class FakeResult:
 
 
 # Captured before any monkeypatch: the start-path tests stub subprocess.run to
-# intercept session / docker / probe commands, but `ava start`'s migration step
+# intercept session / docker / probe commands, but `meiva start`'s migration step
 # consults git (`base.deploy.schema.migrations.tracked_migration_paths`, Task #998) — a
 # blank fake result would trip the git-tracking gate's fail-closed path and
 # abort cmd_start. `git` invocations therefore reach the real binary (read-only
@@ -124,7 +124,7 @@ def fake_session_backends(
 ) -> tuple[_FakeSessionBackend, _FakeSessionBackend]:
     """The session backends, faked in-memory for every test in an importing module.
 
-    `ava start` / `ava stop` drive the native supervisor for service sessions;
+    `meiva start` / `meiva stop` drive the native supervisor for service sessions;
     they must not reach the
     real supervisor in unit tests (a real launch would fork a daemon, a real
     kill could touch the dev host's sessions). Returns (service, shell).
@@ -143,13 +143,13 @@ def gateway_role_pinned(command_runtime: CommandRuntime) -> None:
     """Pin the machine's capability set to gateway, whatever the dev host's environment says.
 
     The cluster-status commands read it through `_roles_or_none`; the tests assert the
-    full-service gateway view, so the host's own `AVA_MACHINE_SERVE_*` flags must not decide."""
+    full-service gateway view, so the host's own `MEIVA_MACHINE_SERVE_*` flags must not decide."""
     command_runtime.machine.set(role="gateway")
 
 
 @pytest.fixture(autouse=True)
 def hermetic_gateway_base(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Keep `ava status` / `ava cluster status` HTTP calls off any real gateway.
+    """Keep `meiva status` / `meiva cluster status` HTTP calls off any real gateway.
 
     `cmd_status`'s gateway supplement and `cmd_cluster_status`'s roster both dial
     `gateway_api_base()`; left unstubbed they hit whatever gateway the dev box

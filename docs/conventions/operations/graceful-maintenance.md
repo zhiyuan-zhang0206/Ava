@@ -1,7 +1,7 @@
 # Stop, restart, and resume a cluster
 
-Use the `ava` belonging to each unit's checkout. `ava stop`, `ava restart`, and
-`ava start` act on **one local home**; they do not stop every machine remotely.
+Use the `meiva` belonging to each unit's checkout. `meiva stop`, `meiva restart`, and
+`meiva start` act on **one local home**; they do not stop every machine remotely.
 For a planned cluster outage, coordinate the participating machines through
 SSH or their existing operator entry points. Stop runners before the gateway;
 start the gateway and verify its dependencies before starting runners.
@@ -10,11 +10,11 @@ start the gateway and verify its dependencies before starting runners.
 
 | Command | Native agent execution | Persistent shells and schedules | Local infrastructure and extras |
 | --- | --- | --- | --- |
-| `ava stop -y` | Same normal drain | Close shells/terminals with bounded known-group signals; report known job leftovers | Stop this home's services, browser, Gate, helper, native LGTM and private data plane |
-| `ava stop -y --keep-infra` | Same normal drain | Close | Keep the private data plane |
-| `ava stop -y --keep-infra --keep-service gateway` | Same normal drain | Close | Also retain the named service; dependent services require `--keep-infra` |
-| `ava restart` | Same normal drain, then `ava start` | Retained | Replace the native services; keep PostgreSQL, Redis, PgBouncer, browser, Gate, helper and native LGTM |
-| `ava start` | Restore normal admission after readiness | Reuse retained sessions; closed sessions are not serialized | Bring up enabled services from the existing home |
+| `meiva stop -y` | Same normal drain | Close shells/terminals with bounded known-group signals; report known job leftovers | Stop this home's services, browser, Gate, helper, native LGTM and private data plane |
+| `meiva stop -y --keep-infra` | Same normal drain | Close | Keep the private data plane |
+| `meiva stop -y --keep-infra --keep-service gateway` | Same normal drain | Close | Also retain the named service; dependent services require `--keep-infra` |
+| `meiva restart` | Same normal drain, then `meiva start` | Retained | Replace the native services; keep PostgreSQL, Redis, PgBouncer, browser, Gate, helper and native LGTM |
+| `meiva start` | Restore normal admission after readiness | Reuse retained sessions; closed sessions are not serialized | Bring up enabled services from the existing home |
 
 `--keep-service` is repeatable and accepts the bare service-roster name. It is
 an invocation's preservation choice, not a permanent disabled-service setting.
@@ -41,13 +41,13 @@ for interrupted arbitrary code; use normal stop for the planned data-plane move.
 A stop retains agent IDs, history, checkpoints, pending messages, workspaces,
 browser profiles and observability data. It does not terminate agent identities
 or destroy the cluster. A full stop closes persistent shells; their running
-processes and shell variables cannot be restored by `start`. No `ava stop` option
-keeps them; only `ava restart` does.
+processes and shell variables cannot be restored by `start`. No `meiva stop` option
+keeps them; only `meiva restart` does.
 Externally launched tools are not owned by one local home.
 
 Impersonation is a separate agent identity protocol. These commands do not
 request, acquire, renew or release external-agent control leases. Also,
-`ava cluster pause NAME` is machine membership administration, not this
+`meiva cluster pause NAME` is machine membership administration, not this
 local maintenance operation; it stops nothing on this home.
 
 ## What normal drain waits for
@@ -73,7 +73,7 @@ remaining request and stream tasks and the lifespan cleanup runs, so an
 unfinished streaming response cannot hold the process open. The SSE streams do
 not spend that budget: the gateway's server marks its shutdown as it begins and
 each stream ends itself within one poll tick, so its client reconnects at once.
-ava-root waits for the gateway's stop longer than that budget plus the lifespan
+meiva-root waits for the gateway's stop longer than that budget plus the lifespan
 cleanup (`ServiceSpec.stop_ceiling_s`, derived from the same setting), so a
 gateway still draining is never reported as a failed stop. No remote
 dispatch holds that cleanup: the TTL reaper runs as its own service, whose stop
@@ -86,13 +86,13 @@ failure. A drain that hits its deadline reports every unfinished agent — its
 restart command's delivery state, the row's owner/lease/resource facts, the
 agent's last activity and the live host's view — and names the predecessor-owner
 fence explicitly when a successor boot is looking at a row its predecessor left:
-that one is ended by `ava start`, never a retry loop. A rollout's own pause no longer defers the held
+that one is ended by `meiva start`, never a retry loop. A rollout's own pause no longer defers the held
 continuation it requires, so the ordinary update drain consumes and certifies.
-For ordinary local maintenance, retry the command or run `ava start` to restore
+For ordinary local maintenance, retry the command or run `meiva start` to restore
 services and release the hold after readiness succeeds. A failed start keeps
 admission closed.
 A recorded checkpoint/continuation failure keeps the hold and fails every
-other gate (the drain, the phase transitions, a bare resume); `ava start` is its
+other gate (the drain, the phase transitions, a bare resume); `meiva start` is its
 exit, and settles it as described under "Holds and their exits". A healthy
 service probe cannot prove that a failed checkpoint became durable: the agent
 continues from its last durable checkpoint, as after a crash.
@@ -105,7 +105,7 @@ service must pass readiness; normal start exposes no readiness waiver.
 Normal commands manage their own operation identity; there is no operation ID
 or timestamp to copy between machines.
 
-Once stop has completed without recorded failures, repeating `ava stop` can
+Once stop has completed without recorded failures, repeating `meiva stop` can
 read the existing local journal and finish without fetching an offline
 gateway. An incomplete, corrupt or failed journal does not enable this
 exception; the first normal drain needs the actual cluster configuration.
@@ -118,7 +118,7 @@ the external effect but before its result becomes durable.
 
 ## Updating and moving the data plane
 
-`python -m cli.fleet_update down` stops every unit with `ava stop -y`, keeping the
+`python -m cli.fleet_update down` stops every unit with `meiva stop -y`, keeping the
 stateful components whose code the window does not touch (`--keep-service`; the
 [keep decision](../../decisions/runtime/updates/release/2026-10-17-component-scoped-keep-on-update.md)),
 and `up` starts them again (the runbook's "Updating a networked cluster in source mode").
@@ -133,7 +133,7 @@ terminals a bounded completed-work wait, then closes known shells/terminals
 best effort. This does not prove detached/background writers disappeared;
 inspect residual writers before treating it as an external-work barrier. Each
 busy owner receives the same closure notice as
-`ava stop`. When the window does not restart the pty-sessions service (the keep decision
+`meiva stop`. When the window does not restart the pty-sessions service (the keep decision
 above), terminal state survives the update and old-code shells keep running: the stop is
 not a writer barrier for them in that window. A window that does restart it closes
 terminals as above; schedules are re-armed after start.
@@ -171,29 +171,29 @@ checkpoint still refuses; queued ordinary messages remain available for resume.
 Preparation consumes orphaned ordinary claims on non-cold parked agents (marks
 them done; they are never redelivered) and bounded-waits unfinished lifecycle
 commands. Maintenance-authored commands still refuse immediately. See the
-[preparation consumption and wait contract](../../../base/deploy/maintenance/docs/lifecycle-wait.ava.okf.md)
+[preparation consumption and wait contract](../../../base/deploy/maintenance/docs/lifecycle-wait.meiva.okf.md)
 for eligibility and retry semantics.
 
 ## Holds and their exits
 
-`ava stop` and `ava restart` take the hold and walk it through drain and stop;
-`ava start` releases it after readiness. No command runs those steps one at a
-time, and no command reads or ends a hold except these: `ava status` prints the
-hold (phase, operation, acquired-at), `ava status --json` prints only it as one
+`meiva stop` and `meiva restart` take the hold and walk it through drain and stop;
+`meiva start` releases it after readiness. No command runs those steps one at a
+time, and no command reads or ends a hold except these: `meiva status` prints the
+hold (phase, operation, acquired-at), `meiva status --json` prints only it as one
 JSON object (`status`, `operation`, `acquired_at`, `maintenance`, `scope`; the
 fleet update's start-of-work refusal reads that; it probes nothing, so it
-answers with everything else down), and `ava start` ends it. The hold records
-no process identity and says nothing about whether the `ava stop` that took it
+answers with everything else down), and `meiva start` ends it. The hold records
+no process identity and says nothing about whether the `meiva stop` that took it
 is still running; see "Is a stop still running?" below.
 
 A restart that fails before any service stopped (its preflight, preparation or
 drain) releases the hold its own process took, so the idle agents on the
-machine stay wakeable. It does not run `ava start` and retries nothing; the
+machine stay wakeable. It does not run `meiva start` and retries nothing; the
 failure is reported and the operator decides. A failure after the services
-began stopping keeps the hold, as `ava stop` does, until `ava start` passes
+began stopping keeps the hold, as `meiva stop` does, until `meiva start` passes
 readiness.
 
-`ava start` over a hold in any phase brings the unit's services up (a unit whose
+`meiva start` over a hold in any phase brings the unit's services up (a unit whose
 services are already running is left as it is), then releases the hold. It does
 not retract restarts already issued (durable per-agent intents): members not yet
 at their boundary still complete that restart, with its cold recovery, on
@@ -203,8 +203,8 @@ A turn that fails while its continuation is still owed to the hold is logged at
 ERROR and raises the `agent_continuation_lost` alert once; it is not latched in
 the journal. The agent's unapplied restart command is ended (settled `done`,
 result `failed`/`continuation_failed`, pointer cleared) and no scan drives it
-again. The agent never drains, so `ava stop` ends at its drain deadline with the
-stall report, the hold stays, and `ava start` releases it; the ended restart is
+again. The agent never drains, so `meiva stop` ends at its drain deadline with the
+stall report, the hold stays, and `meiva start` releases it; the ended restart is
 not carried out, and the alert tells the owner to look at the agent. A restart
 whose effect had already started is left as it is and reported. A failed wake of an agent with no
 continuation left in the hold raises nothing: one outside the captured cohort
@@ -214,8 +214,8 @@ member once the hold reached `drained`.
 A failed continuation raised, so its final checkpoint may not be durable and the
 interrupted turn may be lost. The agent's restart pointer is durable: it survives
 in Postgres exactly as after a crash, and the agent continues from its last
-durable checkpoint (`ava stop --force` and a host crash give the same guarantee,
-no more). `ava start` does not settle or inspect the agent.
+durable checkpoint (`meiva stop --force` and a host crash give the same guarantee,
+no more). `meiva start` does not settle or inspect the agent.
 
 ## Recovering a stuck maintenance operation
 
@@ -224,66 +224,66 @@ does not expire. There is no pause-controller or OS hold-watchdog recovery job.
 A failed or unreadable ownership observation never permits an independent
 restart or release of admission.
 
-A hold older than `AVA_MAINTENANCE_HOLD_ALERT_AFTER_S` (default 1800 seconds,
+A hold older than `MEIVA_MAINTENANCE_HOLD_ALERT_AFTER_S` (default 1800 seconds,
 counted from its `acquired_at`) raises one `maintenance_hold_overdue` event, and
-the `ava-ops-maintenance-hold-overdue` Grafana rule alerts on it. The check is
+the `meiva-ops-maintenance-hold-overdue` Grafana rule alerts on it. The check is
 the `maintenance-hold` diagnostic of the running root, so it needs no CLI process
 to be alive; it only reads the journal and never releases or repairs anything. An
 unreadable journal counts as a hold too (the event reports `state: invalid`, with
 no holder or phase, aged from the file's modification time). The alert is raised
 once per hold, and a root restart re-raises it for a hold still in place. A
 machine that is being deliberately kept stopped also holds past the age, so the
-alert there is an expected operational signal, not a fault. Because a full `ava
+alert there is an expected operational signal, not a fault. Because a full `meiva
 stop` also stops the root, a hold left in the `stopped` phase of a full stop is
 not observed by this check; it covers holds left while the root is running (a
 stop that keeps a service, a restart that failed or was cut off, a stuck
-drain). The recovery it names is the one below: run `ava start` on that machine.
+drain). The recovery it names is the one below: run `meiva start` on that machine.
 
-First identify what owns the home: `ava status` names the operation and phase.
+First identify what owns the home: `meiva status` names the operation and phase.
 Do not apply the table below over a `cli.fleet_update` half that is still
 running; rerun that half after its failure is fixed instead. A refused
 connection alone does not establish that the owner is absent.
 
 | Phase found | Recovery after confirming there is no competing owner |
 | --- | --- |
-| `preparing`, `draining`, `drained` | `ava start` abandons the drain and releases the hold; or re-run `ava stop`. |
-| `stopping` | Re-run `ava stop` to verify and finish closure, then `ava start`; or `ava start` directly. |
-| `stopped` | `ava start` brings services back, verifies readiness and releases the hold. |
+| `preparing`, `draining`, `drained` | `meiva start` abandons the drain and releases the hold; or re-run `meiva stop`. |
+| `stopping` | Re-run `meiva stop` to verify and finish closure, then `meiva start`; or `meiva start` directly. |
+| `stopped` | `meiva start` brings services back, verifies readiness and releases the hold. |
 
 An unreadable journal, or a record with no maintenance hold, has no exact
-generation to match, and no command clears it. After confirming no `ava stop`
+generation to match, and no command clears it. After confirming no `meiva stop`
 is in flight for this home (see "Is a stop still running?" below), remove
-`$AVA_HOME/run/deploy-pause-owner.json` by hand and run `ava start`.
+`$MEIVA_HOME/run/deploy-pause-owner.json` by hand and run `meiva start`.
 
 ### Is a stop still running?
 
 The hold does not say. Ask the lifecycle itself:
 
-- `$AVA_HOME/run/lifecycle-op.json` records the running or last stop/restart: its
+- `$MEIVA_HOME/run/lifecycle-op.json` records the running or last stop/restart: its
   pid, the phase timeline and whether it finished. A pid that is gone without a
   completion means the command died where the timeline stops.
-- `ava stop`, `ava restart` and `ava start` all run under one exclusive lock on
+- `meiva stop`, `meiva restart` and `meiva start` all run under one exclusive lock on
   the home (`resource_lock` over `deploy-state.lifecycle.lock`). When another of
-  them holds it, `ava start` waits up to 30 seconds and then fails naming the
-  holder's pid and purpose. When the lock is free, `ava start` proceeds and
+  them holds it, `meiva start` waits up to 30 seconds and then fails naming the
+  holder's pid and purpose. When the lock is free, `meiva start` proceeds and
   releases the hold as usual, so use it as the probe only when releasing is what
   you want next.
 
 The lock belongs to the OS and goes away with its process, so a killed
-`ava stop` never blocks `ava start`.
+`meiva stop` never blocks `meiva start`.
 
 A failed stop retains its process inventory and hold. Force remains an explicit
 owned-process escalation, not an inference from a timeout or a way to
 manufacture a drain receipt.
 
-An ordinary `ava start` completes stopped recovery and resumes after
+An ordinary `meiva start` completes stopped recovery and resumes after
 full readiness, settling recorded continuation failures as above. A successful
 service probe cannot make an unflushed checkpoint durable; that is why the
 agent continues from the last durable one.
 
 ## Supervision and recovery ownership
 
-Ava root supervises the admitted application roster. Deliberate maintenance
+Meiva root supervises the admitted application roster. Deliberate maintenance
 stops remove services from that roster before closing their captured processes;
 service supervision cannot reinterpret a planned stop as an unexpected crash.
 The ordinary root boot unit owns replacement applications. Data-plane and persistent-terminal

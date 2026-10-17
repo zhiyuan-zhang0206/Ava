@@ -2,25 +2,25 @@
 
 ## Context
 
-`ops/cluster_deploy.py` has always known how to kill a hung `ava-updater`: a session
+`ops/cluster_deploy.py` has always known how to kill a hung `meiva-updater`: a session
 whose log has not advanced in `NO_PROGRESS_TIMEOUT_S` is blocked on a
 non-terminating step, and `_reap_stalled_updater` force-kills it. The call sat in
 one place — inside `spawn_update`, on the path a *new* update takes when it finds
 the session still there. Its own docstring described the mechanism accurately as
 "unblock-the-next-attempt … not a background reaper".
 
-That reads like enough. `ava update`'s Phase-B poll carries its own bound from the
+That reads like enough. `meiva update`'s Phase-B poll carries its own bound from the
 same constant and reports `INCOMPLETE` rather than a silent `rc=0`, so the caller is
 protected against a host that never comes back. The remaining cost looked like
 latency of *discovery*: the dead session is invisible until someone tries to deploy,
 which on a quiet weekend is days.
 
 **Auditing the refusal path says the cost is not discovery latency — it is a
-deadlock.** A live `ava-updater` makes `current_orchestration()` answer `"update"`
+deadlock.** A live `meiva-updater` makes `current_orchestration()` answer `"update"`
 for as long as it exists, and the two actors that would otherwise have ended it both
 read that answer:
 
-- The gateway's next `ava update` calls `_assert_no_orchestration_in_flight`, which
+- The gateway's next `meiva update` calls `_assert_no_orchestration_in_flight`, which
   asks `ops.deploy_window.deploy_in_flight()`. Signal 3 probes every machine's
   `current_orchestration` and reports this host as mid-deploy, so the **whole
   rollout is refused cluster-wide**. Phase B never fans out, and the `spawn_update`
@@ -37,7 +37,7 @@ That leg self-heals today. The two that do not are the cluster-wide refusal and 
 on-pin code controller, and they are what this decision is about.
 
 One hung session on one runner therefore blocks the cluster's deploy path *and* that
-runner's code recovery, permanently, and the documented exits are `ava update --force` —
+runner's code recovery, permanently, and the documented exits are `meiva update --force` —
 which skips the cluster-wide deploy-window check the corpse is impersonating, i.e.
 trains the operator to suppress the real protection — or a human with
 a session kill. Bounding the Phase-B poll does not touch this: the poll protects
@@ -71,7 +71,7 @@ Three properties make the unattended kill a narrow addition rather than a new po
 
 Agent-runner only. That is a co-location fact, not a policy: the `ops` daemon is
 agent-runner-scoped and `spawn_update` runs inside it, so every host that can hold an
-`ava-updater` also runs an agent-runner watchdog. A gateway-only unit runs no ops
+`meiva-updater` also runs an agent-runner watchdog. A gateway-only unit runs no ops
 daemon and has nothing to reap; adding the gateway leg would be a no-op on a split
 deployment and a second killer racing the first on a single box, which runs both.
 
@@ -102,7 +102,7 @@ opinions the controller gates own. Reconcile logic lives in the round.
 
 ## Consequences
 
-- A hung `ava-updater` now clears itself within one round of crossing 15 minutes of
+- A hung `meiva-updater` now clears itself within one round of crossing 15 minutes of
   silence, on the host that owns it, with no operator present.
 - `spawn_rollout` and `spawn_restart` still refuse outright: they reach
   `_assert_no_orchestration_in_flight` and never get as far as `spawn_update`'s
@@ -110,7 +110,7 @@ opinions the controller gates own. Reconcile logic lives in the round.
   themselves. Under this design that refusal stops being a dead end and becomes a
   wait of at most one watchdog round (≤60 s), because the reaper — not the caller —
   owns the corpse.
-- `ava update --force` loses its most common legitimate use. That is the point: the
+- `meiva update --force` loses its most common legitimate use. That is the point: the
   flag stays for a deploy window that is real but stale (a host powered off
   mid-update), and stops being the routine answer to a corpse.
 - A genuinely slow updater that writes nothing for 15 minutes is killed by the

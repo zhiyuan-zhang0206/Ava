@@ -27,7 +27,7 @@ AGENT = 8902
 
 @pytest.fixture(autouse=True)
 def production_process_by_default(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.delenv("AVA_EXEC_REQUEST_FILE", raising=False)
+    monkeypatch.delenv("MEIVA_EXEC_REQUEST_FILE", raising=False)
     monkeypatch.setattr(telemetry_otlp, "production_identity", allow_identity, raising=False)
 
 
@@ -47,7 +47,7 @@ def otlp_test_event(
         span_id=span_id,
         agent_id=agent_id,
         machine="test-mac",
-        cluster=".ava-test",
+        cluster=".meiva-test",
         process="test-proc",
         category=category,
         event_name=event_name,
@@ -112,7 +112,7 @@ def _assert_log_record_indexed_attributes(r: Any) -> None:
     assert attrs["category"] == "log"
     assert attrs["level"] == "warning"
     assert attrs["machine"] == "test-mac"
-    assert attrs["cluster"] == ".ava-test"
+    assert attrs["cluster"] == ".meiva-test"
     assert attrs["process"] == "test-proc"
     assert attrs["source"] == "test"
     assert attrs["agent_id"] == AGENT
@@ -121,7 +121,7 @@ def _assert_log_record_indexed_attributes(r: Any) -> None:
 def _assert_log_record_json_body(r: Any) -> None:
     body = json.loads(r.log_record.body)
     assert body["event_name"] == "exec"
-    assert body["cluster"] == ".ava-test"
+    assert body["cluster"] == ".meiva-test"
     assert body["attributes"] == {"body": "print(1)", "ok": False}
     assert body["ts"] == "2026-08-11T12:00:00+00:00"
 
@@ -181,7 +181,7 @@ def test_flush_groups_each_event_name_under_its_matching_resource(
             for attribute in resource_logs.resource.attributes
             if attribute.key == "cluster"
         )
-        assert resource_cluster == ".ava-test"
+        assert resource_cluster == ".meiva-test"
         for scope_logs in resource_logs.scope_logs:
             for record in scope_logs.log_records:
                 assert (
@@ -195,7 +195,7 @@ def test_flush_groups_each_event_name_under_its_matching_resource(
 
 
 def _assert_int_payload_maps_to_counter_without_body_label(metrics: dict[str, Any]) -> None:
-    counter = metrics["ava_llm_usage_in_total"]
+    counter = metrics["meiva_llm_usage_in_total"]
     assert counter.unit == "1"
     assert len(counter.data.data_points) == 1
     dp = counter.data.data_points[0]
@@ -209,20 +209,20 @@ def _assert_int_payload_maps_to_counter_without_body_label(metrics: dict[str, An
 
 
 def _assert_float_payload_maps_to_histogram_with_unit(metrics: dict[str, Any]) -> None:
-    hist = metrics["ava_llm_usage_latency"]
+    hist = metrics["meiva_llm_usage_latency"]
     assert hist.unit == "ms"
     assert hist.data.data_points[0].count == 1
     assert hist.data.data_points[0].sum == 42.5
-    assert "ava_llm_usage_latency_ms" not in metrics
+    assert "meiva_llm_usage_latency_ms" not in metrics
 
 
 def _assert_bool_payload_is_attribute_not_metric(metrics: dict[str, Any]) -> None:
-    assert "ava_turn_end_ok" not in metrics
-    turn = _attrs_of(metrics["ava_turn_end_duration"].data.data_points[0])
-    assert metrics["ava_turn_end_duration"].unit == "s"
+    assert "meiva_turn_end_ok" not in metrics
+    turn = _attrs_of(metrics["meiva_turn_end_duration"].data.data_points[0])
+    assert metrics["meiva_turn_end_duration"].unit == "s"
     assert turn["ok"] is True
 
-    assert "ava_llm_usage_ok" not in metrics
+    assert "meiva_llm_usage_ok" not in metrics
 
 
 def test_metric_mapping_int_counter_float_histogram(otlp_backend: OtlpFixture) -> None:
@@ -276,26 +276,26 @@ def test_compaction_completed_maps_size_samples_and_frequency_counter(
     backend.flush()
 
     metrics = collected_metrics(metric_reader)
-    count = metrics["ava_compaction_completed_compactions"].data.data_points[0]
+    count = metrics["meiva_compaction_completed_compactions"].data.data_points[0]
     assert count.value == 1
     assert _attrs_of(count)["compact_kind"] == "auto"
     assert _attrs_of(count)["reminder_shown"] is True
-    assert "ava_compaction_completed_reminder_shown" not in metrics
+    assert "meiva_compaction_completed_reminder_shown" not in metrics
     for field, value in (("history_chars", 5000), ("summary_chars", 1500)):
-        sample = metrics[f"ava_compaction_completed_{field}"].data.data_points[0]
+        sample = metrics[f"meiva_compaction_completed_{field}"].data.data_points[0]
         assert sample.count == 1
         assert sample.sum == value
-    ratio = metrics["ava_compaction_completed_summary_history_ratio"].data.data_points[0]
+    ratio = metrics["meiva_compaction_completed_summary_history_ratio"].data.data_points[0]
     assert ratio.count == 1
     assert ratio.sum == 0.3
 
 
 def test_metrics_resource_carries_cluster(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(telemetry_otlp, "cluster_label", lambda: ".ava-preview")
+    monkeypatch.setattr(telemetry_otlp, "cluster_label", lambda: ".meiva-preview")
 
     resource = telemetry_otlp.metrics_resource()
 
-    assert resource.attributes["cluster"] == ".ava-preview"
+    assert resource.attributes["cluster"] == ".meiva-preview"
 
 
 def test_resolution_status_uses_latest_value_gauges(otlp_backend: OtlpFixture) -> None:
@@ -328,10 +328,10 @@ def test_resolution_status_uses_latest_value_gauges(otlp_backend: OtlpFixture) -
     backend.flush()
 
     metrics = collected_metrics(metric_reader)
-    warning = metrics["ava_resolution_status_unresolved_warnings"]
-    error = metrics["ava_resolution_status_unresolved_errors"]
-    dismissed_warning = metrics["ava_resolution_status_dismissed_warnings"]
-    dismissed_error = metrics["ava_resolution_status_dismissed_errors"]
+    warning = metrics["meiva_resolution_status_unresolved_warnings"]
+    error = metrics["meiva_resolution_status_unresolved_errors"]
+    dismissed_warning = metrics["meiva_resolution_status_dismissed_warnings"]
+    dismissed_error = metrics["meiva_resolution_status_dismissed_errors"]
     assert warning.data.data_points[0].value == 2.0
     assert error.data.data_points[0].value == 1.0
     assert dismissed_warning.data.data_points[0].value == 7.0
@@ -355,7 +355,7 @@ def test_root_health_tick_uses_latest_timestamp_gauge(otlp_backend: OtlpFixture)
     )
     backend.flush()
 
-    tick = collected_metrics(metric_reader)["ava_root_health_tick_last_tick_timestamp"]
+    tick = collected_metrics(metric_reader)["meiva_root_health_tick_last_tick_timestamp"]
     assert tick.unit == "s"
     assert tick.data.data_points[0].value == 1_725_000_060.0
 
@@ -391,12 +391,12 @@ def test_root_health_gauges_keep_separate_home_identity_and_expected_only(
     )
     backend.flush()
     metrics = collected_metrics(metric_reader)
-    expected = metrics["ava_root_health_expected_expected_since_timestamp"]
+    expected = metrics["meiva_root_health_expected_expected_since_timestamp"]
     assert {point.attributes["home_id"] for point in expected.data.data_points} == {
         "a" * 64,
         "b" * 64,
     }
-    ticks = metrics["ava_root_health_tick_last_tick_timestamp"]
+    ticks = metrics["meiva_root_health_tick_last_tick_timestamp"]
     assert {point.attributes["home_id"] for point in ticks.data.data_points} == {"a" * 64}
 
 
@@ -425,12 +425,12 @@ def test_metric_disposition_cost_counter_price_excluded(otlp_backend: OtlpFixtur
     backend.flush()
     metrics = collected_metrics(metric_reader)
 
-    cost = metrics["ava_llm_usage_cost_usd"]
+    cost = metrics["meiva_llm_usage_cost_usd"]
     assert cost.data.is_monotonic
     assert abs(cost.data.data_points[0].value - 0.5) < 1e-9
-    assert metrics["ava_llm_usage_calls"].data.data_points[0].value == 2
+    assert metrics["meiva_llm_usage_calls"].data.data_points[0].value == 2
     for excluded in ("price_miss", "price_hit", "price_out"):
-        assert f"ava_llm_usage_{excluded}" not in metrics
+        assert f"meiva_llm_usage_{excluded}" not in metrics
 
 
 def test_metric_views_shape_latency_histograms() -> None:
@@ -438,11 +438,11 @@ def test_metric_views_shape_latency_histograms() -> None:
 
     reader = InMemoryMetricReader()
     provider = MeterProvider(metric_readers=[reader], views=telemetry_otlp.metric_views())
-    meter = provider.get_meter("ava.telemetry")
-    hist = meter.create_histogram("ava_llm_usage_latency", unit="ms")
+    meter = provider.get_meter("meiva.telemetry")
+    hist = meter.create_histogram("meiva_llm_usage_latency", unit="ms")
     hist.record(45000.0, {"model": "m", "agent_id": 7, "machine": "x", "process": "p"})
 
-    dp = collected_metrics(reader)["ava_llm_usage_latency"].data.data_points[0]
+    dp = collected_metrics(reader)["meiva_llm_usage_latency"].data.data_points[0]
     assert list(dp.explicit_bounds) == list(telemetry_otlp.LLM_LATENCY_BUCKETS_MS)
     assert "agent_id" not in _attrs_of(dp)
     assert _attrs_of(dp)["model"] == "m"
@@ -453,11 +453,11 @@ def test_metric_views_shape_gateway_event_loop_lag_histogram() -> None:
 
     reader = InMemoryMetricReader()
     provider = MeterProvider(metric_readers=[reader], views=telemetry_otlp.metric_views())
-    meter = provider.get_meter("ava.telemetry")
-    hist = meter.create_histogram("ava_gateway_event_loop_lag", unit="ms")
+    meter = provider.get_meter("meiva.telemetry")
+    hist = meter.create_histogram("meiva_gateway_event_loop_lag", unit="ms")
     hist.record(45000.0, {"machine": "x", "process": "gateway"})
 
-    dp = collected_metrics(reader)["ava_gateway_event_loop_lag"].data.data_points[0]
+    dp = collected_metrics(reader)["meiva_gateway_event_loop_lag"].data.data_points[0]
     assert list(dp.explicit_bounds) == list(telemetry_otlp.EVENT_LOOP_LAG_BUCKETS_MS)
 
 
@@ -490,18 +490,18 @@ def test_gateway_runtime_and_sse_absolute_metrics_use_gauges(otlp_backend: OtlpF
     backend.flush()
 
     metrics = collected_metrics(metric_reader)
-    active = metrics["ava_sse_active_connections"].data.data_points[0]
+    active = metrics["meiva_sse_active_connections"].data.data_points[0]
     assert active.value == 1.0
     assert _attrs_of(active)["mode"] == "filtered"
-    assert metrics["ava_sse_opened"].data.data_points[0].value == 1
-    assert metrics["ava_sse_closed"].data.data_points[0].value == 1
-    assert metrics["ava_gateway_process_cpu_percent"].data.data_points[0].value == 12.5
-    assert metrics["ava_gateway_process_rss_bytes"].data.data_points[0].value == 268_435_456
-    assert metrics["ava_gateway_process_fd_count"].data.data_points[0].value == 23
-    lag = metrics["ava_gateway_event_loop_lag"].data.data_points[0]
+    assert metrics["meiva_sse_opened"].data.data_points[0].value == 1
+    assert metrics["meiva_sse_closed"].data.data_points[0].value == 1
+    assert metrics["meiva_gateway_process_cpu_percent"].data.data_points[0].value == 12.5
+    assert metrics["meiva_gateway_process_rss_bytes"].data.data_points[0].value == 268_435_456
+    assert metrics["meiva_gateway_process_fd_count"].data.data_points[0].value == 23
+    lag = metrics["meiva_gateway_event_loop_lag"].data.data_points[0]
     assert lag.count == 1
     assert lag.sum == 250.0
-    assert metrics["ava_gateway_event_loop_slow_ticks"].data.data_points[0].value == 1
+    assert metrics["meiva_gateway_event_loop_slow_ticks"].data.data_points[0].value == 1
 
 
 def test_metric_mapping_skips_long_string_attributes(otlp_backend: OtlpFixture) -> None:
@@ -510,7 +510,7 @@ def test_metric_mapping_skips_long_string_attributes(otlp_backend: OtlpFixture) 
         [otlp_test_event(event_name="llm_usage", attributes={"model": "m" * 100, "in_total": 1})]
     )
     backend.flush()
-    dp = collected_metrics(metric_reader)["ava_llm_usage_in_total"].data.data_points[0]
+    dp = collected_metrics(metric_reader)["meiva_llm_usage_in_total"].data.data_points[0]
     assert "model" not in _attrs_of(dp)
 
 
@@ -534,7 +534,7 @@ def test_metric_mapping_excludes_loguru_decoration_extras(otlp_backend: OtlpFixt
         ]
     )
     backend.flush()
-    dp = collected_metrics(metric_reader)["ava_llm_usage_in_total"].data.data_points[0]
+    dp = collected_metrics(metric_reader)["meiva_llm_usage_in_total"].data.data_points[0]
     a = _attrs_of(dp)
     assert a["model"] == "deepseek-v4-flash"
     assert "msg" not in a
@@ -616,7 +616,7 @@ def test_flag_defaults_on_with_standard_endpoint(monkeypatch: pytest.MonkeyPatch
 @pytest.fixture(autouse=True)
 def bind_telemetry(db_conn: psycopg.Connection, database: Database) -> Iterator[None]:
     pipeline = telemetry.build_pipeline(
-        database=lambda: database, machine=machine_identity(), home=Path(".ava")
+        database=lambda: database, machine=machine_identity(), home=Path(".meiva")
     )
     try:
         telemetry.init_telemetry(process="test-proc", pipeline=pipeline)

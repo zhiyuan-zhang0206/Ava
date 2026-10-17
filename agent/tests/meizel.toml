@@ -12,31 +12,31 @@ exports = ["agent_tests.py", "claim"]
 "test_external.py" = ["impersonation"]
 
 [debt.env-patch]
-"agent_tests.py#monkeypatch.setitem os.environ.AVA_DB_URL" = 1
+"agent_tests.py#monkeypatch.setitem os.environ.MEIVA_DB_URL" = 1
 "test_exec_subprocess.py#monkeypatch.setenv os.environ.PYTHONIOENCODING" = 1
 "test_exec_subprocess.py#monkeypatch.setenv os.environ.PYTHONPATH" = 1
 "test_exec_subprocess.py#monkeypatch.setenv os.environ.PYTHONUTF8" = 1
-"test_external.py#monkeypatch.setenv os.environ.AVA_CALLER_IDENTITY" = 1
+"test_external.py#monkeypatch.setenv os.environ.MEIVA_CALLER_IDENTITY" = 1
 "test_resource_admission.py#patch.dict os.environ" = 1
 
 [debt.first-party-patch]
 "test_compact_part2.py#monkeypatch.setattr agent.graph.hooks.compact.resolve_context_budget" = 1
-"test_external.py#assignment ava.state" = 1
-"test_external.py#assignment ava.state_update" = 1
-"test_external.py#monkeypatch.setattr ava.boot.ensure_plugins_loaded" = 1
-"test_external.py#monkeypatch.setattr ava.gateway_client.send_message" = 2
-"test_external.py#monkeypatch.setattr ava.impersonation.attachment.control.require_active" = 3
+"test_external.py#assignment meiva.state" = 1
+"test_external.py#assignment meiva.state_update" = 1
+"test_external.py#monkeypatch.setattr meiva.boot.ensure_plugins_loaded" = 1
+"test_external.py#monkeypatch.setattr meiva.gateway_client.send_message" = 2
+"test_external.py#monkeypatch.setattr meiva.impersonation.attachment.control.require_active" = 3
 "test_external.py#monkeypatch.setattr base.agents.impersonation.manifest.capture_local_event" = 2
 "test_external.py#monkeypatch.setattr base.agents.impersonation.manifest.open_local_participant" = 1
 "test_external.py#monkeypatch.setattr base.agents.impersonation.manifest.seal_local_participant" = 3
 "test_external.py#monkeypatch.setattr base.telemetry.sync" = 3
 "test_hosted_ownership_agent.py#monkeypatch.setattr agent.ownership.hosted.publish_agent_updated" = 1
 "test_hosted_ownership_agent.py#monkeypatch.setattr agent.ownership.hosted_cleanup.publish_agent_updated" = 1
-"test_state_slot.py#assignment ava.state" = 8
-"test_state_slot.py#assignment ava.state.delta_test__counter" = 1
-"test_state_slot.py#assignment ava.state.delta_test__seen" = 1
-"test_state_slot.py#assignment ava.state.messages" = 3
-"test_state_slot.py#assignment ava.state_update" = 5
+"test_state_slot.py#assignment meiva.state" = 8
+"test_state_slot.py#assignment meiva.state.delta_test__counter" = 1
+"test_state_slot.py#assignment meiva.state.delta_test__seen" = 1
+"test_state_slot.py#assignment meiva.state.messages" = 3
+"test_state_slot.py#assignment meiva.state_update" = 5
 
 [debt.private-name]
 "compact/test_compact_reminder_fires_in_band.py -> test_compact.py#_config" = 1

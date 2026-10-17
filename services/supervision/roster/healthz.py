@@ -1,7 +1,7 @@
 """The standard `/healthz` daemon: one declaration, everything else derived.
 
 Most roster entries are the same shape: a Python daemon started with
-``python -m <module>`` that serves the shared Ava ``/healthz`` on its slot of the
+``python -m <module>`` that serves the shared Meiva ``/healthz`` on its slot of the
 health-port table and records a pidfile. For that shape the only decisions are the
 service name, the entry module, the capability set and whether it uses the
 database; ``healthz_daemon`` derives the rest (launch command, probe URL, identity
@@ -28,8 +28,8 @@ from base.daemon.health import DaemonProbe, probe_daemon
 from base.host.env.health_ports import DEFAULT_PORTS
 from services.supervision.roster.service_spec import DbAccess, ServiceSpec
 
-# `ava-root` renders this prefix into `cd <repo> && exec <cmd>`; a command that stays
-# bare tokens keeps the unit's pid a direct child of root (`ava_root_glue.manifests`).
+# `meiva-root` renders this prefix into `cd <repo> && exec <cmd>`; a command that stays
+# bare tokens keeps the unit's pid a direct child of root (`meiva_root_glue.manifests`).
 _PYTHON_M = ".venv/bin/python -m"
 
 _SESSION_KEBAB = r"[a-z][a-z0-9]*(-[a-z0-9]+)*"
@@ -40,7 +40,7 @@ def health_name_of(session: str) -> str:
     """The health name of a standard daemon: its kebab session with underscores.
 
     This is the key of its port slot, the ``name`` its ``/healthz`` answers with
-    the stem of its ``AVA_<NAME>_HEALTH_PORT`` setting and of its ``run/<name>.pid`` pidfile.
+    the stem of its ``MEIVA_<NAME>_HEALTH_PORT`` setting and of its ``run/<name>.pid`` pidfile.
 
     Raises:
         ValueError: ``session`` is not lowercase kebab-case.
@@ -56,14 +56,14 @@ def healthz_url(name: str) -> str:
 
 
 def daemon_identity(name: str, pidfile: Path) -> Callable[[], DaemonProbe]:
-    """The ``identity_probe`` for a daemon that serves the standard Ava ``/healthz``.
+    """The ``identity_probe`` for a daemon that serves the standard Meiva ``/healthz``.
 
     Binds ``probe_daemon`` to the three facts that identify one daemon: its
     ``name``, its ``/healthz`` URL (derived from this unit's health port at
     call time, like every other probe target on the roster) and the pidfile this
     unit recorded for it. Public because plugin-registered services declare their
     own specs and must be able to state the same contract without restating the
-    probe (``ava_builtins/plugins/*/services.py``).
+    probe (``meiva_builtins/plugins/*/services.py``).
     """
     return partial(probe_daemon, name, healthz_url(name), pidfile=pidfile)
 

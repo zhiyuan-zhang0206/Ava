@@ -12,7 +12,7 @@ remaining slices are at the bottom.
 
 ## Why now
 
-plugin-spec-v2 reserved the slot ("Ava plugins have no UI surface today;
+plugin-spec-v2 reserved the slot ("Meiva plugins have no UI surface today;
 `contributions` grows a key if that ever changes") and the survey says the slot
 is now warranted:
 
@@ -20,7 +20,7 @@ is now warranted:
   capabilities but *seeing and dressing the agent*: UI/themes/pets ≈19% plus
   session dashboards/usage meters ≈22% of all plugins — together outweighing
   every capability category.
-- Ava already computes what those plugins surface (LGTM metrics, the cost
+- Meiva already computes what those plugins surface (LGTM metrics, the cost
   ledger, the task board, fleet state). What is missing is any way for a plugin
   to put a widget, a page, or a skin in front of the user.
 - The same survey shows the trap: dsh built its entire web UI as ~44
@@ -125,7 +125,7 @@ any server data (TanStack Query). No per-plugin frontend code, no build step.
 ### Plugin-served pages — the universal escape hatch
 
 Custom visuals come from a page the plugin serves itself, reached through the
-gateway exactly like `ava.ui` pages are today (`gateway/routers/pages.py`
+gateway exactly like `meiva.ui` pages are today (`gateway/routers/pages.py`
 reverse-proxies `/pages/<agent_id>-<name>/…` to a supervised local page
 server, behind the gateway's normal auth). Plugin pages get the sibling mount:
 
@@ -209,7 +209,7 @@ value is validated as a CSS color literal.
 
 ## Slotting into plugin-spec-v2
 
-- `contributions.ui` amends the spec's "Not borrowed from VS Code" item 2: Ava
+- `contributions.ui` amends the spec's "Not borrowed from VS Code" item 2: Meiva
   now borrows VS Code's *themes/views* contribution **shape** (declarative,
   host-rendered) while still not borrowing runtime component composition
   (webviews are the closest VS Code analog to our iframes — also a deliberate
@@ -231,11 +231,11 @@ value is validated as a CSS color literal.
   only: a section for a plugin not active on the inspected agent is omitted
   from that agent's inspect view. Nav and themes are cluster-level surfaces
   and ignore per-agent overlays.
-- **#41 (`ava plugins inspect`)**: declared `ui` contributions are listed like
+- **#41 (`meiva plugins inspect`)**: declared `ui` contributions are listed like
   any other surface — no special casing; since UI contributions have no
   registration side, they appear in the "manifest declarations" half only.
 - **#42 (four-layer modification model)**: UI contributions ride
-  `ava-plugin.json` through the normal L3 install flow, so an external plugin
+  `meiva-plugin.json` through the normal L3 install flow, so an external plugin
   adds a panel or skin without a kernel PR — exactly the decoupling #42's L3
   ladder requires. Builtin plugins declare theirs in-tree like any manifest
   field.
@@ -247,7 +247,7 @@ value is validated as a CSS color literal.
   own UI; deep customizers bypassed it anyway (two TUIs in the top 20, nine
   competing desktop shells against the host protocol); shallow contributors pay
   a TS-build + type-chain + breaking-changes tax. It is the price of
-  "everything is a plugin" — an ideology Ava explicitly does not hold
+  "everything is a plugin" — an ideology Meiva explicitly does not hold
   (plugin-spec-v2 borrow/not-borrow). Deep customization is Lane 1.
 - **Build-time React component contributions** (plugins ship TSX, converge
   rebuilds the frontend): couples every plugin install to a Node toolchain on
@@ -255,7 +255,7 @@ value is validated as a CSS color literal.
   fail-fast isolation. Rejected.
 - **Composer / conversation-surface extension points** — dsh's hottest UI
   cluster (file drop, @file, prompt toolboxes) targets a chat-first product;
-  Ava's interaction center of gravity is IM bridge / CLI / notifications.
+  Meiva's interaction center of gravity is IM bridge / CLI / notifications.
   Revisit only on real demand.
 - **User-customizable memory/compaction semantics** (ruling 2026-08-19):
   semantic mechanisms belong to the kernel; the survey's "memory plugins" are

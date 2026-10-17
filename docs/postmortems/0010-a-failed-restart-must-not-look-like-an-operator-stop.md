@@ -1,8 +1,8 @@
 # 0010 — A failed restart must not look like an operator stop
 
 **Date:** 2026-10-01
-**Anchors:** `services/ava_root/health.py` (`_HELD_DOWN` branch),
-`services/ava_root/supervisor.py` (`revival_deferral`); fixes: #3830, #3866,
+**Anchors:** `services/meiva_root/health.py` (`_HELD_DOWN` branch),
+`services/meiva_root/supervisor.py` (`revival_deferral`); fixes: #3830, #3866,
 #3909, #3937. Host-side records (supervisor log, agent event files, the
 recovery logs) are not in this repo `(summarized)`; the drill VM and its logs
 were destroyed, and its memory telemetry is summarized from a host-side monitor.
@@ -44,8 +44,8 @@ Host-local times.
 - 16:33–19:37 — blackout. Wake deliveries retry a bounded number of times and
   are dropped (one message stranded). The supervisor logs "restart held for N s"
   locally only, reaching 10,132 s.
-- 19:33–19:35 — a plain `ava start` fails against the locally dead services;
-  `ava restart --mode smooth` refuses because an agent has no complete persisted
+- 19:33–19:35 — a plain `meiva start` fails against the locally dead services;
+  `meiva restart --mode smooth` refuses because an agent has no complete persisted
   cold END.
 - 19:36–19:38 — operator-approved forced restart. Custody for the dead process
   group is released, the agent host and ops return, and the stranded wake
@@ -114,19 +114,19 @@ reconciliation" until the process group was verified gone.
   while intent stays running; a recorded failure is deliberately not a
   deferral, so the backoff retry it exists to trigger still fires. Integration
   tests drive the real supervisor with the real monitor
-  (`services/ava_root/tests/test_ava_root_intent.py`,
-  `services/ava_root/tests/test_ava_root_health.py`).
+  (`services/meiva_root/tests/test_meiva_root_intent.py`,
+  `services/meiva_root/tests/test_meiva_root_health.py`).
 - **State-based alert episodes (#3866).** A unit that is meant to run but sits
   in an explicit failure state fires one durable alert episode: it survives a
   root restart, resolves when the condition clears, goes out on the event
   stream and posts to the platform's existing alert store. No numeric
-  thresholds anywhere in the chain (`services/ava_root/alerts.py`,
-  `services/ava_root/tests/test_ava_root_alerts.py`).
+  thresholds anywhere in the chain (`services/meiva_root/alerts.py`,
+  `services/meiva_root/tests/test_meiva_root_alerts.py`).
 - **Custody reconciles before it refuses (#3909).** A stale custody
   record whose process group is provably gone is released before a cold start
   refuses; a record that keeps an unproven fact still refuses, naming its
-  reconcile steps and evidence path (`services/ava_root/custody.py`,
-  `services/ava_root/reconciling.py`).
+  reconcile steps and evidence path (`services/meiva_root/custody.py`,
+  `services/meiva_root/reconciling.py`).
 - **Wake re-dispatch waits for a live host (#3937).** Wake re-dispatch and
   poisoning require a fresh healthy host verdict for the owner's machine — a
   `machine_probe` row inside the staleness window, machine graded online,

@@ -21,11 +21,11 @@ User rulings on this slice (2026-10-01):
 
 1. **The container recipe comes first.** It needs no new host software and no
    download beyond package installs, and it restores the one claim no CI job carries
-   (a fresh `ava start` from source).
+   (a fresh `meiva start` from source).
 2. **The Tart experiment runs in parallel** with it. Its result is in (Experiment B): a
    clone of a granted image keeps the helper's signing identity and both grants, so the
    Tart recipe is clone-per-run. The recipe is scripted (`scripts/verify/tart_run.py`) and
-   one run of it carried a full `ava start` in a guest (Recipe C, "Run results").
+   one run of it carried a full `meiva start` in a guest (Recipe C, "Run results").
 3. **Tart uses the `base` image** (SIP disabled), not `vanilla`.
 4. **The model is scripted.** No verification boundary carries a provider key: the
    scripted scenario executes real code through the real gateway and agent host, and
@@ -37,8 +37,8 @@ User rulings on this slice (2026-10-01):
 
 A verification boundary is an OS environment created from a pinned image in which one
 cluster is born from one immutable commit through the ordinary start entry, observed,
-and destroyed. Inside it the cluster is the machine's one cluster: home `~/.ava`,
-source checkout `~/.ava/source`, the fixed port table. Two kinds are in this slice:
+and destroyed. Inside it the cluster is the machine's one cluster: home `~/.meiva`,
+source checkout `~/.meiva/source`, the fixed port table. Two kinds are in this slice:
 
 | Boundary | Status | Carries |
 |---|---|---|
@@ -56,9 +56,9 @@ impersonation hosts need.
 
 ## What every boundary guarantees
 
-1. **One cluster, production layout.** Home `~/.ava`, source at `~/.ava/source`, so
-   the rule "only `~/.ava/source` starts `~/.ava`" holds with no special case.
-2. **Nothing of the host's cluster inside.** No mount of a host `~/.ava`, no container
+1. **One cluster, production layout.** Home `~/.meiva`, source at `~/.meiva/source`, so
+   the rule "only `~/.meiva/source` starts `~/.meiva`" holds with no special case.
+2. **Nothing of the host's cluster inside.** No mount of a host `~/.meiva`, no container
    runtime socket, no SSH keys, no environment passed in, no provider key.
 3. **Born from a pinned image and one commit.** The ref is resolved to a commit once;
    uncommitted files are not included; evidence names the commit and the image ID.
@@ -73,7 +73,7 @@ impersonation hosts need.
 
 | Claim | Container | Linux VM + systemd | Tart VM | Hosted CI today |
 |---|---|---|---|---|
-| Fresh home, source start through `ava start` | yes | yes | yes | no job (inferred from the workflow and test inventory) |
+| Fresh home, source start through `meiva start` | yes | yes | yes | no job (inferred from the workflow and test inventory) |
 | Real agent execution (scripted model) | yes | yes | yes | harness processes, not the start entry |
 | Real provider behavior | no (scripted model only) | no | no | no |
 | Headless browser against the frontend | not built (Chromium is not in the image) | possible | possible | yes (e2e) |
@@ -97,10 +97,10 @@ every step and every observer check passed and the container is gone.
 
 ### Why a container is enough (known)
 
-- **No systemd needed.** `cli/commands/lifecycle/root_driver.py` launches `ava-root`
+- **No systemd needed.** `cli/commands/lifecycle/root_driver.py` launches `meiva-root`
   directly on every non-macOS platform (`_spawn_direct`). systemd is used only for
   automatic boot (`base/host/system/boot_unit.py`, a system-scope unit that needs root
-  to install). With `AVA_OS_JOBS_ENABLED=0` (`base/host/system/cron.py:os_jobs_enabled`)
+  to install). With `MEIVA_OS_JOBS_ENABLED=0` (`base/host/system/cron.py:os_jobs_enabled`)
   converge registers no cron, boot or logs jobs.
 - **Data plane is native inside the container**, as everywhere; this is the opposite of
   the retired compose data plane
@@ -119,14 +119,14 @@ software under test:
   `scripts/provision/toolchain.sh` (uv at the pinned release).
 - An ordinary user, `verify`, with a home: PostgreSQL refuses to run as root, and the
   data plane's administrator is the OS user over `peer` authentication on an
-  owner-only socket. The user is **not** named `ava`: initdb makes the OS user the
+  owner-only socket. The user is **not** named `meiva`: initdb makes the OS user the
   bootstrap superuser, and start refuses a superuser that shares its name with the
-  schema owner role `ava` (found by the first run).
+  schema owner role `meiva` (found by the first run).
 - **No source, no virtualenv, no `node_modules`, no secret** in the image. The build
   context is filtered to the provisioning scripts (`Dockerfile.dockerignore`). The image
   is tagged with a digest of those inputs, so it is built once and reused until they
   change; evidence records the image ID and the base image digest.
-- One named volume, `ava-verify-cache`, holds the uv cache, the managed Python
+- One named volume, `meiva-verify-cache`, holds the uv cache, the managed Python
   interpreters and the npm cache. It carries no cluster state and no secret.
 
 The root `Dockerfile` that used to live in the repository was an orphan of the deleted
@@ -135,36 +135,36 @@ PgBouncer nor pgvector); it is replaced by this image rather than kept beside it
 
 ### Run
 
-One `docker run`: detached, `--init` (ava-root detaches into its own session and is
+One `docker run`: detached, `--init` (meiva-root detaches into its own session and is
 reparented to PID 1, which must reap), a memory limit and `/dev/shm` size (8 GB and 1 GB
 by default), `--cap-drop ALL`, `no-new-privileges`, the cache volume, and exactly one
 bind mount: the host repository's object store (`<git-common-dir>/objects`), read-only.
 No published port, no `--network`, no `-e`, no container runtime socket, no SSH key, no
-host `~/.ava`; `refuse_host_state` rejects the home directory, any parent of it, the host
+host `~/.meiva`; `refuse_host_state` rejects the home directory, any parent of it, the host
 cluster and credential directories, and any socket as a mount source. The working tree
 is never mounted, so uncommitted files cannot enter, and the repository's `config` (which
 may hold remote URLs) stays on the host.
 
 Steps, each logged to its own file in the evidence directory:
 
-1. `prepare-source`: `git init ~/.ava/source`, point its alternates at the mounted
+1. `prepare-source`: `git init ~/.meiva/source`, point its alternates at the mounted
    object store, `git checkout --detach <commit>`, `git repack -a -d`, drop the alternates.
    The result is an ordinary standalone clone, which the start admission needs (it
    hashes the tracked and non-ignored files); nothing depends on the mount afterwards.
 2. `uv sync --locked` in the checkout; `npm ci` in `ui/web`.
 3. Write the start profile and upload the observer.
-4. `ava init --serve-gateway --serve-agent-runner --machine-name verify --machine-host
-   127.0.0.1 --config-file <profile>`, then `ava start --only-service gateway frontend ops
-   agent-host`: the first start of a single box. `~/.ava` lives on the container's own filesystem,
+4. `meiva init --serve-gateway --serve-agent-runner --machine-name verify --machine-host
+   127.0.0.1 --config-file <profile>`, then `meiva start --only-service gateway frontend ops
+   agent-host`: the first start of a single box. `~/.meiva` lives on the container's own filesystem,
    never a bind mount (unix sockets, peer authentication, fsync).
 5. `observe`: the observer below.
 6. Copy out `observer.json` and the cluster's logs; `docker rm -f -v`.
 
 The start profile is the deleted controller's, plus a declared time zone:
-`AVA_OS_JOBS_ENABLED=0`, `AVA_PROVISION_BUILTIN_SCHEDULES=0`, `AVA_BROWSER_ENABLED=0`,
-`AVA_MEMORY_KEEP_LOCAL=1`, `AVA_CROSS_MACHINE_TRANSFER_BACKEND=none`,
-`AVA_REQUIRE_GITHUB_PR=0`, `AVA_TELEMETRY_OTLP_ENABLED=0`, `AVA_TIMEZONE=UTC`, and
-`AVA_LLM_OVERRIDE=tests.e2e.fakes.scenarios.message_flow:build` for the scripted
+`MEIVA_OS_JOBS_ENABLED=0`, `MEIVA_PROVISION_BUILTIN_SCHEDULES=0`, `MEIVA_BROWSER_ENABLED=0`,
+`MEIVA_MEMORY_KEEP_LOCAL=1`, `MEIVA_CROSS_MACHINE_TRANSFER_BACKEND=none`,
+`MEIVA_REQUIRE_GITHUB_PR=0`, `MEIVA_TELEMETRY_OTLP_ENABLED=0`, `MEIVA_TIMEZONE=UTC`, and
+`MEIVA_LLM_OVERRIDE=tests.e2e.fakes.scenarios.message_flow:build` for the scripted
 scenario. It contains no key of any kind. A branch under test can read everything in its
 container, which is why nothing secret is put there: trusted branches only still applies
 to what the branch can do with the machine, not to what it can steal.
@@ -179,7 +179,7 @@ the frontend starts with `next start -H 127.0.0.1` (`ui/web/package.json`), so
 the host would have to reuse the fixed port numbers, which collide with the host's own
 cluster. So the observer (`scripts/verify/observe.py`) runs inside the container, from the
 checkout's interpreter, and writes `observer.json`. The cluster API always authenticates
-(`ava init` mints a human secret for every gateway home), so the observer logs in with
+(`meiva init` mints a human secret for every gateway home), so the observer logs in with
 that secret from the home's `.env` — minted inside the boundary, nothing sent in from
 outside — the way an operator's browser does, and the `cors` and `scripted_agent` checks
 carry the session. It runs every check and records each outcome, so a partial result
@@ -212,8 +212,8 @@ commits no run, so this is what the runs established, not a log):
   pgdg, redis.io and nodesource repositories all serve arm64, as does the pinned
   PgBouncer build (`1.26.0-1.pgdg24.04+1`). Only the image's package install differs from
   an amd64 host.
-- **`ava start` completes in a non-root, no-systemd, no-sudo container** (the image has no
-  `sudo`; converge on Linux needs none with OS jobs off). Direct launch of `ava-root`
+- **`meiva start` completes in a non-root, no-systemd, no-sudo container** (the image has no
+  `sudo`; converge on Linux needs none with OS jobs off). Direct launch of `meiva-root`
   works: the start reports the root spawned directly, and the four services, the
   per-cluster Postgres, Redis and PgBouncer all come up.
 - **The scripted scenario runs through the real stack**: gateway, agent host, exec child,
@@ -232,8 +232,8 @@ commits no run, so this is what the runs established, not a log):
 - The start prints one benign warning here: the checkout has no installed Git hooks.
 
 What the first runs got wrong, now fixed in the recipe: the container user was named
-`ava`, which start refuses (see Image); start also warned that no time zone was declared,
-so the profile declares `AVA_TIMEZONE`.
+`meiva`, which start refuses (see Image); start also warned that no time zone was declared,
+so the profile declares `MEIVA_TIMEZONE`.
 
 ### Redis on Linux
 
@@ -278,12 +278,12 @@ refusal and evidence steps). It resolves `--ref` to one commit and records, step
    store (a share holding a `git clone --local` of the host repository failed in the guest:
    `unable to open loose object ... Permission denied`, while the fetched export passed
    `git fsck`) and the host repository's config and other branches stay out.
-2. `clone`: `tart clone <golden> ava-verify-<sha8>-<random>`, from a golden image that exists
+2. `clone`: `tart clone <golden> meiva-verify-<sha8>-<random>`, from a golden image that exists
    locally and is stopped.
 3. `boot`: `tart run --no-graphics --no-audio --no-clipboard --no-usb-accessories` with the
    export as the one read-only share; ready when `tart exec <vm> true` answers.
 4. In the guest, through the guest agent: `keychain` (the login keychain is readable),
-   `prepare-source` (the commit into `~/.ava/source`, a standalone clone with no remote),
+   `prepare-source` (the commit into `~/.meiva/source`, a standalone clone with no remote),
    `toolchain` (the repository's own `scripts/provision/database.sh` and `toolchain.sh`:
    Homebrew `postgresql@17`, `redis@8.2`, `pgbouncer`, `pgvector`, and the pinned uv; a no-op
    for what the golden image already holds), `python` (`uv sync --locked`), the profile and
@@ -306,7 +306,7 @@ identity, set the key's partition list, build and load the helper, then boot wit
 print what to toggle and wait. After the person confirms it restarts the helper and judges the
 grant from `ping`, the system TCC rows, the identity's designated requirement and a capture
 that is not a uniform image (the record is written to the evidence directory); it then removes
-`~/.ava/source` and shuts the guest down. It never overwrites a VM, never boots a third, and
+`~/.meiva/source` and shuts the guest down. It never overwrites a VM, never boots a third, and
 `--dry-run` prints every step and touches nothing. The steps are those of "Golden image" and
 "First grant" below.
 
@@ -389,7 +389,7 @@ Steps 1 to 4 prepare a signed, loaded helper; the experiment ran them by hand (k
 
 1. **Toolchain.** `swiftc` is already in the image. Add `uv` at the release CI pins,
    installed from the release archive with its sha256 checked, and a checkout of the commit
-   at `~/.ava/source` (a checkout at that path anchors the home to `~/.ava`), then
+   at `~/.meiva/source` (a checkout at that path anchors the home to `~/.meiva`), then
    `uv sync --frozen`. A full start also needs `redis@8.2`, `pgbouncer`, `pgvector` and Node
    22 (design).
 2. **Identity.** With the same code the start path uses,
@@ -404,7 +404,7 @@ Steps 1 to 4 prepare a signed, loaded helper; the experiment ran them by hand (k
 
    ```
    security set-key-partition-list -S apple-tool:,apple: -s \
-     -l 'Ava Permissions Helper Code Signing' -k <account password> <login keychain>
+     -l 'Meiva Permissions Helper Code Signing' -k <account password> <login keychain>
    ```
 
    The key's access control lives in the keychain file, so a clone signs without a dialog:
@@ -416,7 +416,7 @@ Steps 1 to 4 prepare a signed, loaded helper; the experiment ran them by hand (k
    both booleans false.
 
 No cluster is started in the golden image, so it carries no cluster state; the helper
-artifact under `~/.ava/helper` and its LaunchAgent stay in it (route R1 below).
+artifact under `~/.meiva/helper` and its LaunchAgent stay in it (route R1 below).
 
 ### First grant (user present, once)
 
@@ -425,7 +425,7 @@ artifact under `~/.ava/helper` and its LaunchAgent stay in it (route R1 below).
    `services/desktop/permissions_helper/helper/main.swift`), so both entries already exist and need
    only a toggle.
 2. System Settings > Privacy & Security > Screen & System Audio Recording: turn on
-   AvaPermissionsHelper. Accessibility: turn on AvaPermissionsHelper. Authenticate with the
+   MeivaPermissionsHelper. Accessibility: turn on MeivaPermissionsHelper. Authenticate with the
    account password.
 3. **Restart the helper after the toggles.** Either choose "Quit & Reopen" when macOS offers
    it (never "Later"), or run `launchctl kickstart -k gui/<uid>/<label>` in the guest. macOS
@@ -435,7 +435,7 @@ artifact under `~/.ava/helper` and its LaunchAgent stay in it (route R1 below).
    child it spawns already worked. `ax_trusted` flipped to true in the same process about a
    minute after its first false reading. After the restart both were true.
 4. Verify, in the golden image, before anything is cloned: `ping` reports both booleans
-   true; the two rows for `com.ava.permissions-helper` in the system `TCC.db` have
+   true; the two rows for `com.meiva.permissions-helper` in the system `TCC.db` have
    `auth_value` 2 and a code requirement that embeds the identity's SHA-1; a real capture
    through the helper is not a uniform image. Record the identity's SHA-1, the designated
    requirement (`codesign -d -r-`) and the rows.
@@ -446,7 +446,7 @@ artifact under `~/.ava/helper` and its LaunchAgent stay in it (route R1 below).
 Grant routes: (1) click once in the golden image, then clone (taken; it works, see
 Experiment B); (2) on the SIP-off `base`, write the rows into `TCC.db` with a code
 requirement compiled from the helper's designated requirement (the Cirrus script does this
-for other clients; Ava's own notes call direct writes unverified on macOS 26; the user
+for other clients; Meiva's own notes call direct writes unverified on macOS 26; the user
 database moves into a per-user container in macOS 27); (3) MDM cannot grant Screen
 Recording, only deny it or let a standard user approve
 ([PPPC overview](https://www.iru.com/blog/archive/changes-to-pppc-in-macos-big-sur)).
@@ -460,7 +460,7 @@ seconds in the experiment). The LaunchAgent loads at login and the helper answer
 with both booleans true about a minute after boot, while the guest is still busy starting.
 The login keychain needs no unlock in the boots tried (auto-login opens it); keep
 `security show-keychain-info` as a guard and unlock only if it fails. Clone the commit from
-the shared directory into `~/.ava/source` (local disk, not the virtio-fs share), sync
+the shared directory into `~/.meiva/source` (local disk, not the virtio-fs share), sync
 dependencies, start, observe, copy evidence out, stop and delete the clone. Observation
 runs in the guest; a host browser pointed at a forwarded guest port has the same
 port-number problem as in Recipe A. The container's observer is the guest's: one file
@@ -487,12 +487,12 @@ nothing:
   lifecycle protocol flags the start admits the helper by. Readable headless.
 - **The tree**: the helper's root keeper reports a running root for this home, the root's
   own status agrees on its pid, and every unit's chain of parents ends
-  `unit -> ava-root -> helper -> launchd`, with the units exactly the verification profile's
+  `unit -> meiva-root -> helper -> launchd`, with the units exactly the verification profile's
   services.
 - **TCC rows**, read-only: `sqlite3 -readonly` on the system database
   (`/Library/Application Support/com.apple.TCC/TCC.db`), compared with the two allowed
   values; the helper's designated requirement and CDHash are recorded beside them. The
-  Screen Recording and Accessibility rows for `com.ava.permissions-helper` live there, not
+  Screen Recording and Accessibility rows for `com.meiva.permissions-helper` live there, not
   in the user database. `auth_value` 2 is allowed, 0 is denied; the helper writes the denied
   rows itself at its first start, and its csreq embeds the identity's SHA-1. Never write
   these rows to make a check pass.
@@ -534,13 +534,13 @@ the project commits no run, so this is what the run established, not a log):
   the scripted agent's recorded output body was `3`) and the macOS-only `helper_chain`. In
   that check the helper answered `ping` with both grants true, the system TCC rows for both
   services were `auth_value` 2, its designated requirement and CDHash were those the golden
-  image's own verification records (same identity SHA-1, same CDHash), and every process chain ended `unit -> ava-root -> AvaPermissionsHelper -> launchd`
+  image's own verification records (same identity SHA-1, same CDHash), and every process chain ended `unit -> meiva-root -> MeivaPermissionsHelper -> launchd`
   for the gateway, frontend, agent-host and ops. The helper in those chains had been running
   since 14 seconds after the guest's boot (its process age against `launchd`'s in the
-  snapshot): `ava start` ran its converge step (build, sign, load) and left it in place.
+  snapshot): `meiva start` ran its converge step (build, sign, load) and left it in place.
 - **No manual step.** Nothing in the run waited for a click, an unlock or an answer. The
   guest was headless, so a consent dialog could not have been seen, but none blocked a step.
-  This is the claim "a clone of a granted image carries `ava start` on macOS" holding end
+  This is the claim "a clone of a granted image carries `meiva start` on macOS" holding end
   to end, beyond the helper's `ping` that Experiment B measured.
 - **Time**, 21 minutes in all:
 
@@ -550,8 +550,8 @@ the project commits no run, so this is what the run established, not a log):
   | keychain guard, `prepare-source` | 1, 15 |
   | `toolchain` | 743 |
   | `uv sync --locked` | 4 |
-  | uploads, `ava init` | 2 |
-  | `ava start` (first start: data plane, frontend dependencies and build) | 472 |
+  | uploads, `meiva init` | 2 |
+  | `meiva start` (first start: data plane, frontend dependencies and build) | 472 |
   | `observe`, `snapshot`, evidence copy and teardown | 5, 1, a few |
 
 - **The `toolchain` step is what makes a run slow, and it is a golden-image matter.** The
@@ -621,7 +621,7 @@ Two parts of `tart_golden.py` ran for real; the part between them did not.
 | Computer capability (capture, click, type) | grants, GUI session | no | yes |
 | Headed Chrome and browser profile | macOS Chrome, GUI session | no | yes |
 | macOS data plane (vendored PG, brew Redis and PgBouncer, SysV shm limits) | mac binaries | Linux-only pgvector smoke | yes |
-| `ava start` end to end on macOS | helper refuses ad-hoc, no direct-spawn fallback | not possible without a test hook | the only place besides a real Mac |
+| `meiva start` end to end on macOS | helper refuses ad-hoc, no direct-spawn fallback | not possible without a test hook | the only place besides a real Mac |
 | LaunchAgent jobs (health probe, logs, packages, boot) | launchd | no | yes |
 
 Nothing above moves to the hosted runner without weakening the no-ad-hoc, no-fallback rule
@@ -630,7 +630,7 @@ in the helper, so they stay on the VM.
 ## Not yet known
 
 Tart. Items 1 to 3 are answered by Experiment B and stay here so the numbers used above
-keep their meaning; the Recipe C run answers the question Experiment B left (`ava start` in a
+keep their meaning; the Recipe C run answers the question Experiment B left (`meiva start` in a
 guest) and adds items 6 to 9:
 
 1. **Answered: a clone of a granted image keeps the signing identity and both grants.** The
@@ -654,7 +654,7 @@ guest) and adds items 6 to 9:
    26 behavior not checked).
 5. Whether Linux guests count toward the two-VM kernel quota, and whether the Linux
    container runtime's VM does. (Two macOS guests at once is known to work.)
-6. **Answered: `ava start` runs end to end in a cloned, headless guest** and the observer's
+6. **Answered: `meiva start` runs end to end in a cloned, headless guest** and the observer's
    seven checks pass, with no manual step (Recipe C, "Run results").
 7. A golden image built from the base image by `tart_golden.py`, to its end and with a person
    present: the build has run to the dependency sync and, against a granted image, from the
@@ -682,18 +682,18 @@ Container:
 Answered unknowns 1 to 3 and decided that the Tart recipe is clone-per-run, not
 click-per-run. It ran in parallel with Recipe A. The protocol, as run:
 
-1. Clone `macos-tahoe-base` (by digest) to `ava-golden`; 4 CPUs, 8 GB.
-2. In the golden image: check out the commit at `~/.ava/source`, create the identity, set the
+1. Clone `macos-tahoe-base` (by digest) to `meiva-golden`; 4 CPUs, 8 GB.
+2. In the golden image: check out the commit at `~/.meiva/source`, create the identity, set the
    key's partition list, build and load the helper, and (user present) grant Screen Recording
    and Accessibility by hand, then restart the helper ("Golden image" and "First grant").
    Record: identity SHA-1; `codesign -d -r-` output; TCC rows for
-   `com.ava.permissions-helper` (user and system databases, including the code requirement
+   `com.meiva.permissions-helper` (user and system databases, including the code requirement
    blob); helper `ping` fields `preflight_screen` and `ax_trusted`; a real capture that is not
    uniform. Shut the golden image down.
 3. A clone taken **before** the grants is the negative control (taken while the golden image
    was stopped, never booted before the grants). After the grants, two more clones: R1 keeps
    the helper artifact in its home. R2 is booted once, then its helper job is retired
-   (`launchctl bootout`, plist deleted), `~/.ava` (source included) is deleted, the same
+   (`launchctl bootout`, plist deleted), `~/.meiva` (source included) is deleted, the same
    commit is cloned again, and `lifecycle.converge()` rebuilds the helper.
 4. Boot each one at a time, with graphics so a capture is possible, and repeat the recording.
    The login keychain was checked and unlocked first.
@@ -705,7 +705,7 @@ click-per-run. It ran in parallel with Recipe A. The protocol, as run:
 ### Results (known)
 
 Every guest, control included, carried one identity and one designated requirement
-(`identifier "com.ava.permissions-helper" and certificate leaf = H"<the identity's SHA-1>"`),
+(`identifier "com.meiva.permissions-helper" and certificate leaf = H"<the identity's SHA-1>"`),
 and one CDHash (read directly in the golden image, in R2 after its rebuild and in the
 concurrent run; the other guests carry the byte-identical helper file).
 
@@ -744,7 +744,7 @@ What the run showed:
   booleans true about a minute after boot; `converge()` 39 seconds for the first build in
   the golden image (identity already present) and 5.5 seconds for R2's rebuild.
 
-Not exercised by the experiment: a rebuild that changes the CDHash; `ava start` (services,
+Not exercised by the experiment: a rebuild that changes the CDHash; `meiva start` (services,
 data plane, root) inside a guest (the Recipe C run covers it); a capture from a headless guest
 with the grants held (no display); `--vnc`; the golden image drifting over days (unknown 4);
 Linux guests against the two-VM quota.

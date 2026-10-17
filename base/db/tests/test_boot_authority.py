@@ -24,21 +24,21 @@ def test_boot_authority_result_reaches_the_database_handle(
     home.mkdir()
     seed_write_generation(home)
     (home / ".env").write_text(
-        "AVA_MACHINE_SERVE_GATEWAY=true\n"
-        "AVA_DB_URL=postgresql://ava@127.0.0.1:6433/ava\n"
-        "AVA_REDIS_URL=redis://127.0.0.1:1/0\n",
+        "MEIVA_MACHINE_SERVE_GATEWAY=true\n"
+        "MEIVA_DB_URL=postgresql://meiva@127.0.0.1:6433/meiva\n"
+        "MEIVA_REDIS_URL=redis://127.0.0.1:1/0\n",
         encoding="utf-8",
     )
     intent = home / "start-intent.json"
     intent.write_text(json.dumps({"home": str(home), "checkout": str(tmp_path / "foreign")}))
     intent.chmod(0o600)
-    env = {key: value for key, value in os.environ.items() if not key.startswith("AVA_")}
+    env = {key: value for key, value in os.environ.items() if not key.startswith("MEIVA_")}
     env.pop("VIRTUAL_ENV", None)
-    env["AVA_HOME"] = str(home)
+    env["MEIVA_HOME"] = str(home)
     if mode == "eager":
-        env["AVA_CONFIG_BOOT"] = "eager"
+        env["MEIVA_CONFIG_BOOT"] = "eager"
     if mode == "skip":
-        env["AVA_CONFIG_FETCH"] = "skip"
+        env["MEIVA_CONFIG_FETCH"] = "skip"
     proc = subprocess.run(  # noqa: S603 — this test owns its isolated home and argv
         [sys.executable, "-B", str(_CHILD)],
         check=False,

@@ -10,20 +10,20 @@ from pathlib import Path
 import pytest
 
 from base.packages.extensions import install_registry as reg
-from base.paths.home import resolve_ava_home
+from base.paths.home import resolve_meiva_home
 
 
 @pytest.fixture(autouse=True)
 def _hermetic(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     """Isolated home, OS-job gate off (suite default)."""
-    home = tmp_path / ".ava"
+    home = tmp_path / ".meiva"
     (home / "skills").mkdir(parents=True)
     (home / "logs").mkdir()
-    monkeypatch.setenv("AVA_HOME", str(home))
+    monkeypatch.setenv("MEIVA_HOME", str(home))
 
 
 def _home() -> Path:
-    return resolve_ava_home()
+    return resolve_meiva_home()
 
 
 def _git(cwd: Path, *args: str, check: bool = True) -> str:
@@ -46,13 +46,15 @@ def _git(cwd: Path, *args: str, check: bool = True) -> str:
 def _write_skill(
     repo: Path, name: str, body: str, manifest: dict[str, object] | None = None
 ) -> None:
-    d = repo / "ava_builtins" / "skills" / name
+    d = repo / "meiva_builtins" / "skills" / name
     d.mkdir(parents=True, exist_ok=True)
     (d / "SKILL.md").write_text(
         f"---\nname: {name}\ndescription: d\n---\n\n{body}", encoding="utf-8"
     )
     if manifest is not None:
-        (d / "ava-plugin.json").write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
+        (d / "meiva-plugin.json").write_text(
+            json.dumps(manifest, indent=2) + "\n", encoding="utf-8"
+        )
 
 
 def _head(repo: Path) -> str:
@@ -105,7 +107,7 @@ def test_loadable_names_respect_the_host_contract(
         d.mkdir(parents=True)
         (d / "SKILL.md").write_text(f"---\nname: {name}\ndescription: d\n---\n", encoding="utf-8")
         if manifest is not None:
-            (d / "ava-plugin.json").write_text(json.dumps(manifest), encoding="utf-8")
+            (d / "meiva-plugin.json").write_text(json.dumps(manifest), encoding="utf-8")
         reg.register(reg.InstalledPackage(name=name, type="skill", enabled=True))
 
     head = _head(core_repo)
@@ -121,7 +123,7 @@ def test_loadable_names_respect_the_host_contract(
     skill("ok", _manifest_for("ok", requires_commit=head))
     skill("future", _manifest_for("future", requires_commit="d" * 40))
     skill("side", _manifest_for("side", requires_commit=side))
-    skill("too_new", _manifest_for("too_new", engines={"ava": ">=2099"}))
+    skill("too_new", _manifest_for("too_new", engines={"meiva": ">=2099"}))
 
     import base.paths as paths_mod
 

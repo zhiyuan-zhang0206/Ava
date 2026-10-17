@@ -15,12 +15,12 @@ exports = ["support.py"]
 "test_verify.py" = ["support.py"]
 
 [debt.env-patch]
-"support.py#monkeypatch.setenv os.environ.AVA_HOME" = 1
-"test_runner.py#monkeypatch.setenv os.environ.AVA_API_TOKEN" = 1
-"test_runner.py#monkeypatch.setenv os.environ.AVA_TEST_ONLY_SECRET" = 1
+"support.py#monkeypatch.setenv os.environ.MEIVA_HOME" = 1
+"test_runner.py#monkeypatch.setenv os.environ.MEIVA_API_TOKEN" = 1
+"test_runner.py#monkeypatch.setenv os.environ.MEIVA_TEST_ONLY_SECRET" = 1
 "test_runner.py#monkeypatch.setenv os.environ.OSS_ACCESS_KEY_SECRET" = 1
-"test_walg_config_boot_owner.py#monkeypatch.delenv os.environ.AVA_PROCESS_PROFILE" = 1
-"test_walg_config_boot_owner.py#monkeypatch.setenv os.environ.AVA_PROCESS_PROFILE" = 1
+"test_walg_config_boot_owner.py#monkeypatch.delenv os.environ.MEIVA_PROCESS_PROFILE" = 1
+"test_walg_config_boot_owner.py#monkeypatch.setenv os.environ.MEIVA_PROCESS_PROFILE" = 1
 "test_walg_config_boot_owner.py#patch.dict os.environ" = 1
 
 [debt.first-party-patch]

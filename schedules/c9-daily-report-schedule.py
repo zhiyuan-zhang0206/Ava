@@ -26,8 +26,8 @@ from functools import partial
 from typing import Any
 from zoneinfo import ZoneInfo
 
-import ava
-from ava.agents import AgentStatus as S
+import meiva
+from meiva.agents import AgentStatus as S
 from schedules.agent_status_guard import ensure_agent_status_members
 from base.host.system.hostport import Host
 from base.native_process.loaded_commit import LoadedCommit
@@ -39,8 +39,8 @@ from base.telemetry.process_logging import init_gateway_process
 
 
 CRON = "0 5 * * *"
-_REPORT_AGENT_ENV = "AVA_CI_USAGE_REPORT_AGENT"
-_REPORT_LABEL = "Ava \u8d1f\u8d23\u4eba"
+_REPORT_AGENT_ENV = "MEIVA_CI_USAGE_REPORT_AGENT"
+_REPORT_LABEL = "Meiva \u8d1f\u8d23\u4eba"
 _PROCESS_NAME = "schedule-c9-daily"
 
 # GitHub-hosted overage rates (private-repo equivalent; scripts/ci/pull_requests/accounting.py).
@@ -59,7 +59,7 @@ def _report_failure(detail: str) -> None:
         "`scripts/ci/pull_requests/accounting.py --since ... --until ... --append-ledger`."
     )
     try:
-        ava.agents.send_message(_report_agent(), message)
+        meiva.agents.send_message(_report_agent(), message)
     except Exception as exc:
         print(f"c9-daily-report could not notify the P0 lead: {exc}")
         raise
@@ -180,7 +180,7 @@ if __name__ == "__main__":
         {"IDLING", "RUNNING", "TERMINATED"},
         schedule_name="c9-daily-report",
     )
-    entry_inputs = globals().get("AVA_SCHEDULE_INPUTS")
+    entry_inputs = globals().get("MEIVA_SCHEDULE_INPUTS")
     if entry_inputs is None:
         from base.log import prepare_process_logging
 

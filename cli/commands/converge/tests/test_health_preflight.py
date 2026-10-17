@@ -1,8 +1,8 @@
 """Health preflight — the start-time data-plane + checkout self-check (#607).
 
-`ava start` / `ava converge` probe the data plane (pg/redis, the URLs the runtime
+`meiva start` / `meiva converge` probe the data plane (pg/redis, the URLs the runtime
 dials) and the checkout (dirty marker). Warning-only, logged to
-`$AVA_HOME/logs/health_preflight.log`, never failing a start.
+`$MEIVA_HOME/logs/health_preflight.log`, never failing a start.
 """
 
 import subprocess
@@ -26,7 +26,7 @@ from cli.database.tests.command_inputs import command_runtime as command_runtime
 from tests.path_scoped.cli_tests import operator_database as operator_database
 from tests.path_scoped.cli_tests import operator_pipeline as operator_pipeline
 
-_PG_URL = "postgresql://ava:sek@127.0.0.1:5433/ava"
+_PG_URL = "postgresql://meiva:sek@127.0.0.1:5433/meiva"
 _REDIS_URL = "redis://:sek@127.0.0.1:6380/0"
 
 
@@ -43,7 +43,7 @@ def _preflight_ctx(
     config.set_field("redis_url", _REDIS_URL)
     return ConvergeCtx(
         repo=tmp_path / "repo",
-        ava_home=tmp_path / "home",
+        meiva_home=tmp_path / "home",
         roles=roles,
         config=config,
         database_factory=operator_database,
@@ -98,7 +98,7 @@ def test_health_preflight_warns_and_logs(
     command_runtime: CommandRuntime,
 ):
     """A data-plane / checkout finding → the start CONTINUES (rc-free step) but
-    prints the warning and appends it to $AVA_HOME/logs/health_preflight.log."""
+    prints the warning and appends it to $MEIVA_HOME/logs/health_preflight.log."""
     ctx = _preflight_ctx(
         tmp_path,
         operator_database=operator_database,
@@ -306,7 +306,7 @@ def test_preflight_keeps_reading_its_owners_live_urls(
         command_runtime=command_runtime,
     )
     assert _hp.data_plane_warnings(ctx) == []
-    changed_pg = "postgresql://ava:changed@127.0.0.1:5434/other"
+    changed_pg = "postgresql://meiva:changed@127.0.0.1:5434/other"
     changed_redis = "redis://:changed@127.0.0.1:6381/1"
     ctx.config.set_field("db_url", changed_pg)
     ctx.config.set_field("redis_url", changed_redis)
@@ -387,7 +387,7 @@ def _git_repo(
     head = _commit("two")
     ctx = ConvergeCtx(
         repo=repo,
-        ava_home=tmp_path / "home",
+        meiva_home=tmp_path / "home",
         roles=frozenset({"gateway"}),
         config=command_runtime.config,
         database_factory=operator_database,
@@ -458,7 +458,7 @@ def test_checkout_worktree_skipped(
     wt.mkdir(parents=True)
     ctx = ConvergeCtx(
         repo=wt,
-        ava_home=tmp_path / "home",
+        meiva_home=tmp_path / "home",
         roles=frozenset({"gateway"}),
         config=command_runtime.config,
         database_factory=operator_database,

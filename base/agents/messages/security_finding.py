@@ -1,6 +1,6 @@
-"""One prompt-injection scan finding — the value `ava.security` raises and the agent host delivers.
+"""One prompt-injection scan finding — the value `meiva.security` raises and the agent host delivers.
 
-A leaf in `base/` so the SDK (`ava.security`, which writes findings into the exec turn's state
+A leaf in `base/` so the SDK (`meiva.security`, which writes findings into the exec turn's state
 update) and the agent (`BaseAgentState.security_findings`, which carries them through the
 checkpoint, and the claim node, which raises its own) share one class. It is a checkpoint channel
 value, so it is named in `base/agents/history/checkpoint_serde.py`.

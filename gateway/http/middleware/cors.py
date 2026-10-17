@@ -14,7 +14,7 @@ def _frontend_port(frontend_healthcheck_url: str) -> int:
         return 80
     if parsed.scheme == "https":
         return 443
-    raise ValueError("AVA_FRONTEND_HEALTHCHECK_URL must include a port")
+    raise ValueError("MEIVA_FRONTEND_HEALTHCHECK_URL must include a port")
 
 
 def _scheme_default_port(scheme: str) -> int:
@@ -39,7 +39,7 @@ def _origin_forms(scheme: str, hostname: str, port: int) -> list[str]:
 def _app_origins(port: int | None) -> list[str]:
     """Loopback origins of this cluster's own reserved Next.js app port.
 
-    `AVA_APP_PORT` is the `app` slot start reserved in this home's registry
+    `MEIVA_APP_PORT` is the `app` slot start reserved in this home's registry
     record and wrote to its `.env` — the port the frontend service binds, so
     no caller predicts it. Next.js binds 127.0.0.1 only: a browser on this host
     reaches it as `127.0.0.1` or `localhost`; `[::1]` and every non-loopback
@@ -89,7 +89,7 @@ def cors_allowed_origins(
 
     parsed_gateway = urlsplit(gateway_url)
     if not parsed_gateway.scheme or parsed_gateway.hostname is None:
-        raise ValueError("AVA_GATEWAY_URL must be an absolute URL")
+        raise ValueError("MEIVA_GATEWAY_URL must be an absolute URL")
     hostname = parsed_gateway.hostname
     gateway_scheme = parsed_gateway.scheme
     gateway_port = (

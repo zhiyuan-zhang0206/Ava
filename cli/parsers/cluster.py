@@ -1,4 +1,4 @@
-"""`ava cluster` — whole-cluster verbs: argparse builder + its `_h_*` handlers.
+"""`meiva cluster` — whole-cluster verbs: argparse builder + its `_h_*` handlers.
 
 Every verb here operates on the cluster as a whole (roster, recovery, health
 probes, home lifecycle) rather than a single host — the
@@ -95,7 +95,7 @@ def _add_db_authority_parser(
     )
     issue_unit_p.add_argument("--machine", required=True, help="the unit's machine name")
     issue_unit_p.add_argument(
-        "--home", required=True, help="the unit's absolute $AVA_HOME path on its machine"
+        "--home", required=True, help="the unit's absolute $MEIVA_HOME path on its machine"
     )
     issue_unit_p.add_argument(
         "--out", required=True, help="bundle path to create (refused when it exists)"
@@ -112,15 +112,15 @@ def _add_db_authority_parser(
         "install-unit",
         help="on an initialized agent-runner unit: install a capability bundle `issue-unit` "
         "sealed for it (a fresh expiry, a rotated telemetry token); the transport key comes "
-        "from AVA_DB_CAPABILITY_KEY and the bundle file is deleted once installed. Stop the "
-        "unit first and `ava start` it after",
+        "from MEIVA_DB_CAPABILITY_KEY and the bundle file is deleted once installed. Stop the "
+        "unit first and `meiva start` it after",
     )
     install_unit_p.add_argument("bundle", metavar="BUNDLE", help="path of the sealed bundle file")
     install_unit_p.set_defaults(func=_h_cluster_db_authority_install_unit)
 
 
 def add_cluster_parser(sub: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
-    # `ava cluster status` — list machines table + per-agent-runner status_probe op
+    # `meiva cluster status` — list machines table + per-agent-runner status_probe op
     cluster_p = sub.add_parser(
         "cluster",
         help="[cluster] cluster subcommands — every verb here operates on the whole cluster",
@@ -136,7 +136,7 @@ def add_cluster_parser(sub: argparse._SubParsersAction[argparse.ArgumentParser])
         (
             "mark-staging",
             "[cluster] mark a machine as staging — registered + roster-visible, "
-            "excluded from agent-runner fan-outs and probes. Operator-set; never touched by ava start",
+            "excluded from agent-runner fan-outs and probes. Operator-set; never touched by meiva start",
         ),
         (
             "unmark-staging",
@@ -155,14 +155,14 @@ def add_cluster_parser(sub: argparse._SubParsersAction[argparse.ArgumentParser])
             "[cluster] temporarily pull a machine out of the cluster: drain its tasks "
             "(reassign in_progress to #405 with a note), terminate its agents, then "
             "hide it from roster/probe/fan-out/spawn (no offline signal). Registration "
-            "kept for `ava cluster resume`",
+            "kept for `meiva cluster resume`",
             True,
         ),
         (
             "resume",
             "[cluster] restore a paused machine as a normal cluster member (clears the "
             "pause latch; probing/roster/fan-out/spawn resume immediately). Prints the "
-            "machine-side checklist (re-`ava start`, pg_hba if the reachable address changed)",
+            "machine-side checklist (re-`meiva start`, pg_hba if the reachable address changed)",
             False,
         ),
     ):
@@ -192,14 +192,14 @@ def add_cluster_parser(sub: argparse._SubParsersAction[argparse.ArgumentParser])
     )
     cluster_destroy_p.set_defaults(func=_h_cluster_destroy)
 
-    # --- `ava cluster health-probe` ---
+    # --- `meiva cluster health-probe` ---
     cluster_health_probe_p = cluster_sub.add_parser(
         "health-probe",
         help="[cluster] assess cluster health (exit 0=healthy, 1=unhealthy); designed as a cron job payload",
     )
     # task #4092 cli-default inventory: monitoring contract — this verb is a
     # cron payload invoked bare; its defaults (the schema check on; the agent floor
-    # from AVA_HEALTH_PROBE_AGENT_MIN) are what "healthy" means out of the box.
+    # from MEIVA_HEALTH_PROBE_AGENT_MIN) are what "healthy" means out of the box.
     cluster_health_probe_p.add_argument(
         "--no-schema-check",
         action="store_false",
@@ -209,14 +209,14 @@ def add_cluster_parser(sub: argparse._SubParsersAction[argparse.ArgumentParser])
     )
     cluster_health_probe_p.set_defaults(func=_h_cluster_health_probe)
 
-    # --- `ava cluster health-probe-register` ---
+    # --- `meiva cluster health-probe-register` ---
     cluster_health_probe_register_p = cluster_sub.add_parser(
         "health-probe-register",
         help="register the OS-scheduled health probe (launchd on macOS, crontab on Linux)",
     )
     cluster_health_probe_register_p.set_defaults(func=_h_cluster_health_probe_register)
 
-    # --- `ava cluster health-probe-unregister` ---
+    # --- `meiva cluster health-probe-unregister` ---
     cluster_health_probe_unregister_p = cluster_sub.add_parser(
         "health-probe-unregister",
         help="remove the OS-scheduled health probe",

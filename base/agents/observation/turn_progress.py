@@ -9,11 +9,11 @@ step — at in-process monotonic granularity, so the hosted daemon can ask "has
 this turn done anything in the last N seconds?" without touching the DB.
 
 The agent host builds one `TurnProgress` and holds it: it hands it to the turns it runs
-(`AvaContext.turn_progress`, where the graph's writers mark activity) and to its own readers.
+(`MeivaContext.turn_progress`, where the graph's writers mark activity) and to its own readers.
 Two consumers read the clock:
 
 - the host's stall guard aborts a ``graph.ainvoke`` whose turn clock has been silent for
-  ``AVA_HOST_TURN_NO_PROGRESS_TIMEOUT_SECONDS`` (the turn-level timeout: a turn that keeps
+  ``MEIVA_HOST_TURN_NO_PROGRESS_TIMEOUT_SECONDS`` (the turn-level timeout: a turn that keeps
   stepping may legitimately run for days, a turn that stops stepping is the failure this clock
   exists to bound);
 - the host daemon snapshots active turns onto its existing 15-second Redis heartbeat, so the

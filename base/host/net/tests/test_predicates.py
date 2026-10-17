@@ -27,7 +27,7 @@ def test_non_loopback_hosts(host: str) -> None:
 
 def test_predicates_import_without_config() -> None:
     """predicates must not pull base.config (which builds Settings at import and
-    fails on a fresh host) — a first `ava start` imports it before any settings."""
+    fails on a fresh host) — a first `meiva start` imports it before any settings."""
     import ast
 
     src = Path(__file__).resolve().parents[4] / "base" / "host" / "net" / "predicates.py"

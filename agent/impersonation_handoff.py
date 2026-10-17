@@ -17,9 +17,9 @@ from base.native_process.runtime_incarnation import RuntimeIncarnation
 
 _IMPERSONATION_EXPLANATION = (
     "Impersonation means a trusted external executor temporarily takes over your "
-    "work. You are paused while it acts under your Ava agent identity. It receives "
+    "work. You are paused while it acts under your Meiva agent identity. It receives "
     "incoming messages, can use your tools, and can send replies to the user as "
-    "you; those replies appear to the user as coming from you, an Ava agent. "
+    "you; those replies appear to the user as coming from you, an Meiva agent. "
     "When the takeover ends, you resume with a summary of its work when supplied "
     "and a path to the session record. Review the handoff and continue any "
     "unfinished requests."
@@ -29,8 +29,8 @@ _IMPERSONATION_EXPLANATION = (
 async def flush_checkpoint(checkpointer: object, agent_id: int) -> None:
     """Flush the optional buffered saver without probing dynamic attributes."""
     attributes = getattr(checkpointer, "__dict__", {})
-    if "_ava_nstep_flush" in attributes:
-        flush = cast(Callable[[str], Awaitable[None]], attributes["_ava_nstep_flush"])
+    if "_meiva_nstep_flush" in attributes:
+        flush = cast(Callable[[str], Awaitable[None]], attributes["_meiva_nstep_flush"])
         await flush(str(agent_id))
 
 
@@ -72,7 +72,7 @@ def start_marker(session: dict[str, Any], *, notes: HandoffNotes) -> HumanMessag
         notes=notes,
     )
     note.id = f"impersonation-start:{session['agent_id']}:{session['session_id']}"
-    note.additional_kwargs["ava_impersonation"] = metadata(session).model_dump()
+    note.additional_kwargs["meiva_impersonation"] = metadata(session).model_dump()
     return note
 
 

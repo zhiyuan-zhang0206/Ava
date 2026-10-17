@@ -12,7 +12,6 @@ import psycopg
 import pytest
 from psycopg_pool import AsyncConnectionPool
 
-from ava.tests.fixtures.pin_agent import exec_context
 from base.agents.incarnation.resources import (
     IncarnationResources,
     decode_resources,
@@ -20,6 +19,7 @@ from base.agents.incarnation.resources import (
 from base.agents.incarnation.tests.test_resources import force_incarnation
 from base.db import Database
 from base.native_process.runtime_incarnation import RuntimeIncarnation
+from meiva.tests.fixtures.pin_agent import exec_context
 
 
 @pytest.fixture(autouse=True)

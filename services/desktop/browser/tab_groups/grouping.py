@@ -5,7 +5,7 @@ of its domains mentions groups), so grouping goes through a small extension
 shipped in ``extension/``. The browser-mcp daemon loads it with
 ``Extensions.loadUnpacked`` -- available on the ordinary
 ``--remote-debugging-port`` connection, no launch flag -- and calls the
-``avaGroup(targetId, title)`` function its service worker exposes.
+``meivaGroup(targetId, title)`` function its service worker exposes.
 
 Three facts shape the design:
 
@@ -18,7 +18,7 @@ Three facts shape the design:
   restarted, worker idled out, or an older worker file is still running). It
   must not reload a live worker: the reload tears the worker down, and a
   call that attached to the dying target never gets its reply (measured).
-  After attaching it waits for the worker script to have defined ``avaGroup``
+  After attaching it waits for the worker script to have defined ``meivaGroup``
   (the target can be attachable first). Nothing is remembered between calls,
   so daemon restarts need no repair.
 - **Page ids are not target ids.** The daemon's page ids are chrome-devtools-mcp
@@ -82,13 +82,13 @@ _WORKER_POLL_S = 0.1
 
 
 def group_title(agent_id: int) -> str:
-    """The tab group title of an agent: ``Ava #<id>``.
+    """The tab group title of an agent: ``Meiva #<id>``.
 
     The title is the group's identity (the worker finds a group by title), so it
     names the agent by id -- labels can repeat, ids cannot. It carries no TTL and
     no color; Chrome picks the color.
     """
-    return f"Ava #{agent_id}"
+    return f"Meiva #{agent_id}"
 
 
 class _NoUniqueNewPageError(RuntimeError):
@@ -147,10 +147,10 @@ async def _worker_session(ws: Any, ids: Any) -> str:
 
 
 async def _await_worker_script(ws: Any, ids: Any, session_id: str) -> None:
-    """Wait until the worker's script has defined ``avaGroup``.
+    """Wait until the worker's script has defined ``meivaGroup``.
 
     The worker's CDP target can be attachable a moment before its script has
-    run (measured on first load: ``avaGroup is not defined``).
+    run (measured on first load: ``meivaGroup is not defined``).
     """
     loop = asyncio.get_running_loop()
     deadline = loop.time() + WORKER_WAIT_S
@@ -160,13 +160,13 @@ async def _await_worker_script(ws: Any, ids: Any, session_id: str) -> None:
             ws,
             ids,
             "Runtime.evaluate",
-            {"expression": "typeof avaGroup", "returnByValue": True},
+            {"expression": "typeof meivaGroup", "returnByValue": True},
             session_id=session_id,
         )
         if probe["result"].get("value") == "function":
             return
         if loop.time() >= deadline:
-            raise RuntimeError("extension worker did not define avaGroup")
+            raise RuntimeError("extension worker did not define meivaGroup")
         await asyncio.sleep(_WORKER_POLL_S)
 
 
@@ -277,7 +277,7 @@ class AgentTabGroups:
                 ids,
                 "Runtime.evaluate",
                 {
-                    "expression": f"avaGroup({json.dumps(target_id)}, {json.dumps(title)})",
+                    "expression": f"meivaGroup({json.dumps(target_id)}, {json.dumps(title)})",
                     "awaitPromise": True,
                     "returnByValue": True,
                 },

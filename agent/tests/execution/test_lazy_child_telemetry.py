@@ -21,21 +21,21 @@ from typing import Any, cast
 
 _REPO_ROOT = Path(__file__).resolve().parents[3]
 
-# Mirror `test_lazy_lm_import._CLEAN_ENV_STRIP` — with AVA_AGENT_ID forwarded,
-# `import ava` self-loads plugin namespaces (`agent_identity.is_launched_child`); the
+# Mirror `test_lazy_lm_import._CLEAN_ENV_STRIP` — with MEIVA_AGENT_ID forwarded,
+# `import meiva` self-loads plugin namespaces (`agent_identity.is_launched_child`); the
 # probe must model the producer path, not the launcher's environment.
 _CLEAN_ENV_STRIP = frozenset(
     {
-        "AVA_AGENT_ID",
-        "AVA_PROCESS_PROFILE",
-        "AVA_EXEC_REQUEST_FILE",
-        "AVA_EXEC_RESULT_FILE",
-        "AVA_EXEC_TIMEOUT_S",
-        "AVA_TURN_ID",
-        "AVA_SESSION_ID",
-        "AVA_LOG_DIR",
-        "AVA_AGENT_LABEL",
-        "AVA_AGENT_DIR",
+        "MEIVA_AGENT_ID",
+        "MEIVA_PROCESS_PROFILE",
+        "MEIVA_EXEC_REQUEST_FILE",
+        "MEIVA_EXEC_RESULT_FILE",
+        "MEIVA_EXEC_TIMEOUT_S",
+        "MEIVA_TURN_ID",
+        "MEIVA_SESSION_ID",
+        "MEIVA_LOG_DIR",
+        "MEIVA_AGENT_LABEL",
+        "MEIVA_AGENT_DIR",
     }
 )
 

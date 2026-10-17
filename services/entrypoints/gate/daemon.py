@@ -49,7 +49,7 @@ from base.cluster.dataplane.direct_url import ClusterDirectUrl
 from base.cluster.machine.boot import machine_from_boot
 from base.config import ConfigBoot, settings
 from base.log import logger
-from base.paths import ava_home
+from base.paths import meiva_home
 
 _log = logging.getLogger("services.entrypoints.gate")
 
@@ -290,7 +290,7 @@ class Handler(BaseHTTPRequestHandler):
         self._maybe_close_connection()
 
     def _handle(self) -> None:
-        if urlsplit(self.path).path == "/__ava/healthz":
+        if urlsplit(self.path).path == "/__meiva/healthz":
             self._serve_health()
             return
         cookie = self.headers.get("Cookie") or ""
@@ -310,7 +310,7 @@ class Handler(BaseHTTPRequestHandler):
             self.send_header("Content-Length", "0")
             self.end_headers()
             return
-        body = json.dumps({"name": "gate", "home": str(ava_home()), "pid": os.getpid()}).encode()
+        body = json.dumps({"name": "gate", "home": str(meiva_home()), "pid": os.getpid()}).encode()
         self.send_response(200)
         self.send_header("Content-Type", "application/json")
         self.send_header("Cache-Control", "no-store")
@@ -349,8 +349,8 @@ def gateway_base(*, local_host: Callable[[], str]) -> str:
 
     The host must be one the user's browser can dial: the login page posts the
     cluster secret to this origin, and a remote browser resolving `127.0.0.1`
-    would hit itself. The supplied owner host (`AVA_MACHINE_HOST`, else `localhost`) is the
-    same operator-declared address `ava.ui.show` hands the user for direct page URLs
+    would hit itself. The supplied owner host (`MEIVA_MACHINE_HOST`, else `localhost`) is the
+    same operator-declared address `meiva.ui.show` hands the user for direct page URLs
     and the bootstrap rewrites loopback data-plane URLs to; a single box falls back to
     `localhost` unchanged. The server-side auth probe follows the same base —
     on a gateway host the gateway binds all interfaces, so dialing the host's
@@ -421,7 +421,7 @@ def main() -> None:
             machine.host, gateway_url_reader=lambda: config.view.gateway.gateway_url
         ),
     )
-    pipeline = build_pipeline(database=database, machine=machine, home=ava_home().resolve())
+    pipeline = build_pipeline(database=database, machine=machine, home=meiva_home().resolve())
     primary: BaseException | None = None
     try:
         init_gateway_process(

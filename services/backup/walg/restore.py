@@ -1,6 +1,6 @@
 """Restore a WAL-G backup into an empty directory and recover it with a scratch Postgres.
 
-One code path for two uses: the operator's `ava backup walg restore` (disaster
+One code path for two uses: the operator's `meiva backup walg restore` (disaster
 recovery) and the weekly recovery drill (`drill.py`).
 
 1. `wal-g backup-fetch <dir> <backup>` into an empty directory. An increment is
@@ -9,7 +9,7 @@ recovery) and the weekly recovery drill (`drill.py`).
 2. `recovery.signal`, then a scratch postmaster on that directory whose settings are
    all launch arguments, none written to the directory:
    - `archive_mode=off`: a recovering instance must never archive into the live
-     chain. The backup carries no archive setting (Ava's are launch arguments of the
+     chain. The backup carries no archive setting (Meiva's are launch arguments of the
      source, see `archive.py`), but a source that once wrote one into
      `postgresql.auto.conf` would bring it back, so it is overridden explicitly;
    - `restore_command` is `wal-g wal-fetch %f %p`, `recovery_target_*` is the
@@ -50,7 +50,7 @@ from base.cluster.dataplane.pg_foreground import start_foreground_postgres, stop
 from base.cluster.dataplane.pg_tools import pg_shm_args, pg_start_env, pg_tool, pg_tz_args
 from base.db import connect_url
 from base.native_process.child_env import daemon_process_env
-from base.paths import ava_home
+from base.paths import meiva_home
 from services.backup.walg.archive import postgres_command
 from services.backup.walg.runner import WalgCommandError, run_walg
 
@@ -146,7 +146,7 @@ def _log_tail(log: Path) -> str:
 
 
 def _prepare_directory(directory: Path) -> None:
-    live = ava_home() / "pg"
+    live = meiva_home() / "pg"
     if directory.is_relative_to(live) or live.is_relative_to(directory):
         raise RestoreError(f"{directory} is or contains this home's live data directory {live}")
     if directory.exists() and (not directory.is_dir() or any(directory.iterdir())):
@@ -295,7 +295,7 @@ def restored_instance(
     report(f"fetched in {time.monotonic() - started:.0f}s; recovering to {target.describe()}")
 
     # Short and private: a socket path is capped at 103 bytes, which a deep scratch path exceeds.
-    socket_dir = Path(tempfile.mkdtemp(prefix="ava-walg-restore-", dir="/tmp"))
+    socket_dir = Path(tempfile.mkdtemp(prefix="meiva-walg-restore-", dir="/tmp"))
     log = socket_dir / "postgres.log"
     instance = RestoredInstance(directory, socket_dir, _free_port(), user or getpass.getuser())
     process: subprocess.Popen[bytes] | None = None

@@ -7,7 +7,7 @@ profile (test_gateway_consumer_guard). The watchdog resolves it by dotted string
 runner closure never contains it.
 
 The GATEWAY's probe of a REMOTE observatory station (WP4, task #1946;
-docs/conventions/data/reachability-and-credentials.md). When `AVA_OBSERVABILITY_URL`
+docs/conventions/data/reachability-and-credentials.md). When `MEIVA_OBSERVABILITY_URL`
 is empty the check is a no-op: the observatory is local and the `lgtm`
 healthcheck keeps the native stack alive. When it is set, the gateway dials
 the station through the reachability contract — the address the station
@@ -44,7 +44,7 @@ from base.db.code_version_gate import ProcessDbGate
 from base.log import logger
 from base.native_process.code_version import CodeVersion
 from base.native_process.loaded_commit import LoadedCommit
-from base.paths import ava_home
+from base.paths import meiva_home
 from base.telemetry.pipeline_build import build_pipeline
 from base.telemetry.process_logging import init_gateway_process
 from base.telemetry.station_endpoint import StationTarget as _StationTarget
@@ -55,12 +55,12 @@ _log = logging.getLogger("services.wake.heartbeat.station_probe")
 # One OTLP round-trip budget. The station is a private-network peer; 5s
 # covers a slow-but-healthy host while a genuinely offline host still
 # refuses fast (connect refused / blackhole), mirroring the status_probe
-# budget philosophy (AVA_STATUS_PROBE_TIMEOUT_SECONDS).
+# budget philosophy (MEIVA_STATUS_PROBE_TIMEOUT_SECONDS).
 _PROBE_TIMEOUT_S = 5.0
 
 
 def _configured_observability_base() -> str:
-    """The validated AVA_OBSERVABILITY_URL base, or "" when unset/malformed.
+    """The validated MEIVA_OBSERVABILITY_URL base, or "" when unset/malformed.
 
     The same validation the collector fan-out uses
     (base.telemetry.station_endpoint) — the two consumer paths can never
@@ -73,7 +73,7 @@ def resolve_target(*, database: Callable[[], Database]) -> _StationTarget | None
     """The station's dial target from the reachability contract.
 
     The advertised machine_units url when a station unit has registered;
-    otherwise the configured AVA_OBSERVABILITY_URL base + OTLP port (with a
+    otherwise the configured MEIVA_OBSERVABILITY_URL base + OTLP port (with a
     loud warning — the operator configured a remote observatory but no
     station unit has advertised itself). None when no remote observatory is
     configured at all.
@@ -91,7 +91,7 @@ def resolve_target(*, database: Callable[[], Database]) -> _StationTarget | None
     if target.advertised:
         return target
     logger.bind(_no_emitter=True, component="station-healthcheck").warning(
-        "station probe: AVA_OBSERVABILITY_URL is set but no observability-station "
+        "station probe: MEIVA_OBSERVABILITY_URL is set but no observability-station "
         "unit advertises the OTLP ingress in machine_units (a pure station's "
         "unit_dial_url; a hybrid gateway+station unit advertises its gateway URL "
         "and is not a probe target) — probing the configured base until the "
@@ -108,9 +108,9 @@ def _station_answers(url: str) -> bool:
     capability), read from the private file the gateway home's start publishes: this process
     never holds the human secret it is derived from."""
     from base.host.db_authority.api import read_telemetry_token
-    from base.paths import ava_home
+    from base.paths import meiva_home
 
-    token = read_telemetry_token(ava_home())
+    token = read_telemetry_token(meiva_home())
     if token is None:
         # A remote observatory with no published telemetry token (an open cluster, or a
         # start that has not run yet) cannot authenticate a probe (and the collector relay
@@ -157,7 +157,7 @@ def main() -> None:
     machine_config = ConfigBoot()
     machine_config.boot()
     machine = machine_from_boot(machine_config)
-    process_home = ava_home().resolve()
+    process_home = meiva_home().resolve()
     version = CodeVersion(image)
     gate = ProcessDbGate(version=version.get, process="station")
 

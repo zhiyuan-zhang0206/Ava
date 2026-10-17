@@ -8,7 +8,7 @@ from psycopg_pool import PoolTimeout
 import gateway.app as gateway_app
 from base.cluster.machine import MachineIdentity
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
-from base.paths import ava_home
+from base.paths import meiva_home
 from gateway.cluster.process_boot import LOADED_IMAGE
 from tests.fixtures.gateway_config import gateway_test_client
 
@@ -31,7 +31,7 @@ def test_health_payload_carries_the_full_identity_set(*, machine_identity: Machi
     assert payload == {
         "status": "ok",
         "name": "gateway",
-        "home": str(ava_home()),
+        "home": str(meiva_home()),
         "machine": machine_identity.name(),
         "liveness": "ok",
         "readiness": "ok",
@@ -73,7 +73,7 @@ def test_health_control_pool_timeout_returns_degraded_with_identity(
     assert payload == {
         "status": "degraded",
         "name": "gateway",
-        "home": str(ava_home()),
+        "home": str(meiva_home()),
         "machine": machine_identity.name(),
         "liveness": "ok",
         "readiness": "degraded",

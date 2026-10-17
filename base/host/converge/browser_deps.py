@@ -22,7 +22,7 @@ def node_install_command(*, host: Host) -> str:
 def browser_deps_notice(reason: str) -> str:
     """Return the informational display-less-host outcome for operator output."""
     return (
-        f"ava-browser is not applicable on this host: {reason} — a headed browser cannot run "
+        f"meiva-browser is not applicable on this host: {reason} — a headed browser cannot run "
         "here; nothing to install. The service stays skipped by design."
     )
 
@@ -36,20 +36,20 @@ def browser_deps_warning(reason: str, *, host: Host) -> str:
         )
     elif reason.startswith("no Chrome"):
         repair = (
-            "| Install Google Chrome (after the first start, AVA_CHROME_BINARY|\n"
+            "| Install Google Chrome (after the first start, MEIVA_CHROME_BINARY|\n"
             "| can point at an existing binary).                              |\n"
         )
     else:
         repair = (
             "| A headed browser cannot run without a display; nothing to      |\n"
-            "| install for ava-browser on this host.                          |\n"
+            "| install for meiva-browser on this host.                          |\n"
         )
     return (
         "+----------------------------------------------------------------+\n"
-        "| WARNING: ava-browser dependencies are incomplete               |\n"
+        "| WARNING: meiva-browser dependencies are incomplete               |\n"
         "+----------------------------------------------------------------+\n"
         f"| Reason: {reason}\n"
-        "| ava-browser will not run on this host until this is fixed.     |\n"
+        "| meiva-browser will not run on this host until this is fixed.     |\n"
         "+----------------------------------------------------------------+\n"
         f"{repair}"
         "| Display, Chrome, and npx are all required; the first missing  |\n"

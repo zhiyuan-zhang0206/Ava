@@ -8,7 +8,7 @@ the replacement repeatedly failed to bind.
 Startup and the watchdog now use one shared listener verdict over both the
 OTLP receiver (:4318) and the collector health port (:8888). A holder is
 reclaimed only when its resolved executable exactly matches this unit's
-collector binary and it is absent from the live `ava-otel-collector` session
+collector binary and it is absent from the live `meiva-otel-collector` session
 record. A different executable or a holder belonging to the live record remains
 a terminal port conflict.
 

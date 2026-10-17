@@ -41,7 +41,7 @@ def dotenv_boot_mode_is_not_honored() -> None:
 
     import base.config as c
 
-    emit("DOTENV", c.boot_state()["mode"], os.environ.get("AVA_CONFIG_BOOT"))
+    emit("DOTENV", c.boot_state()["mode"], os.environ.get("MEIVA_CONFIG_BOOT"))
 
 
 def present(value: object) -> bool:
@@ -105,7 +105,7 @@ def lite_reads_see_environment_changes_live() -> None:
     import base.config as c
 
     first = c.settings.lm.llm_model
-    os.environ["AVA_MODEL"] = "changed-later"
+    os.environ["MEIVA_MODEL"] = "changed-later"
     second = c.settings.lm.llm_model
     emit("LIVE", first, second, c.boot_state()["upgrades"])
 
@@ -433,7 +433,7 @@ def current_facade_resolves_after_upgrade() -> None:
     import base.config as c
 
     lite_served = [
-        "load_ava_env",
+        "load_meiva_env",
         "config_source_is_local",
         "should_fetch_from_gateway",
         "CONFIG_FETCH_ENV",

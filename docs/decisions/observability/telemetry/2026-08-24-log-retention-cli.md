@@ -12,7 +12,7 @@ retention.
 
 ## Decision
 
-Local deletion is owned only by `ava logs retention`, intended as a daily
+Local deletion is owned only by `meiva logs retention`, intended as a daily
 per-machine OS job. The command uses a conservative 14-day default until the
 separate rotation direction permits alignment with Loki's seven-day window.
 It admits only agent-main stdout, named PTY transcript/host files, and the

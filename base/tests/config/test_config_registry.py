@@ -34,7 +34,7 @@ def test_retired_runner_selector_is_not_configurable(authority: ConfigAuthority)
 
     assert "runner_mode" not in FIELD_INFOS
     assert all(
-        meta.env_var != "AVA_RUNNER_MODE" for meta in get_config_metadata(authority=authority)
+        meta.env_var != "MEIVA_RUNNER_MODE" for meta in get_config_metadata(authority=authority)
     )
     assert "restarter_poll_interval_seconds" not in FIELD_INFOS
 
@@ -47,7 +47,7 @@ def test_skill_match_fields_are_unregistered() -> None:
     surface (Inspector Configuration Overlay) and per-agent overlay
     acceptance. Regression guard: the four keys must stay unregistered —
     a resurrected field would surface in the config UI again and be accepted
-    in `ava.self.restart(config_overlay=...)`.
+    in `meiva.self.restart(config_overlay=...)`.
     """
     from base.config import FIELD_INFOS
 
@@ -115,7 +115,7 @@ def test_capability_assignment_is_pinned_for_load_bearing_fields(
         "llm_model": "common",  # cluster-wide spawn default — read by the gateway
         # (spawn pre-select / default-model endpoint) AND frozen into agents at
         # spawn; moved from agent-runner on 2026-08-06 so it survives the
-        # gateway profile pop (P0: AVA_MODEL popped broke spawn defaults).
+        # gateway profile pop (P0: MEIVA_MODEL popped broke spawn defaults).
         "exec_timeout_seconds": "agent-runner",
         "ops_concurrency": "agent-runner",  # services domain (default gateway) override
         "host_max_concurrent_turns": "agent-runner",  # daemon domain (default gateway) override
@@ -163,7 +163,7 @@ def test_identity_fields_are_read_only() -> None:
 
 def test_host_identity_fields_are_read_only() -> None:
     """Host identity / connection / infra fields are not panel-writable — they're set
-    by the first `ava start`, not the runtime config panel. (The config
+    by the first `meiva start`, not the runtime config panel. (The config
     write path enforces this too; the metadata must agree so the UI shows read-only.)"""
     from base.config import FIELD_INFOS
 
@@ -222,10 +222,10 @@ def test_bootstrap_distributes_a_behavior_knob(
     """A non-default agent-behavior knob is now distributed to agent-runners."""
     from base import config as cfg
 
-    authority.env_path.write_text(f"AVA_DB_URL={cfg.settings.data_plane.db_url}\n")
+    authority.env_path.write_text(f"MEIVA_DB_URL={cfg.settings.data_plane.db_url}\n")
     monkeypatch.setattr(cfg.settings.sandbox, "exec_timeout_seconds", 123.0)
     values = authority.bootstrap_config_values(provider_key_envs=(), plugin_cluster_config="")
-    assert values["AVA_EXEC_TIMEOUT_SECONDS"] == "123.0"
+    assert values["MEIVA_EXEC_TIMEOUT_SECONDS"] == "123.0"
 
 
 def test_cluster_default_iff_per_agent() -> None:

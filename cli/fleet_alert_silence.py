@@ -30,7 +30,7 @@ import urllib.request
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
-CREATED_BY = "ava-fleet-update"
+CREATED_BY = "meiva-fleet-update"
 SILENCES = "/api/alertmanager/grafana/api/v2/silences"
 _SILENCE = "/api/alertmanager/grafana/api/v2/silence"
 # Every alert but a full disk: the disk fills the same during an update, so the host filesystem rules

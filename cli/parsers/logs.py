@@ -1,4 +1,4 @@
-"""`ava logs` local log-maintenance parser."""
+"""`meiva logs` local log-maintenance parser."""
 
 from __future__ import annotations
 
@@ -77,8 +77,8 @@ def add_logs_parser(sub: argparse._SubParsersAction[argparse.ArgumentParser]) ->
         "retention",
         help="delete expired service and native log archives",
         description=(
-            "Delete expired managed files from the top level of $AVA_HOME/logs, "
-            "$AVA_HOME/lgtm/native/logs, and the nested computer-use snapshot "
+            "Delete expired managed files from the top level of $MEIVA_HOME/logs, "
+            "$MEIVA_HOME/lgtm/native/logs, and the nested computer-use snapshot "
             "dir while preserving active open files."
         ),
     )
@@ -89,7 +89,7 @@ def add_logs_parser(sub: argparse._SubParsersAction[argparse.ArgumentParser]) ->
         default=None,
         metavar="DAYS",
         help=(
-            "positive age threshold in days (default: AVA_LOG_RETENTION_DAYS, otherwise 14 days)"
+            "positive age threshold in days (default: MEIVA_LOG_RETENTION_DAYS, otherwise 14 days)"
         ),
     )
     age_mode.add_argument(
@@ -101,7 +101,7 @@ def add_logs_parser(sub: argparse._SubParsersAction[argparse.ArgumentParser]) ->
             "comma-separated retention overrides; mutually exclusive with --older-than. "
             "Tier defaults: agent=15, shell=7, gateway=30, ops=30, watchdog=30, "
             "snapshot=7, other=3 days (the no-flag fallback remains "
-            "AVA_LOG_RETENTION_DAYS, otherwise 14 days)"
+            "MEIVA_LOG_RETENTION_DAYS, otherwise 14 days)"
         ),
     )
     retention_p.add_argument(
@@ -138,6 +138,6 @@ def add_logs_parser(sub: argparse._SubParsersAction[argparse.ArgumentParser]) ->
         type=Path,
         default=None,
         metavar="PATH",
-        help="service log directory (default: $AVA_HOME/logs)",
+        help="service log directory (default: $MEIVA_HOME/logs)",
     )
     rotate_p.set_defaults(func=_h_logs_rotate)

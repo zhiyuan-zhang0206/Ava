@@ -1016,7 +1016,7 @@ describe("compact crossed unseen (SSE-gap heal)", () => {
   // Production shape (base/agents/history/timeline.py `_compact_item`): the envelope's
   // inbound_id is hardcoded null and message_timestamps prefixes the payload
   // with a render-time ts — so the identity must be item_id + kind +
-  // created_at (the render-stable ava_created_at), never payload/inbound_id.
+  // created_at (the render-stable meiva_created_at), never payload/inbound_id.
   const ENVELOPE_CREATED = "2026-08-30T04:00:00.123456+00:00";
   const envelope = (overrides: Partial<BackendTimelineItem> = {}): BackendTimelineItem =>
     item({

@@ -15,11 +15,11 @@ exports = ["capture"]
 "tracing" = ["otlp", "test_tracing.py"]
 
 [debt.env-patch]
-"test_observability.py#monkeypatch.delitem os.environ.AVA_TELEMETRY_OTLP_ENDPOINT" = 3
-"test_observability.py#monkeypatch.setitem os.environ.AVA_TELEMETRY_OTLP_ENDPOINT" = 1
-"test_telemetry_otlp_gate.py#monkeypatch.delitem os.environ.AVA_TELEMETRY_OTLP_ENDPOINT" = 3
-"test_telemetry_otlp_gate.py#monkeypatch.setitem os.environ.AVA_TELEMETRY_OTLP_ENDPOINT" = 2
-"test_tracing.py#monkeypatch.delitem os.environ.AVA_TELEMETRY_OTLP_ENDPOINT" = 2
+"test_observability.py#monkeypatch.delitem os.environ.MEIVA_TELEMETRY_OTLP_ENDPOINT" = 3
+"test_observability.py#monkeypatch.setitem os.environ.MEIVA_TELEMETRY_OTLP_ENDPOINT" = 1
+"test_telemetry_otlp_gate.py#monkeypatch.delitem os.environ.MEIVA_TELEMETRY_OTLP_ENDPOINT" = 3
+"test_telemetry_otlp_gate.py#monkeypatch.setitem os.environ.MEIVA_TELEMETRY_OTLP_ENDPOINT" = 2
+"test_tracing.py#monkeypatch.delitem os.environ.MEIVA_TELEMETRY_OTLP_ENDPOINT" = 2
 "test_tracing.py#monkeypatch.setenv os.environ.TRACELOOP_TRACE_CONTENT" = 1
 "test_tracing_lifecycle.py#monkeypatch.setenv os.environ.TRACELOOP_TRACE_CONTENT" = 1
 

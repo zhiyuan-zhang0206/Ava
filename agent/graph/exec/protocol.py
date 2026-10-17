@@ -8,7 +8,7 @@ logs it shares the home with):
 
 - request `<uuid>.json`: the code, the agent id (the attribution key the quarantine tooling in
   `base/agents/incarnation/exec_request_evidence.py` reads), the description of the run's
-  `AvaContext` (identity; `AvaContext.describe`), the timeout, and the typed state snapshot.
+  `MeivaContext` (identity; `MeivaContext.describe`), the timeout, and the typed state snapshot.
 - result  `<uuid>.json`: the outcome kind, the state-update delta (plugin fields,
   security findings, attachment registrations), the run's SDK-call tally, and — for a crash —
   the child-formatted traceback text.
@@ -110,7 +110,9 @@ class RequestPayload:
     """
 
     code: str
-    context: dict[str, Any]  # the host's `AvaContext.describe()`; the child builds its own from it
+    context: dict[
+        str, Any
+    ]  # the host's `MeivaContext.describe()`; the child builds its own from it
     timeout_s: float
     state: dict[str, Any] | None  # typed-blob-decoded model dump (see materialize_state)
     incarnation: RuntimeIncarnation | None = None
@@ -139,7 +141,7 @@ class RequestPayload:
 class ResultPayload:
     """Decoded result envelope — what the child hands back.
 
-    `state_update` carries the raw `ava.state_update` delta (typed-blob
+    `state_update` carries the raw `meiva.state_update` delta (typed-blob
     decoded); `state_update_error` is set when the agent tampered with the
     slot (left it a non-dict) — the parent then raises the same TypeError the
     old in-process path raised. `sdk_calls` is the run's real SDK-call tally."""

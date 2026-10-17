@@ -32,7 +32,7 @@ By 2026-08 the axis had accumulated more machinery than content:
   spans (OpenLLMetry auto-instruments the LLM SDKs and LangChain/LangGraph;
   metadata-only since trace v2, with turn content resolved on demand from the
   checkpoints table by trace id), the unified event river in Loki, and the local
-  OTLP/JSON mirror under `$AVA_HOME/traces/`. A trace document copied a
+  OTLP/JSON mirror under `$MEIVA_HOME/traces/`. A trace document copied a
   snapshot of that and then began to rot; the original stayed current.
 
 What was actually missing was never a document. It was **know-how**: no single
@@ -42,19 +42,19 @@ which query dialect each one speaks.
 
 ## Decision
 
-1. **The axis is retired.** Four axes remain (`*.ava.okf.md` / `decisions/` /
+1. **The axis is retired.** Four axes remain (`*.meiva.okf.md` / `decisions/` /
    `future/` / `conventions/`), and nothing trace-shaped is committed to this
    repo. The `traces/` exemptions come out of `check_doc_references.py`,
    `lint_no_emoji.py`, and `shared/repo_change.py`'s doc-root set.
 2. **The know-how becomes a skill**: `.agents/skills/inspect-a-trace/` — one
    corpus serving both the repo-side developer and the runtime agent (converge
-   syncs `.agents/skills/` into the load directory, so `ava.help` reaches it).
+   syncs `.agents/skills/` into the load directory, so `meiva.help` reaches it).
    It documents, with runnable queries, the four surfaces and the two ids that
    join them: find the run (checkpoints SQL, including reading an agent's
    history across compaction segments), read the event stream (the
    `{service_name="unknown_service"} | json` LogQL dialect), read the spans
    (TraceQL plus the mirror), and hand the user a Grafana link. The
-   `ava-trace-toolchain` skill is folded into it rather than kept beside it —
+   `meiva-trace-toolchain` skill is folded into it rather than kept beside it —
    its three scripts are the fetch/read/render arm of the same job.
 3. **The self-evolution weekly loop references it** as the optional deep-dive
    when a finding needs evidence the dataset transcript cannot carry.

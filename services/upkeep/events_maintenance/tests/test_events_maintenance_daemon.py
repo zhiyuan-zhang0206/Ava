@@ -415,8 +415,8 @@ def test_deadline_settings_defaults_and_env_aliases() -> None:
 
     configured = DaemonSettings.model_validate(
         {
-            "AVA_EVENTS_MAINTENANCE_PASS_DEADLINE_S": "15.5",
-            "AVA_EVENTS_MAINTENANCE_RESOLUTION_DEADLINE_S": "35.5",
+            "MEIVA_EVENTS_MAINTENANCE_PASS_DEADLINE_S": "15.5",
+            "MEIVA_EVENTS_MAINTENANCE_RESOLUTION_DEADLINE_S": "35.5",
         }
     )
     assert configured.events_maintenance_pass_deadline_s == 15.5

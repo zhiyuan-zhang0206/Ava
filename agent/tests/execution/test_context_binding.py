@@ -9,7 +9,7 @@ from unittest.mock import patch
 
 import pytest
 
-import ava
+import meiva
 from agent.graph.exec.protocol import (
     ResultPayload,
     make_request_path,
@@ -17,16 +17,16 @@ from agent.graph.exec.protocol import (
     read_result,
     write_request,
 )
-from ava.boot import process_clients
-from base.agents.context import AvaContext
+from base.agents.context import MeivaContext
 from base.agents.context.identity import AgentIdentity
 from base.agents.sdk.tally import SdkCallTally
 from base.packages.plugin_providers import build_model_catalog
+from meiva.boot import process_clients
 
 
 @patch.dict(os.environ)
 def _start(tmp_path: Path, agent_id: int, code: str) -> tuple[subprocess.Popen[str], Path]:
-    context = AvaContext(
+    context = MeivaContext(
         identity=AgentIdentity(agent_id, True),
         catalog=build_model_catalog(),
         clients=process_clients(),
@@ -42,11 +42,11 @@ def _start(tmp_path: Path, agent_id: int, code: str) -> tuple[subprocess.Popen[s
         incarnation=None,
     )
     env = os.environ | {
-        "AVA_HOME": str(tmp_path / "home"),
-        "AVA_AGENT_ID": str(agent_id),
-        "AVA_PROCESS_PROFILE": "agent",
-        "AVA_EXEC_REQUEST_FILE": str(request),
-        "AVA_EXEC_RESULT_FILE": str(result),
+        "MEIVA_HOME": str(tmp_path / "home"),
+        "MEIVA_AGENT_ID": str(agent_id),
+        "MEIVA_PROCESS_PROFILE": "agent",
+        "MEIVA_EXEC_REQUEST_FILE": str(request),
+        "MEIVA_EXEC_RESULT_FILE": str(result),
     }
     return (
         subprocess.Popen(
@@ -72,16 +72,16 @@ def _finish(process: subprocess.Popen[str], result: Path) -> tuple[str, ResultPa
 
 
 def test_concurrent_children_bind_imports_threads_and_state_independently(tmp_path: Path) -> None:
-    original = getattr(ava, "context", None)
+    original = getattr(meiva, "context", None)
     first, first_result = _start(
         tmp_path / "one",
         101,
         "import json, os, time, threading\n"
-        "import ava\nfrom ava import context, state, state_update\n"
+        "import meiva\nfrom meiva import context, state, state_update\n"
         "from concurrent.futures import ThreadPoolExecutor\n"
         "with ThreadPoolExecutor(2) as pool:\n"
-        "    seen = list(pool.map(lambda _: [ava.context is context, ava.state is state, "
-        "ava.state_update is state_update, ava.self.AGENT_ID], range(4)))\n"
+        "    seen = list(pool.map(lambda _: [meiva.context is context, meiva.state is state, "
+        "meiva.state_update is state_update, meiva.self.AGENT_ID], range(4)))\n"
         "state_update['halted'] = True\n"
         "time.sleep(0.2)\n"
         "print(json.dumps([os.getpid(), seen, threading.Thread.start.__module__]))\n",
@@ -89,7 +89,7 @@ def test_concurrent_children_bind_imports_threads_and_state_independently(tmp_pa
     second, second_result = _start(
         tmp_path / "two",
         202,
-        "import ava, os\nprint(os.getpid(), ava.self.AGENT_ID, ava.state.halted)",
+        "import meiva, os\nprint(os.getpid(), meiva.self.AGENT_ID, meiva.state.halted)",
     )
     try:
         first_stdout, first_payload = _finish(first, first_result)
@@ -108,14 +108,14 @@ def test_concurrent_children_bind_imports_threads_and_state_independently(tmp_pa
     assert (second_id, second_halted) == ("202", "False")
     assert first_payload.state_update == {"halted": True}
     assert second_payload.state_update is None
-    assert getattr(ava, "context", None) is original
+    assert getattr(meiva, "context", None) is original
 
 
 @pytest.mark.parametrize(
     "failure", ["ValueError('original source')", "KeyboardInterrupt()", "TimeoutError()"]
 )
 def test_failure_preserves_legal_delta_and_original_traceback(tmp_path: Path, failure: str) -> None:
-    code = f"import ava\nava.state_update['halted'] = True\nraise {failure}\n"
+    code = f"import meiva\nmeiva.state_update['halted'] = True\nraise {failure}\n"
     process, result = _start(tmp_path, 303, code)
     stdout, payload = _finish(process, result)
     assert payload.state_update == {"halted": True}
@@ -134,12 +134,12 @@ def test_failure_preserves_legal_delta_and_original_traceback(tmp_path: Path, fa
 @patch.dict(os.environ)
 def test_execution_tally_stays_with_its_context_and_out_of_description() -> None:
     tally = SdkCallTally()
-    context = AvaContext(
+    context = MeivaContext(
         identity=AgentIdentity(41, True), clients=process_clients(), sdk_calls=tally
     )
     tally.add("files.read")
     assert set(context.describe()) == {"identity", "gateway_url"}
-    assert AvaContext().sdk_calls is None
+    assert MeivaContext().sdk_calls is None
     assert context.sdk_calls is tally
     assert tally.snapshot() == {"files.read": 1}
 
@@ -149,10 +149,10 @@ def test_child_sdk_tally_includes_plain_thread_calls(tmp_path: Path) -> None:
     sample = tmp_path / "thread-sample.txt"
     sample.write_text("hello", encoding="utf-8")
     code = f"""
-import ava
+import meiva
 from concurrent.futures import ThreadPoolExecutor
 with ThreadPoolExecutor(max_workers=4) as workers:
-    values = list(workers.map(lambda _: ava.files.read({str(sample)!r}), range(24)))
+    values = list(workers.map(lambda _: meiva.files.read({str(sample)!r}), range(24)))
 assert len(values) == 24
 """
     from agent.tests.execution.test_exec_child import spawn_real_child
@@ -166,13 +166,13 @@ assert len(values) == 24
 
 def test_controlled_child_plugin_faces_keep_its_context_writer(tmp_path: Path) -> None:
     code = """
-import ava
-from ava.sdk_surface.installation import installed
-context_writer = ava.context.clients.event_pipeline()
+import meiva
+from meiva.sdk_surface.installation import installed
+context_writer = meiva.context.clients.event_pipeline()
 surface = installed()
 assert surface is not None and surface.producer is not None
 assert surface.producer() is context_writer
-ava.ensure_plugins_loaded(surface=False)
+meiva.ensure_plugins_loaded(surface=False)
 faces = installed()
 assert faces is not None and faces.faces and faces.producer is not None
 assert faces.producer() is context_writer

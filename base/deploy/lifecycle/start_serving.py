@@ -1,4 +1,4 @@
-"""Generation-owned serving state for one ``ava start`` attempt.
+"""Generation-owned serving state for one ``meiva start`` attempt.
 
 Recovery cannot revive work until ordinary start proves the exact root and runtime
 are serving. Native IPC binds this receipt to the root that answered readiness.  A new
@@ -25,7 +25,7 @@ from base.host.verified_file import regular_bytes
 from base.native_process.evidence import Digest, EvidenceModel, ExpectedProcess
 from base.native_process.os_platform import file_lock
 from base.native_process.ownership import OwnedProcess
-from base.paths import ava_home, run_dir
+from base.paths import meiva_home, run_dir
 
 _log = logging.getLogger("base.deploy.lifecycle.start_serving")
 _STATE_FILENAME = "start-serving.json"
@@ -34,11 +34,11 @@ _LOCK_FILENAME = "start-serving.lock"
 
 def state_path() -> Path:
     """The per-unit serving state persisted across service processes."""
-    return run_dir(ava_home()) / _STATE_FILENAME
+    return run_dir(meiva_home()) / _STATE_FILENAME
 
 
 def _lock_path() -> Path:
-    return run_dir(ava_home()) / _LOCK_FILENAME
+    return run_dir(meiva_home()) / _LOCK_FILENAME
 
 
 class RootBirth(EvidenceModel):
@@ -91,8 +91,8 @@ def observe_root() -> RootBirth:
         native_identity,
     )
 
-    home = ava_home().resolve(strict=True)
-    response = RootClient(home / "run/ava-root/ava-root.sock", timeout=2).status()
+    home = meiva_home().resolve(strict=True)
+    response = RootClient(home / "run/meiva-root/meiva-root.sock", timeout=2).status()
     body = response.get("result")
     if response["ok"] is not True or not isinstance(body, dict):
         raise RootClientError("root did not provide its birth evidence")

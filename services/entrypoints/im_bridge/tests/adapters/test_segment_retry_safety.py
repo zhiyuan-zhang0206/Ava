@@ -15,7 +15,7 @@ from services.entrypoints.im_bridge.types import SendNotStartedError
 async def test_connect_failure_marker_cannot_escape_after_a_successful_prefix(
     channel: str, acknowledged: bool, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    monkeypatch.setenv("AVA_HOME", str(tmp_path))
+    monkeypatch.setenv("MEIVA_HOME", str(tmp_path))
     calls: list[httpx.Request] = []
 
     def handler(request: httpx.Request) -> httpx.Response:

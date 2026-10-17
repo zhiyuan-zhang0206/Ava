@@ -41,7 +41,7 @@ def test_session_filelog_receivers_are_disjoint_and_bound_discovery(
 
     sessions = cfg["receivers"]["filelog/sessions"]
     assert sessions == {
-        "include": ["/home/u/.ava/logs/ava-agent-*-shell-*.out.log"],
+        "include": ["/home/u/.meiva/logs/meiva-agent-*-shell-*.out.log"],
         "start_at": "end",
         "include_file_name": True,
         "include_file_path": False,
@@ -53,10 +53,10 @@ def test_session_filelog_receivers_are_disjoint_and_bound_discovery(
 
     services = cfg["receivers"]["filelog/services"]
     assert services == {
-        "include": ["/home/u/.ava/logs/*.out.log"],
+        "include": ["/home/u/.meiva/logs/*.out.log"],
         "exclude": [
-            "/home/u/.ava/logs/ava-agent-*.out.log",
-            "/home/u/.ava/logs/ava-otel-collector.out.log",
+            "/home/u/.meiva/logs/meiva-agent-*.out.log",
+            "/home/u/.meiva/logs/meiva-otel-collector.out.log",
         ],
         "start_at": "end",
         "include_file_name": True,
@@ -185,7 +185,7 @@ def test_remote_observatory_gateway_relays_to_station_single_ingress(
     *,
     command_runtime: CommandRuntime,
 ) -> None:
-    """A gateway consuming a remote observatory (AVA_OBSERVABILITY_URL set)
+    """A gateway consuming a remote observatory (MEIVA_OBSERVABILITY_URL set)
     relays every signal to the station's single bearer-authenticated OTLP
     ingress with the cluster bearer — it never dials the station's
     loopback-bound backends directly (WP4, task #1946)."""
@@ -237,7 +237,7 @@ def test_station_otlp_ingress_port_follows_single_source(
     command_runtime: CommandRuntime,
 ) -> None:
     """The station's advertised unit url (base.cluster.machines.unit_dial_url) and
-    its remote receiver bind the SAME port — AVA_TELEMETRY_OTLP_PORT is the
+    its remote receiver bind the SAME port — MEIVA_TELEMETRY_OTLP_PORT is the
     single knob for both (WP4, task #1946)."""
     monkeypatch.setattr(base_config.settings.observability, "telemetry_otlp_port", 4321)
     cfg = render_real_template(
@@ -526,7 +526,7 @@ def test_collector_self_metrics_are_scraped_for_queue_and_drop_visibility(
     scrape = cfg["receivers"]["prometheus/otelcol"]["config"]["scrape_configs"]
     assert scrape == [
         {
-            "job_name": "ava-otel-collector",
+            "job_name": "meiva-otel-collector",
             "scrape_interval": "30s",
             "static_configs": [{"targets": ["localhost:8888"]}],
         }

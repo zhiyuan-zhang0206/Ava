@@ -12,7 +12,7 @@ from psycopg_pool import AsyncConnectionPool
 from agent.graph.llm_errors import FatalProviderError
 from agent.state import AgentState, CircuitState
 from agent.turn.runloop import _handle_fatal_llm_error
-from base.agents.context import AvaContext
+from base.agents.context import MeivaContext
 from base.agents.tests.units import spawn_agent
 from base.cluster.machine import MachineIdentity
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
@@ -51,8 +51,8 @@ def overflow_state(breaker_reason: str | None = None) -> AgentState:
     )
 
 
-def breaker_ctx(*, database_gate: ProcessDbGate) -> AvaContext:
-    return AvaContext(
+def breaker_ctx(*, database_gate: ProcessDbGate) -> MeivaContext:
+    return MeivaContext(
         ops_pool=None,
         llm=MagicMock(),
         event_publisher=MagicMock(),
@@ -83,7 +83,7 @@ async def reject_turn(
 ) -> None:
     await _handle_fatal_llm_error(
         exc if exc is not None else permanent_rejection(),
-        AvaContext(
+        MeivaContext(
             ops_pool=aops_pool,
             llm=MagicMock(),
             event_publisher=cast(AgentEventPublisher, publisher),

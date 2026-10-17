@@ -335,7 +335,7 @@ class FeishuAdapter(IMAdapter):
         interval = self._config.feishu_poll_interval_seconds
         bootstrap = self._config.feishu_poll_chat_id.strip()
         if interval <= 0:
-            logger.info("FeishuAdapter: polling disabled (AVA_FEISHU_POLL_INTERVAL_SECONDS=0)")
+            logger.info("FeishuAdapter: polling disabled (MEIVA_FEISHU_POLL_INTERVAL_SECONDS=0)")
             return
         if bootstrap:
             self._poll_chats.add(bootstrap)
@@ -708,7 +708,7 @@ class FeishuAdapter(IMAdapter):
         card = {
             "config": {"wide_screen_mode": True},
             "header": {
-                "title": {"tag": "plain_text", "content": "Ava"},
+                "title": {"tag": "plain_text", "content": "Meiva"},
                 "template": "blue",
             },
             "elements": [

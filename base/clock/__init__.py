@@ -1,4 +1,4 @@
-# ava:ref base/clock/docs/clock.ava.okf.md#configuration-free-capabilities
+# meiva:ref base/clock/docs/clock.meiva.okf.md#configuration-free-capabilities
 from __future__ import annotations
 
 import asyncio

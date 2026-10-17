@@ -1,13 +1,13 @@
 """Settings-build config-source behavior, exercised in subprocesses.
 
-The config source is role-derived (AVA_CONFIG_SOURCE deleted 2026-08-01):
+The config source is role-derived (MEIVA_CONFIG_SOURCE deleted 2026-08-01):
 
-- gateway-capable unit (`AVA_MACHINE_SERVE_GATEWAY=true`) -> the local .env is
+- gateway-capable unit (`MEIVA_MACHINE_SERVE_GATEWAY=true`) -> the local .env is
   the source; no fetch.
-- pure agent-runner + no AVA_CONFIG_FETCH=skip -> the Settings import fetches
-  `GET /api/bootstrap` from AVA_GATEWAY_URL and the fetched values are
+- pure agent-runner + no MEIVA_CONFIG_FETCH=skip -> the Settings import fetches
+  `GET /api/bootstrap` from MEIVA_GATEWAY_URL and the fetched values are
   authoritative.
-- pure agent-runner + AVA_CONFIG_FETCH=skip (maintenance verbs, settings-lite)
+- pure agent-runner + MEIVA_CONFIG_FETCH=skip (maintenance verbs, settings-lite)
   -> no fetch; the required data-plane URLs fall back to never-dialed
   placeholders so Settings constructs with the gateway down.
 
@@ -42,15 +42,15 @@ def _base_env(home: Path) -> dict[str, str]:
         for k, v in os.environ.items()
         if k
         not in {
-            "AVA_CONFIG_FETCH",
-            "AVA_MACHINE_SERVE_GATEWAY",
-            "AVA_GATEWAY_URL",
-            "AVA_DB_URL",
-            "AVA_REDIS_URL",
-            "AVA_CLUSTER_SECRET",
+            "MEIVA_CONFIG_FETCH",
+            "MEIVA_MACHINE_SERVE_GATEWAY",
+            "MEIVA_GATEWAY_URL",
+            "MEIVA_DB_URL",
+            "MEIVA_REDIS_URL",
+            "MEIVA_CLUSTER_SECRET",
         }
     }
-    env["AVA_HOME"] = str(home)
+    env["MEIVA_HOME"] = str(home)
     return env
 
 
@@ -72,8 +72,8 @@ def test_lite_settings_build_plants_placeholders(tmp_path: Path) -> None:
     data-plane URLs being never-dialed placeholders (lite verbs never touch the
     data plane)."""
     env = _base_env(tmp_path)
-    env["AVA_CONFIG_FETCH"] = "skip"
-    env["AVA_MACHINE_SERVE_AGENT_RUNNER"] = "true"
+    env["MEIVA_CONFIG_FETCH"] = "skip"
+    env["MEIVA_MACHINE_SERVE_AGENT_RUNNER"] = "true"
     result = _import_settings(env, "data_plane_urls")
     assert result.returncode == 0, result.stderr
     lines = result.stdout.strip().splitlines()
@@ -84,10 +84,10 @@ def test_lite_settings_build_plants_placeholders(tmp_path: Path) -> None:
 def test_unenrolled_runner_constructs_locally(tmp_path: Path) -> None:
     """A not-yet-enrolled runner (agent-runner flag on, no gateway URL) must not
     blow up the Settings import — lint scripts and tools import base.config on
-    any machine. The fail-fast for an unenrolled `ava start` is the preflight
-    gate (AVA_GATEWAY_URL check), not the import."""
+    any machine. The fail-fast for an unenrolled `meiva start` is the preflight
+    gate (MEIVA_GATEWAY_URL check), not the import."""
     env = _base_env(tmp_path)
-    env["AVA_MACHINE_SERVE_AGENT_RUNNER"] = "true"
+    env["MEIVA_MACHINE_SERVE_AGENT_RUNNER"] = "true"
     result = _import_settings(env, "db_url")
     assert result.returncode == 0, result.stderr
     assert PLACEHOLDER_DB_URL in result.stdout
@@ -106,15 +106,15 @@ def test_leaked_machine_identity_flags_do_not_flip_config_source(
     tmp_path: Path,
 ) -> None:
     """Regression for #771: a host shell leaking prod's machine-identity env
-    (AVA_MACHINE_SERVE_GATEWAY=true, the runner flag, prod's data-plane URLs)
+    (MEIVA_MACHINE_SERVE_GATEWAY=true, the runner flag, prod's data-plane URLs)
     into a child process must not flip an isolated unit into 'gateway-capable'.
 
     Before the fix the leaked flag made `config_source_is_local()` True, so the
     settings-lite placeholders were skipped; the DERIVED drop then removed the
-    inherited AVA_DB_URL / AVA_REDIS_URL (the empty home's .env declares
+    inherited MEIVA_DB_URL / MEIVA_REDIS_URL (the empty home's .env declares
     nothing), and Settings failed with Field required — the local-only watcher
     test failures. Identity keys a unit's own .env does not declare are now
-    dropped at load_ava_env, so the child falls through to its own (absent)
+    dropped at load_meiva_env, so the child falls through to its own (absent)
     files, stays a bare checkout, and Settings constructs with the never-dialed
     placeholders."""
     env = {
@@ -122,19 +122,19 @@ def test_leaked_machine_identity_flags_do_not_flip_config_source(
         for k, v in os.environ.items()
         if k
         not in {
-            "AVA_CONFIG_FETCH",
-            "AVA_GATEWAY_URL",
-            "AVA_DB_URL",
-            "AVA_REDIS_URL",
-            "AVA_CLUSTER_SECRET",
+            "MEIVA_CONFIG_FETCH",
+            "MEIVA_GATEWAY_URL",
+            "MEIVA_DB_URL",
+            "MEIVA_REDIS_URL",
+            "MEIVA_CLUSTER_SECRET",
         }
     }
-    env["AVA_HOME"] = str(tmp_path)
+    env["MEIVA_HOME"] = str(tmp_path)
     # The leak: prod's identity + data-plane values riding in via the shell.
-    env["AVA_MACHINE_SERVE_GATEWAY"] = "true"
-    env["AVA_MACHINE_SERVE_AGENT_RUNNER"] = "true"
-    env["AVA_DB_URL"] = "postgresql://prod@db:5432/ava"
-    env["AVA_REDIS_URL"] = "redis://prod:6380/0"
+    env["MEIVA_MACHINE_SERVE_GATEWAY"] = "true"
+    env["MEIVA_MACHINE_SERVE_AGENT_RUNNER"] = "true"
+    env["MEIVA_DB_URL"] = "postgresql://prod@db:5432/meiva"
+    env["MEIVA_REDIS_URL"] = "redis://prod:6380/0"
     result = _import_settings(env, "db_url")
     assert result.returncode == 0, result.stderr
     assert PLACEHOLDER_DB_URL in result.stdout
@@ -146,18 +146,18 @@ def test_enrolled_runner_with_unreachable_gateway_fails_fast(tmp_path: Path) -> 
 
     The runner flag is DECLARED IN THE UNIT'S .env, as its first start writes it —
     a machine-identity key supplied by env alone is now dropped at
-    load_ava_env (#771), so an env-only flag no longer configures the fetch."""
+    load_meiva_env (#771), so an env-only flag no longer configures the fetch."""
     home = tmp_path / "home"
     home.mkdir()
     # A runner's bootstrap env: the role flag + gateway URL + a bearer.
     (home / ".env").write_text(
-        "AVA_MACHINE_SERVE_AGENT_RUNNER=true\n"
-        "AVA_GATEWAY_URL=http://127.0.0.1:1\n"  # nothing listens on port 1
-        "AVA_CLUSTER_SECRET=test-cluster-secret\n"
+        "MEIVA_MACHINE_SERVE_AGENT_RUNNER=true\n"
+        "MEIVA_GATEWAY_URL=http://127.0.0.1:1\n"  # nothing listens on port 1
+        "MEIVA_CLUSTER_SECRET=test-cluster-secret\n"
     )
     env = _base_env(home)
-    env["AVA_GATEWAY_URL"] = "http://127.0.0.1:1"
-    env["AVA_CLUSTER_SECRET"] = "test-cluster-secret"  # noqa: S105 — the suite's fixture value
+    env["MEIVA_GATEWAY_URL"] = "http://127.0.0.1:1"
+    env["MEIVA_CLUSTER_SECRET"] = "test-cluster-secret"  # noqa: S105 — the suite's fixture value
     result = _import_settings(env)
     assert result.returncode != 0
     assert "127.0.0.1:1" in result.stderr
@@ -169,16 +169,16 @@ def test_gateway_unit_never_fetches(tmp_path: Path) -> None:
     home = tmp_path / "home"
     home.mkdir()
     (home / ".env").write_text(
-        "AVA_MACHINE_SERVE_GATEWAY=true\n"
-        "AVA_MACHINE_SERVE_AGENT_RUNNER=true\n"
-        "AVA_DB_URL=postgresql://ava:s@127.0.0.1:5433/ava\n"
-        "AVA_REDIS_URL=redis://127.0.0.1:6380/0\n"
+        "MEIVA_MACHINE_SERVE_GATEWAY=true\n"
+        "MEIVA_MACHINE_SERVE_AGENT_RUNNER=true\n"
+        "MEIVA_DB_URL=postgresql://meiva:s@127.0.0.1:5433/meiva\n"
+        "MEIVA_REDIS_URL=redis://127.0.0.1:6380/0\n"
     )
     env = _base_env(home)
-    env["AVA_MACHINE_SERVE_GATEWAY"] = "true"
+    env["MEIVA_MACHINE_SERVE_GATEWAY"] = "true"
     result = _import_settings(env, "db_url")
     assert result.returncode == 0, result.stderr
-    assert "postgresql://ava:s@127.0.0.1:5433/ava" in result.stdout
+    assert "postgresql://meiva:s@127.0.0.1:5433/meiva" in result.stdout
 
 
 class _BootstrapHandler(BaseHTTPRequestHandler):
@@ -214,10 +214,10 @@ def test_pure_runner_settings_build_fetches_and_overrides(tmp_path: Path) -> Non
     handler = _BootstrapHandler
     handler.queries.clear()
     handler.payload = {
-        "AVA_DB_URL": "postgresql://ava_runner@db:5432/ava",
-        "AVA_REDIS_URL": "redis://db:6380/0",
+        "MEIVA_DB_URL": "postgresql://meiva_runner@db:5432/meiva",
+        "MEIVA_REDIS_URL": "redis://db:6380/0",
         "DEEPSEEK_API_KEY": "sk-fetched",
-        "AVA_EVENTS_CHANNEL": "ava:events",
+        "MEIVA_EVENTS_CHANNEL": "meiva:events",
     }
     server = HTTPServer(("127.0.0.1", 0), handler)
     thread = threading.Thread(target=server.serve_forever, daemon=True)
@@ -226,24 +226,24 @@ def test_pure_runner_settings_build_fetches_and_overrides(tmp_path: Path) -> Non
         port = server.server_address[1]
         home = tmp_path / "home"
         home.mkdir()
-        # Stale cluster facts left in the .env: the fetch must override them. (AVA_GATEWAY_URL is in derived_env_keys(),
+        # Stale cluster facts left in the .env: the fetch must override them. (MEIVA_GATEWAY_URL is in derived_env_keys(),
         # so `_enforce_cluster_env_authority` forces the file value over an
         # inherited env — write the real port into the file.)
         (home / ".env").write_text(
-            "AVA_MACHINE_SERVE_AGENT_RUNNER=true\n"
-            f"AVA_GATEWAY_URL=http://127.0.0.1:{port}\n"
-            "AVA_DB_URL=postgresql://stale@old:5432/ava\n"
+            "MEIVA_MACHINE_SERVE_AGENT_RUNNER=true\n"
+            f"MEIVA_GATEWAY_URL=http://127.0.0.1:{port}\n"
+            "MEIVA_DB_URL=postgresql://stale@old:5432/meiva\n"
         )
         env = _base_env(home)
-        env["AVA_MACHINE_SERVE_AGENT_RUNNER"] = "true"
-        env["AVA_GATEWAY_URL"] = f"http://127.0.0.1:{port}"
-        env["AVA_CLUSTER_SECRET"] = "test-cluster-secret"  # noqa: S105 — the suite's fixture value
+        env["MEIVA_MACHINE_SERVE_AGENT_RUNNER"] = "true"
+        env["MEIVA_GATEWAY_URL"] = f"http://127.0.0.1:{port}"
+        env["MEIVA_CLUSTER_SECRET"] = "test-cluster-secret"  # noqa: S105 — the suite's fixture value
         result = _import_settings(env, "db_url_events_channel")
         assert result.returncode == 0, result.stderr
         lines = result.stdout.strip().splitlines()
         # The fetched endpoint wins over the stale owner URL.
-        assert lines[0] == "postgresql://ava_runner@db:5432/ava", lines
-        assert lines[1] == "ava:events", lines
+        assert lines[0] == "postgresql://meiva_runner@db:5432/meiva", lines
+        assert lines[1] == "meiva:events", lines
         # The runner's Settings-build fetch requests no projection.
         assert handler.queries == [""], handler.queries
     finally:
@@ -257,10 +257,10 @@ def test_runner_daemon_boot_from_session_env_handoff(
     """The daemon-boot chain under the 2026-08-02 session-env policy, end to end:
 
     a watchdog/start process on a pure runner forwards its env through
-    `base.sessions.env_forwarding`'s session-env handoff (`forward_env_dict` for `ava start`
+    `base.sessions.env_forwarding`'s session-env handoff (`forward_env_dict` for `meiva start`
     children and the watchdog respawn) — host-scope keys only, cluster-scope
     keys (a stale frozen copy) dropped. The daemon then
-    boots from that env: load_ava_env, then the Settings-build fetch from the
+    boots from that env: load_meiva_env, then the Settings-build fetch from the
     gateway, whose values must be the ones it actually runs with.
 
     Simulated: spawner env carries a STALE cluster copy (db URL on an old
@@ -272,10 +272,10 @@ def test_runner_daemon_boot_from_session_env_handoff(
 
     handler = _BootstrapHandler
     handler.payload = {
-        "AVA_DB_URL": "postgresql://ava@db:5432/ava",
-        "AVA_REDIS_URL": "redis://db:6380/0",
+        "MEIVA_DB_URL": "postgresql://meiva@db:5432/meiva",
+        "MEIVA_REDIS_URL": "redis://db:6380/0",
         "DEEPSEEK_API_KEY": "sk-fetched",
-        "AVA_EVENTS_CHANNEL": "ava:events",
+        "MEIVA_EVENTS_CHANNEL": "meiva:events",
     }
     server = HTTPServer(("127.0.0.1", 0), handler)
     thread = threading.Thread(target=server.serve_forever, daemon=True)
@@ -287,34 +287,34 @@ def test_runner_daemon_boot_from_session_env_handoff(
         # A runner's bootstrap env: gateway URL + a bearer + the role flag
         # (the ONLY cluster facts a runner's .env holds since 2026-08-01).
         (home / ".env").write_text(
-            "AVA_MACHINE_SERVE_AGENT_RUNNER=true\n"
-            f"AVA_GATEWAY_URL=http://127.0.0.1:{port}\n"
-            "AVA_CLUSTER_SECRET=test-cluster-secret\n"
+            "MEIVA_MACHINE_SERVE_AGENT_RUNNER=true\n"
+            f"MEIVA_GATEWAY_URL=http://127.0.0.1:{port}\n"
+            "MEIVA_CLUSTER_SECRET=test-cluster-secret\n"
         )
         spawner_env = {
             # host-scope facts the spawner's own boot loaded — must ride through
-            "AVA_HOME": str(home),
-            "AVA_MACHINE_HOST": "10.0.0.9",
-            "AVA_GATEWAY_URL": f"http://127.0.0.1:{port}",
+            "MEIVA_HOME": str(home),
+            "MEIVA_MACHINE_HOST": "10.0.0.9",
+            "MEIVA_GATEWAY_URL": f"http://127.0.0.1:{port}",
             # a stale frozen cluster copy (rotated since the spawner froze it)
             # — must NOT ride through: the child re-fetches
-            "AVA_CLUSTER_SECRET": "test-cluster-secret",
-            "AVA_DB_URL": "postgresql://stale@old:5432/ava",
+            "MEIVA_CLUSTER_SECRET": "test-cluster-secret",
+            "MEIVA_DB_URL": "postgresql://stale@old:5432/meiva",
             "DEEPSEEK_API_KEY": "sk-stale",
-            "AVA_EVENTS_CHANNEL": "ava:stale-events",
+            "MEIVA_EVENTS_CHANNEL": "meiva:stale-events",
             "PATH": "/usr/bin:/bin",
         }
         monkeypatch.setattr(os, "environ", dict(spawner_env))
 
-        # `ava start`'s child env: host-scope kept, cluster-scope gone.
+        # `meiva start`'s child env: host-scope kept, cluster-scope gone.
         child = env_forwarding.forward_env_dict()
-        assert child["AVA_HOME"] == str(home)
-        assert child["AVA_MACHINE_HOST"] == "10.0.0.9"
-        assert child["AVA_GATEWAY_URL"] == f"http://127.0.0.1:{port}"
-        assert "AVA_DB_URL" not in child
-        assert "AVA_CLUSTER_SECRET" not in child
+        assert child["MEIVA_HOME"] == str(home)
+        assert child["MEIVA_MACHINE_HOST"] == "10.0.0.9"
+        assert child["MEIVA_GATEWAY_URL"] == f"http://127.0.0.1:{port}"
+        assert "MEIVA_DB_URL" not in child
+        assert "MEIVA_CLUSTER_SECRET" not in child
         assert "DEEPSEEK_API_KEY" not in child
-        assert "AVA_EVENTS_CHANNEL" not in child
+        assert "MEIVA_EVENTS_CHANNEL" not in child
 
         # The watchdog respawn path: the child's REAL environment (the backend
         # hands the dict out-of-band; no shell prefix, no handoff file).
@@ -333,7 +333,7 @@ def test_runner_daemon_boot_from_session_env_handoff(
         lines = result.stdout.strip().splitlines()
         # The fetched endpoint is what the daemon runs with — not the stale
         # owner URL the spawner froze.
-        assert lines[0] == "postgresql://ava@db:5432/ava", lines
+        assert lines[0] == "postgresql://meiva@db:5432/meiva", lines
         assert lines[1] == "sk-fetched", lines
         # host-scope facts survived the handoff
         assert lines[2] == str(home), lines

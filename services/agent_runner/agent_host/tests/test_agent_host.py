@@ -6,12 +6,12 @@ from typing import Any, cast
 import pytest
 from psycopg_pool import AsyncConnectionPool
 
-import ava
-from ava.tests.fixtures.pin_agent import pin_agent, pin_no_identity
+import meiva
 from base.cluster.machine import MachineIdentity
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from base.db.code_version_gate import ProcessDbGate
 from base.lm.catalog import ModelCatalog
+from meiva.tests.fixtures.pin_agent import pin_agent, pin_no_identity
 from services.agent_runner.agent_host.tests.host_policy import (
     assert_sdk_context,
     configured_machine,
@@ -97,7 +97,7 @@ class TestConcurrentAgentIsolation:
         graph.gate(11)
         graph.gate(22)
 
-        child_context = getattr(ava, "context", None)
+        child_context = getattr(meiva, "context", None)
         assert_sdk_context(child_context, bound=sdk_bound)
         t1 = asyncio.create_task(host.run_turn(11))
         t2 = asyncio.create_task(host.run_turn(22))
@@ -130,6 +130,6 @@ class TestConcurrentAgentIsolation:
         host, _, _ = wired(
             {11: Row(overlay={"llm_model": "model-for-11"})},
         )
-        child_context = getattr(ava, "context", None)
+        child_context = getattr(meiva, "context", None)
         await asyncio.wait_for(host.run_turn(11), 2)
-        assert getattr(ava, "context", None) is child_context
+        assert getattr(meiva, "context", None) is child_context

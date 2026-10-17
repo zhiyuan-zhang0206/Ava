@@ -42,7 +42,7 @@ def private_file_problem(path: Path) -> str | None:
     """Read-only twin of `ensure_private_file`'s refusal: why it would raise, or None.
 
     Used by the update leg's pre-stop gate to see — without the chmod repair —
-    the failure `ava start` would hit later: a marker or secrets file the
+    the failure `meiva start` would hit later: a marker or secrets file the
     converge writer refuses because a symlink or a non-regular node sits at its
     path. A missing file is not a problem (the writer creates it).
     """
@@ -140,7 +140,7 @@ def _converge_tree(path: Path, skips: _SkipReport) -> None:
     for child in path.iterdir():
         current = child.lstat()
         if stat.S_ISLNK(current.st_mode):
-            # Workspace trees can link tooling outside AVA_HOME; private-tree
+            # Workspace trees can link tooling outside MEIVA_HOME; private-tree
             # convergence must not recurse into or alter those targets.
             logger.debug("private storage convergence skipped symlink {path}", path=child)
             skips.symlinks.append(child)

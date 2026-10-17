@@ -25,7 +25,7 @@ matches the request's own session, whose only revocation path is logout
 (QA guard-bypass follow-up, 2026-08-27).
 
 Managed-browser sessions are labeled: the browser daemon's gateway login sends
-a dedicated user agent (`ava-managed-browser`), and the list derives
+a dedicated user agent (`meiva-managed-browser`), and the list derives
 `managed: true` from it. No schema change; the label is a stored fact already
 captured at login.
 

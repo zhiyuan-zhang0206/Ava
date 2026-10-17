@@ -21,7 +21,7 @@ from base.packages.plugins.manifest import load_manifest
 from base.telemetry import report_sink_failure
 
 SURFACE_FACES: tuple[str, ...] = (SURFACE_MODULE, CONFIG_FACE)
-_PLUGIN_PACKAGES = frozenset({"ava_builtins.plugins", "plugins"})
+_PLUGIN_PACKAGES = frozenset({"meiva_builtins.plugins", "plugins"})
 ALL_FACES: tuple[str, ...] = (*SURFACE_FACES, FACE_MODULE)
 
 FACE_KEYS: dict[str, tuple[str, ...]] = {
@@ -41,7 +41,7 @@ def _declared(plugin: str, face: str, contribute: Callable[[], object]) -> Plugi
     return contributions
 
 
-# ava:ref base/packages/plugins/docs/runtime-contributions.ava.okf.md#runtime-face-admission
+# meiva:ref base/packages/plugins/docs/runtime-contributions.meiva.okf.md#runtime-face-admission
 def declarations(
     faces: Sequence[str] = ALL_FACES, report: load_report.Reporter | None = None
 ) -> list[tuple[str, Path, PluginContributions]]:
@@ -85,7 +85,7 @@ def loaded_state_classes() -> frozenset[type[BaseModel]]:
     return frozenset(classes)
 
 
-# ava:ref base/packages/plugins/docs/runtime-contributions.ava.okf.md#runtime-face-admission
+# meiva:ref base/packages/plugins/docs/runtime-contributions.meiva.okf.md#runtime-face-admission
 def build_registry(
     faces: Sequence[str] = ALL_FACES,
     report: load_report.Reporter | None = None,

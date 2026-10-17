@@ -7,7 +7,7 @@ Date: 2026-08-05 (user ruling)
 The frontend needs a multi-language UI (Settings page Language row, en/zh). Constraints:
 
 - Language is a **user setting** (`user_settings.display.language`, persisted in the DB, synced across devices), not a URL or browser property;
-- Switching must take effect immediately, without refresh flicker (Ava is a resident SPA; routes do not reload);
+- Switching must take effect immediately, without refresh flicker (Meiva is a resident SPA; routes do not reload);
 - Desktop/web are same-origin (the web app is the universal host, the desktop app is a thin wrapper), so language state cannot live only in the shell.
 
 ## Decision

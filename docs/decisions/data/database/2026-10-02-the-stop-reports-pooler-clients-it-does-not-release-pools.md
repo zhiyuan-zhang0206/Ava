@@ -39,7 +39,7 @@ a local stop cannot reach it, and the release never did either.
 - **Refuse to stop the data plane while clients remain.** The incident this contract answers
   was a stop that could not complete because of clients it did not own; the report must not
   become the same wait.
-- **Release from the remote runners.** A runner is stopped by its own `ava stop`; the fleet
+- **Release from the remote runners.** A runner is stopped by its own `meiva stop`; the fleet
   update stops runners before the gateway. A new cross-machine call for a step the stop
   already makes would add a way for the stop to fail.
 

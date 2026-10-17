@@ -1,4 +1,4 @@
-"""`ava plugins enable/disable` write the per-machine local config."""
+"""`meiva plugins enable/disable` write the per-machine local config."""
 
 import json
 from pathlib import Path
@@ -12,14 +12,14 @@ from cli.commands.extensions.plugins import cmd_plugins_disable, cmd_plugins_ena
 def _isolate(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """Keep every plugin write in this test's tmp dir, never the worker-shared
     session home (tests ambient-state audit H-1): a discoverable plugin or a
-    plugins_config.json left in `$AVA_HOME` changes what later tests in the same
+    plugins_config.json left in `$MEIVA_HOME` changes what later tests in the same
     worker see. Same redirection `test_plugin_scaffold.py` uses."""
     from base import paths
 
-    home = tmp_path / "ava_home"
+    home = tmp_path / "meiva_home"
     monkeypatch.setattr(paths, "plugins_dir", lambda: home / "plugins")
-    monkeypatch.setattr(paths, "ava_home", lambda: home)
-    monkeypatch.setenv("AVA_HOME", str(home))
+    monkeypatch.setattr(paths, "meiva_home", lambda: home)
+    monkeypatch.setenv("MEIVA_HOME", str(home))
 
 
 def test_cmd_enable_then_disable(tmp_path: Path, capsys):

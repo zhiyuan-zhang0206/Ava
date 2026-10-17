@@ -12,7 +12,7 @@ references this file (see `base/cluster/machines.py`, `cli/commands/observabilit
 Every unit advertises **one inbound base URL** in its `machine_units.url` row
 (`base.cluster.machines.register_self`), composed into the machine's
 `machines.gateway_url`. `base.cluster.machines.unit_dial_url` is the single
-definition of that URL — both writers (`ava start` and the ops daemon's boot
+definition of that URL — both writers (`meiva start` and the ops daemon's boot
 registration) share it, so two processes can never advertise different
 addresses for the same unit.
 
@@ -24,7 +24,7 @@ addresses for the same unit.
 
 Three rules:
 
-1. **The advertised host is always `machine.host()`** (`AVA_MACHINE_HOST` >
+1. **The advertised host is always `machine.host()`** (`MEIVA_MACHINE_HOST` >
    `localhost`). A unit never advertises its bare
    gateway URL and never hardcodes loopback: a machine with a reachable
    identity must advertise it, or every consumer that dials the advertised
@@ -39,17 +39,17 @@ Three rules:
    — the gateway would dial itself and report the peer online under the wrong
    identity (the 2026-07-18 runner incident).
 3. **The station's advertised url is its OTLP ingress** (single source:
-   the station unit's `AVA_TELEMETRY_OTLP_PORT`, default 4318) — the one station endpoint that
+   the station unit's `MEIVA_TELEMETRY_OTLP_PORT`, default 4318) — the one station endpoint that
    authenticates with the telemetry token. The native backends (Loki 3100 /
    Prometheus 9090 / Grafana 3003) have no advertised url; they stay
    loopback-bound unless an operator widens the listen host,
    and they are never dialed cross-machine.
    Collector rendering and the station probe share `base.telemetry.station_endpoint`:
    they select the live pure-station advertisement on the configured
-   `AVA_OBSERVABILITY_URL` host and preserve its port. Gateway/station and
+   `MEIVA_OBSERVABILITY_URL` host and preserve its port. Gateway/station and
    runner/station hybrids advertise gateway/ops URLs, so they are excluded by
    capability. Without a matching pure station, both consumers append
-   `AVA_OBSERVABILITY_OTLP_PORT` (default 4318), which the operator must set to
+   `MEIVA_OBSERVABILITY_OTLP_PORT` (default 4318), which the operator must set to
    the remote station's actual ingress port. The consumer's local port never
    selects a remote target. Ambiguous advertisements fail rendering; discovery
    failure aborts rendering and makes the watchdog skip its probe round.
@@ -69,16 +69,16 @@ guard correct.
 
 | Surface | Credential | Verifier |
 |---|---|---|
-| Gateway HTTP API, bootstrap, webhooks | `AVA_CLUSTER_SECRET` bearer (human/operator, gateway only) or the active write generation's machine API token (`AVA_API_TOKEN`) | `gateway.http.auth.request_principal.cluster_credential` (constant-time; a revoked generation's token never matches) |
+| Gateway HTTP API, bootstrap, webhooks | `MEIVA_CLUSTER_SECRET` bearer (human/operator, gateway only) or the active write generation's machine API token (`MEIVA_API_TOKEN`) | `gateway.http.auth.request_principal.cluster_credential` (constant-time; a revoked generation's token never matches) |
 | A unit's `/ops` | its write generation's gateway or runner API token | `base/host/net/auth.py` `verify_bearer_digest` over digests only |
-| Gateway and station OTLP ingress (remote receiver) | the telemetry token (`HMAC(AVA_CLUSTER_SECRET)`; remote units hold only the token, from their capability) | otel-collector `bearertokenauth/cluster` extension |
+| Gateway and station OTLP ingress (remote receiver) | the telemetry token (`HMAC(MEIVA_CLUSTER_SECRET)`; remote units hold only the token, from their capability) | otel-collector `bearertokenauth/cluster` extension |
 | Data plane (Postgres/Redis) | split admin/runtime credentials, gateway-only admin | `docs/conventions/data/data-plane-secret-split.md` |
-| Loki/Prometheus backend APIs | none — loopback-only (`AVA_LGTM_LISTEN_HOST`) | n/a |
+| Loki/Prometheus backend APIs | none — loopback-only (`MEIVA_LGTM_LISTEN_HOST`) | n/a |
 | Grafana UI | gateway session auth through `/grafana/*` proxy | gateway middleware; Grafana runs anonymous read-only |
 
-Every gateway home has an `AVA_CLUSTER_SECRET`; the cluster API and `/ops`
+Every gateway home has an `MEIVA_CLUSTER_SECRET`; the cluster API and `/ops`
 always authenticate. Reach is a separate fact: the zero-config single box
-declares no reachable address (`AVA_MACHINE_HOST` unset, `localhost`), so every
+declares no reachable address (`MEIVA_MACHINE_HOST` unset, `localhost`), so every
 listener, the data plane included, binds loopback only, and a unit that would
 have to expose a remote ingress without a telemetry token **fails closed**
 (converge raises). The telemetry token (derived from the secret on the gateway,

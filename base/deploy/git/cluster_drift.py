@@ -1,6 +1,6 @@
 """Prod-source git introspection — the checkout a source-run home executes.
 
-The prod source (`$AVA_HOME/source`) is the tree a source-run home's services
+The prod source (`$MEIVA_HOME/source`) is the tree a source-run home's services
 run out of. Facts about it that status surfaces show:
 
 - `prod_source_head_sha()` — its HEAD commit, reported per host in the roster
@@ -12,7 +12,7 @@ run out of. Facts about it that status surfaces show:
 
 All are local, read-only git subprocess calls against a fixed path, with no
 dependency on the CLI or gateway layers, so the gateway roster and the ops
-status probe can share them with `ava status`.
+status probe can share them with `meiva status`.
 """
 
 from __future__ import annotations
@@ -32,13 +32,13 @@ _GIT_TIMEOUT_S = 5.0
 
 
 def prod_source_dir() -> Path | None:
-    """The installed source checkout of this unit: `$AVA_HOME/source`.
+    """The installed source checkout of this unit: `$MEIVA_HOME/source`.
 
-    Every unit runs from its own `$AVA_HOME/source` checkout (source mode), so the
+    Every unit runs from its own `$MEIVA_HOME/source` checkout (source mode), so the
     home names its checkout; a home without one (a test home) reads as absent."""
-    from base.paths import ava_home
+    from base.paths import meiva_home
 
-    return ava_home() / "source"
+    return meiva_home() / "source"
 
 
 def _git_ro(*args: str, repo: Path | None = None) -> str | None:

@@ -14,7 +14,7 @@ from agent.impersonation import settle_checkpoint
 from agent.impersonation_handoff import flush_checkpoint
 from agent.ownership.native_cancel import halt_for_native_cancel
 from agent.state import BaseAgentState
-from base.agents.context import AvaContext
+from base.agents.context import MeivaContext
 from base.agents.impersonation.notes import HandoffNotes
 from base.agents.inbox.native_cancel import finish_native_cancel, require_cancel_receiver
 from base.agents.incarnation.native_work import load_work, prepare_work
@@ -34,7 +34,7 @@ from base.native_process.runtime_incarnation import RuntimeIncarnation
 from base.native_process.turn_identity import HostedTurnResources, hosted_resources_settled
 from services.agent_runner.agent_host.db_recovery import database_phase
 
-_Graph = CompiledStateGraph[BaseAgentState, AvaContext, BaseAgentState, BaseAgentState]
+_Graph = CompiledStateGraph[BaseAgentState, MeivaContext, BaseAgentState, BaseAgentState]
 
 
 @dataclass
@@ -254,13 +254,13 @@ async def invoke_prepared_graph[T](
     control_pool: AsyncConnectionPool,
     graph: _Graph,
     agent_id: int,
-    ctx: AvaContext,
+    ctx: MeivaContext,
     work: NativeWorkContinuation,
     *,
     db: Database,
     bus: EventBus,
     relays: RelaySupervision,
-    invoke: Callable[[AvaContext, dict[str, object]], Awaitable[T]],
+    invoke: Callable[[MeivaContext, dict[str, object]], Awaitable[T]],
     notes: HandoffNotes,
 ) -> dict[str, object] | T:
     """Execute the prepared original work within its retained resource scope."""

@@ -9,7 +9,7 @@ grants, which macOS lets only a person give:
 1. clone the `macos-tahoe-base` image by digest (SIP disabled; the pull is the slow part),
    4 CPUs and 8 GB;
 2. boot it headless with the commit's export as the one read-only share, fetch the commit
-   into `~/.ava/source` (the helper is built from it), run the repository's own macOS
+   into `~/.meiva/source` (the helper is built from it), run the repository's own macOS
    provisioning (Homebrew postgresql@17, redis@8.2, pgbouncer, pgvector; the pinned uv)
    and `uv sync`, which also warms the uv cache every clone inherits;
 3. create the helper's self-signed identity, then set the key's partition list, the one
@@ -24,10 +24,10 @@ grants, which macOS lets only a person give:
    process that started after it), and verify: `ping` reports both booleans true, the
    system TCC rows are allowed with the identity's code requirement, and a real capture
    through the helper is not a uniform image;
-7. remove `~/.ava/source` (the golden image carries no source and no cluster; each run
+7. remove `~/.meiva/source` (the golden image carries no source and no cluster; each run
    fetches its own commit) and shut the guest down.
 
-Nothing of the host's `~/.ava`, launchd, keychain or TCC is touched, and at most two Tart
+Nothing of the host's `~/.meiva`, launchd, keychain or TCC is touched, and at most two Tart
 VMs run at once. A VM that already has the name is never overwritten. If a step fails the
 VM is left stopped as it is, for inspection. The design is
 future/infra/engineering/verification-boundaries.md.
@@ -64,20 +64,20 @@ from scripts.verify.tart_vm import (  # noqa: E402 — standalone script
 
 # `latest` as of 2026-10-01; the digest, not the tag, is what a golden image is built from.
 IMAGE = "ghcr.io/cirruslabs/macos-tahoe-base@sha256:1b093499716409d29e8b5336844528e1cae375db97d2ad8e5aeff78cf0da201e"
-NAME = "ava-golden"
+NAME = "meiva-golden"
 CPUS = 4
 MEMORY_MB = 8192
 # The base image's documented default account; the VM holds no secret.
 ACCOUNT_PASSWORD = "admin"  # noqa: S105 — the base image's documented default account
-CERT_CN = "Ava Permissions Helper Code Signing"
-BUNDLE_ID = "com.ava.permissions-helper"
+CERT_CN = "Meiva Permissions Helper Code Signing"
+BUNDLE_ID = "com.meiva.permissions-helper"
 TCC_DB = "/Library/Application Support/com.apple.TCC/TCC.db"
 # The helper's two desktop grants, as the system TCC database names them.
 GRANTED = {"kTCCServiceScreenCapture": 2, "kTCCServiceAccessibility": 2}
 
 _HELPER_LIFECYCLE = "from services.desktop.permissions_helper import lifecycle; lifecycle.{call}"
 IDENTITY = guest_script(
-    f'cd "{GUEST_SOURCE}" && AVA_CONFIG_FETCH=skip .venv/bin/python -c '
+    f'cd "{GUEST_SOURCE}" && MEIVA_CONFIG_FETCH=skip .venv/bin/python -c '
     f'"{_HELPER_LIFECYCLE.format(call="ensure_signing_cert()")}"'
 )
 KEY_ACCESS = guest_script(
@@ -85,13 +85,13 @@ KEY_ACCESS = guest_script(
     f'-k {ACCOUNT_PASSWORD} "$HOME/Library/Keychains/login.keychain-db"'
 )
 HELPER = guest_script(
-    f'cd "{GUEST_SOURCE}" && AVA_CONFIG_FETCH=skip .venv/bin/python -c '
+    f'cd "{GUEST_SOURCE}" && MEIVA_CONFIG_FETCH=skip .venv/bin/python -c '
     f'"{_HELPER_LIFECYCLE.format(call="converge()")}"'
 )
 # Restart the helper through launchd: its job label names the home, so read it from the
 # LaunchAgent the converge wrote.
 RESTART_HELPER = guest_script(
-    'label=$(ls "$HOME/Library/LaunchAgents" | sed -n "s/^\\(com.ava.permissions-helper.*\\)\\.plist$/\\1/p")\n'
+    'label=$(ls "$HOME/Library/LaunchAgents" | sed -n "s/^\\(com.meiva.permissions-helper.*\\)\\.plist$/\\1/p")\n'
     'test -n "$label"\n'
     'launchctl kickstart -k "gui/$(id -u)/$label"\n'
     "sleep 5"
@@ -109,7 +109,7 @@ client = helper_client()
 def out(*argv):
     return subprocess.run(argv, capture_output=True, text=True).stdout
 
-app = str(permissions_helper_app_dir() / "AvaPermissionsHelper.app")
+app = str(permissions_helper_app_dir() / "MeivaPermissionsHelper.app")
 record = {"ping": dict(client.ping())}
 record["identity"] = out("security", "find-identity", "-p", "codesigning")
 signing = subprocess.run(["codesign", "-dv", "-r-", "--verbose=4", app], capture_output=True, text=True)
@@ -124,7 +124,7 @@ rows = out(
 record["tcc"] = {
     row.split("|")[0]: [int(row.split("|")[1]), row.split("|")[2]] for row in rows.splitlines()
 }
-path = "/tmp/ava-golden-capture.png"
+path = "/tmp/meiva-golden-capture.png"
 try:
     client.screencapture_region(0, 0, 1024, 768, path)
     subprocess.run(["/usr/bin/sips", "-s", "format", "bmp", path, "--out", path + ".bmp"],
@@ -141,18 +141,18 @@ except Exception as error:
 print("RECORD " + json.dumps(record))
 """
 VERIFY = guest_script(
-    f"cd \"{GUEST_SOURCE}\" && AVA_CONFIG_FETCH=skip .venv/bin/python - <<'PY'\n"
+    f"cd \"{GUEST_SOURCE}\" && MEIVA_CONFIG_FETCH=skip .venv/bin/python - <<'PY'\n"
     + _VERIFY_PY.replace("@TCC_DB@", TCC_DB).replace("@BUNDLE_ID@", BUNDLE_ID)
     + "PY\n"
 )
-FINALIZE = guest_script('rm -rf "$HOME/.ava/source"')
+FINALIZE = guest_script('rm -rf "$HOME/.meiva/source"')
 
 INSTRUCTIONS = f"""
 A Tart window has opened with the golden image. Do this in that window (about a minute):
 
   1. System Settings > Privacy & Security > Screen & System Audio Recording:
-     turn on AvaPermissionsHelper.
-  2. Privacy & Security > Accessibility: turn on AvaPermissionsHelper.
+     turn on MeivaPermissionsHelper.
+  2. Privacy & Security > Accessibility: turn on MeivaPermissionsHelper.
   3. Authenticate with the account password ({ACCOUNT_PASSWORD}) when asked.
   4. If macOS offers "Quit & Reopen", choose it. Never choose "Later".
 
@@ -301,9 +301,9 @@ def build_golden(ref: str, evidence_root: Path, *, name: str, repo: Path, tart: 
     build = Build(tart, evidence)
     # A dry run creates nothing, not even the temporary export it would mount.
     export = (
-        Path(tempfile.gettempdir()) / "ava-golden-src-dry-run"
+        Path(tempfile.gettempdir()) / "meiva-golden-src-dry-run"
         if dry_run
-        else Path(tempfile.mkdtemp(prefix="ava-golden-src-"))
+        else Path(tempfile.mkdtemp(prefix="meiva-golden-src-"))
     )
     proc = None
     try:
@@ -358,7 +358,7 @@ def main() -> int:
     parser.add_argument(
         "--evidence-root",
         type=Path,
-        default=Path(tempfile.gettempdir()) / "ava-verify",
+        default=Path(tempfile.gettempdir()) / "meiva-verify",
         help="parent directory of the build's evidence directory",
     )
     parser.add_argument(

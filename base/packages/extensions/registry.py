@@ -9,7 +9,7 @@ the agent owns an activation delta.
 This module is the write side and the read side of the two tables. It does not
 materialize anything onto a machine — that is converge's job and lands with the
 next slice, so today these rows are written and not yet read. That ordering is
-deliberate (expand, then switch readers, then contract): making `ava skill
+deliberate (expand, then switch readers, then contract): making `meiva skill
 install` depend on the cluster DB before anything materializes from the rows
 would buy the dependency without the payoff.
 
@@ -359,7 +359,7 @@ def list_enabled(conn: psycopg.Connection, *, kind: ExtensionKind | None = None)
 def set_default_enabled(conn: psycopg.Connection, name: str, *, enabled: bool) -> bool:
     """Flip one row's cluster-default enablement; False when no such row.
 
-    The write behind `ava skill enable/disable` once those retarget from the
+    The write behind `meiva skill enable/disable` once those retarget from the
     per-machine file to the cluster row.
     """
     result = conn.execute(

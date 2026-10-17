@@ -17,7 +17,7 @@ model to treat "plan this, then recap" as one thing.
 ## Decision
 
 **One send is one message.** The Composer sends the raw text unsplit;
-`ava._commands.expand_command` splits the chain and expands every command
+`meiva._commands.expand_command` splits the chain and expands every command
 inside that single inbound, in the order typed, each keeping the free text that
 followed it. `parseCommandSegments` is deleted.
 
@@ -65,7 +65,7 @@ analogy does not carry.
 ## Consequences
 
 - Expansion is the receiver's job, uniformly — the same chain works from the web
-  Composer and from `ava.agents.send_message(peer, "/a … /b …")`, because both
+  Composer and from `meiva.agents.send_message(peer, "/a … /b …")`, because both
   reach the same claim node.
 - No send path inspects command text. The gateway stores it; the claim node
   expands it. Adding a command needs no change anywhere but its `.md` file.

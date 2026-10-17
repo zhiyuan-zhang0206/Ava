@@ -18,7 +18,7 @@ from base.config.base import EnvSettings
 class GeneralSettings(EnvSettings):
     service_path: str = Field(
         default="",
-        alias="AVA_SERVICE_PATH",
+        alias="MEIVA_SERVICE_PATH",
         description="Host executable search directories admitted at first start, excluding virtualenv directories. Managed services prepend the current runtime virtualenv. The home declaration overrides inherited values; changing it requires stopping the current generation.",
         json_schema_extra={
             "restart_required": "all",
@@ -31,7 +31,7 @@ class GeneralSettings(EnvSettings):
 
     impersonation_event_seal_wait_seconds: int = Field(
         default=10,
-        alias="AVA_IMPERSONATION_EVENT_SEAL_WAIT_SECONDS",
+        alias="MEIVA_IMPERSONATION_EVENT_SEAL_WAIT_SECONDS",
         description="Seconds an external detach waits for in-flight SDK calls to drain before sealing its event source. A call still running after the wait seals its source later; the wait never marks a source empty or complete.",
         gt=0,
         le=86400,
@@ -45,7 +45,7 @@ class GeneralSettings(EnvSettings):
 
     timezone: str = Field(
         default="America/Los_Angeles",
-        alias="AVA_TIMEZONE",
+        alias="MEIVA_TIMEZONE",
         description="Timezone every agent-facing timestamp is rendered in, and the default for schedules an agent creates. Declared to the agent once as a standing context note, so the timestamps themselves carry no timezone suffix. Defaults to Los Angeles time.",
         json_schema_extra={
             "restart_required": "agent",
@@ -58,7 +58,7 @@ class GeneralSettings(EnvSettings):
     @field_validator("timezone", mode="before")
     @classmethod
     def _validate_timezone(cls, v: object) -> object:
-        """Fail fast at Settings construction on an unparseable AVA_TIMEZONE.
+        """Fail fast at Settings construction on an unparseable MEIVA_TIMEZONE.
 
         The envelope / exec-output / lifecycle timestamp paths call
         `ZoneInfo(settings.general.timezone)` with no try/except, so a bad
@@ -73,7 +73,7 @@ class GeneralSettings(EnvSettings):
                 ZoneInfo(v)
             except (ZoneInfoNotFoundError, ValueError) as exc:
                 raise ValueError(
-                    f"AVA_TIMEZONE={v!r} is not a valid IANA timezone name "
+                    f"MEIVA_TIMEZONE={v!r} is not a valid IANA timezone name "
                     f"(e.g. America/Los_Angeles, Asia/Shanghai, UTC)"
                 ) from exc
         return v
@@ -82,7 +82,7 @@ class GeneralSettings(EnvSettings):
     def _warn_when_timezone_unset(self) -> GeneralSettings:
         """A silent America/Los_Angeles default is this cluster's worst failure mode.
 
-        The field default only applies when AVA_TIMEZONE is absent from both the
+        The field default only applies when MEIVA_TIMEZONE is absent from both the
         process env and the unit .env. On a cluster pinned to another zone
         (2026-08-12 ruling: Asia/Shanghai) that fallback fires cron schedules at
         PT midnight instead of the cluster's midnight — schedule #3 did exactly
@@ -95,18 +95,18 @@ class GeneralSettings(EnvSettings):
             # loguru bridge, and loguru's default stderr sink keeps the warning
             # visible even then.
             logger.warning(
-                "AVA_TIMEZONE is not set (env or unit .env) — "
+                "MEIVA_TIMEZONE is not set (env or unit .env) — "
                 "settings.general.timezone falls back to the field default "
                 "America/Los_Angeles. A schedule runner with this default fires "
                 "cron jobs at PT midnight instead of the cluster's configured "
-                "midnight (2026-08-21 incident, schedule #3). Set AVA_TIMEZONE "
+                "midnight (2026-08-21 incident, schedule #3). Set MEIVA_TIMEZONE "
                 "in the cluster .env."
             )
         return self
 
     message_timestamps: bool = Field(
         default=True,
-        alias="AVA_MESSAGE_TIMESTAMPS",
+        alias="MEIVA_MESSAGE_TIMESTAMPS",
         description="Whether agent-facing messages carry a timestamp (inbound envelope, exec output headers, lifecycle markers). Turn off when the prefix is noise; the UI still shows its own timestamps.",
         json_schema_extra={
             "restart_required": "agent",
@@ -118,7 +118,7 @@ class GeneralSettings(EnvSettings):
 
     message_timestamp_weekday: bool = Field(
         default=False,
-        alias="AVA_MESSAGE_TIMESTAMP_WEEKDAY",
+        alias="MEIVA_MESSAGE_TIMESTAMP_WEEKDAY",
         description="Whether the agent-facing timestamp includes the weekday (e.g. `Mon`). No effect when message_timestamps is off.",
         json_schema_extra={
             "restart_required": "agent",
@@ -130,7 +130,7 @@ class GeneralSettings(EnvSettings):
 
     track_branch: str = Field(
         default="main",
-        alias="AVA_TRACK_BRANCH",
+        alias="MEIVA_TRACK_BRANCH",
         description="Git branch the agent-runner memory pool tracks; `base.deploy.git.memory_repo.pull_main()` fast-forwards the gateway's consolidated memory checkout from origin/<this>, and branch-status reporting diffs against it. Override for preview/staging clusters.",
         json_schema_extra={
             "restart_required": "all",
@@ -142,8 +142,8 @@ class GeneralSettings(EnvSettings):
 
     os_jobs_enabled: bool = Field(
         default=True,
-        alias="AVA_OS_JOBS_ENABLED",
-        description="Whether this process may hand jobs to the platform scheduler (launchd LaunchAgent / crontab line / Task Scheduler task). The test suite turns it off: the scheduler is one namespace per OS user, so a test-scoped $AVA_HOME cannot isolate it. Deregistration is never gated.",
+        alias="MEIVA_OS_JOBS_ENABLED",
+        description="Whether this process may hand jobs to the platform scheduler (launchd LaunchAgent / crontab line / Task Scheduler task). The test suite turns it off: the scheduler is one namespace per OS user, so a test-scoped $MEIVA_HOME cannot isolate it. Deregistration is never gated.",
         json_schema_extra={
             "restart_required": "all",
             "writable": False,
@@ -155,8 +155,8 @@ class GeneralSettings(EnvSettings):
 
     machine_name: str = Field(
         default="",
-        alias="AVA_MACHINE_NAME",
-        description="Stable machine identifier for this host. Empty raises: a unit's name is recorded by `ava init`.",
+        alias="MEIVA_MACHINE_NAME",
+        description="Stable machine identifier for this host. Empty raises: a unit's name is recorded by `meiva init`.",
         json_schema_extra={
             "restart_required": "all",
             "writable": False,
@@ -168,7 +168,7 @@ class GeneralSettings(EnvSettings):
 
     machine_serve_gateway: bool | None = Field(
         default=None,
-        alias="AVA_MACHINE_SERVE_GATEWAY",
+        alias="MEIVA_MACHINE_SERVE_GATEWAY",
         description="Whether this host serves the gateway capability (Postgres/Redis + HTTP gateway + gateway daemons). A host serves gateway and/or agent-runner and/or observability-station; at least one must be true. None = off.",
         json_schema_extra={
             "restart_required": "all",
@@ -181,7 +181,7 @@ class GeneralSettings(EnvSettings):
 
     machine_serve_agent_runner: bool | None = Field(
         default=None,
-        alias="AVA_MACHINE_SERVE_AGENT_RUNNER",
+        alias="MEIVA_MACHINE_SERVE_AGENT_RUNNER",
         description="Whether this host serves the agent-runner capability (agent host, ops server, and watchdog). A host serves gateway and/or agent-runner and/or observability-station; at least one must be true. None = off.",
         json_schema_extra={
             "restart_required": "all",
@@ -194,8 +194,8 @@ class GeneralSettings(EnvSettings):
 
     machine_serve_observability_station: bool | None = Field(
         default=None,
-        alias="AVA_MACHINE_SERVE_OBSERVABILITY_STATION",
-        description="Whether this host serves the observability-station capability (owns the native LGTM observability backends — the declarative form of the `$AVA_HOME/lgtm-host` marker). A host serves gateway and/or agent-runner and/or observability-station; at least one must be true. None = off.",
+        alias="MEIVA_MACHINE_SERVE_OBSERVABILITY_STATION",
+        description="Whether this host serves the observability-station capability (owns the native LGTM observability backends — the declarative form of the `$MEIVA_HOME/lgtm-host` marker). A host serves gateway and/or agent-runner and/or observability-station; at least one must be true. None = off.",
         json_schema_extra={
             "restart_required": "all",
             "writable": False,
@@ -207,8 +207,8 @@ class GeneralSettings(EnvSettings):
 
     machine_description: str = Field(
         default="",
-        alias="AVA_MACHINE_DESCRIPTION",
-        description="Free-text note of what this host is for, surfaced to agents via ava.self.MACHINE_SPEC and ava.agents.list_machines(). Empty is legal.",
+        alias="MEIVA_MACHINE_DESCRIPTION",
+        description="Free-text note of what this host is for, surfaced to agents via meiva.self.MACHINE_SPEC and meiva.agents.list_machines(). Empty is legal.",
         json_schema_extra={
             "restart_required": "all",
             "writable": True,
@@ -220,7 +220,7 @@ class GeneralSettings(EnvSettings):
 
     machine_host: str = Field(
         default="",
-        alias="AVA_MACHINE_HOST",
+        alias="MEIVA_MACHINE_HOST",
         description="This host's reachable address — the IP/hostname other nodes and the browser dial it at, and the address authenticated Postgres, its pooler and Linux Redis bind in addition to loopback (macOS Redis retains its loopback relay). Empty (default): `localhost`, which the registration loopback guard refuses for an enrolled agent-runner. A split deployment sets each node's real private-network address.",
         json_schema_extra={
             "restart_required": "all",
@@ -233,8 +233,8 @@ class GeneralSettings(EnvSettings):
 
     memory_remote: str = Field(
         default="",
-        alias="AVA_MEMORY_REMOTE",
-        description="Central git remote URL for the memory pool (each host pushes to a machine-<name> branch). Empty raises on a remote-backed memory operation. Ignored when AVA_MEMORY_KEEP_LOCAL is true.",
+        alias="MEIVA_MEMORY_REMOTE",
+        description="Central git remote URL for the memory pool (each host pushes to a machine-<name> branch). Empty raises on a remote-backed memory operation. Ignored when MEIVA_MEMORY_KEEP_LOCAL is true.",
         json_schema_extra={
             "restart_required": "all",
             "writable": True,
@@ -245,8 +245,8 @@ class GeneralSettings(EnvSettings):
 
     memory_keep_local: bool = Field(
         default=False,
-        alias="AVA_MEMORY_KEEP_LOCAL",
-        description="Keep the memory pool purely local: no git remote, no push/pull, notes never leave the box. Default off (the pool syncs to AVA_MEMORY_REMOTE). Set true on a host whose notes must not sync off-box; explicit `ava memory init` then strips any existing remote and skips the GitHub PR capability check.",
+        alias="MEIVA_MEMORY_KEEP_LOCAL",
+        description="Keep the memory pool purely local: no git remote, no push/pull, notes never leave the box. Default off (the pool syncs to MEIVA_MEMORY_REMOTE). Set true on a host whose notes must not sync off-box; explicit `meiva memory init` then strips any existing remote and skips the GitHub PR capability check.",
         json_schema_extra={
             "restart_required": "all",
             "writable": True,
@@ -258,7 +258,7 @@ class GeneralSettings(EnvSettings):
 
     cross_machine_transfer_backend: Literal["drive", "none"] = Field(
         default="drive",
-        alias="AVA_CROSS_MACHINE_TRANSFER_BACKEND",
+        alias="MEIVA_CROSS_MACHINE_TRANSFER_BACKEND",
         description="Cross-machine file transfer backend on an agent-runner: `drive` probes a writable Google Drive synced folder at start and uses it when present (missing = warn, never block); `none` assumes no framework-managed backend. Auto-skipped on a single box.",
         json_schema_extra={
             "capability": "agent-runner",
@@ -272,7 +272,7 @@ class GeneralSettings(EnvSettings):
 
     require_github_pr: bool = Field(
         default=True,
-        alias="AVA_REQUIRE_GITHUB_PR",
+        alias="MEIVA_REQUIRE_GITHUB_PR",
         description="Require gh-authenticated GitHub PR access to the memory repo on an agent-runner at start (nightly memory consolidation). Auto-skipped on a single box. Set false to opt out on a split agent-runner that doesn't consolidate via PRs.",
         json_schema_extra={
             "capability": "agent-runner",

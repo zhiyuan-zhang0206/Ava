@@ -203,7 +203,7 @@ def test_the_guard_reads_the_real_home_and_dials_and_writes_nothing(tmp_path: Pa
     script = (
         Path(__file__).resolve().parents[2] / "scripts" / "host_ops" / "check_worktree_remove.py"
     )
-    home = tmp_path / "ava-home"
+    home = tmp_path / "meiva-home"
     (home / "run").mkdir(parents=True)
     target = tmp_path / "worktrees" / "wt-under-test"
     target.mkdir(parents=True)
@@ -223,12 +223,14 @@ def test_the_guard_reads_the_real_home_and_dials_and_writes_nothing(tmp_path: Pa
         ],
     )
     env_file = home / ".env"
-    env_file.write_text("AVA_DB_URL=postgresql://ava@127.0.0.1:1/ava\nAVA_CLUSTER_SECRET=canary\n")
+    env_file.write_text(
+        "MEIVA_DB_URL=postgresql://meiva@127.0.0.1:1/meiva\nMEIVA_CLUSTER_SECRET=canary\n"
+    )
     env_file.chmod(0)
     home.chmod(0o755)
     before = _tree_state(home)
-    env = {k: v for k, v in os.environ.items() if not k.startswith("AVA_")}
-    env.update(AVA_HOME=str(home), HOME=str(tmp_path / "user"))
+    env = {k: v for k, v in os.environ.items() if not k.startswith("MEIVA_")}
+    env.update(MEIVA_HOME=str(home), HOME=str(tmp_path / "user"))
     try:
         result = subprocess.run(  # noqa: S603 - test-owned interpreter and fixture paths
             [sys.executable, "-c", _NO_DIAL_DRIVER, str(script), str(target)],

@@ -103,7 +103,7 @@ def test_tests_package_with_init_takes_a_slot(
     assert "base/pkg: directory has 21 direct entries" in capsys.readouterr().out
 
 
-@pytest.mark.parametrize("location", ["tests", "base/pkg/tests", "ava_builtins/skills/x/tests"])
+@pytest.mark.parametrize("location", ["tests", "base/pkg/tests", "meiva_builtins/skills/x/tests"])
 def test_tests_layer_has_the_same_entry_cap(
     tmp_path: pathlib.Path, capsys: pytest.CaptureFixture[str], location: str
 ) -> None:
@@ -162,7 +162,7 @@ machine_role()
     [
         "base/pkg/tests/test_x.py",
         "gateway/agents/tests/test_x.py",
-        "ava_builtins/plugins/p/tests/test_x.py",
+        "meiva_builtins/plugins/p/tests/test_x.py",
     ],
 )
 def test_ast_rules_do_not_govern_a_package_tests_directory(
@@ -173,7 +173,7 @@ def test_ast_rules_do_not_govern_a_package_tests_directory(
     assert capsys.readouterr().out == ""
 
 
-@pytest.mark.parametrize("location", ["base/pkg/mod.py", "ava_builtins/plugins/p/run.py"])
+@pytest.mark.parametrize("location", ["base/pkg/mod.py", "meiva_builtins/plugins/p/run.py"])
 def test_the_same_source_outside_tests_is_governed(
     tmp_path: pathlib.Path, capsys: pytest.CaptureFixture[str], location: str
 ) -> None:
@@ -189,16 +189,16 @@ def test_path_import_rule_skips_test_files_at_any_depth() -> None:
     tree = ast.parse('import sys\nsys.path.insert(0, "/somewhere")\n')
     assert (
         path_imports.measure(
-            tree, "ava_builtins/skills/integrations/gmail/scripts/tests/test_gmail.py"
+            tree, "meiva_builtins/skills/integrations/gmail/scripts/tests/test_gmail.py"
         )
         == {}
     )
     assert (
-        path_imports.measure(tree, "ava_builtins/tests/schedules/test_goal_watch_filter.py") == {}
+        path_imports.measure(tree, "meiva_builtins/tests/schedules/test_goal_watch_filter.py") == {}
     )
-    assert path_imports.measure(tree, "ava_builtins/skills/integrations/gmail/scripts/run.py") == {
-        "ava_builtins/skills/integrations/gmail/scripts/run.py::sys.path": [2]
-    }
+    assert path_imports.measure(
+        tree, "meiva_builtins/skills/integrations/gmail/scripts/run.py"
+    ) == {"meiva_builtins/skills/integrations/gmail/scripts/run.py::sys.path": [2]}
 
 
 def test_test_module_move_still_enforces_file_and_function_budgets(

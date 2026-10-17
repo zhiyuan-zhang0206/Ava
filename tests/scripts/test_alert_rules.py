@@ -19,53 +19,53 @@ RULES = (
 )
 
 _EXPECTED_UIDS = {
-    "ava-ops-warning-error-spike",
-    "ava-ops-llm-rate-limit",
-    "ava-ops-sse-drop-backlog",
-    "ava-ops-telemetry-queue-loss",
-    "ava-ops-llm-latency-p95",
-    "ava-ops-delivery-stalled-backlog",
-    "ava-ops-events-freshness",
-    "ava-ops-events-low-water",
-    "ava-ops-gateway-metrics-silent",
-    "ava-ops-root-health-stale",
-    "ava-ops-checkpoint-blobs-warning",
-    "ava-ops-checkpoint-blobs-error",
-    "ava-ops-checkpoint-blobs-freshness",
-    "ava-ops-checkpoint-blobs-growth",
-    "ava-ops-trace-disk-watermark",
-    "ava-ops-llm-billing-quota",
-    "ava-ops-gateway-latency-route-warning",
-    "ava-ops-gateway-latency-route-error",
-    "ava-ops-turn-duration-p95",
-    "ava-ops-gw-latency-slow-warning",
-    "ava-ops-gw-latency-slow-error",
-    "ava-ops-host-cpu-saturated",
-    "ava-ops-host-memory-pressure",
-    "ava-ops-host-disk-watermark",
-    "ava-ops-host-disk-watermark-93",
-    "ava-ops-host-disk-watermark-95",
-    "ava-ops-pg-connection-saturation",
-    "ava-ops-redis-memory",
-    "ava-ops-otelcol-queue-pressure",
-    "ava-ops-otelcol-enqueue-failures",
-    "ava-ops-otelcol-host-silent",
-    "ava-ops-prom-too-old-samples",
-    "ava-ops-memory-search-rows-warning",
-    "ava-ops-memory-search-rows-critical",
-    "ava-ops-recovery-drill-failed",
-    "ava-ops-backup-dump-failed",
-    "ava-ops-tempo-backend-down",
+    "meiva-ops-warning-error-spike",
+    "meiva-ops-llm-rate-limit",
+    "meiva-ops-sse-drop-backlog",
+    "meiva-ops-telemetry-queue-loss",
+    "meiva-ops-llm-latency-p95",
+    "meiva-ops-delivery-stalled-backlog",
+    "meiva-ops-events-freshness",
+    "meiva-ops-events-low-water",
+    "meiva-ops-gateway-metrics-silent",
+    "meiva-ops-root-health-stale",
+    "meiva-ops-checkpoint-blobs-warning",
+    "meiva-ops-checkpoint-blobs-error",
+    "meiva-ops-checkpoint-blobs-freshness",
+    "meiva-ops-checkpoint-blobs-growth",
+    "meiva-ops-trace-disk-watermark",
+    "meiva-ops-llm-billing-quota",
+    "meiva-ops-gateway-latency-route-warning",
+    "meiva-ops-gateway-latency-route-error",
+    "meiva-ops-turn-duration-p95",
+    "meiva-ops-gw-latency-slow-warning",
+    "meiva-ops-gw-latency-slow-error",
+    "meiva-ops-host-cpu-saturated",
+    "meiva-ops-host-memory-pressure",
+    "meiva-ops-host-disk-watermark",
+    "meiva-ops-host-disk-watermark-93",
+    "meiva-ops-host-disk-watermark-95",
+    "meiva-ops-pg-connection-saturation",
+    "meiva-ops-redis-memory",
+    "meiva-ops-otelcol-queue-pressure",
+    "meiva-ops-otelcol-enqueue-failures",
+    "meiva-ops-otelcol-host-silent",
+    "meiva-ops-prom-too-old-samples",
+    "meiva-ops-memory-search-rows-warning",
+    "meiva-ops-memory-search-rows-critical",
+    "meiva-ops-recovery-drill-failed",
+    "meiva-ops-backup-dump-failed",
+    "meiva-ops-tempo-backend-down",
 }
 
 INFRA_RULE_METRICS = {
-    "ava-ops-host-cpu-saturated": "system_cpu_utilization_ratio",
-    "ava-ops-host-memory-pressure": "system_memory_utilization_ratio",
-    "ava-ops-host-disk-watermark": "system_filesystem_utilization_ratio",
-    "ava-ops-host-disk-watermark-93": "system_filesystem_utilization_ratio",
-    "ava-ops-host-disk-watermark-95": "system_filesystem_utilization_ratio",
-    "ava-ops-pg-connection-saturation": "postgresql_backends",
-    "ava-ops-redis-memory": "redis_memory_used_bytes",
+    "meiva-ops-host-cpu-saturated": "system_cpu_utilization_ratio",
+    "meiva-ops-host-memory-pressure": "system_memory_utilization_ratio",
+    "meiva-ops-host-disk-watermark": "system_filesystem_utilization_ratio",
+    "meiva-ops-host-disk-watermark-93": "system_filesystem_utilization_ratio",
+    "meiva-ops-host-disk-watermark-95": "system_filesystem_utilization_ratio",
+    "meiva-ops-pg-connection-saturation": "postgresql_backends",
+    "meiva-ops-redis-memory": "redis_memory_used_bytes",
 }
 
 
@@ -74,8 +74,8 @@ def _load_groups() -> list[dict[str, Any]]:
     assert doc is not None
     groups = doc["groups"]
     assert len(groups) == 2
-    assert [group["name"] for group in groups] == ["ava-ops", "ava-ops-slow"]
-    assert [group["folder"] for group in groups] == ["Ava", "Ava"]
+    assert [group["name"] for group in groups] == ["meiva-ops", "meiva-ops-slow"]
+    assert [group["folder"] for group in groups] == ["Meiva", "Meiva"]
     assert [group["interval"] for group in groups] == ["1m", "5m"]
     assert [len(group["rules"]) for group in groups] == [52, 14]
     return groups
@@ -119,17 +119,17 @@ def test_low_cost_rules_use_the_slow_group() -> None:
     groups = _load_groups()
     group_for_rule = {rule["uid"]: group["name"] for group in groups for rule in group["rules"]}
     for uid in (
-        "ava-ops-trace-disk-watermark",
-        "ava-ops-llm-rate-limit",
-        "ava-ops-llm-billing-quota",
-        "ava-ops-gateway-latency-route-warning",
-        "ava-ops-gateway-latency-route-error",
-        "ava-ops-turn-duration-p95",
-        "ava-ops-gw-latency-slow-warning",
-        "ava-ops-gw-latency-slow-error",
-        "ava-ops-tempo-backend-down",
+        "meiva-ops-trace-disk-watermark",
+        "meiva-ops-llm-rate-limit",
+        "meiva-ops-llm-billing-quota",
+        "meiva-ops-gateway-latency-route-warning",
+        "meiva-ops-gateway-latency-route-error",
+        "meiva-ops-turn-duration-p95",
+        "meiva-ops-gw-latency-slow-warning",
+        "meiva-ops-gw-latency-slow-error",
+        "meiva-ops-tempo-backend-down",
     ):
-        assert group_for_rule[uid] == "ava-ops-slow"
+        assert group_for_rule[uid] == "meiva-ops-slow"
 
 
 def test_rules_never_query_postgres() -> None:
@@ -172,7 +172,7 @@ def test_loki_rules_filter_to_prod_cluster_after_json() -> None:
     for rule in load_rules():
         for expr in rule_query_exprs(rule, "loki"):
             normalized = " ".join(expr.split())
-            assert '| json | cluster=".ava"' in normalized, (
+            assert '| json | cluster=".meiva"' in normalized, (
                 f"{rule['uid']}: missing prod cluster filter after json:\n{expr}"
             )
 
@@ -180,11 +180,11 @@ def test_loki_rules_filter_to_prod_cluster_after_json() -> None:
 @pytest.mark.parametrize(
     ("uid", "event_filter"),
     [
-        ("ava-ops-sse-drop-backlog", 'event_name=~"sse_drop|event_log_drop"'),
-        ("ava-ops-delivery-stalled-backlog", 'event_name="delivery_stalled"'),
-        ("ava-ops-trace-disk-watermark", 'event_name="trace"'),
-        ("ava-ops-llm-rate-limit", 'event_name="llm_provider_error"'),
-        ("ava-ops-llm-billing-quota", 'event_name="llm_provider_error"'),
+        ("meiva-ops-sse-drop-backlog", 'event_name=~"sse_drop|event_log_drop"'),
+        ("meiva-ops-delivery-stalled-backlog", 'event_name="delivery_stalled"'),
+        ("meiva-ops-trace-disk-watermark", 'event_name="trace"'),
+        ("meiva-ops-llm-rate-limit", 'event_name="llm_provider_error"'),
+        ("meiva-ops-llm-billing-quota", 'event_name="llm_provider_error"'),
     ],
 )
 def test_event_name_rules_filter_by_event_name(uid: str, event_filter: str) -> None:
@@ -200,7 +200,7 @@ def test_event_name_rules_filter_by_event_name(uid: str, event_filter: str) -> N
 
 def test_drop_backlog_rule_unwraps_payload_n() -> None:
     rules = {r["uid"]: r for r in load_rules()}
-    exprs = rule_query_exprs(rules["ava-ops-sse-drop-backlog"], "loki")
+    exprs = rule_query_exprs(rules["meiva-ops-sse-drop-backlog"], "loki")
     assert any("unwrap attributes_n" in e for e in exprs), (
         f"R2 must unwrap attributes_n, got:\n{exprs[0]}"
     )
@@ -209,7 +209,7 @@ def test_drop_backlog_rule_unwraps_payload_n() -> None:
 
 def test_level_rule_scopes_to_observability_categories() -> None:
     rules = {r["uid"]: r for r in load_rules()}
-    exprs = rule_query_exprs(rules["ava-ops-warning-error-spike"], "loki")
+    exprs = rule_query_exprs(rules["meiva-ops-warning-error-spike"], "loki")
     assert any('category=~"telemetry|log"' in e for e in exprs)
     assert any('level=~"warning|error|critical"' in e for e in exprs)
     assert any("[5m]" in e for e in exprs)
@@ -218,28 +218,28 @@ def test_level_rule_scopes_to_observability_categories() -> None:
 
 def test_freshness_rule_is_absent_over_time() -> None:
     rules = {r["uid"]: r for r in load_rules()}
-    exprs = rule_query_exprs(rules["ava-ops-events-freshness"], "loki")
+    exprs = rule_query_exprs(rules["meiva-ops-events-freshness"], "loki")
     assert any("absent_over_time" in e for e in exprs)
     assert any("[5m]" in e for e in exprs)
-    assert threshold_params(rules["ava-ops-events-freshness"]) == [[0]]
+    assert threshold_params(rules["meiva-ops-events-freshness"]) == [[0]]
 
 
 def test_events_low_water_rule_detects_partial_write_loss() -> None:
     rules = {r["uid"]: r for r in load_rules()}
-    rule = rules["ava-ops-events-low-water"]
+    rule = rules["meiva-ops-events-low-water"]
 
     assert rule_query_exprs(rule, "loki") == [
         'sum(count_over_time({service_name="unknown_service"} | json | '
-        'cluster=".ava" [5m])) or vector(0)'
+        'cluster=".meiva" [5m])) or vector(0)'
     ]
     assert rule["for"] == "10m"
     assert rule["noDataState"] == "OK"
     assert rule["execErrState"] == "OK"
     assert rule["labels"] == {
         "severity": "warning",
-        "ruleUID": "ava-ops-events-low-water",
+        "ruleUID": "meiva-ops-events-low-water",
         "metric": "events_freshness",
-        "team": "ava-ops",
+        "team": "meiva-ops",
     }
     assert threshold_params(rule) == [[150]]
     threshold = next(d for d in rule["data"] if d["model"].get("type") == "threshold")
@@ -248,9 +248,9 @@ def test_events_low_water_rule_detects_partial_write_loss() -> None:
 
 def test_gateway_metrics_silence_rule_uses_heartbeat_counter() -> None:
     rules = {r["uid"]: r for r in load_rules()}
-    rule = rules["ava-ops-gateway-metrics-silent"]
+    rule = rules["meiva-ops-gateway-metrics-silent"]
     assert rule_query_exprs(rule, "prometheus") == [
-        "absent_over_time(ava_gateway_latency_count_total[5m])"
+        "absent_over_time(meiva_gateway_latency_count_total[5m])"
     ]
     assert threshold_params(rule) == [[0]]
     assert rule["for"] == "5m"
@@ -260,11 +260,11 @@ def test_gateway_metrics_silence_rule_uses_heartbeat_counter() -> None:
 
 def test_root_health_tick_staleness_tracks_each_recent_root_home() -> None:
     rules = {r["uid"]: r for r in load_rules()}
-    rule = rules["ava-ops-root-health-stale"]
+    rule = rules["meiva-ops-root-health-stale"]
     expr = rule_query_exprs(rule, "prometheus")[0]
-    assert "ava_root_health_tick_last_tick_timestamp_seconds" in expr
+    assert "meiva_root_health_tick_last_tick_timestamp_seconds" in expr
     assert "max_over_time" in expr
-    assert "ava_root_health_expected_expected_since_timestamp_seconds[24h]" in expr
+    assert "meiva_root_health_expected_expected_since_timestamp_seconds[24h]" in expr
     assert "[3m]" in expr
     assert "unless on(machine, home_id, process)" in expr
     assert "max by (machine, home_id, process)" in expr
@@ -276,27 +276,27 @@ def test_root_health_tick_staleness_tracks_each_recent_root_home() -> None:
 
 def test_latency_rule_uses_prometheus_histogram() -> None:
     rules = {r["uid"]: r for r in load_rules()}
-    exprs = rule_query_exprs(rules["ava-ops-llm-latency-p95"], "prometheus")
+    exprs = rule_query_exprs(rules["meiva-ops-llm-latency-p95"], "prometheus")
     assert len(exprs) == 1
     expr = exprs[0]
     assert "histogram_quantile(0.95" in expr
-    assert "ava_llm_usage_latency_milliseconds_bucket" in expr
+    assert "meiva_llm_usage_latency_milliseconds_bucket" in expr
     assert "[10m]" in expr
-    assert threshold_params(rules["ava-ops-llm-latency-p95"]) == [[60000]]
+    assert threshold_params(rules["meiva-ops-llm-latency-p95"]) == [[60000]]
 
 
 def test_checkpoint_blobs_high_water_rules() -> None:
     rules = {r["uid"]: r for r in load_rules()}
     expectations: dict[str, tuple[str, int, str]] = {
-        "ava-ops-checkpoint-blobs-warning": (
+        "meiva-ops-checkpoint-blobs-warning": (
             "warning",
             2684354560,
-            "max(ava_checkpoint_table_sizes_blobs_bytes_ratio) > 2684354560",
+            "max(meiva_checkpoint_table_sizes_blobs_bytes_ratio) > 2684354560",
         ),
-        "ava-ops-checkpoint-blobs-error": (
+        "meiva-ops-checkpoint-blobs-error": (
             "error",
             4294967296,
-            "max(ava_checkpoint_table_sizes_blobs_bytes_ratio) > 4294967296",
+            "max(meiva_checkpoint_table_sizes_blobs_bytes_ratio) > 4294967296",
         ),
     }
 
@@ -313,7 +313,7 @@ def test_checkpoint_blobs_high_water_rules() -> None:
             "severity": severity,
             "ruleUID": uid,
             "metric": "checkpoint_blobs_physical_bytes",
-            "team": "ava-ops",
+            "team": "meiva-ops",
         }
         description = rule["annotations"]["description"]
         assert "repack" in description
@@ -324,9 +324,9 @@ def test_checkpoint_blobs_high_water_rules() -> None:
 
 def test_checkpoint_blobs_freshness_guard() -> None:
     rules = {r["uid"]: r for r in load_rules()}
-    rule = rules["ava-ops-checkpoint-blobs-freshness"]
+    rule = rules["meiva-ops-checkpoint-blobs-freshness"]
     exprs = rule_query_exprs(rule, "prometheus")
-    assert exprs == ["absent_over_time(ava_checkpoint_table_sizes_blobs_bytes_ratio[2h])"]
+    assert exprs == ["absent_over_time(meiva_checkpoint_table_sizes_blobs_bytes_ratio[2h])"]
     assert rule_query_exprs(rule, "loki") == []
     assert rule["for"] == "5m"
     assert rule["noDataState"] == "OK"
@@ -334,9 +334,9 @@ def test_checkpoint_blobs_freshness_guard() -> None:
     assert threshold_params(rule) == [[0]]
     assert rule["labels"] == {
         "severity": "warning",
-        "ruleUID": "ava-ops-checkpoint-blobs-freshness",
+        "ruleUID": "meiva-ops-checkpoint-blobs-freshness",
         "metric": "checkpoint_blobs_freshness",
-        "team": "ava-ops",
+        "team": "meiva-ops",
     }
     description = rule["annotations"]["description"]
     assert "events_maintenance" in description
@@ -345,11 +345,11 @@ def test_checkpoint_blobs_freshness_guard() -> None:
 
 def test_checkpoint_blobs_growth_tier() -> None:
     rules = {r["uid"]: r for r in load_rules()}
-    rule = rules["ava-ops-checkpoint-blobs-growth"]
+    rule = rules["meiva-ops-checkpoint-blobs-growth"]
     exprs = rule_query_exprs(rule, "prometheus")
     assert exprs == [
-        "max(ava_checkpoint_table_sizes_blobs_bytes_ratio) - "
-        "max(ava_checkpoint_table_sizes_blobs_bytes_ratio offset 6h)"
+        "max(meiva_checkpoint_table_sizes_blobs_bytes_ratio) - "
+        "max(meiva_checkpoint_table_sizes_blobs_bytes_ratio offset 6h)"
     ]
     assert rule_query_exprs(rule, "loki") == []
     assert rule["for"] == "1h"
@@ -358,9 +358,9 @@ def test_checkpoint_blobs_growth_tier() -> None:
     assert threshold_params(rule) == [[1073741824]]
     assert rule["labels"] == {
         "severity": "warning",
-        "ruleUID": "ava-ops-checkpoint-blobs-growth",
+        "ruleUID": "meiva-ops-checkpoint-blobs-growth",
         "metric": "checkpoint_blobs_growth",
-        "team": "ava-ops",
+        "team": "meiva-ops",
     }
     description = rule["annotations"]["description"]
     assert "2026-09-13" in description
@@ -420,7 +420,7 @@ def _rendered_names(event: str, field: str) -> set[str]:
     kind = _metric_kind(event, field)
     if kind is None:
         return set()
-    base = f"ava_{event}_{strip_unit_suffix(field)}"
+    base = f"meiva_{event}_{strip_unit_suffix(field)}"
     unit = unit_for(field)
     if kind == "gauge":
         return {base + _UNIT_RENDER[unit]}
@@ -446,7 +446,7 @@ def _rule_metric_tokens() -> set[str]:
         for query in rule["data"]:
             expr = query["model"].get("expr")
             if isinstance(expr, str):
-                tokens.update(re.findall(r"ava_[a-z0-9_]+", expr))
+                tokens.update(re.findall(r"meiva_[a-z0-9_]+", expr))
     return tokens
 
 
@@ -465,25 +465,27 @@ def test_rule_metric_references_match_the_prometheus_translation() -> None:
 
 def test_unit_one_gauges_render_with_the_ratio_suffix() -> None:
     assert _rendered_names("checkpoint_table_sizes", "blobs_bytes") == {
-        "ava_checkpoint_table_sizes_blobs_bytes_ratio"
+        "meiva_checkpoint_table_sizes_blobs_bytes_ratio"
     }
     assert _rendered_names("event_log_drop", "last_dropped_at") == {
-        "ava_event_log_drop_last_dropped_at_ratio"
+        "meiva_event_log_drop_last_dropped_at_ratio"
     }
-    assert _rendered_names("memory_search_stats", "rows") == {"ava_memory_search_stats_rows_ratio"}
-    assert _rendered_names("gateway_latency", "count") == {"ava_gateway_latency_count_total"}
+    assert _rendered_names("memory_search_stats", "rows") == {
+        "meiva_memory_search_stats_rows_ratio"
+    }
+    assert _rendered_names("gateway_latency", "count") == {"meiva_gateway_latency_count_total"}
     assert _rendered_names("turn_end", "duration_seconds") == {
-        "ava_turn_end_duration_seconds_bucket",
-        "ava_turn_end_duration_seconds_count",
-        "ava_turn_end_duration_seconds_sum",
+        "meiva_turn_end_duration_seconds_bucket",
+        "meiva_turn_end_duration_seconds_count",
+        "meiva_turn_end_duration_seconds_sum",
     }
 
 
 def test_runtime_typed_fields_pin_their_emitted_kind() -> None:
-    assert _rendered_names("delivery_stalled", "age_s") == {"ava_delivery_stalled_age_s_total"}
-    assert _rendered_names("shell_ttl_renewed", "ttl_s") == {"ava_shell_ttl_renewed_ttl_s_total"}
+    assert _rendered_names("delivery_stalled", "age_s") == {"meiva_delivery_stalled_age_s_total"}
+    assert _rendered_names("shell_ttl_renewed", "ttl_s") == {"meiva_shell_ttl_renewed_ttl_s_total"}
     assert _rendered_names("heartbeat_paused", "duration_s") == {
-        "ava_heartbeat_paused_duration_s_total"
+        "meiva_heartbeat_paused_duration_s_total"
     }
 
 
@@ -494,11 +496,11 @@ def test_unlisted_metric_names_have_no_stale_entries() -> None:
 
 def test_trace_watermark_rule_filters_degradation_action() -> None:
     rules = {r["uid"]: r for r in load_rules()}
-    exprs = rule_query_exprs(rules["ava-ops-trace-disk-watermark"], "loki")
+    exprs = rule_query_exprs(rules["meiva-ops-trace-disk-watermark"], "loki")
     assert any('attributes_action="recording_disabled_disk_watermark"' in e for e in exprs)
     assert any('category="telemetry"' in e for e in exprs)
     assert any("[24h]" in e for e in exprs)
-    assert threshold_params(rules["ava-ops-trace-disk-watermark"]) == [[0]]
+    assert threshold_params(rules["meiva-ops-trace-disk-watermark"]) == [[0]]
 
 
 def assert_latency_query_scopes_to_route_class(expr: str, route_class: str) -> None:

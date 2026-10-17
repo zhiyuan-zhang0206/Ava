@@ -2,7 +2,7 @@
 
 A generation is either *supervised* — a file-driven delegated worker with a
 task file, a work file, and an automatic lifecycle supervisor — or a
-*file-less takeover* that replaces the launching Ava agent: no files, no
+*file-less takeover* that replaces the launching Meiva agent: no files, no
 supervisor, and its coding session alone is the liveness signal.
 
 Every launch owns a generation of its own under the key ``(cluster home,
@@ -104,7 +104,7 @@ class CodingSessionSocketError(RuntimeError):
 
 
 def private_socket_dir(*, base: Path | None = None) -> Path:
-    """``<short tmp>/ava-<uid>``: a real directory this user owns, mode 0700.
+    """``<short tmp>/meiva-<uid>``: a real directory this user owns, mode 0700.
 
     A world-writable parent lets anyone pre-create the name, so a directory
     that is a symlink or belongs to another user is refused rather than used.
@@ -113,7 +113,7 @@ def private_socket_dir(*, base: Path | None = None) -> Path:
     if base is None:
         base = Path("/private/tmp" if is_macos() else "/tmp")  # noqa: S108 — the per-user dir below is checked: real, ours, 0700
     uid = os.getuid()
-    directory = base / f"ava-{uid}"
+    directory = base / f"meiva-{uid}"
     with contextlib.suppress(FileExistsError):
         directory.mkdir(mode=0o700)
     info = directory.lstat()
@@ -130,8 +130,8 @@ def private_socket_dir(*, base: Path | None = None) -> Path:
 def codex_app_server_socket(key: CodingSessionKey, generation: str) -> Path:
     """Private host-local unix socket for a generation's shared Codex app server.
 
-    The socket lives in a short per-user directory (``/private/tmp/ava-<uid>``
-    on macOS, ``/tmp/ava-<uid>`` elsewhere), created 0700 and verified to be
+    The socket lives in a short per-user directory (``/private/tmp/meiva-<uid>``
+    on macOS, ``/tmp/meiva-<uid>`` elsewhere), created 0700 and verified to be
     this user's real directory, so its length no longer depends on the cluster
     home: a home under a long directory path pushed a
     ``<home>/run`` socket past the kernel limit and codex refused to listen.

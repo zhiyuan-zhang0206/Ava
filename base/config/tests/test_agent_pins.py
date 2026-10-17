@@ -17,7 +17,7 @@ def test_birth_fills_fields_overlay_omits() -> None:
 
 def test_unknown_and_plugin_keys_are_dropped() -> None:
     pins = resolve_agent_config_pins(
-        {"llm_model": "m", "ava_memory.pool_size": 3, "deleted_field": 1}, None
+        {"llm_model": "m", "meiva_memory.pool_size": 3, "deleted_field": 1}, None
     )
     assert pins == {"llm_model": "m"}
 

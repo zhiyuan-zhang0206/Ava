@@ -85,7 +85,7 @@ it("falls back to plain text, then highlights once an un-prefetched chunk resolv
   await waitFor(() => expect(copy).toHaveBeenCalledWith(code));
 });
 
-// Regression coverage for the P1 adversarial-review finding on Ava #3463: a
+// Regression coverage for the P1 adversarial-review finding on Meiva #3463: a
 // rejected dynamic import (chunk-load failure) used to be cached forever by
 // `highlightPromise ??= ...` with no `.catch`, permanently bricking syntax
 // highlighting after one transient failure and raising an unhandled

@@ -37,8 +37,8 @@ from tests.path_scoped.cli_tests import operator_database as operator_database
 from tests.path_scoped.cli_tests import operator_pipeline as operator_pipeline
 
 
-def _isolated_ava(*, host: Host) -> str:
-    return "/isolated/.venv/bin/ava"
+def _isolated_meiva(*, host: Host) -> str:
+    return "/isolated/.venv/bin/meiva"
 
 
 def _usr_bin(*, host: Host) -> str:
@@ -64,7 +64,7 @@ def test_converge_constructs_one_lazy_owner_per_operation(
         host.converge_host(
             tmp_path,
             None,
-            ava_home=tmp_path,
+            meiva_home=tmp_path,
             services=frozenset(),
             steps=steps,
             database_factory=operator_database,
@@ -94,7 +94,7 @@ def test_all_six_formal_steps_pass_live_readers_from_the_same_owner(
         owner.set_field(name, value)
     ctx = ConvergeCtx(
         repo=tmp_path,
-        ava_home=tmp_path,
+        meiva_home=tmp_path,
         roles=None,
         config=owner,
         database_factory=operator_database,
@@ -138,7 +138,7 @@ def test_all_six_formal_steps_pass_live_readers_from_the_same_owner(
     def register_pr_flow(
         *, enabled_reader: Callable[[], bool], production: bool, host: Host
     ) -> None:
-        assert production is production_identity(machine=ctx.machine, home=ctx.ava_home)
+        assert production is production_identity(machine=ctx.machine, home=ctx.meiva_home)
         register(enabled_reader=enabled_reader, host=host)
 
     monkeypatch.setattr(pr_flow_job, "register_pr_flow_job", register_pr_flow)
@@ -196,7 +196,7 @@ def test_formal_steps_reach_real_backend_with_live_policy_and_isolated_os(
     runner: CommandRunner = launchctl if platform == "macos" else crontab
     ctx = ConvergeCtx(
         repo=default_home,
-        ava_home=default_home,
+        meiva_home=default_home,
         roles=None,
         config=owner,
         database_factory=operator_database,
@@ -211,7 +211,7 @@ def test_formal_steps_reach_real_backend_with_live_policy_and_isolated_os(
         services=frozenset(),
         timers=ManualTimers(),
     )
-    monkeypatch.setattr(cron, "ava_binary_path", _isolated_ava)
+    monkeypatch.setattr(cron, "meiva_binary_path", _isolated_meiva)
     monkeypatch.setattr(cron, "launchd_path_env", _usr_bin)
 
     def specs() -> tuple[str, str]:
@@ -220,13 +220,13 @@ def test_formal_steps_reach_real_backend_with_live_policy_and_isolated_os(
         if platform == "linux":
             line = {
                 marker: next(ln for ln in crontab.lines if ln.endswith(marker))
-                for marker in ("# ava-packages-refresh", "# ava-walg")
+                for marker in ("# meiva-packages-refresh", "# meiva-walg")
             }
-            return line["# ava-packages-refresh"], line["# ava-walg"]
+            return line["# meiva-packages-refresh"], line["# meiva-walg"]
         directory = Path.home() / "Library" / "LaunchAgents"
         return (
-            (directory / "com.ava.packages-refresh.plist").read_text(),
-            (directory / "com.ava.walg.plist").read_text(),
+            (directory / "com.meiva.packages-refresh.plist").read_text(),
+            (directory / "com.meiva.walg.plist").read_text(),
         )
 
     initial = specs()

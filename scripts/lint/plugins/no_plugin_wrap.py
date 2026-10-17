@@ -1,45 +1,45 @@
-"""Forbid bare monkey-patching of `ava.*` in plugins — wraps must be declared as `SdkWrap`.
+"""Forbid bare monkey-patching of `meiva.*` in plugins — wraps must be declared as `SdkWrap`.
 
 Run: `.venv/bin/python scripts/lint/plugins/no_plugin_wrap.py [path ...]` (defaults to scanning
-`ava_builtins/plugins/`, the built-in plugins; a missing default dir is an error;
+`meiva_builtins/plugins/`, the built-in plugins; a missing default dir is an error;
 an explicit path that does not exist is an error (stderr + exit 1) rather than a
 silent no-op). Also run automatically via pre-commit hook before commit.
 
 ## Why
 
 A plugin's `contribute()` declares `SdkWrap(target, wrapper)` to extend
-SDK behavior; the SDK install applies it: it makes the wrap stack enumerable (`ava.extend.stack`),
+SDK behavior; the SDK install applies it: it makes the wrap stack enumerable (`meiva.extend.stack`),
 deterministic (registration = plugin load order), and reversible (originals
-restored on reload). A plugin that instead does `ava.files.read = my_read`
-(or `setattr(ava.files, "read", my_read)`) monkey-patches invisibly — no record
+restored on reload). A plugin that instead does `meiva.files.read = my_read`
+(or `setattr(meiva.files, "read", my_read)`) monkey-patches invisibly — no record
 of who changed it or in what order, and a reload double-wraps. That bypass is
 what this lint bans, so the introspectable stack stays the single source of
 truth for "what did plugins inject."
 
 ## Rule
 
-In every `plugin.py` (and sibling modules) under `ava_builtins/plugins/`, an assignment
-whose target is an `ava`-rooted attribute path ending in a function-style name
+In every `plugin.py` (and sibling modules) under `meiva_builtins/plugins/`, an assignment
+whose target is an `meiva`-rooted attribute path ending in a function-style name
 is an error:
 
-    ava.files.read = _wrapped_read          # error -> SdkWrap("files.read", ...)
-    ava.agents.spawn = _spawn_with_label    # error -> SdkWrap("agents.spawn", ...)
-    setattr(ava.files, "read", _wrapped)    # error -> SdkWrap(...)
+    meiva.files.read = _wrapped_read          # error -> SdkWrap("files.read", ...)
+    meiva.agents.spawn = _spawn_with_label    # error -> SdkWrap("agents.spawn", ...)
+    setattr(meiva.files, "read", _wrapped)    # error -> SdkWrap(...)
 
-Not flagged: dunder assignments (`ava.files.__doc__ = ...` — a legitimate
+Not flagged: dunder assignments (`meiva.files.__doc__ = ...` — a legitimate
 module-docstring override) and ALL-CAPS constant assignments
-(`ava.memory.PATH = ...`). New namespaces / members are declared as
+(`meiva.memory.PATH = ...`). New namespaces / members are declared as
 `SdkNamespace` / `SdkMember` (Call nodes, never matched here).
 
-Known gap: assignment through a module alias (`import ava.files as f; f.read = x`)
-is not caught — the target must be a literal `ava.…` attribute chain. The
+Known gap: assignment through a module alias (`import meiva.files as f; f.read = x`)
+is not caught — the target must be a literal `meiva.…` attribute chain. The
 primitive is the obvious path; this catches the naive regression.
 
 ## Exemption
 
 Append `# wrap-ok: <reason>` on the offending line for a deliberate, reviewed
 bare assignment (rare). A test file (any `tests/` directory under the plugins,
-e.g. `ava_builtins/plugins/<plugin>/tests/`) is exempt: a test stubs the SDK on
+e.g. `meiva_builtins/plugins/<plugin>/tests/`) is exempt: a test stubs the SDK on
 purpose. Error format `file:line: <line>` + non-zero exit.
 """
 
@@ -56,13 +56,13 @@ sys.path.insert(0, str(_REPO_ROOT))
 
 from meizel import lint_common  # noqa: E402 - standalone script
 
-SCAN_DIR = "ava_builtins/plugins"
+SCAN_DIR = "meiva_builtins/plugins"
 
 _EXEMPTION = "# wrap-ok:"
 
 
 def _root_name(node: ast.expr) -> str | None:
-    """Leftmost `Name.id` of an attribute chain (`ava.files.read` -> "ava"), else None."""
+    """Leftmost `Name.id` of an attribute chain (`meiva.files.read` -> "meiva"), else None."""
     while isinstance(node, ast.Attribute):
         node = node.value
     return node.id if isinstance(node, ast.Name) else None
@@ -80,7 +80,7 @@ def _is_function_style(attr: str) -> bool:
 
 
 def _attr_path(node: ast.Attribute) -> str:
-    """Render `ava.files.read` from the AST target for the error message."""
+    """Render `meiva.files.read` from the AST target for the error message."""
     parts: list[str] = []
     cur: ast.expr = node
     while isinstance(cur, ast.Attribute):
@@ -99,7 +99,7 @@ def _assign_violations(
     for tgt in targets:
         if (
             isinstance(tgt, ast.Attribute)
-            and _root_name(tgt) == "ava"
+            and _root_name(tgt) == "meiva"
             and _is_function_style(tgt.attr)
             and not exempt(node.lineno)
         ):
@@ -108,24 +108,24 @@ def _assign_violations(
                 (
                     node.lineno,
                     f"bare `{path_str} = ...` monkey-patches the SDK — use "
-                    f'`SdkWrap("{path_str.removeprefix("ava.")}", wrapper)`',
+                    f'`SdkWrap("{path_str.removeprefix("meiva.")}", wrapper)`',
                 )
             )
     return out
 
 
-def _is_ava_setattr(node: ast.AST) -> TypeGuard[ast.Call]:
+def _is_meiva_setattr(node: ast.AST) -> TypeGuard[ast.Call]:
     return (
         isinstance(node, ast.Call)
         and isinstance(node.func, ast.Name)
         and node.func.id == "setattr"
         and bool(node.args)
-        and _root_name(node.args[0]) == "ava"
+        and _root_name(node.args[0]) == "meiva"
     )
 
 
 def _scan_file(path: Path) -> list[tuple[int, str]]:
-    """Return [(lineno, message), ...] for bare ava monkey-patches."""
+    """Return [(lineno, message), ...] for bare meiva monkey-patches."""
     try:
         lines = path.read_text(encoding="utf-8").splitlines()
     except (OSError, UnicodeDecodeError):
@@ -140,15 +140,15 @@ def _scan_file(path: Path) -> list[tuple[int, str]]:
 
     out: list[tuple[int, str]] = []
     for node in ast.walk(tree):
-        # `ava.x.y = ...` / `ava.x.y: T = ...`
+        # `meiva.x.y = ...` / `meiva.x.y: T = ...`
         if isinstance(node, (ast.Assign, ast.AnnAssign)):
             out.extend(_assign_violations(node, exempt))
-        # `setattr(ava.<x>, "name", ...)`
-        elif _is_ava_setattr(node) and not exempt(node.lineno):
+        # `setattr(meiva.<x>, "name", ...)`
+        elif _is_meiva_setattr(node) and not exempt(node.lineno):
             out.append(
                 (
                     node.lineno,
-                    "bare `setattr(ava..., ...)` monkey-patches the SDK — use "
+                    "bare `setattr(meiva..., ...)` monkey-patches the SDK — use "
                     "`SdkWrap(target, wrapper)` in `contribute()` (or SdkNamespace / SdkMember for new members)",
                 )
             )

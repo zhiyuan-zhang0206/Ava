@@ -1,7 +1,7 @@
 """Label helpers shared by agent birth, gateway, and services/derived/labeler.
 
 `publish_label_updated` pushes a LabelUpdated event to the Redis
-`ava:events` channel so the frontend's SSE sees label changes in real
+`meiva:events` channel so the frontend's SSE sees label changes in real
 time. Two callers:
 - `gateway/app.py` — when PATCH /api/agents/{id} manually changes label
 - `services/derived/labeler/labeler.py` — after LLM auto-generated label succeeds

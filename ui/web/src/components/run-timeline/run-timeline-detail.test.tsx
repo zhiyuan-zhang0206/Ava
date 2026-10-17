@@ -68,7 +68,7 @@ describe("NodeDetail summary", () => {
   });
 
   it("does not render raw HTML and opens links in a new tab", () => {
-    const el = renderNode("<script>x</script>\n\n[ava](https://example.com)");
+    const el = renderNode("<script>x</script>\n\n[meiva](https://example.com)");
     expect(el.querySelector("script")).toBeNull();
     const a = el.querySelector("a");
     expect(a?.getAttribute("target")).toBe("_blank");

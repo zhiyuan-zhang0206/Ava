@@ -1,4 +1,4 @@
-"""The manifest gate: a plugin's `ava-plugin.json` and what it declares must agree.
+"""The manifest gate: a plugin's `meiva-plugin.json` and what it declares must agree.
 
 A plugin without a manifest is refused (`load_manifest` raises). With one, each key the caller gates
 must list exactly the identifiers the plugin's `PluginContributions` provides on that surface: a
@@ -21,7 +21,7 @@ _CONFIG_IDENTIFIER = "<declared>"
 
 
 class ContributionMismatch(Exception):  # noqa: N818 — a load failure of one plugin, not an error class family
-    """A plugin's `ava-plugin.json` and its declaration disagree."""
+    """A plugin's `meiva-plugin.json` and its declaration disagree."""
 
 
 def check_manifest(
@@ -58,6 +58,6 @@ def check_manifest(
             problems.append(f"{key}: {identifier!r} is provided but not declared")
     if problems:
         raise ContributionMismatch(
-            f"plugin {name!r}: ava-plugin.json and its declaration disagree — "
+            f"plugin {name!r}: meiva-plugin.json and its declaration disagree — "
             + "; ".join(problems)
         )

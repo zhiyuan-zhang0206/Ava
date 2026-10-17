@@ -9,7 +9,7 @@ What is decided:
   newest segment, with no boundary checkpoint, is the session in progress. Building it is what
   closing the live segment was.
 - **A build is the live trigger rule, replayed, minus coverage.** The chunks are cut as the hook
-  would have cut them (`AVA_UNDERSTANDING_CHUNK_RATIO` x the agent model's soft compaction threshold, the closing remainder last); a chunk that
+  would have cut them (`MEIVA_UNDERSTANDING_CHUNK_RATIO` x the agent model's soft compaction threshold, the closing remainder last); a chunk that
   overlaps level-1 nodes is cut down to its uncovered runs, one job each, so a repeated or
   overlapping build never re-describes what exists. The jobs are ordinary chunk jobs.
 - **The levels above are rebuilt from the leaves, by a job.** A build also queues one

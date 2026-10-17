@@ -111,7 +111,7 @@ def validate_spawn_args(
         raise ValueError(
             f"spawner has agent: prefix but the id part is not a valid agent id: "
             f"{spawner!r}. This is often caused by an un-bootstrapped process "
-            f"(no AvaContext carrying an agent id was bound) — the process's own agent id "
+            f"(no MeivaContext carrying an agent id was bound) — the process's own agent id "
             f"was None, producing 'agent:None'. Fix the caller to bind "
             f"an identity before spawning."
         )
@@ -245,7 +245,7 @@ def insert_agent_birth(
     """
     validate_spawn_args(spawner, fork_from, fork_checkpoint, prompt, prompt_source)
     # The gateway creates the row for ANY target (the runner's ops server runs
-    # as ava_runner and cannot INSERT agents); the launch op re-checks the
+    # as meiva_runner and cannot INSERT agents); the launch op re-checks the
     # agent-runner capability on the target itself.
     target_machine = machine
     conn = cur.connection

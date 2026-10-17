@@ -466,7 +466,7 @@ async def pending_interrupt_reason(
     claim node, the single owner of inbound semantics. So does a claimed
     terminate whose application is durable but not yet observed.
 
-    Self-initiated lifecycle (`source='self'`, i.e. `ava.self.terminate()` /
+    Self-initiated lifecycle (`source='self'`, i.e. `meiva.self.terminate()` /
     restart from inside the agent's own exec) is EXCLUDED: that path already
     raises `LifecycleExit` inside the exec child, which the exec node handles
     directly, so the watcher must not also fire on the agent's own row — doing

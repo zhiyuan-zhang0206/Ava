@@ -370,7 +370,7 @@ def require_helper_support(helper: PermissionsHelperClient, capability: str, too
     if not helper.ping().get(capability):
         raise ComputerUseError(
             f"the running permissions helper predates {tool}: rebuild it "
-            "(an operator runs ava stop then ava start) before using this tool"
+            "(an operator runs meiva stop then meiva start) before using this tool"
         )
 
 

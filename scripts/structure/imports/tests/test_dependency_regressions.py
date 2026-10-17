@@ -8,11 +8,11 @@ from scripts.structure.tests.patch_repo import make_repo
 def test_dynamic_top_level_module_is_evidence(tmp_path: Path) -> None:
     root = make_repo(tmp_path)
     evidence = placement.collect_reference_evidence(
-        ast.parse('import importlib\nimportlib.import_module("ava")'),
+        ast.parse('import importlib\nimportlib.import_module("meiva")'),
         placement.ModuleIndex(root),
         "scripts/tests/test_probe.py",
     )
-    assert [ref.module for ref in evidence.refs] == ["ava"]
+    assert [ref.module for ref in evidence.refs] == ["meiva"]
     assert evidence.unresolved == []
 
 
@@ -30,7 +30,7 @@ def test_unknown_dynamic_target_retains_incomplete_evidence(tmp_path: Path) -> N
 def test_missing_absolute_module_does_not_become_its_parent(tmp_path: Path) -> None:
     root = make_repo(tmp_path)
     evidence = placement.collect_reference_evidence(
-        ast.parse("import ava.nonexistent_module"),
+        ast.parse("import meiva.nonexistent_module"),
         placement.ModuleIndex(root),
         "scripts/tests/test_probe.py",
     )

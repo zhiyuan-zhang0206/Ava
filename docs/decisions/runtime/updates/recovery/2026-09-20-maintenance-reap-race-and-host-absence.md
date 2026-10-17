@@ -40,6 +40,6 @@ lease renewal or compaction admission. Whether repeatedly interrupted agents
 need compaction admitted before ordinary turns remains a separate design
 question; context size alone does not establish lease expiry.
 
-Forward link (2026-10-04): `repair` and its host-absence probe are gone with `ava maintenance`; `ava
+Forward link (2026-10-04): `repair` and its host-absence probe are gone with `meiva maintenance`; `meiva
 start` settles failed receipts without asking the host. See
-[delete-ava-maintenance](../../../agents/graph/2026-10-04-delete-ava-maintenance.md).
+[delete-meiva-maintenance](../../../agents/graph/2026-10-04-delete-meiva-maintenance.md).

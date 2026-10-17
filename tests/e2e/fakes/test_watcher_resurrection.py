@@ -10,7 +10,7 @@ from tests.e2e.fakes.scenarios import shell_effects
 async def test_resurrection_model_processes_wake_and_completion(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, batched: bool
 ) -> None:
-    monkeypatch.setenv("AVA_HOME", str(tmp_path))
+    monkeypatch.setenv("MEIVA_HOME", str(tmp_path))
     shell_effects.sandbox().mkdir(parents=True, exist_ok=True)
     (shell_effects.sandbox() / "resurrection-id").write_text("0")
     model = shell_effects.build_watcher_resurrection("unused", agent_id=17)

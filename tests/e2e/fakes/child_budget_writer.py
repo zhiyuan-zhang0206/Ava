@@ -9,8 +9,8 @@ import time
 from pathlib import Path
 from typing import Any
 
-import ava
-from base.agents.context import AvaContext
+import meiva
+from base.agents.context import MeivaContext
 from base.agents.context.identity import AgentIdentity
 
 root = Path(sys.argv[1])
@@ -62,7 +62,7 @@ def send_message(*_args: object, **_kwargs: object) -> None:
 
 Path.open = held_open  # pyright: ignore[reportAttributeAccessIssue]
 os.fdopen = held_fdopen  # pyright: ignore[reportAttributeAccessIssue]
-ava.context = AvaContext(identity=AgentIdentity(agent_id=1, owns_loop=False))
-ava.agents.spawn = spawn
-ava.agents.send_message = send_message
+meiva.context = MeivaContext(identity=AgentIdentity(agent_id=1, owns_loop=False))
+meiva.agents.spawn = spawn
+meiva.agents.send_message = send_message
 exec(sys.argv[2])

@@ -33,7 +33,7 @@ def ai(
         blocks.append({"type": "text", "text": text})
     calls = [{"name": "execute_code", "args": {"code": code}, "id": f"tc{second}"}] if code else []
     return AIMessage(
-        content=blocks, tool_calls=calls, additional_kwargs={"ava_created_at": ts(second)}
+        content=blocks, tool_calls=calls, additional_kwargs={"meiva_created_at": ts(second)}
     )
 
 
@@ -42,9 +42,9 @@ def result(second: int, text: str = "ok") -> ToolMessage:
         content=text,
         tool_call_id="tc",
         additional_kwargs={
-            "ava_msg_type": "exec_output",
-            "ava_exec_body_start": 0,
-            "ava_created_at": ts(second),
+            "meiva_msg_type": "exec_output",
+            "meiva_exec_body_start": 0,
+            "meiva_created_at": ts(second),
         },
     )
 
@@ -53,9 +53,9 @@ def inbound(second: int, text: str, source: str = "user") -> HumanMessage:
     return HumanMessage(
         content=text,
         additional_kwargs={
-            "ava_msg_type": "inbound",
-            "ava_created_at": ts(second),
-            "ava_source": source,
+            "meiva_msg_type": "inbound",
+            "meiva_created_at": ts(second),
+            "meiva_source": source,
         },
     )
 
@@ -63,7 +63,7 @@ def inbound(second: int, text: str, source: str = "user") -> HumanMessage:
 def note(second: int, text: str = "heartbeat") -> HumanMessage:
     return HumanMessage(
         content=text,
-        additional_kwargs={"ava_msg_type": "system_note", "ava_created_at": ts(second)},
+        additional_kwargs={"meiva_msg_type": "system_note", "meiva_created_at": ts(second)},
     )
 
 

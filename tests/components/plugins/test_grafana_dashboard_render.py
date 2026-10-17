@@ -1,7 +1,7 @@
-"""The registry-rendered Ava Ops dashboard — renderer + suppliers (task #3697).
+"""The registry-rendered Meiva Ops dashboard — renderer + suppliers (task #3697).
 
 The provisioning file ``deploy/lgtm/config/grafana/provisioning/dashboards/
-ava-ops-main.json`` is on its way to becoming a render of the metric
+meiva-ops-main.json`` is on its way to becoming a render of the metric
 registries instead of a hand-maintained file. This module locks the renderer
 (``base.telemetry.metrics.grafana_dashboard``) and the plugin suppliers
 (``base.packages.dashboard_supply``):
@@ -70,9 +70,9 @@ from base.telemetry.metrics.plugin_metrics import MetricSpec, render_title
 
 _REPO_ROOT = Path(__file__).resolve().parents[3]
 _DASHBOARD_FILE = (
-    _REPO_ROOT / "deploy/lgtm/config/grafana/provisioning/dashboards/ava-ops-main.json"
+    _REPO_ROOT / "deploy/lgtm/config/grafana/provisioning/dashboards/meiva-ops-main.json"
 )
-_PLUGINS = ("ava_fleet", "ava_memory", "ava_syntax_fix")
+_PLUGINS = ("meiva_fleet", "meiva_memory", "meiva_syntax_fix")
 
 # Empty since S2 (task #3697) registered the last 18 panels — the Events
 # trio, the gateway sample count, and the host + memory-search gauges. Kept as
@@ -322,7 +322,7 @@ def _assert_one_panel_per_grafana_spec(
 
 
 def _assert_shell_anchors(dashboard: dict[str, Any], panels: list[dict[str, Any]]) -> None:
-    assert dashboard["uid"] == "ava-ops-main"
+    assert dashboard["uid"] == "meiva-ops-main"
     assert dashboard["timezone"] == "Asia/Shanghai"
     assert dashboard["refresh"] == "10m"
     assert dashboard["time"] == {"from": "now-24h", "to": "now"}
@@ -442,11 +442,11 @@ def test_render_is_deterministic_and_environment_independent(
     """Same specs, same bytes — twice in-process, and once more in a
     subprocess with a scrubbed environment (the #3339/#2456 lesson).
 
-    The scrub drops everything except ``PATH``, ``AVA_HOME`` and
-    ``AVA_CONFIG_FETCH=skip``, and the last two must be given explicitly.
-    ``AVA_HOME`` is the session's isolated test home: without it the child
-    falls back to ``~/.ava`` (via the passwd entry, even with no ``HOME``) and
-    boots against the operator's production ``.env``. ``AVA_CONFIG_FETCH=skip``
+    The scrub drops everything except ``PATH``, ``MEIVA_HOME`` and
+    ``MEIVA_CONFIG_FETCH=skip``, and the last two must be given explicitly.
+    ``MEIVA_HOME`` is the session's isolated test home: without it the child
+    falls back to ``~/.meiva`` (via the passwd entry, even with no ``HOME``) and
+    boots against the operator's production ``.env``. ``MEIVA_CONFIG_FETCH=skip``
     keeps that boot offline, so it never asks a gateway for config.
     """
     core_specs, plugin_specs, dashboard = world
@@ -460,8 +460,8 @@ def test_render_is_deterministic_and_environment_independent(
         cwd="/",
         env={
             "PATH": "/usr/bin:/bin",
-            "AVA_HOME": os.environ["AVA_HOME"],
-            "AVA_CONFIG_FETCH": "skip",
+            "MEIVA_HOME": os.environ["MEIVA_HOME"],
+            "MEIVA_CONFIG_FETCH": "skip",
         },
         check=True,
     )
@@ -493,7 +493,7 @@ def _metrics_manifest(name: str, metric: str) -> str:
             "apiVersion": 2,
             "name": name,
             "version": "1.0.0",
-            "engines": {"ava": ">=2026.10.1"},
+            "engines": {"meiva": ">=2026.10.1"},
             "contributions": {"metrics": [metric]},
         }
     )
@@ -508,7 +508,7 @@ def _install_plugin(
     tree = tmp_path / name
     tree.mkdir()
     (tree / "metrics.py").write_text(source)
-    (tree / "ava-plugin.json").write_text(_metrics_manifest(name, metric))
+    (tree / "meiva-plugin.json").write_text(_metrics_manifest(name, metric))
     digest = registry.put_blob(conn, registry.pack_tree(tree), name=name)
     registry.upsert(conn, name=name, kind="plugin", source="test", content_hash=digest)
 
@@ -534,23 +534,23 @@ def test_repo_supplier_reports_a_broken_plugin_loudly(
     (plugins_dir / "good_one" / "metrics.py").write_text(
         _metrics_module_source("good_one_calls", "Good")
     )
-    (plugins_dir / "good_one" / "ava-plugin.json").write_text(
+    (plugins_dir / "good_one" / "meiva-plugin.json").write_text(
         _metrics_manifest("good_one", "good_one_calls")
     )
     (plugins_dir / "broken_one").mkdir()
     (plugins_dir / "broken_one" / "metrics.py").write_text("raise RuntimeError('boom')\n")
-    (plugins_dir / "broken_one" / "ava-plugin.json").write_text(
+    (plugins_dir / "broken_one" / "meiva-plugin.json").write_text(
         _metrics_manifest("broken_one", "broken_one_calls")
     )
     import base.packages.dashboard_supply as supply
 
     for name in ("good_one", "broken_one"):
-        sys.modules.pop(f"ava_repo_plugins.{name}.metrics", None)
+        sys.modules.pop(f"meiva_repo_plugins.{name}.metrics", None)
     try:
         result = supply.load_repo_plugin_specs(plugins_dir)
     finally:
         for name in ("good_one", "broken_one"):
-            sys.modules.pop(f"ava_repo_plugins.{name}.metrics", None)
+            sys.modules.pop(f"meiva_repo_plugins.{name}.metrics", None)
     assert result.loaded == ["good_one"]
     assert result.failed == ["broken_one"]
     assert [spec.name for spec in result.specs] == ["good_one_calls"]

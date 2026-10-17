@@ -23,7 +23,7 @@ def _run(**overrides: object) -> dict[str, Any]:
         "status": "completed",
         "conclusion": "success",
         "run_attempt": 1,
-        "head_branch": "ava-1-demo",
+        "head_branch": "meiva-1-demo",
         "head_sha": "a" * 40,
         "created_at": "2026-09-02T10:00:00Z",
         "run_started_at": "2026-09-02T10:00:00Z",
@@ -36,7 +36,7 @@ def _run(**overrides: object) -> dict[str, Any]:
 def _pr(**overrides: object) -> dict[str, Any]:
     row: dict[str, Any] = {
         "number": 1,
-        "head_ref": "ava-1-demo",
+        "head_ref": "meiva-1-demo",
         "head_sha": "a" * 40,
         "created_at": "2026-09-02T08:00:00Z",
         "updated_at": "2026-09-02T12:00:00Z",
@@ -102,7 +102,7 @@ def test_classification_rules_cover_noise_white_retry_and_trunk_mapping() -> Non
     assert module.workflow_class("Example proof") == "proof"
     assert module.workflow_class("Release desktop") == "release"
     assert module.trunk_merge_pr_number("trunk-merge/pr-42/a4e9") == 42
-    assert module.trunk_merge_pr_number("ava-42-demo") is None
+    assert module.trunk_merge_pr_number("meiva-42-demo") is None
 
 
 def test_attribute_runs_respects_pr_life_and_synthetic_trunk_branch() -> None:

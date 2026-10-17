@@ -246,7 +246,7 @@ def test_adapter_rejects_changed_signature(monkeypatch: pytest.MonkeyPatch) -> N
 
 def test_adapter_rejects_foreign_replacement(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(BasePostgresSaver, "_try_advance_walks", lambda: None)
-    with pytest.raises(TypeError, match="replaced outside Ava"):
+    with pytest.raises(TypeError, match="replaced outside Meiva"):
         checkpoint_postgres_walks.validate_checkpoint_postgres_api()
 
 

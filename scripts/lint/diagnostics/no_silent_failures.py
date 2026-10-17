@@ -9,7 +9,7 @@ rather than a silent no-op). Also run automatically via pre-commit hook
 ## Why
 
 A broad handler that neither re-raises nor reports turns every bug in its `try`
-body into "nothing happened". The `ava_code` after_exec hook read per-turn state
+body into "nothing happened". The `meiva_code` after_exec hook read per-turn state
 from the host process, raised `PluginStateOutsideTurnError` on every call, and a
 `contextlib.suppress(Exception)` ate it: the hook was a no-op from the day it
 shipped and there was not one log line to say so. The failure a handler hides is

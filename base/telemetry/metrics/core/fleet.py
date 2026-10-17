@@ -2,10 +2,10 @@
 
 The two Fleet growth panels read the gateway's absolute agent-registry
 max-id gauge (``services/upkeep/events_maintenance/registry_gauge.py``, 60s sample): a Prometheus
-timeseries of ``ava_agent_registry_max_id_ratio`` and its ``deriv()`` slope
+timeseries of ``meiva_agent_registry_max_id_ratio`` and its ``deriv()`` slope
 in agents per day. They live here — beside ``dismissed`` — so
 the core panels module (already at 787 lines) stays untouched, while the
-ava_observability registry count remains locked at 21 metrics by tests.
+meiva_observability registry count remains locked at 21 metrics by tests.
 """
 
 from __future__ import annotations
@@ -22,7 +22,7 @@ def core_metrics() -> list[MetricSpec]:
             title="Max Agent ID",
             description=(
                 "Agents-table high-water mark (max id), sampled by the gateway every "
-                "60s into the ava_agent_registry_max_id_ratio gauge (task #2010); a "
+                "60s into the meiva_agent_registry_max_id_ratio gauge (task #2010); a "
                 "vertical step marks a batch spawn."
             ),
             event_name="agent_registry",
@@ -36,7 +36,7 @@ def core_metrics() -> list[MetricSpec]:
             # every rollout, so a bare read draws one overlapping series per
             # gateway lifetime; max() collapses them into the single high-water
             # curve the panel promises.
-            query="max(ava_agent_registry_max_id_ratio)",
+            query="max(meiva_agent_registry_max_id_ratio)",
             query_type="promql",
             target_names=["max_id"],
             panel_id=2301,
@@ -50,7 +50,7 @@ def core_metrics() -> list[MetricSpec]:
             name="core_agent_max_id_growth_rate",
             title="Max Agent ID growth rate",
             description=(
-                "Slope of the ava_agent_registry_max_id_ratio gauge over the last hour, "
+                "Slope of the meiva_agent_registry_max_id_ratio gauge over the last hour, "
                 "expressed in agents per day (deriv() * 86400, task #2010); a spike marks "
                 "a batch spawn."
             ),
@@ -63,7 +63,7 @@ def core_metrics() -> list[MetricSpec]:
             # #2010; the [1h:] subquery form — a bare [1h] range on a function
             # call is a PromQL parse error). Shows batch-spawn intensity at a
             # glance (e.g. +300/day).
-            query="deriv(max(ava_agent_registry_max_id_ratio)[1h:]) * 86400",
+            query="deriv(max(meiva_agent_registry_max_id_ratio)[1h:]) * 86400",
             query_type="promql",
             target_names=["agents/day"],
             panel_id=2302,

@@ -57,7 +57,7 @@ def make_session(tmp_path: Path) -> Iterator[MakeSession]:
 def test_begin_finish_has_single_winner(make_session: MakeSession) -> None:
     """Concurrent teardown claims must have exactly one winner: a double
     winner would double-close the master fd."""
-    session = make_session("ava-test-win-1", 1024)
+    session = make_session("meiva-test-win-1", 1024)
     results: list[bool] = []
     threads = [
         threading.Thread(target=lambda: results.append(session.begin_finish())) for _ in range(8)
@@ -74,10 +74,10 @@ def test_begin_finish_has_single_winner(make_session: MakeSession) -> None:
 def test_transcript_log_is_capped(make_session: MakeSession, tmp_path: Path) -> None:
     """The byte transcript stops growing at the per-session cap: past the cap
     the service keeps the session but stops appending."""
-    session = make_session("ava-test-logcap-1", 200)
-    log_file = tmp_path / "ava-test-logcap-1.out.log"
+    session = make_session("meiva-test-logcap-1", 200)
+    log_file = tmp_path / "meiva-test-logcap-1.out.log"
     header = log_file.read_bytes()
-    assert header.startswith(b"--- ava session ava-test-logcap-1 start=")
+    assert header.startswith(b"--- meiva session meiva-test-logcap-1 start=")
     assert header.endswith(f" pid={session.pid} ---\n".encode())
     assert session._log_written == len(header)
     session.log_write(b"a" * 60)
@@ -104,7 +104,7 @@ def _still_waiting(identities: Iterable[OwnedProcess], _timeout: float) -> tuple
 def test_a_concrete_group_signal_error_is_not_a_success(
     make_session: MakeSession, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    session = make_session("ava-test-denied", 1024)
+    session = make_session("meiva-test-denied", 1024)
     monkeypatch.setattr(session_module.process_groups, "live", _live)
 
     def denied(*_args: object) -> None:
@@ -118,7 +118,7 @@ def test_a_concrete_group_signal_error_is_not_a_success(
 def test_a_live_shell_cannot_be_reported_closed(
     make_session: MakeSession, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    session = make_session("ava-test-live", 1024)
+    session = make_session("meiva-test-live", 1024)
     monkeypatch.setattr(session_module.process_groups, "live", _live)
     monkeypatch.setattr(session_module.process_groups, "signal", _no_signal)
     monkeypatch.setattr(session_module.process_groups, "wait", _still_waiting)
@@ -129,7 +129,7 @@ def test_a_live_shell_cannot_be_reported_closed(
 def test_unknown_foreground_is_interrupted_without_discovering_processes(
     make_session: MakeSession, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    session = make_session("ava-test-unknown", 1024)
+    session = make_session("meiva-test-unknown", 1024)
     monkeypatch.setattr(session_module.OwnedProcess, "live", _live)
 
     def unavailable(_fd: int) -> int:
@@ -153,7 +153,7 @@ def test_unknown_foreground_is_interrupted_without_discovering_processes(
 def test_foreground_in_another_session_is_not_adopted(
     make_session: MakeSession, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    session = make_session("ava-test-wrong-session", 1024)
+    session = make_session("meiva-test-wrong-session", 1024)
     monkeypatch.setattr(session_module.OwnedProcess, "live", _live)
 
     def own_pid(_fd: int) -> int:
@@ -173,7 +173,7 @@ def test_foreground_in_another_session_is_not_adopted(
 def test_master_close_failure_is_visible_after_the_teardown_claim(
     make_session: MakeSession, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    session = make_session("ava-test-close-error", 1024)
+    session = make_session("meiva-test-close-error", 1024)
 
     def no_reap(_session: PtySession) -> None:
         pass
@@ -199,7 +199,7 @@ def test_master_close_failure_is_visible_after_the_teardown_claim(
 def test_reap_and_callback_errors_still_close_the_master(
     make_session: MakeSession, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    session = make_session("ava-test-reap-error", 1024)
+    session = make_session("meiva-test-reap-error", 1024)
 
     def failed_reap(_session: PtySession) -> None:
         raise RuntimeError("reap failed")
@@ -221,7 +221,7 @@ def test_reap_and_callback_errors_still_close_the_master(
 def test_closure_preparation_error_releases_the_allocation_fence(
     make_session: MakeSession, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    session = make_session("ava-test-preparation-error", 1024)
+    session = make_session("meiva-test-preparation-error", 1024)
     service = PtyService()
     service._sessions[session.name] = session
 
@@ -243,6 +243,6 @@ def test_the_client_reads_survivors_from_a_kill_answer(monkeypatch: pytest.Monke
 
     monkeypatch.setattr(client, "request", request)
 
-    assert client.kill("ava-test-race-2", graceful=False) == client.KillVerdict(
+    assert client.kill("meiva-test-race-2", graceful=False) == client.KillVerdict(
         "forced", True, (4242,)
     )

@@ -47,7 +47,7 @@ def test_service_reads_stay_full_when_singleton_domain_excluded(
     for name in ("exec_timeout_seconds", "prompt_invest_future_enabled", "web_fetch_model"):
         assert name in values, name
         assert name in flat, name
-    assert "AVA_EXEC_TIMEOUT_SECONDS" in served
+    assert "MEIVA_EXEC_TIMEOUT_SECONDS" in served
 
 
 def test_get_field_stays_strict_on_excluded_domain(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -127,12 +127,12 @@ def test_keys_of_the_retired_stack_are_inert(monkeypatch: pytest.MonkeyPatch) ->
     from base import config
 
     for key, value in {
-        "AVA_PITR_ENABLED": "true",
-        "AVA_PITR_STORE_BACKEND": "oss",
-        "AVA_PITR_OSS_BUCKET": "retired",
-        "AVA_PITR_GCS_PREFIX": "ava-pitr/retired",
-        "AVA_PITR_SPOOL_HARD_BYTES": "2362232013",
-        "AVA_PITR_UPLOADER_HEALTH_PORT": "8117",
+        "MEIVA_PITR_ENABLED": "true",
+        "MEIVA_PITR_STORE_BACKEND": "oss",
+        "MEIVA_PITR_OSS_BUCKET": "retired",
+        "MEIVA_PITR_GCS_PREFIX": "meiva-pitr/retired",
+        "MEIVA_PITR_SPOOL_HARD_BYTES": "2362232013",
+        "MEIVA_PITR_UPLOADER_HEALTH_PORT": "8117",
     }.items():
         monkeypatch.setitem(os.environ, key, value)
 
@@ -165,10 +165,10 @@ def test_runner_profile_domains(monkeypatch: pytest.MonkeyPatch) -> None:
 def test_settings_reads_env_profile_marker(monkeypatch: pytest.MonkeyPatch) -> None:
     from base import config
 
-    monkeypatch.setenv(config.AVA_PROCESS_PROFILE_ENV, "gateway")
+    monkeypatch.setenv(config.MEIVA_PROCESS_PROFILE_ENV, "gateway")
     s = config.Settings()
     assert not s.has_domain("agent")
-    monkeypatch.delenv(config.AVA_PROCESS_PROFILE_ENV, raising=False)
+    monkeypatch.delenv(config.MEIVA_PROCESS_PROFILE_ENV, raising=False)
     s2 = config.Settings()
     assert s2.has_domain("agent") and s2.has_domain("sandbox") and s2.has_domain("web")
 
@@ -183,7 +183,7 @@ def test_unknown_profile_fails_fast(monkeypatch: pytest.MonkeyPatch) -> None:
 def test_explicit_none_profile_is_full(monkeypatch: pytest.MonkeyPatch) -> None:
     from base import config
 
-    monkeypatch.setenv(config.AVA_PROCESS_PROFILE_ENV, "gateway")
+    monkeypatch.setenv(config.MEIVA_PROCESS_PROFILE_ENV, "gateway")
     s = config.Settings(profile=None)
     assert s.has_domain("agent") and s.has_domain("sandbox") and s.has_domain("web")
 
@@ -307,7 +307,7 @@ def test_build_registry_rejects_unknown_restart_required(monkeypatch: pytest.Mon
     class Bad(EnvSettings):
         synthetic_knob: int = Field(
             default=1,
-            alias="AVA_SYNTHETIC_KNOB",
+            alias="MEIVA_SYNTHETIC_KNOB",
             json_schema_extra={"scope": "cluster-pinned", "restart_required": "gatewat"},
         )
 
@@ -335,7 +335,7 @@ def test_build_registry_rejects_restart_required_for_unconsuming_kind(
     class WrongKind(EnvSettings):
         synthetic_knob: int = Field(
             default=1,
-            alias="AVA_SYNTHETIC_KNOB",
+            alias="MEIVA_SYNTHETIC_KNOB",
             json_schema_extra={"scope": "cluster-pinned", "restart_required": "agent"},
         )
 

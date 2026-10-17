@@ -53,7 +53,7 @@ def test_boot_lands_a_skill_this_machine_never_installed(
 
     land_cluster_extensions(database)
 
-    assert (paths.skills_dir(paths.ava_home()) / "boot-demo" / "SKILL.md").read_text(
+    assert (paths.skills_dir(paths.meiva_home()) / "boot-demo" / "SKILL.md").read_text(
         encoding="utf-8"
     ) == (src / "SKILL.md").read_text(encoding="utf-8")
 

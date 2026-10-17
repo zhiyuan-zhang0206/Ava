@@ -115,7 +115,9 @@ def test_all_handle_dials_use_their_retained_authority_refusal(
     from psycopg_pool import AsyncConnectionPool
 
     handle = Database(
-        _config(db_url="postgresql://ava@127.0.0.1:1/x", db_authority_refusal="unadmitted runtime"),
+        _config(
+            db_url="postgresql://meiva@127.0.0.1:1/x", db_authority_refusal="unadmitted runtime"
+        ),
         gate=database_gate,
         direct_url=lambda config: config.db_url,
     )

@@ -6,11 +6,11 @@ the whole mirror scan, --trace-id validation must match its error text, and
 unpadded base64 ids (legacy OTLP JSON) must decode. Pure logic only — no
 network, no Tempo; the mirror walk uses tmp_path files.
 
-`_mirror_dir` / `_cluster_secret` / `_gateway_get` resolve `$AVA_HOME` via
-`base.paths.home.resolve_ava_home` (the variable, else `~/.ava`), the
-same resolution every other Ava process uses.
+`_mirror_dir` / `_cluster_secret` / `_gateway_get` resolve `$MEIVA_HOME` via
+`base.paths.home.resolve_meiva_home` (the variable, else `~/.meiva`), the
+same resolution every other Meiva process uses.
 
-AVA_CLUSTER_SECRET is also a `base.config.Settings` field alias, but
+MEIVA_CLUSTER_SECRET is also a `base.config.Settings` field alias, but
 `read_trace.py` reads it straight from `os.environ` by design (the same
 Settings-free stance as the rest of this skill script) — `monkeypatch.
 setitem(os.environ, ...)` is used below instead of `monkeypatch.setenv` /
@@ -19,14 +19,14 @@ stays meaningful for tests that DO exercise Settings.
 
 `_common.py::source_root` tests: `read_trace.py` / `fetch_trace.py` each need to
 locate the `base` package before they can import
-`base.paths.home.resolve_ava_home` — a bootstrap problem
-`resolve_ava_home` itself cannot solve, so `_common.py` mirrors its rule. The
+`base.paths.home.resolve_meiva_home` — a bootstrap problem
+`resolve_meiva_home` itself cannot solve, so `_common.py` mirrors its rule. The
 walk-up-from-`__file__` branch (the dev checkout, or a converged
-`$AVA_HOME/skills/...` copy invoked with an interpreter that already carries
+`$MEIVA_HOME/skills/...` copy invoked with an interpreter that already carries
 `base` on `sys.path`) needs no fix and is exercised by every `_load()` above.
 The tests below lock the *other* branch: when no `base` package is found above
 the script, the converged-copy fallback consults `<home>/source` for the home
-`AVA_HOME` names, else `~/.ava`. They run `_common.py` in a subprocess with a
+`MEIVA_HOME` names, else `~/.meiva`. They run `_common.py` in a subprocess with a
 from-scratch environment and copy it to an isolated directory with no `base`
 package anywhere above it, so the walk-up branch is forced to fail and the
 fallback branch actually runs.
@@ -271,9 +271,11 @@ def test_mirror_dir_respects_explicit_override(tmp_path: Path) -> None:
     assert ft._mirror_dir(args) == override
 
 
-def test_mirror_dir_uses_resolve_ava_home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_mirror_dir_uses_resolve_meiva_home(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     home = tmp_path / "dev-cluster-home"
-    monkeypatch.setattr(ft, "resolve_ava_home", lambda: home)
+    monkeypatch.setattr(ft, "resolve_meiva_home", lambda: home)
 
     assert ft._mirror_dir(SimpleNamespace(mirror_dir=None)) == home / "traces"
 
@@ -285,16 +287,16 @@ def test_mirror_dir_uses_resolve_ava_home(tmp_path: Path, monkeypatch: pytest.Mo
 def _no_inherited_api_token(monkeypatch: pytest.MonkeyPatch) -> None:
     """A launched process's machine token outranks every other bearer; keep
     one inherited from the test runner's environment out of these cases."""
-    monkeypatch.delitem(os.environ, "AVA_API_TOKEN", raising=False)
+    monkeypatch.delitem(os.environ, "MEIVA_API_TOKEN", raising=False)
 
 
 def test_cluster_secret_prefers_explicit_env(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    monkeypatch.setitem(os.environ, "AVA_CLUSTER_SECRET", "explicit-secret")
+    monkeypatch.setitem(os.environ, "MEIVA_CLUSTER_SECRET", "explicit-secret")
     home = tmp_path / "home"
     home.mkdir()
-    (home / ".env").write_text("AVA_CLUSTER_SECRET=file-secret\n")
+    (home / ".env").write_text("MEIVA_CLUSTER_SECRET=file-secret\n")
 
     assert rt._cluster_secret(home) == "explicit-secret"
 
@@ -302,10 +304,10 @@ def test_cluster_secret_prefers_explicit_env(
 def test_cluster_secret_reads_the_homes_env_file(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    monkeypatch.delitem(os.environ, "AVA_CLUSTER_SECRET", raising=False)
+    monkeypatch.delitem(os.environ, "MEIVA_CLUSTER_SECRET", raising=False)
     home = tmp_path / "dev-cluster-home"
     home.mkdir()
-    (home / ".env").write_text("AVA_CLUSTER_SECRET=dev-cluster-secret\n")
+    (home / ".env").write_text("MEIVA_CLUSTER_SECRET=dev-cluster-secret\n")
 
     assert rt._cluster_secret(home) == "dev-cluster-secret"
 
@@ -313,11 +315,11 @@ def test_cluster_secret_reads_the_homes_env_file(
 def test_cluster_secret_prefers_the_machine_api_token(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    monkeypatch.setitem(os.environ, "AVA_API_TOKEN", "machine-token")
-    monkeypatch.setitem(os.environ, "AVA_CLUSTER_SECRET", "explicit-secret")
+    monkeypatch.setitem(os.environ, "MEIVA_API_TOKEN", "machine-token")
+    monkeypatch.setitem(os.environ, "MEIVA_CLUSTER_SECRET", "explicit-secret")
     home = tmp_path / "home"
     home.mkdir()
-    (home / ".env").write_text("AVA_CLUSTER_SECRET=file-secret\n")
+    (home / ".env").write_text("MEIVA_CLUSTER_SECRET=file-secret\n")
 
     assert rt._cluster_secret(home) == "machine-token"
 
@@ -354,8 +356,8 @@ def _allow_network(monkeypatch: pytest.MonkeyPatch, seen_requests: list[Any]) ->
 def test_gateway_get_sends_the_explicit_secret(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    monkeypatch.setitem(os.environ, "AVA_CLUSTER_SECRET", "explicit-secret")
-    monkeypatch.setattr(rt, "resolve_ava_home", lambda: tmp_path / "home")
+    monkeypatch.setitem(os.environ, "MEIVA_CLUSTER_SECRET", "explicit-secret")
+    monkeypatch.setattr(rt, "resolve_meiva_home", lambda: tmp_path / "home")
     seen: list[Any] = []
     _allow_network(monkeypatch, seen)
 
@@ -369,11 +371,11 @@ def test_gateway_get_sends_the_explicit_secret(
 def test_gateway_get_uses_the_homes_env_file_secret(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    monkeypatch.delitem(os.environ, "AVA_CLUSTER_SECRET", raising=False)
+    monkeypatch.delitem(os.environ, "MEIVA_CLUSTER_SECRET", raising=False)
     home = tmp_path / "dev-cluster-home"
     home.mkdir()
-    (home / ".env").write_text("AVA_CLUSTER_SECRET=dev-cluster-secret\n")
-    monkeypatch.setattr(rt, "resolve_ava_home", lambda: home)
+    (home / ".env").write_text("MEIVA_CLUSTER_SECRET=dev-cluster-secret\n")
+    monkeypatch.setattr(rt, "resolve_meiva_home", lambda: home)
     seen: list[Any] = []
     _allow_network(monkeypatch, seen)
 
@@ -407,7 +409,7 @@ except RuntimeError as exc:
 def _run_source_root(
     scripts_dir: Path, env_overrides: dict[str, str], home: Path | None = None
 ) -> subprocess.CompletedProcess[str]:
-    env = {k: v for k, v in os.environ.items() if not k.startswith("AVA_")}
+    env = {k: v for k, v in os.environ.items() if not k.startswith("MEIVA_")}
     if home is not None:
         env["HOME"] = str(home)
     env |= env_overrides
@@ -422,7 +424,7 @@ def _run_source_root(
 
 
 def test_source_root_walks_up_to_the_real_checkout() -> None:
-    """The unmodified dev-checkout invocation needs no `AVA_HOME` at all —
+    """The unmodified dev-checkout invocation needs no `MEIVA_HOME` at all —
     `_common.py` lives under the real repo, whose root has `base/__init__.py`."""
     res = _run_source_root(_SCRIPTS_DIR, {})
 
@@ -433,7 +435,7 @@ def test_source_root_walks_up_to_the_real_checkout() -> None:
 
 def _isolated_scripts_dir(tmp_path: Path) -> Path:
     """Copy `_common.py` somewhere with no `base` package above it, forcing
-    the walk-up branch to fail so the AVA_HOME fallback branch actually runs."""
+    the walk-up branch to fail so the MEIVA_HOME fallback branch actually runs."""
     isolated = tmp_path / "isolated" / "scripts"
     isolated.mkdir(parents=True)
     shutil.copy(_SCRIPTS_DIR / "_common.py", isolated / "_common.py")
@@ -441,7 +443,7 @@ def _isolated_scripts_dir(tmp_path: Path) -> Path:
 
 
 def test_source_root_refuses_when_base_is_found_nowhere(tmp_path: Path) -> None:
-    """No `base` above the script, AVA_HOME unset and nothing at `~/.ava/source`
+    """No `base` above the script, MEIVA_HOME unset and nothing at `~/.meiva/source`
     (HOME is a fake directory): there is no checkout to locate."""
     isolated = _isolated_scripts_dir(tmp_path)
     fake_home = tmp_path / "home"
@@ -451,15 +453,15 @@ def test_source_root_refuses_when_base_is_found_nowhere(tmp_path: Path) -> None:
 
     assert res.returncode == 1
     assert "RUNTIMEERROR:" in res.stdout
-    assert str(fake_home / ".ava" / "source") in res.stdout
+    assert str(fake_home / ".meiva" / "source") in res.stdout
 
 
 def test_source_root_falls_back_to_the_default_homes_source(tmp_path: Path) -> None:
-    """With AVA_HOME unset the home is `~/.ava`, exactly as `resolve_ava_home`
+    """With MEIVA_HOME unset the home is `~/.meiva`, exactly as `resolve_meiva_home`
     decides (here under a fake HOME): its `source` is where `base` is found."""
     isolated = _isolated_scripts_dir(tmp_path)
     fake_home = tmp_path / "home"
-    source = fake_home / ".ava" / "source"
+    source = fake_home / ".meiva" / "source"
     (source / "base").mkdir(parents=True)
     (source / "base" / "__init__.py").write_text("")
 
@@ -469,25 +471,25 @@ def test_source_root_falls_back_to_the_default_homes_source(tmp_path: Path) -> N
     assert res.stdout.strip() == str(source)
 
 
-def test_source_root_uses_the_explicit_ava_home(tmp_path: Path) -> None:
+def test_source_root_uses_the_explicit_meiva_home(tmp_path: Path) -> None:
     isolated = _isolated_scripts_dir(tmp_path)
     home = tmp_path / "dev-cluster-home"
     source = home / "source"
     (source / "base").mkdir(parents=True)
     (source / "base" / "__init__.py").write_text("")
 
-    res = _run_source_root(isolated, {"AVA_HOME": str(home)})
+    res = _run_source_root(isolated, {"MEIVA_HOME": str(home)})
 
     assert res.returncode == 0, res.stdout + res.stderr
     assert res.stdout.strip() == str(source)
 
 
-def test_source_root_refuses_when_explicit_ava_home_has_no_source(tmp_path: Path) -> None:
+def test_source_root_refuses_when_explicit_meiva_home_has_no_source(tmp_path: Path) -> None:
     isolated = _isolated_scripts_dir(tmp_path)
     home = tmp_path / "dev-cluster-home-without-source"
     home.mkdir()
 
-    res = _run_source_root(isolated, {"AVA_HOME": str(home)})
+    res = _run_source_root(isolated, {"MEIVA_HOME": str(home)})
 
     assert res.returncode == 1
     assert "RUNTIMEERROR:" in res.stdout

@@ -1,15 +1,15 @@
-# Ava Fleet Heartbeat — Design
+# Meiva Fleet Heartbeat — Design
 
 **Current ownership:** this original proposal is archived; its rejected
 backoff/escalation design is not pending work. Current behavior belongs to
-[heartbeat](../../../services/docs/gateway_side/heartbeat.ava.okf.md), and the adopted
+[heartbeat](../../../services/docs/gateway_side/heartbeat.meiva.okf.md), and the adopted
 choice is [opt-out over escalation](../../../docs/decisions/runtime/processes/health/2026-06-22-heartbeat-opt-out-over-escalation.md).
 The original research and partial-landing notes below are preserved as evidence.
 
 > Status: **Partially superseded** (2026-06-22). The self-check heartbeat (Tier 2)
 > is now **implemented with a deliberately simpler design** than this proposal:
 > a single gateway daemon (`services/wake/heartbeat/`) that nudges idle agents on a
-> fixed interval, with an agent-driven **opt-out** (`ava.self.pause_heartbeat`)
+> fixed interval, with an agent-driven **opt-out** (`meiva.self.pause_heartbeat`)
 > instead of the exponential-backoff + miss-counter + escalation chain below.
 > See [`runbook.md`](../../../docs/conventions/runbook.md) (the `heartbeat` service row) for current
 > behavior and the git log (heartbeat-opt-out design)
@@ -19,13 +19,13 @@ The original research and partial-landing notes below are preserved as evidence.
 
 ## 0. Problem
 
-The Ava fleet lacks a fallback liveness mechanism. If an agent forgets to
+The Meiva fleet lacks a fallback liveness mechanism. If an agent forgets to
 self-report and no watcher is set, every agent can sit idle simultaneously
 with no one aware. The fleet lead only knows an agent is alive when it
 produces activity — silence is ambiguous (idle? dead? stuck?).
 
 This doc researches OpenClaw's heartbeat mechanism, then proposes a
-two-tier heartbeat scheme for Ava: a **gateway liveness watchdog** (Tier 1)
+two-tier heartbeat scheme for Meiva: a **gateway liveness watchdog** (Tier 1)
 and an **agent self-check heartbeat** (Tier 2).
 
 ---
@@ -129,7 +129,7 @@ agents run heartbeats. Otherwise, the global default applies to all.
 
 ---
 
-## 2. Proposed Ava Heartbeat — Two-Tier Design
+## 2. Proposed Meiva Heartbeat — Two-Tier Design
 
 ### 2.1 Tier separation rationale
 
@@ -156,7 +156,7 @@ anything the fleet lead should know?"
 > durable pending-work scans and host health checks. Idle has no task or
 > per-agent process to probe. The escalation proposal below is historical
 > research, not the current heartbeat implementation; see
-> `services/docs/gateway_side/heartbeat.ava.okf.md` for the implemented contract.
+> `services/docs/gateway_side/heartbeat.meiva.okf.md` for the implemented contract.
 
 #### Trigger
 
@@ -361,7 +361,7 @@ loses value over hours of silence.
 every turn completion. Tier 1's `last_active_at` naturally reflects this.
 Tier 2 only fires when `status = 'idling'`.
 
-Why not OpenClaw-style `skipWhenBusy`? Because Ava's agent status is
+Why not OpenClaw-style `skipWhenBusy`? Because Meiva's agent status is
 explicit (`running` vs `idling`), making the check simpler: if `running`,
 don't heartbeat. If `idling`, do.
 
@@ -451,8 +451,8 @@ cluster admin shouldn't need to configure it per agent.
 | Not doing | Why |
 |---|---|
 | Dedicated heartbeat session per agent | Heavy. Inbound messages give the same signal with less infra. |
-| Cron-based exact-timing heartbeat | Cron in Ava is for detached work; heartbeat is for session-bound awareness. Different mechanisms, different purposes. |
-| Per-agent HEARTBEAT.md files | OpenClaw-ism that maps poorly to Ava's fleet model. Ava agents use `memory` for persistent context. A heartbeat instruction can live in the cluster config or agent config. |
+| Cron-based exact-timing heartbeat | Cron in Meiva is for detached work; heartbeat is for session-bound awareness. Different mechanisms, different purposes. |
+| Per-agent HEARTBEAT.md files | OpenClaw-ism that maps poorly to Meiva's fleet model. Meiva agents use `memory` for persistent context. A heartbeat instruction can live in the cluster config or agent config. |
 | Heartbeat-only agents (dedicated watchdog agent) | Adds another agent to monitor, creating infinite regress. Gateway-level watchdog is simpler. |
 | Real-time (sub-minute) heartbeat | Not needed for fleet health. 5-minute detection window is sufficient. If sub-minute is needed, that's a different problem (health-check endpoint, not agent heartbeat). |
 
@@ -499,5 +499,5 @@ cluster admin shouldn't need to configure it per agent.
 - OpenClaw Automation overview: <https://docs.openclaw.ai/automation>
 - OpenClaw Design Patterns (Part 3): <https://kenhuangus.substack.com/p/openclaw-design-patterns-part-3-of>
 - Stanza: OpenClaw Heartbeat — Cron & Automation: <https://www.stanza.dev/concepts/openclaw-heartbeat-automation>
-- Ava Fleet View: the design doc was deleted once the `/fleet` view shipped; read
+- Meiva Fleet View: the design doc was deleted once the `/fleet` view shipped; read
   `ui/web/src/components/fleet/` + `gateway/routers/fleet_graph.py` instead.

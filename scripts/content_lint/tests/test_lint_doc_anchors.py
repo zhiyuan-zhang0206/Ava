@@ -41,7 +41,7 @@ def lint(monkeypatch, tmp_path):
     docs.mkdir(parents=True)
     skills = tmp_path / ".agents" / "skills"
     skills.mkdir(parents=True)
-    builtin = tmp_path / "ava_builtins" / "skills"
+    builtin = tmp_path / "meiva_builtins" / "skills"
     builtin.mkdir(parents=True)
     (tmp_path / "pkg").mkdir()
     (tmp_path / "pkg" / "mod.py").write_text(_TARGET)
@@ -196,9 +196,9 @@ def test_okf_doc_is_in_scope(lint, tmp_path):
     # The OKF axis is the densest anchor surface and the whole point of #112.
     mod, *_ = lint
     (tmp_path / "agent").mkdir()
-    (tmp_path / "agent" / "agent.ava.okf.md").write_text("Entry: `pkg/mod.py:renamed_away`.")
+    (tmp_path / "agent" / "agent.meiva.okf.md").write_text("Entry: `pkg/mod.py:renamed_away`.")
     assert mod.check() == 1
-    (tmp_path / "agent" / "agent.ava.okf.md").write_text("Entry: `pkg/mod.py:top_level`.")
+    (tmp_path / "agent" / "agent.meiva.okf.md").write_text("Entry: `pkg/mod.py:top_level`.")
     assert mod.check() == 0
 
 
@@ -210,7 +210,7 @@ def test_okf_doc_relative_anchor_is_not_resolved(lint, tmp_path):
     mod, *_ = lint
     (tmp_path / "agent").mkdir()
     (tmp_path / "agent" / "_build.py").write_text(_TARGET)
-    (tmp_path / "agent" / "agent.ava.okf.md").write_text("Entry: `_build.py:top_level`.")
+    (tmp_path / "agent" / "agent.meiva.okf.md").write_text("Entry: `_build.py:top_level`.")
     assert mod.check() == 1
 
 
@@ -219,14 +219,14 @@ def test_okf_anchor_with_trailing_call_parens_resolves(lint, tmp_path):
     # the anchor regex deliberately stops before.
     mod, *_ = lint
     (tmp_path / "agent").mkdir()
-    (tmp_path / "agent" / "agent.ava.okf.md").write_text("Entry: `pkg/mod.py:top_level()`.")
+    (tmp_path / "agent" / "agent.meiva.okf.md").write_text("Entry: `pkg/mod.py:top_level()`.")
     assert mod.check() == 0
 
 
 def test_hidden_directory_okf_doc_is_not_scanned(lint, tmp_path):
     mod, *_ = lint
     (tmp_path / ".hidden").mkdir()
-    (tmp_path / ".hidden" / "x.ava.okf.md").write_text("See `pkg/mod.py:renamed_away`.")
+    (tmp_path / ".hidden" / "x.meiva.okf.md").write_text("See `pkg/mod.py:renamed_away`.")
     assert mod.check() == 0
 
 
@@ -235,14 +235,14 @@ def test_github_okf_doc_is_scanned(lint, tmp_path):
     # graph builder: it carries an overview node.
     mod, *_ = lint
     (tmp_path / ".github").mkdir()
-    (tmp_path / ".github" / "x.ava.okf.md").write_text("See `pkg/mod.py:renamed_away`.")
+    (tmp_path / ".github" / "x.meiva.okf.md").write_text("See `pkg/mod.py:renamed_away`.")
     assert mod.check() == 1
 
 
 def test_vendored_directories_are_not_scanned(lint, tmp_path):
     mod, *_ = lint
     (tmp_path / ".venv").mkdir()
-    (tmp_path / ".venv" / "x.ava.okf.md").write_text("See `pkg/mod.py:renamed_away`.")
+    (tmp_path / ".venv" / "x.meiva.okf.md").write_text("See `pkg/mod.py:renamed_away`.")
     assert mod.check() == 0
 
 
@@ -255,13 +255,13 @@ def test_builtin_skill_root_is_in_scope(lint, tmp_path):
 
 
 def test_okf_doc_under_a_procedural_root_is_scanned_once(lint, tmp_path, capsys):
-    # An OKF file under `ava_builtins/skills/` is in scope twice (procedural
+    # An OKF file under `meiva_builtins/skills/` is in scope twice (procedural
     # root + OKF walk); it must be reported once, not twice.
     mod, _, _, builtin = lint
-    (builtin / "sms.ava.okf.md").write_text("See `pkg/mod.py:renamed_away`.")
+    (builtin / "sms.meiva.okf.md").write_text("See `pkg/mod.py:renamed_away`.")
     assert mod.check() == 1
     err = capsys.readouterr().err
-    assert err.count("sms.ava.okf.md:1:") == 1
+    assert err.count("sms.meiva.okf.md:1:") == 1
 
 
 def test_repo_tree_has_no_dangling_anchors():

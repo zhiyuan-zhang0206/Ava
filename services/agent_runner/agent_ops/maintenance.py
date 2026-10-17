@@ -22,7 +22,7 @@ def admission(kind: str, *, requests: RequestTokens) -> Generator[None]:
         and current.maintenance is not None
         and current.maintenance.phase in (MaintenancePhase.STOPPING, MaintenancePhase.STOPPED)
     ):
-        raise RuntimeError("unit is stopping or held until `ava start` releases it")
+        raise RuntimeError("unit is stopping or held until `meiva start` releases it")
     token = object()
     requests.add(token)
     try:

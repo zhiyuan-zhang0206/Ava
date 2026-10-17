@@ -51,13 +51,13 @@ def state_path() -> Path:
 
     # Admission/status reads must not create a home before setup validation.
     # Writers create the parent through lock_path() and write_atomic().
-    return base.paths.ava_home() / "run" / "deploy-pause-owner.json"
+    return base.paths.meiva_home() / "run" / "deploy-pause-owner.json"
 
 
 def lock_path() -> Path:
     import base.paths
 
-    return base.paths.run_dir(base.paths.ava_home()) / "deploy-pause-owner.lock"
+    return base.paths.run_dir(base.paths.meiva_home()) / "deploy-pause-owner.lock"
 
 
 def _read_unlocked(path: Path) -> PauseOwnerSnapshot:

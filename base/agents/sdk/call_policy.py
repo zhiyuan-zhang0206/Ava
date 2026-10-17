@@ -40,9 +40,9 @@ def read_policy() -> SamplingPolicy:
     return SamplingPolicy.model_validate(
         {
             "sampling_enabled": aliases.get(
-                "AVA_SDK_CALL_SAMPLING_ENABLED", defaults.sampling_enabled
+                "MEIVA_SDK_CALL_SAMPLING_ENABLED", defaults.sampling_enabled
             ),
-            "sample_every": aliases.get("AVA_SDK_CALL_SAMPLE_EVERY", defaults.sample_every),
+            "sample_every": aliases.get("MEIVA_SDK_CALL_SAMPLE_EVERY", defaults.sample_every),
         }
     )
 

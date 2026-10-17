@@ -62,7 +62,7 @@ def fake_session(
     def _fake_new_session(
         _self: object, name: str, cmd: str, cwd: object, *, env: dict[str, object]
     ) -> bool:
-        launched.append(int(str(env["AVA_SCHEDULE_ID"])))
+        launched.append(int(str(env["MEIVA_SCHEDULE_ID"])))
         backend.live.append(name)
         return True
 

@@ -1,0 +1,33 @@
+{
+  "apiVersion": 2,
+  "name": "meiva_fleet",
+  "version": "1.0.0",
+  "engines": {
+    "meiva": ">=2026.10.1"
+  },
+  "contributions": {
+    "sdkNamespaces": [
+      "tasks"
+    ],
+    "sdkWraps": [
+      "agents.spawn"
+    ],
+    "systemPromptSections": [
+      "fleet_self_section",
+      "reduce_context_switch_section"
+    ],
+    "compactReminderSections": [
+      "fleet_compact_reminder"
+    ],
+    "metrics": [
+      "meiva_fleet_task_done_rate",
+      "meiva_fleet_agent_task_done_rate"
+    ],
+    "inspectWidgets": [
+      "today-tasks"
+    ],
+    "config": {
+      "schema": "default_config.py"
+    }
+  }
+}

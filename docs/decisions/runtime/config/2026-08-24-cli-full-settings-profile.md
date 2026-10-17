@@ -3,7 +3,7 @@
 ## Context
 
 Launchers mark gateway, agent, and runner children with
-`AVA_PROCESS_PROFILE`, but a CLI started from an agent shell inherits that
+`MEIVA_PROCESS_PROFILE`, but a CLI started from an agent shell inherits that
 marker. The agent profile deliberately omits the `alerts` domain, causing CLI
 LGTM work that reads `settings.alerts` to fail.
 

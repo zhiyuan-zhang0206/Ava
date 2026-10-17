@@ -1,0 +1,8 @@
+[debt.first-party-patch]
+"test_watcher.py#monkeypatch.setattr meiva.shell.background.cli_path" = 4
+"test_watcher.py#monkeypatch.setattr meiva.shell.background.output_dir" = 1
+"test_watcher.py#monkeypatch.setattr meiva.shell.sessions.forward_env_dict" = 1
+
+[debt.restricted-python]
+"test_watcher.py#python subprocess that runs something other than a literal repository file" = 1
+"test_watcher_plugin_load.py#python subprocess that runs something other than a literal repository file" = 3

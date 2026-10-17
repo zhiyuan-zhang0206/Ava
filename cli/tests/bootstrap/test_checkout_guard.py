@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 
-from base.paths import ava_home
+from base.paths import meiva_home
 from base.paths.home import home_checkout_error
 from cli import fleet_update, init_intent, preflight, start_intent
 from cli.database import OperatorDatabaseFactory, operator_event_pipeline
@@ -15,16 +15,16 @@ from tests.path_scoped.cli_tests import operator_database as operator_database
 
 
 def _home_with_source(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
-    home = tmp_path / ".ava"
+    home = tmp_path / ".meiva"
     (home / "source").mkdir(parents=True)
-    monkeypatch.setenv("AVA_HOME", str(home))
+    monkeypatch.setenv("MEIVA_HOME", str(home))
     return home
 
 
 def test_a_home_without_source_accepts_any_checkout(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    monkeypatch.setenv("AVA_HOME", str(tmp_path))
+    monkeypatch.setenv("MEIVA_HOME", str(tmp_path))
     assert home_checkout_error(tmp_path / "some-worktree") is None
 
 
@@ -41,8 +41,8 @@ def test_another_checkout_is_refused_with_both_paths_and_the_way_out(
     assert error is not None
     assert str(tmp_path / "worktrees" / "dev") in error
     assert str(home) in error
-    assert str(home / "source" / ".venv" / "bin" / "ava") in error
-    assert "set AVA_HOME" in error
+    assert str(home / "source" / ".venv" / "bin" / "meiva") in error
+    assert "set MEIVA_HOME" in error
 
 
 def test_a_symlinked_spelling_of_the_same_checkout_is_the_same_checkout(
@@ -58,10 +58,10 @@ def test_the_default_home_is_guarded_when_it_has_a_source(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.setenv("HOME", str(tmp_path))
-    monkeypatch.delenv("AVA_HOME", raising=False)
-    (tmp_path / ".ava" / "source").mkdir(parents=True)
-    assert home_checkout_error(tmp_path / ".ava" / "source") is None
-    assert home_checkout_error(tmp_path / "Ava") is not None
+    monkeypatch.delenv("MEIVA_HOME", raising=False)
+    (tmp_path / ".meiva" / "source").mkdir(parents=True)
+    assert home_checkout_error(tmp_path / ".meiva" / "source") is None
+    assert home_checkout_error(tmp_path / "Meiva") is not None
 
 
 @pytest.mark.parametrize(
@@ -71,7 +71,7 @@ def test_the_default_home_is_guarded_when_it_has_a_source(
         ["status", "--json"],
         ["cluster", "status"],
         ["agents", "ls"],
-        ["config", "get", "AVA_TIMEZONE"],
+        ["config", "get", "MEIVA_TIMEZONE"],
         ["mcp", "ls"],
         ["start"],
         ["stop"],
@@ -98,8 +98,8 @@ def test_gate_refuses_every_command_from_a_foreign_checkout(
     home = _home_with_source(tmp_path, monkeypatch)
     assert preflight.require_own_checkout(argv, tmp_path / "dev") == 1
     err = capsys.readouterr().err
-    assert str(home / "source" / ".venv" / "bin" / "ava") in err, "run the home's own CLI"
-    assert "set AVA_HOME" in err, "or name a home of your own"
+    assert str(home / "source" / ".venv" / "bin" / "meiva") in err, "run the home's own CLI"
+    assert "set MEIVA_HOME" in err, "or name a home of your own"
 
 
 def test_gate_does_not_echo_the_argv(
@@ -112,7 +112,7 @@ def test_gate_does_not_echo_the_argv(
 
 
 @pytest.mark.parametrize("argv", [[], ["--help"], ["-h"]])
-def test_gate_passes_bare_ava_and_a_lone_help_flag(
+def test_gate_passes_bare_meiva_and_a_lone_help_flag(
     argv: list[str], tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     _home_with_source(tmp_path, monkeypatch)
@@ -135,7 +135,7 @@ def test_gate_passes_everything_for_the_homes_own_checkout(
 def test_gate_passes_everything_for_a_home_without_a_source(
     argv: list[str], tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    monkeypatch.setenv("AVA_HOME", str(tmp_path))
+    monkeypatch.setenv("MEIVA_HOME", str(tmp_path))
     assert preflight.require_own_checkout(argv, tmp_path / "dev") is None
 
 
@@ -147,7 +147,7 @@ def test_start_refuses_a_foreign_checkout_before_reading_the_home(
     command_runtime: CommandRuntime,
 ) -> None:
     producer = operator_event_pipeline(
-        operator_database, machine=command_runtime.machine, home=ava_home()
+        operator_database, machine=command_runtime.machine, home=meiva_home()
     )
     home = _home_with_source(tmp_path, monkeypatch)
     monkeypatch.setattr(start_intent, "checkout", lambda: tmp_path / "dev")
@@ -189,11 +189,11 @@ def test_init_refuses_a_foreign_checkout_before_writing_anything(
 def test_a_test_home_is_taken_from_any_checkout(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    monkeypatch.setenv("AVA_HOME", str(tmp_path / "home"))
+    monkeypatch.setenv("MEIVA_HOME", str(tmp_path / "home"))
     monkeypatch.setattr(start_intent, "checkout", lambda: tmp_path / "dev")
     assert start_intent._home() == (tmp_path / "home").resolve()
 
 
 def test_the_fleet_updater_runs_the_homes_own_cli_on_every_host() -> None:
     assert 'S="$H/source"' in fleet_update.HOME
-    assert fleet_update.AVA == 'AVA_HOME="$H" "$S/.venv/bin/ava"'
+    assert fleet_update.MEIVA == 'MEIVA_HOME="$H" "$S/.venv/bin/meiva"'

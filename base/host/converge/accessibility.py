@@ -20,7 +20,7 @@ from enum import StrEnum
 from pathlib import Path
 
 from base.host.converge import _status_file
-from base.paths import ava_home
+from base.paths import meiva_home
 
 _STATUS_FILE = "accessibility_status.json"
 
@@ -75,12 +75,12 @@ class AccessibilityStatus:
 
 
 def status_file_path() -> Path:
-    """Path to the Accessibility status file under ``$AVA_HOME``."""
-    return ava_home() / _STATUS_FILE
+    """Path to the Accessibility status file under ``$MEIVA_HOME``."""
+    return meiva_home() / _STATUS_FILE
 
 
 def write_status(status: AccessibilityStatus) -> None:
-    """Write the Accessibility status to its well-known file under ``$AVA_HOME``."""
+    """Write the Accessibility status to its well-known file under ``$MEIVA_HOME``."""
     _status_file.write_status(status_file_path(), status.to_json())
 
 

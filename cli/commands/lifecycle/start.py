@@ -79,7 +79,7 @@ def refuse_occupied_health_ports(roster: tuple[ServiceSpec, ...]) -> int:
         "Launching onto a held port dies on 'address already in use'; launching onto a "
         "RELAYED one is worse, because the watchdog's probe is answered by the other home's "
         "daemon and the failure reads as green.\n"
-        "  Stop the listed daemon, then retry `ava start`. To bring the rest of this unit "
+        "  Stop the listed daemon, then retry `meiva start`. To bring the rest of this unit "
         "up meanwhile, drop the listed daemons from this start: "
         + " ".join(f"--disable-service {port.spec.session}" for port in occupied)
         + "\n  (that daemon then does not run at all — it is a stopgap, not the fix).",
@@ -114,8 +114,8 @@ def prepare_cold_start(
     import cli.commands._repo as _repo_commands
     from cli.commands.lifecycle import converge_host
 
-    # 1) converge host state (symlink / PATH / $AVA_HOME dirs / plugin config
-    # images). Memory initialization is explicit (`ava memory init`).
+    # 1) converge host state (symlink / PATH / $MEIVA_HOME dirs / plugin config
+    # images). Memory initialization is explicit (`meiva memory init`).
     try:
         converge_host.converge_host(
             repo,
@@ -130,7 +130,7 @@ def prepare_cold_start(
         return 1
 
     # 2) gateway brings up this cluster's own pg/redis instance (under its
-    #    $AVA_HOME, on its recorded ports); a runner-only host skips (uses the
+    #    $MEIVA_HOME, on its recorded ports); a runner-only host skips (uses the
     #    central node's DB/Redis). macOS: brew binaries via pg_ctl + redis-server;
     #    Linux: pg_ctl + redis-server. No docker on any POSIX platform.
     data_plane = data_plane_config_from_settings() if "gateway" in roles else None
@@ -170,7 +170,7 @@ def prepare_cold_start(
     # data plane is up and known-current, which is the precondition
     # materialization actually has. Reports and continues on failure — a machine
     # that is behind catches up on the next start.
-    from base.paths import ava_home, skills_dir
+    from base.paths import meiva_home, skills_dir
     from cli.commands.extensions.materialize import (
         adopt_local_extensions,
         materialize_cluster_extensions,
@@ -179,7 +179,7 @@ def prepare_cold_start(
     # Adopt first: a name this machine installed before the registry existed is
     # invisible to the materializer until it has a row, and sweeping first means
     # one pass leaves machine and cluster agreeing rather than two.
-    skills_root = skills_dir(ava_home())
+    skills_root = skills_dir(meiva_home())
     adopt_local_extensions(
         database_factory=database_factory,
         machine_name=command.machine.name,
@@ -220,16 +220,16 @@ def _guard_start(
     from base.deploy.maintenance import admission
 
     admission.require_start_allowed(operation)
-    from base.paths import ava_home
+    from base.paths import meiva_home
 
-    if (ava_home() / "destroy-intent.json").exists():
+    if (meiva_home() / "destroy-intent.json").exists():
         raise RuntimeError("home is being destroyed or detached; startup refused")
 
     if runtime is None:
         runtime = StartRuntime.development(repo_root())
     runtime.validate()
     repo = runtime.code_root
-    print(f"[ava start] cwd = {repo}")
+    print(f"[meiva start] cwd = {repo}")
 
     # The prod home must not launch from a disposable development checkout.
     err = prod_service_checkout_error(repo)
@@ -240,9 +240,9 @@ def _guard_start(
 
 
 def _resolve_identity(command: CommandRuntime) -> tuple[SetupValues, MachineRoles] | int:
-    """Collect the home's recorded setup fields and settle its roles against `ava init`."""
+    """Collect the home's recorded setup fields and settle its roles against `meiva init`."""
     import cli.commands._setup as _setup_commands
-    from base.paths import ava_home
+    from base.paths import meiva_home
 
     # 0b) collect & validate the home's recorded setup fields (capability-aware filter)
     try:
@@ -261,11 +261,11 @@ def _resolve_identity(command: CommandRuntime) -> tuple[SetupValues, MachineRole
     roles = command.machine.role()
     from cli.start_identity import read_intent
 
-    recorded = read_intent(ava_home())
+    recorded = read_intent(meiva_home())
     if recorded is not None and sorted(roles) != recorded["roles"]:
         print(
             f"\n✗ this home's capabilities ({','.join(sorted(roles))}) differ from the ones "
-            f"`ava init` recorded ({','.join(recorded['roles'])}); capabilities are fixed when "
+            f"`meiva init` recorded ({','.join(recorded['roles'])}); capabilities are fixed when "
             "a home is initialized",
             file=sys.stderr,
         )
@@ -361,11 +361,11 @@ def _register_and_probe(state: _StartState, *, database_factory: DatabaseFactory
     import cli.commands._repo as _repo_commands
 
     # 3) UPSERT this host into the machines table. The table is informational
-    # for ops (`ava cluster status`) + drives agent-runner self-update orchestration;
+    # for ops (`meiva cluster status`) + drives agent-runner self-update orchestration;
     # gateway→agent-runner RPC dials the host's ops URL stored in this row, so
     # a missing/NULL row means the cluster cannot reach it. Failing here means
     # this host is invisible to the cluster — fatal on both roles, because an
-    # agent-runner will also fail every subsequent `ava cluster status` and
+    # agent-runner will also fail every subsequent `meiva cluster status` and
     # The fleet update orchestration.
     print("\n→ register machine in central DB")
     rc = _repo_commands.register_machine_or_die(
@@ -397,26 +397,26 @@ def print_gateway_hint(*, machine: MachineIdentity) -> None:
     """
     from base.config import settings as _settings
     from base.host.net.predicates import is_loopback_host
-    from base.paths import ava_home
+    from base.paths import meiva_home
 
     port = _settings.gateway.gateway_port
     host = machine.host()
     print(
-        f"\n→ web login password: the AVA_CLUSTER_SECRET value in {ava_home() / '.env'} "
+        f"\n→ web login password: the MEIVA_CLUSTER_SECRET value in {meiva_home() / '.env'} "
         "(the CLI, SDK and local services present their own credentials)"
     )
     if is_loopback_host(host):
         print(
             f"\n→ gateway reachable at http://{host}:{port} (loopback only — set "
-            "AVA_MACHINE_HOST to this box's private-network address to enroll remote agent-runners)"
+            "MEIVA_MACHINE_HOST to this box's private-network address to enroll remote agent-runners)"
         )
     else:
         reachable = f"http://{host}:{port}"
         print(f"\n→ gateway reachable at {reachable}")
         print(
-            f"  join an agent-runner: ava init --serve-agent-runner --no-serve-gateway --gateway-url {reachable} "
-            "--machine-name <name> --machine-host <runner-host> --db-capability <bundle>, then ava start "
-            "(bundle from `ava cluster db-authority issue-unit` here; AVA_DB_CAPABILITY_KEY "
+            f"  join an agent-runner: meiva init --serve-agent-runner --no-serve-gateway --gateway-url {reachable} "
+            "--machine-name <name> --machine-host <runner-host> --db-capability <bundle>, then meiva start "
+            "(bundle from `meiva cluster db-authority issue-unit` here; MEIVA_DB_CAPABILITY_KEY "
             "set from a non-echoing prompt)"
         )
 
@@ -522,7 +522,7 @@ def cmd_start_body(
     # 4a) hand the launch failures to whoever runs this start from another process.
     # Written unconditionally so a clean start clears a previous run's list; the
     # rollout's local leg is the consumer (`update._run_gateway_local_update`),
-    # because its `ava start` is a child and an exit code cannot carry names.
+    # because its `meiva start` is a child and an exit code cannot carry names.
     from base.deploy.lifecycle import launch_failures
 
     launch_failures.record(list(_critical_launch_failures(launch)))
@@ -564,10 +564,10 @@ def cmd_start_body(
     if not start_serving.mark_serving(serving_generation, runtime=runtime.identity()):
         print("  ✗ this start lost its serving generation", file=sys.stderr)
         return 1
-    from base.paths import ava_home
+    from base.paths import meiva_home
     from cli.start_identity import mark_phase
 
-    mark_phase(ava_home(), "ready")
+    mark_phase(meiva_home(), "ready")
     return 0
 
 
@@ -587,10 +587,10 @@ def cmd_start(
 ) -> int:
     """Converge one configured unit through storage, schema, root and readiness.
 
-    `ava init` persisted the unit's identity before the public CLI reaches this
+    `meiva init` persisted the unit's identity before the public CLI reaches this
     entry. Internal restart callers reuse that identity and its durable service
     selection. ``boot_attempt`` marks the OS boot job's retried start, which
-    leaves a unit whose ava-root restart budget is spent down.
+    leaves a unit whose meiva-root restart budget is spent down.
     """
     if retained_children is None:
         raise ValueError("start requires its caller-owned PostgreSQL child retention")

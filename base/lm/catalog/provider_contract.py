@@ -28,7 +28,7 @@ from base.lm.registry import ModelSpec
 # Increment for breaking contract changes; additive optional fields stay on the
 # current version. A plugin written against an older shape keeps working —
 # consumers of a new field must degrade when it is absent. (Mirrors the
-# plugin-spec-v2 ``engines.ava`` host-compatibility idea.)
+# plugin-spec-v2 ``engines.meiva`` host-compatibility idea.)
 PROVIDER_API_VERSION = 3
 
 

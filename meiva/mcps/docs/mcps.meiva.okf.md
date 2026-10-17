@@ -1,0 +1,113 @@
+---
+type: doc
+title: MCP Server System
+description: Meiva's MCP (Model Context Protocol) server integration — how external tools are exposed to agents.
+tags:
+- core
+- agent-instruction
+---
+
+# MCP Server System
+
+MCP servers expose external tools to Meiva agents at runtime. Each server
+registers one or more tools that agents call through `meiva.mcps.<server>.<tool>()`.
+
+## Available Servers
+- [[meiva_builtins/mcps/docs/chrome/chrome.meiva.okf.md|Chrome]] — browser automation (navigate, click, fill forms, screenshots)
+
+## How MCP Works
+MCP servers run as child processes managed by the shared per-machine MCP
+daemon (`meiva/mcps/_daemon.py`, ops roster session "mcp-daemon"). Tool
+discovery is **lazy, not at startup**: config reloads on every call
+(`_load_config`), and tool lists load on first access (daemon → 24h disk
+cache for metadata only) — `servers()` and `meiva.help(meiva.mcps)` prioritize the cache so
+they trigger no connections; the daemon does not prefetch at boot.
+
+Remote `url` entries spawn no child: the daemon dials the Streamable HTTP endpoint directly. A missing or unreachable daemon fails the request; the SDK never creates a local server.
+
+**Server subprocess sharing**: a server's `.mcp.json` may declare `"shared"`
+to avoid one stdio child per agent connection. `"shared": "browser"`
+(chrome) makes the daemon dial the browser-mcp service directly — no child
+at all, replacing the ~63MB per-agent wrapper. `"shared": true` (x) keeps one daemon-wide child for every connection, serialized per server
+(only safe for stateless servers; stateful servers stay per-connection).
+
+**Remote servers**: a `url` entry (validated by `meiva/mcps/config.py:server_url`) is an http(s) Streamable HTTP endpoint — mutually exclusive with `command` — with one auth mode: static `headers` (str → str, API-key style) or `"oauth": true`, a full OAuth 2.1 authorization-code + PKCE browser flow ([[oauth.meiva.okf.md]]).
+
+
+**Context ownership**: the SDK stores one daemon socket client on the bound `MeivaContext` (`meiva/mcps/_clients.py:McpClients`). Closing the context closes that client. No portal, local MCP session or SDK-owned server subprocess is created.
+
+`meiva.boot.process_clients` supplies a narrow timeout
+reader through `ClientSet`'s factory configuration. `McpClients` is still built
+on first use without reading that configuration or starting a transport. Closing the set clears its clients; a later use rebuilds them
+with the same reader. The daemon supplies its own reader to each connection scope.
+
+The SDK supplies `mcp_connect_timeout_seconds` to the daemon client on each
+request. The cached client owns its socket, not a settings snapshot: dial and
+response waiting use that request's explicit timeout budget, and a later request
+reads the current configuration again.
+
+## See Also
+- [[meiva/skills/docs/skills.meiva.okf.md|Skill System]] — skills vs MCP servers
+
+# meiva.mcps — MCP Tool Server
+
+## What it is
+
+`meiva.mcps` exposes tools from external MCP (Model Context Protocol) servers. Each MCP server appears as a sub-module `meiva.mcps.<server>`, with tools as functions on it.
+
+## Core API
+
+- `meiva.mcps.<server>.<tool>(...)` — call an MCP tool. Pass parameters as named arguments (positional not allowed).
+- `meiva.mcps.<server>.raw(tool, **args) → dict` — get the raw structured return of a tool (default call returns text).
+- `servers() → list[str]` — list all configured MCP server names.
+- `description(server) → str | None` — get a one-line description of a server.
+
+## Where Servers Come From
+
+The server set is determined by config (not enumerated in `meiva/` source code). `meiva/mcps/config.py:load_mcp_config` **four-layer merge** (later overwrites same name):
+1. builtin `<repo>/meiva_builtins/mcps/*/.mcp.json` (builtin layer, symmetric with builtin skills/plugins);
+2. bundled `.mcp.json` under each plugin root (`mcpServers` section);
+3. installed `$MEIVA_HOME/mcps/*/.mcp.json` (installed outside core via `meiva mcp install`, gated by `install_registry` rows of `type="mcp"`);
+4. machine-level `$MEIVA_HOME/mcp.json` (applied last, overwrites defaults of same name).
+On top of this, per-host **disabled overlay** (`base/packages/plugins/mcp_enabled.py:read_enabled`) — servers marked disabled are excluded from the returned map by default.
+An absent overlay uses the existing default-on policy. An unreadable or invalid
+overlay raises a configuration error before server selection; it never becomes
+an empty server list or enables servers by default. `meiva mcp list` reports the
+error and exits unsuccessfully. Definitions-only inventory can still inspect
+all declared servers, but must read the overlay separately to report enable state.
+Each tool request checks that its server remains enabled before reusing a daemon session. Disabling a server rejects later requests without terminating
+existing sessions or cancelling an already-started call. Warm help metadata can
+still list prior tools; it does not authorize their execution.
+
+Installed server spawn cwd is given by `installed_mcp_dir(name)` (its package directory), allowing its relative `.venv/bin/python` command to resolve to an isolated venv; builtin/plugin/machine returns None (keeping daemon cwd).
+
+Server entries may carry `requires` host-capability pre-checks. The shared
+`meiva/mcps/config.py:validate_requirements` accepts missing, null or an empty map
+as no requirements; otherwise only `display` with a boolean
+value is valid. Invalid declarations fail before a host probe in connections,
+inventory capability checks and CLI list/enable. The CLI checks only declaration
+validity; disabling remains possible even for a broken declaration. An unmet
+valid requirement returns an actionable capability error rather than an opaque
+failure from the underlying tool. `chrome` declares `display` — it drives a
+headed browser. Builtin
+server currently includes only **chrome**; other servers are installed outside
+core via `meiva mcp install`, or declared in machine-level `mcp.json`.
+
+## Key Dependencies
+- [[mcp-daemon.meiva.okf.md]] — MCP subprocess manager (long-lived serial connection process)
+- [[oauth.meiva.okf.md]] — OAuth 2.1 authorization-code + PKCE flow for remote servers
+
+## Notes
+Tool arguments are named — must be passed by name. Errors are returned as `MCPCallError`.
+After a tool call starts, a lost transport or daemon response returns `MCPCallError`
+with an unknown result; the SDK does not replay the call on a new session or
+fall back to local execution. Tool discovery may retry transport failures;
+a tool call can retry only when session selection fails before it starts.
+The shared retry classifier checks concrete AnyIO, operating-system and MCP SDK
+exception types and this platform's transport errno constants. A matching class
+name alone does not make an unknown error retryable; required dependency import
+failures propagate and are not cached as an empty retry policy.
+Repeating a tool with at-least-once delivery requires a protocol-level
+idempotency key and server deduplication.
+
+SDK v2 (pinned `>=2.0.0,<3`, 2026-07-28 protocol revision): SDK field names are snake_case (`input_schema` / `is_error` / `structured_content`); the daemon serializes content `by_alias=True`, so the camelCase wire contract agents parse is unchanged.

@@ -7,7 +7,7 @@ its dead pages stayed dead for as long as its turn lasted (the 2026-09-01 incide
 four hours). The fix of the time was a periodic scan inside the agent-host process
 (`reconcile_all_open_pages`), which re-ran the agent's own page pass for every hosted agent
 under that agent's turn identity: probe every open page; re-serve a dead `serve()` page
-through `ava.ui.serve`; close a dead `show()` page and tell the owner once.
+through `meiva.ui.serve`; close a dead `show()` page and tell the owner once.
 
 ## Decision
 
@@ -21,7 +21,7 @@ with the agent-side pass through `base/agents/page_recovery.py`; the loop then p
 
 The re-serve arm is not carried over. A dead `serve()` page's server is relaunched by the
 page-server daemon's own reconcile, in its persistent session, within one poll; the scan's
-`ava.ui.serve` only registered the row again and waited for that same daemon, so it added
+`meiva.ui.serve` only registered the row again and waited for that same daemon, so it added
 nothing and needed the agent kernel's identity binding, which a service may not import. The
 agent's own boot and heartbeat passes keep their full arms.
 

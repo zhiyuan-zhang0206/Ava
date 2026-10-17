@@ -35,7 +35,7 @@ CREATE TRIGGER agent_impersonations_terminal_notice BEFORE UPDATE ON agent_imper
 
 DO $$
 BEGIN
-    IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname='ava_runner') THEN
-        GRANT UPDATE (relay_generation,relay_identity,relay_degraded_reason,relay_degraded_at,terminal_notice_accepted_at,terminal_notice_attempt_id,terminal_notice_attempt_at,terminal_notice_attempts,terminal_notice_error,terminal_notice_unsupported_at) ON agent_impersonations TO ava_runner;
+    IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname='meiva_runner') THEN
+        GRANT UPDATE (relay_generation,relay_identity,relay_degraded_reason,relay_degraded_at,terminal_notice_accepted_at,terminal_notice_attempt_id,terminal_notice_attempt_at,terminal_notice_attempts,terminal_notice_error,terminal_notice_unsupported_at) ON agent_impersonations TO meiva_runner;
     END IF;
 END $$;

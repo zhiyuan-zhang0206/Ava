@@ -1,13 +1,13 @@
 """The WAL-G configuration file: validated, never translated, never echoed.
 
-`AVA_WALG_CONFIG_FILE` names a 0600 JSON file in WAL-G's own format. WAL-G reads
-it itself (`wal-g --config <file> ...`), so Ava only checks that it is usable
+`MEIVA_WALG_CONFIG_FILE` names a 0600 JSON file in WAL-G's own format. WAL-G reads
+it itself (`wal-g --config <file> ...`), so Meiva only checks that it is usable
 before Postgres is pointed at it, and pins the encryption key's fingerprint.
 
 The libsodium key is the single point of loss: without it every backup and every
 archived WAL segment is unreadable, and a regenerated key file silently mixes two
 keys in one chain. The first load pins the key's fingerprint under
-`$AVA_HOME/backups/walg/key-id` (trust on first use); a later key file that does
+`$MEIVA_HOME/backups/walg/key-id` (trust on first use); a later key file that does
 not match is refused and alerted. Nothing here rotates a key: a new key means a
 new bucket prefix. No secret value (access key, key material) is ever returned,
 logged or put in an error: messages name keys and paths, and the fingerprint is
@@ -27,7 +27,7 @@ from urllib.parse import urlsplit
 
 from base.host.private_storage import create_private_bytes, private_file_problem
 from base.host.verified_file import RegularFileReadError, regular_bytes
-from base.paths import ava_home
+from base.paths import meiva_home
 from services.backup.artifact.names import REMOTE_ROOT
 
 _CONFIG_MAX_BYTES = 64 * 1024
@@ -48,7 +48,7 @@ _REQUIRED_STRINGS = (
 
 # Bucket prefixes the physical chain must never live under: the logical-dump
 # namespace and the scratch area (lifecycle-expired).
-_FORBIDDEN_FIRST_SEGMENTS = (REMOTE_ROOT, "ava-pitr-scratch")
+_FORBIDDEN_FIRST_SEGMENTS = (REMOTE_ROOT, "meiva-pitr-scratch")
 
 
 class WalgConfigError(RuntimeError):
@@ -75,7 +75,7 @@ def enabled(*, path_reader: Callable[[], Path | None]) -> bool:
 
 
 def key_id_path() -> Path:
-    return ava_home() / "backups" / "walg" / "key-id"
+    return meiva_home() / "backups" / "walg" / "key-id"
 
 
 def _owner_only_file(path: Path, what: str) -> None:
@@ -196,7 +196,7 @@ def load_walg_config(*, path_reader: Callable[[], Path | None]) -> WalgConfig:
     """The validated configuration, pinning the key's fingerprint on first use.
 
     Called by converge, before Postgres starts: a bad configuration fails
-    `ava start` instead of becoming a Postgres whose archive command can never
+    `meiva start` instead of becoming a Postgres whose archive command can never
     succeed.
 
     Raises:
@@ -205,7 +205,7 @@ def load_walg_config(*, path_reader: Callable[[], Path | None]) -> WalgConfig:
     """
     path = configured_path(path_reader=path_reader)
     if path is None:
-        raise WalgConfigError("AVA_WALG_CONFIG_FILE is not set")
+        raise WalgConfigError("MEIVA_WALG_CONFIG_FILE is not set")
     config = read_config(path)
     problem = pin_problem(config)
     if problem is not None:

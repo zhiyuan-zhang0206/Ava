@@ -12,7 +12,7 @@ from psycopg_pool import AsyncConnectionPool
 from agent.graph.llm_errors import FatalProviderError
 from agent.ownership.hosted import admit_hosted_runtime
 from agent.state import AgentState, CircuitState
-from base.agents.context import AvaContext
+from base.agents.context import MeivaContext
 from base.agents.tests.units import spawn_agent
 from base.cluster.machine import MachineIdentity
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
@@ -28,9 +28,9 @@ from services.agent_runner.agent_host.tests.host_policy import configured_machin
 from services.agent_runner.agent_host.tests.runtime.hosted_resources import hosted_scope
 
 
-def _breaker_ctx(pool: AsyncConnectionPool, *, database_gate: ProcessDbGate) -> AvaContext:
+def _breaker_ctx(pool: AsyncConnectionPool, *, database_gate: ProcessDbGate) -> MeivaContext:
     """Use the original owner's database channel for native failure settlement."""
-    return AvaContext(
+    return MeivaContext(
         ops_pool=pool,
         llm=MagicMock(),
         event_publisher=MagicMock(),
@@ -94,7 +94,7 @@ async def test_host_persists_provider_failure_before_releasing_turn(
             calls += 1
             raise failure
 
-        builder = StateGraph(AgentState, context_schema=AvaContext)
+        builder = StateGraph(AgentState, context_schema=MeivaContext)
         builder.add_node("reject", reject)  # pyright: ignore[reportUnknownMemberType]
         builder.add_edge(START, "reject")
         builder.add_edge("reject", END)

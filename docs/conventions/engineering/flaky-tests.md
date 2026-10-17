@@ -9,7 +9,7 @@ failed test stays red on canonical and fork runs alike; no external quarantine
 service or secret grants a passing verdict. The explicit backend and frontend
 serial groups still execute and fail on test failures. Their valid empty
 reports are allowed; ordinary test jobs must execute tests. See the
-[CI test gate](../../../.github/test-gate.ava.okf.md).
+[CI test gate](../../../.github/test-gate.meiva.okf.md).
 
 | Anti-pattern | Lint verdict | Guard |
 |---|---|---|
@@ -95,7 +95,7 @@ passing in as a parameter any durable-state source that must not inherit a worke
 shared home.
 
 **Signature.** A result depends on process environment left by an earlier test,
-a marker under worker-shared `$AVA_HOME`, a real host service such as launchd,
+a marker under worker-shared `$MEIVA_HOME`, a real host service such as launchd,
 cron, or Telegram, or the operator's live cluster.
 
 **Evidence.** `tests/e2e/conftest.py:e2e_process_env` was session-scoped, so
@@ -104,7 +104,7 @@ its environment keys leaked to later tests in the same process. That made
 leak. The fix narrowed scope and added
 `test_the_e2e_fixture_restores_every_env_key_it_assigns`. On 2026-08-31,
 `tests/cli` calls using `--disable-service restarter` durably wrote
-`$AVA_HOME/disabled_services`; later `TestUnpauseLocalCluster` tests silently
+`$MEIVA_HOME/disabled_services`; later `TestUnpauseLocalCluster` tests silently
 early-returned, producing `spawned == []` or `DID NOT RAISE` in PRs #1172 and
 #1173. PR #1185 redirected each writer's marker and PR #1204 made the victim
 read hermetic with a tripwire. PR #1224 fixed another class that read the real
@@ -113,12 +113,12 @@ debug script inherited the real environment and rewrote the production launchd
 health-probe plist, restarting the cluster.
 
 **Correct form.** Let the suite's root plugins (`tests/fixtures/env_bootstrap.py`,
-`tests/fixtures/provisioning.py`) redirect `$AVA_HOME`, database,
+`tests/fixtures/provisioning.py`) redirect `$MEIVA_HOME`, database,
 Redis, registry, ports, and session home. Give the component under test the location
 of its durable marker as a parameter (a path under `tmp_path`), rather than inheriting
 worker state. Do not use a
 non-root, session-scoped fixture to mutate process globals. The OS scheduler
-cannot be redirected: keep `AVA_OS_JOBS_ENABLED=false`, and never run a
+cannot be redirected: keep `MEIVA_OS_JOBS_ENABLED=false`, and never run a
 non-pytest script that imports `gateway.app` from a worktree.
 
 **Lintability — lintable now.** The
@@ -300,8 +300,8 @@ exception: a root fixture (`identity_restore`) puts it back after every test, so
 worker of an earlier test; it reads a key or attribute it never set;
 moving test files makes the failure appear or vanish.
 
-**Evidence.** `monkeypatch.setattr(ava.self, "AGENT_ID", ...)` on a name the
-module `__getattr__` serves stored the dynamic value for good, and `tests/ava`
+**Evidence.** `monkeypatch.setattr(meiva.self, "AGENT_ID", ...)` on a name the
+module `__getattr__` serves stored the dynamic value for good, and `tests/meiva`
 tests failed in the shards where they ran after it (PR #3791).
 `monkeypatch.delenv(key, raising=False)` on an absent key records nothing, so
 five environment keys the code under test set outlived three test files (PR
@@ -310,7 +310,7 @@ five environment keys the code under test set outlived three test files (PR
 **Correct form.** `setenv(name, "")` before `delenv`; `setitem(vars(module),
 name, value)` or `mock.patch.object` for a name served by `__getattr__`;
 `monkeypatch.chdir`; restore a handler in a `finally`. The root
-[leak guard](../../../tests/docs/test-leak-guard.ava.okf.md) compares these after
+[leak guard](../../../tests/docs/test-leak-guard.meiva.okf.md) compares these after
 every test; its default `fail` mode restores after each leaker and fails it at
 its own teardown, and the CI annotation of the counts job lists what it found.
 

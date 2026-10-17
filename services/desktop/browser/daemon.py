@@ -1,20 +1,20 @@
 """Shared headed Chrome launcher for the agent-runner.
 
 Launches a real, headed Chrome with a remote-debugging (CDP) port and a
-dedicated persistent profile. Same entry pattern as the other ava daemons
+dedicated persistent profile. Same entry pattern as the other meiva daemons
 (`python -m services.<name>.daemon`); `os.execvp` makes the supervised session's
 process become Chrome. Agents reach the browser over
 localhost CDP through the chrome-devtools-mcp plugin (`--browserUrl`).
 
 env overrides (via base.config.settings):
-- `AVA_BROWSER_ENABLED` — gate (the ava-browser session only starts when true)
-- `AVA_CHROME_BINARY` — explicit Chrome path; else the platform default
+- `MEIVA_BROWSER_ENABLED` — gate (the meiva-browser session only starts when true)
+- `MEIVA_CHROME_BINARY` — explicit Chrome path; else the platform default
 
 The CDP port is `settings.services.browser_cdp_port` (default 9222).
 
-The profile lives at `$AVA_HOME/chrome-profile/` — dedicated and persistent,
+The profile lives at `$MEIVA_HOME/chrome-profile/` — dedicated and persistent,
 separate from the user's daily Chrome profile (isolated cookie jar; the user
-signs it in once). At first `ava start` the operator may instead seed it from
+signs it in once). At first `meiva start` the operator may instead seed it from
 their daily Chrome (converge's `_ensure_browser` -> `profile.ensure_browser_profile`);
 either way, by the time this daemon runs the profile dir is the source of truth
 and `mkdir(exist_ok=True)` only backstops the fresh-empty case.
@@ -48,10 +48,10 @@ def assert_browser_capable(*, host: Host) -> None:
     cannot host the shared headed browser. Called by the converge preflight and
     main(). The capability check itself lives in base.host.system.probes
     (browser_incapability); this raises its reason so a launch fails loudly with
-    the same wording the operator sees in `ava status`."""
+    the same wording the operator sees in `meiva status`."""
     reason = browser_incapability(settings.services.chrome_binary, host=host)
     if reason is not None:
-        raise RuntimeError(f"ava-browser: {reason}")
+        raise RuntimeError(f"meiva-browser: {reason}")
 
 
 def cdp_reachable(port: int) -> bool:
@@ -82,14 +82,14 @@ def exec_chrome(binary: str, args: list[str]) -> None:
     try:
         os.execvp(binary, args)  # noqa: S606 — intentional exec of the resolved Chrome binary
     except OSError as exc:
-        logger.error("ava-browser exec failed: {}", exc)
+        logger.error("meiva-browser exec failed: {}", exc)
         sys.exit(127)
 
 
 def main() -> None:
     # Fail loud BEFORE the log redirect so the reason is visible in the
     # session log — this also guards healthcheck-triggered respawns, not just the first
-    # launch (the converge preflight only runs at `ava start`).
+    # launch (the converge preflight only runs at `meiva start`).
     host = Host.system()
     assert_browser_capable(host=host)
     cdp_port = settings.services.browser_cdp_port  # the recorded/`.env` port; default 9222
@@ -99,21 +99,21 @@ def main() -> None:
         # session on a `SingletonLock` handoff. Launching a second Chrome on the
         # same --user-data-dir collides on that lock and exits at once, killing
         # this session. Refuse loudly: the browser service owns this port, so
-        # the squatter has to go before `ava start` / the watchdog can run the
+        # the squatter has to go before `meiva start` / the watchdog can run the
         # supervised one. The healthcheck does not respawn into this refusal
         # either — it pairs the CDP probe with a session-liveness probe, so a
         # squatter is reported (ERROR) rather than churned at.
         #
         # The message names its own remedy, because this refusal is what an
-        # operator actually meets: `ava stop` now sweeps any Chrome on this
+        # operator actually meets: `meiva stop` now sweeps any Chrome on this
         # cluster's profile (services/desktop/browser/orphan.py), which clears the
         # post-handoff case without a manual pid hunt. A Chrome on some *other*
         # profile is deliberately not swept — it cannot be positively identified
         # as ours — so that case stays the operator's to quit.
         print(  # noqa: T201 — pre-redirect, surfaces in the session log
-            f"ava-browser: CDP port {cdp_port} already served by another Chrome; "
+            f"meiva-browser: CDP port {cdp_port} already served by another Chrome; "
             f"refusing to start a second instance on {profile_dir()}. "
-            "To clear it: `ava stop` then `ava start` — that sweeps any "
+            "To clear it: `meiva stop` then `meiva start` — that sweeps any "
             "Chrome running on this cluster's profile, including one left behind by a "
             "SingletonLock handoff. If instead you started a Chrome of your own on this "
             "port, quit that one — the browser service owns this port.",
@@ -133,7 +133,7 @@ def main() -> None:
     profile.mkdir(parents=True, exist_ok=True)
     local_state_warning = browser_profile.validate_local_state(profile)
     if local_state_warning is not None:
-        logger.warning("ava-browser: Local State validation warning: {}", local_state_warning)
+        logger.warning("meiva-browser: Local State validation warning: {}", local_state_warning)
     # Redirect stdout/stderr to browser.log before execvp so a Chrome crash is
     # postmortem-able.
     log_fd = os.open(str(logs_dir() / "browser.log"), os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o644)

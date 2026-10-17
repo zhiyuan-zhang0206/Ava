@@ -1,0 +1,321 @@
+"""Agent-runtime face of the meiva_syntax_fix plugin — the before_exec fix hook.
+
+A before_exec hook that auto-fixes common Python syntax errors before the
+subprocess exec.
+Loaded only in the agent process: the plugin loader (`base.packages.plugins.loading`) imports this
+module after `plugin.py` on the full path (host boot / graph build); the
+surface module carries only the description (task #3633).
+"""
+
+from __future__ import annotations
+
+from datetime import UTC, datetime
+from typing import Any
+
+from langchain_core.messages import AIMessage, ToolCall
+from langchain_core.runnables import RunnableConfig
+from langgraph.runtime import Runtime
+from loguru import logger
+
+from agent.graph.tool_calls import (
+    first_tool_call_code,
+    normalize_tool_calls,
+    replace_execute_code,
+)
+from agent.hooks import Hook
+from agent.messages import exec_output_message
+from agent.state import AgentState
+from base.agents.context import MeivaContext
+from base.agents.messages.kwargs import ExecStatus
+from base.packages.plugins.extensions import PluginContributions
+
+from ._deterministic_fixes import apply_all_deterministic_fixes
+from ._escapes import fix_invalid_escapes
+from ._imports import detect_missing_imports, insert_imports
+from ._imports import (
+    is_stdlib_module as is_stdlib_module,  # re-exported for tests
+)
+from ._imports import (
+    ruff_executable as ruff_executable,
+)
+from ._llm_repair import (
+    extract_text as extract_text,  # re-exported for tests
+)
+from ._llm_repair import llm_repair_syntax, render_syntax_error
+from ._llm_repair import (
+    strip_code_fence as strip_code_fence,
+)
+from ._punct import fix_chinese_punctuation
+from ._ruff import ruff_fix, ruff_format
+
+# ---------------------------------------------------------------------------
+# Main hook
+# ---------------------------------------------------------------------------
+
+
+def emit_syntax_fix_event(
+    *,
+    fix_type: str,
+    before: str,
+    after: str | None,
+    fixes: list[str],
+    note: str,
+) -> None:
+    """Record one syntax_fix event for the trace-v2 content-retention contract.
+
+    These events are the zero-loss record of every code mutation this hook
+    performs, long after the trace mirror retention or checkpoint trim would
+    have dropped the context around them:
+
+    - fix_type="rough" — deterministic rules only (chinese_punct, missing
+      imports, ruff, the 11 compile-guarded patterns). Stores `before` only:
+      the after state is exactly `apply_fix_pipeline(before)`, so it is
+      replayable and storing it would double the payload for nothing.
+    - fix_type="lm" — an LLM rewrote the source (compile() still failed after
+      all deterministic steps). The rewrite is NOT replayable, so `after` is
+      stored alongside `before` (which is the deterministic-fixed source the
+      LLM actually saw).
+
+    Payload shape (loguru extra -> the event's `attributes`):
+    {fix_type, fixes, before, after?, msg}. Volume is linear in the code
+    block size (KB-scale), which is the design point: long retention, no
+    information loss.
+    """
+    attrs: dict[str, Any] = {
+        "fix_type": fix_type,
+        "fixes": fixes,
+        "before": before,
+    }
+    if after is not None:
+        attrs["after"] = after
+    logger.info(
+        "[syntax_fix] {note}",
+        event="syntax_fix",
+        note=note,
+        **attrs,
+    )
+
+
+def apply_fix_pipeline(code: str, *, ruff_format: bool) -> tuple[str, list[str]]:
+    """Run the deterministic fix pipeline (steps 1-6): Chinese punctuation,
+    missing imports, invalid escapes, ruff --fix, ruff format (gated), and the
+    11 compile-guarded deterministic patterns. Returns (fixed_code,
+    fixes_applied) -- fixes_applied is non-empty iff some step changed the code.
+    """
+    fixes_applied: list[str] = []
+    fixed_code = code
+
+    # Step 1: Chinese punctuation
+    fixed_code, n = fix_chinese_punctuation(fixed_code)
+    if n > 0:
+        fixes_applied.append(f"chinese_punct({n})")
+
+    # Step 2: Missing imports
+    missing = detect_missing_imports(fixed_code)
+    if missing:
+        fixed_code = insert_imports(fixed_code, missing)
+        fixes_applied.append(f"missing_imports({len(missing)})")
+
+    # Step 3: Invalid-escape-sequence fix (before ruff so ruff sees clean source)
+    fixed_code, n_esc = fix_invalid_escapes(fixed_code)
+    if n_esc > 0:
+        fixes_applied.append(f"invalid_escape({n_esc})")
+
+    # Step 4: ruff --fix (unused imports, formatting)
+    ruff_before = fixed_code
+    fixed_code = ruff_fix(fixed_code)
+    if fixed_code != ruff_before:
+        fixes_applied.append("ruff")
+
+    # Step 5: ruff format (style normalization) — pulls in-context code toward
+    # canonical formatting. Off the deterministic-correctness path: it never
+    # fixes an error, only restyles, so it is gated and trivially skippable.
+    fixed_code, fmt_applied = _maybe_ruff_format(fixed_code, enabled=ruff_format)
+    if fmt_applied:
+        fixes_applied.append("ruff_format")
+
+    # Step 6: Deterministic fixes — 11 known failure patterns from production
+    # log analysis (string-delimiter repair, nested triple-quote / inner-quote
+    # escaping, indentation, bracket matching, f-string expressions, etc.) fixed
+    # here before compile(). Each fix is individually compile-guarded and the
+    # first one that makes the source compile wins, so the LLM repair step rarely
+    # needs to run.
+    det_fixed, det_applied = apply_all_deterministic_fixes(fixed_code)
+    if det_applied:
+        logger.info(
+            "[syntax_fix] det_fix: patterns={patterns}",
+            event="syntax_fix",
+            patterns=",".join(det_applied),
+        )
+        fixed_code = det_fixed
+        fixes_applied.extend(det_applied)
+
+    return fixed_code, fixes_applied
+
+
+def _maybe_ruff_format(code: str, *, enabled: bool) -> tuple[str, bool]:
+    """Step 5 of the pipeline: run `ruff format` (style-only normalization)
+    when gated on; returns (code, applied)."""
+    if not enabled:
+        return code, False
+    formatted = ruff_format(code)
+    return formatted, formatted != code
+
+
+def _finalize_success(
+    fixed_msg: AIMessage,
+    fixes_applied: list[str],
+    before_code: str | None = None,
+) -> dict[str, object] | None:
+    """Emit the fixed message, or None to pass the original through untouched
+    when nothing changed."""
+    if not fixes_applied:
+        return None
+
+    if fixes_applied:
+        logger.info(
+            "[syntax_fix] applied: {fixes}",
+            event="syntax_fix",
+            fixes=",".join(fixes_applied),
+        )
+        # Trace-v2 retention event: deterministic fix, before-only (after is
+        # replayable via apply_fix_pipeline). `before_code` is the original
+        # agent-written source — the pre-fix truth.
+        emit_syntax_fix_event(
+            fix_type="rough",
+            before=before_code or "",
+            after=None,
+            fixes=fixes_applied,
+            note=f"deterministic fixes applied: {','.join(fixes_applied)}",
+        )
+    # Code is valid and was fixed -- silent same-ID replacement
+    return {"messages": [fixed_msg]}
+
+
+async def _handle_compile_failure(
+    e: SyntaxError,
+    fixed_code: str,
+    fixes_applied: list[str],
+    last_msg: AIMessage,
+    fixed_msg: AIMessage,
+    tool_call_id: str,
+) -> dict[str, object]:
+    """Last-resort handling for source that still does not compile: hand it to
+    the LLM repair model, or surface the error to the agent (skipping the
+    subprocess). Returns the graph dict to emit.
+    """
+    rendered_error = render_syntax_error(e, fixed_code)
+
+    # Last resort: hand the still-broken source + its error to a strong
+    # reasoning model. Covers open-ended string-delimiter mistakes the
+    # deterministic steps can't (multi-line value in single quotes, embedded
+    # triple-quote, trailing quote against the closing delimiter).
+    repaired = await llm_repair_syntax(fixed_code, rendered_error)
+    if repaired is not None and repaired != fixed_code:
+        # llm_repair_syntax only returns source that compiles.
+        logger.info(
+            "[syntax_fix] llm_repair: {msg} (deterministic fixes: {fixes})",
+            event="syntax_fix",
+            msg=str(e),
+            fixes=",".join(fixes_applied) or "none",
+        )
+        # Trace-v2 retention event: an LLM rewrote the source — not replayable,
+        # so before AND after are stored. `before` is the deterministic-fixed
+        # source the LLM actually saw (identical to the original when no
+        # deterministic fix fired); `after` is the repair output.
+        emit_syntax_fix_event(
+            fix_type="lm",
+            before=fixed_code,
+            after=repaired,
+            fixes=fixes_applied,
+            note=f"llm_repair: {e}",
+        )
+        return {"messages": [replace_execute_code(last_msg, tool_call_id, repaired)]}
+
+    logger.info(
+        "[syntax_fix] compile_failed: {msg} (fixes: {fixes})",
+        event="syntax_fix",
+        msg=str(e),
+        fixes=",".join(fixes_applied) or "none",
+    )
+    # Unfixable -- surface the error to the agent so it retries, skipping the
+    # subprocess. Format mimics Python's native traceback.
+    error_header = "Code execution output:\n\n"
+    error_text = error_header + rendered_error + "\n"
+
+    if len(last_msg.tool_calls) > 1:
+        # Let the ordinary child return this call's syntax error. Skipping the
+        # whole exec node would strand the other calls without results.
+        return {"messages": [fixed_msg]}
+
+    tool_msg = exec_output_message(
+        content=error_text,
+        tool_call_id=tool_call_id,
+        status=ExecStatus.FAILED,
+        body_start=len(error_header),
+        created_at=datetime.now(UTC),
+    )
+    return {
+        "goto": "after_exec",
+        "messages": [fixed_msg, tool_msg],
+        "halted": False,  # route to before_llm -> agent retries
+    }
+
+
+async def _fix_call(
+    last_msg: AIMessage, call: ToolCall, *, ruff_format: bool
+) -> dict[str, Any] | None:
+    """Repair one invocation without inspecting or rewriting sibling code."""
+    if call["name"] != "execute_code":
+        return None
+    code = first_tool_call_code([call])
+    if not code:
+        return None
+    fixed_code, fixes_applied = apply_fix_pipeline(code, ruff_format=ruff_format)
+    fixed_msg = replace_execute_code(last_msg, call["id"], fixed_code)
+    try:
+        compile(fixed_code, "<agent_code>", "exec")
+    except SyntaxError as e:
+        return await _handle_compile_failure(
+            e, fixed_code, fixes_applied, last_msg, fixed_msg, call["id"] or ""
+        )
+    return _finalize_success(fixed_msg, fixes_applied, before_code=code)
+
+
+class _SyntaxFixHook(Hook):
+    """Repair each execute_code invocation separately, preserving IDs and order.
+
+    An unfixable single call can skip exec with a compile-error ToolMessage.
+    In a multi-call message, its child returns the error while siblings run.
+    """
+
+    async def __call__(
+        self,
+        state: AgentState,
+        runtime: Runtime[MeivaContext],
+        _config: RunnableConfig,
+        /,
+    ) -> dict[str, Any] | None:
+        original = state.messages[-1]
+        if not isinstance(original, AIMessage):
+            return None
+        last_msg = normalize_tool_calls(original) or original
+        changed = last_msg is not original
+        ruff_format = runtime.context.require_agent().sandbox.syntax_fix_ruff_format
+        for call in last_msg.tool_calls:
+            result = await _fix_call(last_msg, call, ruff_format=ruff_format)
+            if result is None:
+                continue
+            if "goto" in result:
+                return result
+            last_msg = result["messages"][0]
+            changed = True
+        return {"messages": [last_msg]} if changed else None
+
+
+syntax_fix_before_exec = _SyntaxFixHook()
+
+
+def contribute() -> PluginContributions:
+    """What this plugin declares for the agent runtime."""
+    return PluginContributions(before_exec=(syntax_fix_before_exec,))

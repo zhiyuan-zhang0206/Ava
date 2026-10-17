@@ -48,7 +48,7 @@ function LinkText({ link }: { link: ResolvedLink["link"] }) {
   );
 }
 
-// ava:ref ui/web/src/docs/frontend-components/run-timeline/details-panel.ava.okf.md#selected-message-parts
+// meiva:ref ui/web/src/docs/frontend-components/run-timeline/details-panel.meiva.okf.md#selected-message-parts
 export function LinkDetail({ resolved, snapshot, onAddAgent }: { resolved: ResolvedLink; snapshot?: string; onAddAgent: (agent: number) => void }) {
   const t = useTranslations("runTimeline");
   const labels = useLinkKindLabels();

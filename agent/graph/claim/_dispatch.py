@@ -30,11 +30,11 @@ from agent.graph.prompt import context_notes
 from agent.hooks.compact_events import emit_compact_finished, emit_compact_started
 from agent.messages import NoteTag, security_note_message, system_note_message
 from agent.nodes import BEFORE_LLM, CLAIM, END
-from base.agents.context import AvaContext
+from base.agents.context import MeivaContext
 from base.agents.messages.envelope import EnvelopeReadInputs
 from base.agents.messages.inbound import InboundKind
 from base.agents.messages.injection_scan import scan_inbound_content
-from base.agents.messages.kwargs import AvaMsgType, read_ava_kwargs
+from base.agents.messages.kwargs import MeivaMsgType, read_meiva_kwargs
 from base.agents.messages.security_finding import SecurityFindingEntry
 from base.events.live.projection import Cancelled, CompactionMode, CompactionStatus
 from base.host.env.agent_slices import AgentSlices
@@ -90,7 +90,7 @@ class BatchState:
 def by_who(source: str) -> str:
     """Render "by X" in lifecycle marker text.
 
-    'self' (ava.self.terminate / restart called by agent itself) → "yourself"
+    'self' (meiva.self.terminate / restart called by agent itself) → "yourself"
     makes the marker read naturally ("You are terminated by yourself" expresses
     "self-killed" semantics more accurately than "by self").
     Other sources ('user' / 'agent:N' / 'system') concatenate the
@@ -101,7 +101,7 @@ def by_who(source: str) -> str:
     return source
 
 
-def _ts_prefix(ctx: AvaContext) -> str:
+def _ts_prefix(ctx: MeivaContext) -> str:
     """Leading `[ts] ` for lifecycle markers, or `` when agent-facing message
     timestamps are off (`settings.general.message_timestamps`)."""
     return (
@@ -136,7 +136,7 @@ def render_restart_completed_marker(
       marker each agent wakes to on the new code after a rollout.
     - Any other source → "You have been restarted by {by_who(source)}"
 
-    Payload contains ``config_overlay`` (`ava.self.restart(config_overlay=...)` path) →
+    Payload contains ``config_overlay`` (`meiva.self.restart(config_overlay=...)` path) →
     append ``with config {k=v, ...}`` at the end so the agent immediately sees the
     per-agent overlay fields actually in effect for this process. Empty / missing
     overlay does not append the suffix. Overlay values for credential-like keys
@@ -163,7 +163,7 @@ def render_restart_completed_marker(
 
 
 async def _handle_chat(
-    ctx: AvaContext,
+    ctx: MeivaContext,
     item: ClaimedInbound,
     st: BatchState,
 ) -> None:
@@ -214,7 +214,7 @@ def _task_id_from_system_note(payload: dict[str, object] | None, tag: NoteTag) -
 
 
 async def _handle_system_note(
-    ctx: AvaContext,
+    ctx: MeivaContext,
     item: ClaimedInbound,
     st: BatchState,
 ) -> None:
@@ -241,7 +241,7 @@ async def _handle_system_note(
     )
 
 
-def _close_superseded_compact(ctx: AvaContext, agent_id: int, st: BatchState) -> None:
+def _close_superseded_compact(ctx: MeivaContext, agent_id: int, st: BatchState) -> None:
     """Close the tracked compact run sitting in the payload slot.
 
     A later compact outcome in this dispatch pass supersedes it: the slot
@@ -258,18 +258,18 @@ def _close_superseded_compact(ctx: AvaContext, agent_id: int, st: BatchState) ->
 
 
 async def _handle_compact_summary(
-    ctx: AvaContext,
+    ctx: MeivaContext,
     agent_id: int,
     item: ClaimedInbound,
     st: BatchState,
 ) -> None:
     """COMPACT_SUMMARY: agent-authored summary — used directly, no LLM run."""
     _close_superseded_compact(ctx, agent_id, st)
-    st.compact_payload = (item.content, AvaMsgType.COMPACT_SUMMARY.value, None)
+    st.compact_payload = (item.content, MeivaMsgType.COMPACT_SUMMARY.value, None)
 
 
 async def _handle_compact_request(
-    ctx: AvaContext,
+    ctx: MeivaContext,
     agent_id: int,
     state: _state.AgentState,
     _item: ClaimedInbound,
@@ -338,11 +338,11 @@ async def _handle_compact_request(
         body=f"request summary {len(summary)} chars",
         event="compact_request",
     )
-    st.compact_payload = (summary, AvaMsgType.COMPACT_REQUEST.value, compact_run_id)
+    st.compact_payload = (summary, MeivaMsgType.COMPACT_REQUEST.value, compact_run_id)
 
 
 async def _handle_cancel(
-    ctx: AvaContext,
+    ctx: MeivaContext,
     agent_id: int,
     st: BatchState,
 ) -> None:
@@ -353,7 +353,7 @@ async def _handle_cancel(
 
 
 async def handle_heartbeat(
-    ctx: AvaContext,
+    ctx: MeivaContext,
     agent_id: int,
     item: ClaimedInbound,
     st: BatchState,
@@ -386,7 +386,7 @@ async def handle_heartbeat(
 
 
 async def _handle_terminate(
-    ctx: AvaContext,
+    ctx: MeivaContext,
     item: ClaimedInbound,
     st: BatchState,
 ) -> None:
@@ -406,7 +406,7 @@ async def _handle_terminate(
 
 
 async def handle_restart(
-    ctx: AvaContext,
+    ctx: MeivaContext,
     _agent_id: int,
     item: ClaimedInbound,
     st: BatchState,
@@ -443,7 +443,7 @@ async def _handle_restart_stateful(
 
 
 async def _handle_restart_completed(
-    ctx: AvaContext,
+    ctx: MeivaContext,
     item: ClaimedInbound,
     st: BatchState,
 ) -> None:
@@ -466,7 +466,7 @@ async def _handle_restart_completed(
 
 
 async def _handle_resurrect(
-    ctx: AvaContext,
+    ctx: MeivaContext,
     item: ClaimedInbound,
     st: BatchState,
 ) -> None:
@@ -506,10 +506,10 @@ STRIP_ON_FORK_TAGS: frozenset[NoteTag] = frozenset(
 def _is_source_identity_note(m: BaseMessage) -> bool:
     """Whether `m` is a standing note the fork must drop from the rebuild — a
     system note whose tag names the SOURCE agent."""
-    kw = read_ava_kwargs(m)
+    kw = read_meiva_kwargs(m)
     return (
-        kw.get("ava_msg_type") == AvaMsgType.SYSTEM_NOTE.value
-        and kw.get("ava_note_tag") in STRIP_ON_FORK_TAGS
+        kw.get("meiva_msg_type") == MeivaMsgType.SYSTEM_NOTE.value
+        and kw.get("meiva_note_tag") in STRIP_ON_FORK_TAGS
     )
 
 
@@ -539,7 +539,7 @@ async def _handle_fork(
     state: _state.AgentState,
     slices: AgentSlices,
     extensions: ExtensionRegistry,
-    ctx: AvaContext,
+    ctx: MeivaContext,
 ) -> None:
     """FORK: rebuild the head (drop source-identity notes), append marker, graft own notes.
 
@@ -584,7 +584,7 @@ async def _handle_fork(
 
 
 async def _dispatch_item(
-    ctx: AvaContext,
+    ctx: MeivaContext,
     state: _state.AgentState,
     agent_id: int,
     item: ClaimedInbound,
@@ -632,7 +632,7 @@ async def _dispatch_item(
 
 
 async def dispatch_batch(
-    ctx: AvaContext,
+    ctx: MeivaContext,
     state: _state.AgentState,
     agent_id: int,
     batch: list[ClaimedInbound],

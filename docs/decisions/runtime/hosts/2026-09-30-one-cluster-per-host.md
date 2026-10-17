@@ -1,7 +1,7 @@
 # One cluster per host; every verification cluster runs in its own boundary
 
-**Decision (2026-09-30, user ruling):** a host runs at most one Ava cluster, the
-one at `~/.ava`. Nothing in the repository exists to keep two clusters apart on
+**Decision (2026-09-30, user ruling):** a host runs at most one Meiva cluster, the
+one at `~/.meiva`. Nothing in the repository exists to keep two clusters apart on
 one host. A cluster that exists to verify something (a preview, a rehearsal, a
 proof) runs inside its own isolation boundary, a Linux container or VM, or a
 Tart macOS VM, where it is that boundary's one cluster. The mechanisms below are
@@ -13,16 +13,16 @@ deleted, not deprecated. The sliced plan is
 Until now a cluster's identity was its home path and the code kept several homes
 apart on one OS user: a port block allocated and preflighted per home, a
 checkout-to-home pointer with an env-versus-pointer contradiction check, a bare
-`ava` launcher that routes on `AVA_HOME`, a host-state directory shared across
+`meiva` launcher that routes on `MEIVA_HOME`, a host-state directory shared across
 homes, per-home OS job labels, and a local preview controller that birthed a
 disposable cluster from a worktree. Each of the incidents recorded in
 [path-only cluster identity](2026-07-20-path-only-cluster-identity.md) and
-[AVA_HOME vs checkout contradiction](../../agents/graph/2026-07-31-ava-home-vs-checkout-contradiction.md)
+[MEIVA_HOME vs checkout contradiction](../../agents/graph/2026-07-31-meiva-home-vs-checkout-contradiction.md)
 was the same shape: "which cluster does this process mean" resolved through a
 name, a pointer or an inherited variable on a shared host, and resolved wrongly.
 
 Two proposals made in this line were patches inside that premise and are
-rejected below: an `AVA_HOME` default exported from the user's shell rc, and a
+rejected below: an `MEIVA_HOME` default exported from the user's shell rc, and a
 default home built into the launcher. Two more concern how the home reaches a
 process once the premise is gone.
 
@@ -30,7 +30,7 @@ process once the premise is gone.
 
 Two versions of one tool sharing one PATH is an old problem with three standard
 answers: install one, give every consumer its own prefix, or give every consumer
-its own container or VM. `AVA_HOME` is the second answer. It works only while the
+its own container or VM. `MEIVA_HOME` is the second answer. It works only while the
 selector survives every layer between the operator and the process, and shells
 rebuild PATH at every layer, which is exactly the shadowing the prefix approach
 has to fight. The third answer moves the fight out of the code: a cluster in a
@@ -44,7 +44,7 @@ What the repository itself says about who needs same-host coexistence:
   behavior, multi-machine coordination and production cutover.
 - The Linux lifecycle proof already requires an isolated Linux machine.
 - CI gives every job its own throwaway cluster and tests give every session its
-  own temporary `AVA_HOME`; neither needs the routing, pointer or registry
+  own temporary `MEIVA_HOME`; neither needs the routing, pointer or registry
   machinery.
 - The development loop in the self-development skill does not require a cluster
   per worktree; when local clusters are forbidden it uses selected tests and CI.
@@ -53,35 +53,35 @@ What the repository itself says about who needs same-host coexistence:
 
 ## What is deleted
 
-Port-block allocation and cross-cluster port preflight; the `.ava_home` pointer,
-checkout binding and contradiction check; `AVA_HOME_OVERRIDE`; the private
-scratch home an unanchored checkout boots on; `ava start --worktree`; the
+Port-block allocation and cross-cluster port preflight; the `.meiva_home` pointer,
+checkout binding and contradiction check; `MEIVA_HOME_OVERRIDE`; the private
+scratch home an unanchored checkout boots on; `meiva start --worktree`; the
 launcher routing and the per-home CLI link; the separate host-state directory;
 per-home OS job slugs; the local native preview controller.
 
-## `AVA_HOME` after the premise goes (user ruling, same day)
+## `MEIVA_HOME` after the premise goes (user ruling, same day)
 
-The home is `~/.ava` unless `AVA_HOME` says otherwise. Production does not
+The home is `~/.meiva` unless `MEIVA_HOME` says otherwise. Production does not
 depend on the variable. Only a process tree that must not touch the host's
 cluster sets it, once, at its top: the test session before it spawns anything,
 and the hooks and tools that import application code. Every descendant inherits
-it. No code captures the home at import; `ava_home()` reads it when called, and
+it. No code captures the home at import; `meiva_home()` reads it when called, and
 there is no second, in-process injection channel, so a process and its children
 cannot disagree about their home.
 
-`AVA_HOME` no longer selects between clusters on a host, so the shell layers that
+`MEIVA_HOME` no longer selects between clusters on a host, so the shell layers that
 defeated it as a selector never stand between the setter and the process: the
 test session sets it for the tree it owns.
 
 What keeps development code off the host's cluster is now two rules. A test tree
-always sets `AVA_HOME`; and the `~/.ava` cluster is started and stopped only from
-its own checkout, `~/.ava/source`.
+always sets `MEIVA_HOME`; and the `~/.meiva` cluster is started and stopped only from
+its own checkout, `~/.meiva/source`.
 
 ## Rejected alternatives
 
-- **Keep same-host multi-cluster and export a default `AVA_HOME` from converge.**
+- **Keep same-host multi-cluster and export a default `MEIVA_HOME` from converge.**
   Depends on which dotfile a given shell form reads, must be written
-  set-if-unset or it overwrites the `AVA_HOME` injected into an agent's login
+  set-if-unset or it overwrites the `MEIVA_HOME` injected into an agent's login
   shell, and makes every worktree CLI refuse through the contradiction check.
 - **A default home declared by the launcher.** Removes the dotfile dependence but
   keeps the routing machinery alive for a premise being retired.
@@ -98,7 +98,7 @@ its own checkout, `~/.ava/source`.
 
 ## Consequences and what is not yet known
 
-- A development checkout with `AVA_HOME` unset now reads the host's cluster;
+- A development checkout with `MEIVA_HOME` unset now reads the host's cluster;
   on a development machine that also runs production, that is production.
   Nothing it runs from there may start or stop that cluster.
 - Native local previews disappear before their replacement exists. Until the

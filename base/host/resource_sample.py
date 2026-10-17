@@ -6,9 +6,9 @@ receiver, and Prometheus is the ONE time-series store: a second retained
 history would be a second answer to "what was the CPU on machine X" that drifts
 from the first.
 
-What survives here is the degraded answer — the reading `ava status` and the
+What survives here is the degraded answer — the reading `meiva status` and the
 status page must still show on a deployment where the LGTM backend is down or
-was never deployed (observability is optional; `ava lgtm off` is a supported
+was never deployed (observability is optional; `meiva lgtm off` is a supported
 state). It is a live one-shot sample and nothing is kept between calls, so
 there is no cadence to keep, nothing to lose on restart, and no drift.
 """
@@ -35,7 +35,7 @@ CPU_INTERVAL_S = 0.1
 # task #3696 exception inventory: a protective bound on one best-effort local
 # read (`pmset -g batt`) so a hung command cannot stall the status probe that
 # consumes this sample. The probe's own 8s budget
-# (AVA_STATUS_PROBE_TIMEOUT_SECONDS) sets the ceiling; not an operator knob.
+# (MEIVA_STATUS_PROBE_TIMEOUT_SECONDS) sets the ceiling; not an operator knob.
 _BATTERY_READ_TIMEOUT_S = 2.0
 
 

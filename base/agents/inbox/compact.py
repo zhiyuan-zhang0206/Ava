@@ -16,7 +16,7 @@ def insert_compact_request_inbound(
 
     Claim generates a summary and replaces messages. Public manual compaction
     uses observed closed-history admission instead of this primitive.
-    Agent-authored summaries use ``ava.self.compact`` and ``compact_summary``.
+    Agent-authored summaries use ``meiva.self.compact`` and ``compact_summary``.
     """
     with db.cursor() as cur:
         inbound_id, compact_event = insert_compact_in_transaction(cur, agent_id)

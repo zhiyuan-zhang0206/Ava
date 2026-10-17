@@ -27,8 +27,8 @@ from scripts.verify import boundary, tart_run, tart_vm
 from scripts.verify.tart_vm import Tart
 
 _FAKE = Path(__file__).resolve().parent / "fake_tart.py"
-GOLDEN = "ava-golden"
-EARLIER = ("ava-control", "ava-r1", "ava-r2")
+GOLDEN = "meiva-golden"
+EARLIER = ("meiva-control", "meiva-r1", "meiva-r2")
 OBSERVER_PASSED = json.dumps({"result": "passed", "checks": {}})
 
 
@@ -136,11 +136,13 @@ def test_a_passing_run_copies_the_evidence_out_and_deletes_only_its_vm(
         "profile-upload", "observer-upload", "init", "retire-golden-helper", "start", "observe", "snapshot",
     ]  # fmt: skip
 
-    retirement = next(call for call in fake.commands("exec") if "ava stop" in call[-2])
+    retirement = next(call for call in fake.commands("exec") if "meiva stop" in call[-2])
     assert retirement[1] == result["vm"]
 
 
-@pytest.mark.parametrize("failing", ["ava stop", "ava start", "uv sync", "git fetch", "ava init"])
+@pytest.mark.parametrize(
+    "failing", ["meiva stop", "meiva start", "uv sync", "git fetch", "meiva init"]
+)
 def test_a_failed_step_still_collects_and_deletes_the_vm(
     failing: str, fake: Fake, repo: Path, tmp_path: Path
 ) -> None:
@@ -197,8 +199,8 @@ def test_an_observer_that_failed_fails_the_run(fake: Fake, repo: Path, tmp_path:
 
 
 def test_a_third_vm_is_never_booted(fake: Fake, repo: Path, tmp_path: Path) -> None:
-    fake.state["vms"]["ava-r1"]["running"] = True
-    fake.state["vms"]["ava-r2"]["running"] = True
+    fake.state["vms"]["meiva-r1"]["running"] = True
+    fake.state["vms"]["meiva-r2"]["running"] = True
     fake.save()
 
     status, result, _root = _run(fake, repo, tmp_path)
@@ -210,13 +212,13 @@ def test_a_third_vm_is_never_booted(fake: Fake, repo: Path, tmp_path: Path) -> N
 
 
 def test_one_running_vm_leaves_room_for_the_run(fake: Fake, repo: Path, tmp_path: Path) -> None:
-    fake.state["vms"]["ava-r1"]["running"] = True
+    fake.state["vms"]["meiva-r1"]["running"] = True
     fake.save()
 
     status, _result, _root = _run(fake, repo, tmp_path)
 
     assert status == 0
-    assert fake.vms()["ava-r1"]["running"] is True  # a VM the run did not start is left alone
+    assert fake.vms()["meiva-r1"]["running"] is True  # a VM the run did not start is left alone
 
 
 def test_a_golden_image_that_is_running_or_missing_is_refused(
@@ -251,7 +253,7 @@ def test_the_only_share_is_the_commit_export_read_only_and_nothing_leaks(
     fake: Fake, repo: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     home = tmp_path / "home"
-    (home / ".ava/source").mkdir(parents=True)
+    (home / ".meiva/source").mkdir(parents=True)
     monkeypatch.setenv("HOME", str(home))
 
     status, _result, _root = _run(fake, repo, tmp_path)
@@ -289,13 +291,13 @@ def test_the_export_holds_only_the_commit_and_no_remote(repo: Path, tmp_path: Pa
 
 
 @pytest.mark.parametrize(
-    "relative", [".", "..", ".ava", ".ava/source", ".tart", "Library/Keychains"]
+    "relative", [".", "..", ".meiva", ".meiva/source", ".tart", "Library/Keychains"]
 )
 def test_a_share_of_host_state_is_refused_before_tart_is_asked(
     relative: str, fake: Fake, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     home = tmp_path / "home"
-    for name in (".ava/source", ".tart", "Library/Keychains"):
+    for name in (".meiva/source", ".tart", "Library/Keychains"):
         (home / name).mkdir(parents=True)
     monkeypatch.setenv("HOME", str(home))
 
@@ -326,11 +328,11 @@ def test_every_guest_script_goes_through_the_guest_agent_never_the_host_shell(
     destructive = [a for argv in scripts for a in argv if "rm -rf" in a]
     assert {
         line.strip() for script in destructive for line in script.splitlines() if "rm -rf" in line
-    } == {'rm -rf "$HOME/.ava/source"'}
+    } == {'rm -rf "$HOME/.meiva/source"'}
 
 
 def test_init_and_start_are_the_commands_the_cli_accepts() -> None:
-    """The guest runs `ava init` (machine, capabilities, profile) and then `ava start` with
+    """The guest runs `meiva init` (machine, capabilities, profile) and then `meiva start` with
     the service selection only, the same split the CLI parsers enforce."""
     from cli.parsers import build_parser
 

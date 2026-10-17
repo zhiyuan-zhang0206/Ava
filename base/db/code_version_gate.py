@@ -23,8 +23,8 @@ holding one connection forever never re-reads the minimum. The trade-off is in
 `docs/decisions/runtime/updates/execution/converge/2026-09-30-client-side-code-version-gate.md`.
 
 Direct connections (administrator, migration applier, `pg_dump`) and explicit
-targets (`connect_url`) are not gated. The `ava` CLI is exempt by declaration
-(its operator factory passes an exempt `ProcessDbGate`): `ava stop` writes to
+targets (`connect_url`) are not gated. The `meiva` CLI is exempt by declaration
+(its operator factory passes an exempt `ProcessDbGate`): `meiva stop` writes to
 drain agents, and a host left behind must still be able to run it.
 """
 
@@ -131,8 +131,8 @@ class ProcessDbGate:
     def application_name(self) -> str:
         """Name the process image; an exempt CLI never resolves a Git version."""
         if self._exempt:
-            return "ava:cli"
-        return f"ava:{self._process}:v{self._version()}"
+            return "meiva:cli"
+        return f"meiva:{self._process}:v{self._version()}"
 
     def raise_min_code_version(self, db: _Dialer) -> int:
         """Raise the minimum to this gateway's captured code version."""

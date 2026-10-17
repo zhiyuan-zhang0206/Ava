@@ -1,6 +1,6 @@
 ---
 name: inspect-a-trace
-description: "Reconstructs an Ava run from checkpoints and telemetry. Use when investigating agent behavior, execution failures, or correlated trace evidence."
+description: "Reconstructs an Meiva run from checkpoints and telemetry. Use when investigating agent behavior, execution failures, or correlated trace evidence."
 ---
 
 # Inspect a trace
@@ -40,15 +40,15 @@ Everything hangs off these. Get one, and the rest follows.
 - **`trace_id`** — one turn of graph work, lowercase 32-hex. It is the Loki line
   field (`| trace_id="<hex>"`), the Tempo trace id, and — stamped per turn onto
   the checkpoint the turn committed — `checkpoints.metadata->>'trace_id'`. The
-  reverse link is the root span's `ava.checkpoint_id` attribute.
+  reverse link is the root span's `meiva.checkpoint_id` attribute.
 
 **One trace is exactly one turn.** The root span (`base/telemetry/tracing.py:turn_span`)
 wraps one `graph.ainvoke`, and the runloop invokes the graph once per turn —
 the claim node ends the invocation at the turn boundary, so the trace exports
-when the turn ends. The root keeps the name `ava-agent-{agent_id}` and the
-`session.id` attribute, and carries `ava.turn` (int, from 1, **per process** —
+when the turn ends. The root keeps the name `meiva-agent-{agent_id}` and the
+`session.id` attribute, and carries `meiva.turn` (int, from 1, **per process** —
 it repeats across restarts; order turns across processes by timestamp or
-`ava.checkpoint_id`, never by `ava.turn`). Runs recorded before 2026-08-20
+`meiva.checkpoint_id`, never by `meiva.turn`). Runs recorded before 2026-08-20
 used a session-scoped root (`session_span`) that wrapped the whole process
 life — an old run in the mirror or Tempo can span many turns, so check the
 root's bounds before reasoning about its span count or duration.
@@ -82,14 +82,14 @@ symptom ──▶ Loki: one agent's event river ──▶ a trace_id ──▶ T
 
 For anything a human should look at themselves, build the Grafana Explore URL
 rather than pasting a span dump. Grafana runs on the LGTM host at
-`http://localhost:3003` (anonymous viewer; `ava lgtm status` to check it is up,
-`ava lgtm on` to bring it up). Override with `AVA_GRAFANA_URL` when it is on
+`http://localhost:3003` (anonymous viewer; `meiva lgtm status` to check it is up,
+`meiva lgtm on` to bring it up). Override with `MEIVA_GRAFANA_URL` when it is on
 another box.
 
 ```python
 import json, os, urllib.parse
 
-grafana = os.environ.get("AVA_GRAFANA_URL", "http://localhost:3003")
+grafana = os.environ.get("MEIVA_GRAFANA_URL", "http://localhost:3003")
 pane = {"explore": {"datasource": "tempo",
                     "queries": [{"refId": "A", "queryType": "traceId", "query": trace_id}],
                     "range": {"from": "now-1d", "to": "now"}}}
@@ -103,12 +103,12 @@ uids are `tempo` / `loki` / `prometheus`; swap `datasource` and give a LogQL
 ## The toolchain scripts
 
 `scripts/` holds three chained steps, each runnable standalone. The loader
-prints this skill's path (`ava.help(ava.skills.inspect_a_trace)`); in a repo
+prints this skill's path (`meiva.help(meiva.skills.inspect_a_trace)`); in a repo
 worktree it is `.agents/skills/inspect-a-trace/scripts/`, abbreviated
 `<scripts>/` below.
 
 ```
-fetch_trace.py ─▶ trace_raw.json ─▶ read_trace.py ─▶ trace_read.json ─▶ render_trace.py ─▶ report/ ─▶ ava.ui.serve
+fetch_trace.py ─▶ trace_raw.json ─▶ read_trace.py ─▶ trace_read.json ─▶ render_trace.py ─▶ report/ ─▶ meiva.ui.serve
 ```
 
 They encode the conversions you would otherwise re-derive every time (base64 vs
@@ -120,5 +120,5 @@ and the verified query set: [references/spans.md](references/spans.md).
 - Fleet-wide trends and dashboards — those are pre-shaped questions; use the
   core-metrics dashboards (`base/telemetry/metrics/core/observability.py`) and the
   alert rules, not run-level correlation.
-- Deploying or operating the LGTM stack — `deploy/lgtm/README.md`, `ava lgtm`.
+- Deploying or operating the LGTM stack — `deploy/lgtm/README.md`, `meiva lgtm`.
 - Computer-use traces (`/api/computer/traces`) — a different subsystem.

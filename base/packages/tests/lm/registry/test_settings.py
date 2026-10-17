@@ -169,7 +169,7 @@ def test_explicit_setting_wins_over_per_model_default(
 def test_explicit_empty_string_beats_per_model_effort(
     add_models: AddModels, *, model_catalog: ModelCatalog
 ) -> None:
-    # ava:ref base/packages/tests/lm/docs/contracts.ava.okf.md#explicit-tuning
+    # meiva:ref base/packages/tests/lm/docs/contracts.meiva.okf.md#explicit-tuning
     spec = model_catalog.models["deepseek-flash"]
     tuned = ModelSpec(
         provider=spec.provider,
@@ -299,7 +299,7 @@ def test_compact_fractions_are_per_agent_overridable() -> None:
 def test_resolve_setting_degrades_when_owning_domain_not_in_profile(
     monkeypatch: pytest.MonkeyPatch, *, model_catalog: ModelCatalog
 ) -> None:
-    # ava:ref base/packages/tests/lm/docs/contracts.ava.okf.md#explicit-tuning
+    # meiva:ref base/packages/tests/lm/docs/contracts.meiva.okf.md#explicit-tuning
     import base.config
 
     def _boom(name: str) -> object:

@@ -15,14 +15,14 @@ Spawn a planner agent with a top-tier model. It must produce a concrete plan: fi
 ```python
 from uuid import uuid4
 
-planner_id = ava.agents.spawn(
+planner_id = meiva.agents.spawn(
     prompt="Design a plan for: <your task>. Output: file tree, key decisions, implementation checklist.",
     config_overlay={"llm_model": "claude-opus-5"},
     label="planner"
 , idempotency_key=str(uuid4()))
 ```
 
-Wait for the planner, then read its plan via `ava.agents.get_last_message(planner_id)`.
+Wait for the planner, then read its plan via `meiva.agents.get_last_message(planner_id)`.
 
 Phase 2 — Execute (cheap models, parallel):
 Based on the plan, spawn 2-3 worker agents in parallel, each responsible for a different file or module. Use a cheap model — the work is straightforward implementation from a clear spec.
@@ -32,7 +32,7 @@ from uuid import uuid4
 
 worker_ids = []
 for i, file_spec in enumerate(file_specs):
-    wid = ava.agents.spawn(
+    wid = meiva.agents.spawn(
         prompt=f"Implement this file per the plan:\n{plan}\n\nYour file: {file_spec}",
         config_overlay={"llm_model": "deepseek-flash"},
         label=f"worker-{i}"
@@ -49,13 +49,13 @@ Phase 3 — Check (mixed models):
 ```python
 from uuid import uuid4
 
-reviewer_id = ava.agents.spawn(
+reviewer_id = meiva.agents.spawn(
     prompt=f"Review this code for correctness, edge cases, and code quality:\n{combined_output}",
     config_overlay={"llm_model": "claude-sonnet-5"},
     label="reviewer"
 , idempotency_key=str(uuid4()))
 
-checker_id = ava.agents.spawn(
+checker_id = meiva.agents.spawn(
     prompt=f"Verify this code meets the spec and would run correctly. Flag anything broken:\n{combined_output}",
     config_overlay={"llm_model": "deepseek-flash"},
     label="checker"
@@ -68,7 +68,7 @@ Spawn a reflector with a top-tier model. Give it the full output — plan, imple
 ```python
 from uuid import uuid4
 
-reflector_id = ava.agents.spawn(
+reflector_id = meiva.agents.spawn(
     prompt=f"Reflect on this project: what worked, what didn't, what patterns to reuse.\n\nPlan:\n{plan}\n\nCode:\n{combined_output}\n\nReview:\n{review}\n\nCheck:\n{check}",
     config_overlay={"llm_model": "claude-opus-5"},
     label="reflector"
@@ -76,7 +76,7 @@ reflector_id = ava.agents.spawn(
 ```
 
 Final output:
-Render the final output to HTML and use `ava.ui.serve()` to present:
+Render the final output to HTML and use `meiva.ui.serve()` to present:
 - The task and plan
 - The code produced
 - Review and check results
@@ -96,7 +96,7 @@ Requirements:
 3. **Phase 2**: Spawns 2-3 deepseek-flash workers in parallel → each implements one file
 4. **Phase 3**: Spawns claude-sonnet-5 reviewer + deepseek-flash checker in parallel
 5. **Phase 4**: Spawns claude-opus-5 reflector → architecture-level reflection
-6. Renders the full pipeline output to HTML and serves it with `ava.ui.serve`
+6. Renders the full pipeline output to HTML and serves it with `meiva.ui.serve`
 
 ## Expected output
 
@@ -120,4 +120,4 @@ This is the real use case for `config_overlay` model selection — not just "try
 - **One orchestrator, many models.** No global config changes. Each `spawn()` call carries its own model choice.
 - **Parallelism + cost control.** Cheap workers run in parallel without multiplying costs at the expensive tier.
 - **Portable pattern.** The same tiered routing works for research (plan=research design, execute=fact-gathering, reflect=synthesis), content creation, data analysis — any multi-phase intellectual task.
-- **Agent chooses the model, not the user.** Most frameworks force the user to pick a model before starting — Claude Code only supports Anthropic models, and switching requires manual config changes. Ava can ship a "model router" skill: the agent loads it, inspects the task's cognitive demand and budget, and picks the right model autonomously. The user says *what* to do; the agent decides *which model* to use for each phase.
+- **Agent chooses the model, not the user.** Most frameworks force the user to pick a model before starting — Claude Code only supports Anthropic models, and switching requires manual config changes. Meiva can ship a "model router" skill: the agent loads it, inspects the task's cognitive demand and budget, and picks the right model autonomously. The user says *what* to do; the agent decides *which model* to use for each phase.

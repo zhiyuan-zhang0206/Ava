@@ -34,7 +34,7 @@ def test_gate_is_lazy_and_shared_by_native_builders(
 
     def connect(*, config: Any, gate: ProcessDbGate, **_kwargs: Any) -> Any:
         assert config.db_url == settings.data_plane.db_url
-        assert gate.application_name() == f"ava:{process_name()}:v{version}"
+        assert gate.application_name() == f"meiva:{process_name()}:v{version}"
         if gate.min_read_due():
             gate.observe_minimum(version)
         seen.append(gate)
@@ -54,7 +54,7 @@ def test_gate_keeps_a_fresh_budget_for_each_test(
 ) -> None:
     owner: ProcessDbGate = request.getfixturevalue("database_gate")
     assert owner.min_read_due()
-    assert owner.application_name() == f"ava:{process_name()}:v{database_version.get()}"
+    assert owner.application_name() == f"meiva:{process_name()}:v{database_version.get()}"
 
 
 def test_gate_preserves_an_unknown_nonexempt_session_image(tmp_path: Path) -> None:

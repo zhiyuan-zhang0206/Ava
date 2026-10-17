@@ -22,7 +22,7 @@ afterEach(cleanup);
 
 function widget(over: Partial<InspectWidget> = {}): InspectWidget {
   return {
-    plugin: "ava_fleet",
+    plugin: "meiva_fleet",
     id: "today-tasks",
     kind: "taskList",
     order: 150,

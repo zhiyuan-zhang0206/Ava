@@ -13,7 +13,7 @@ class DaemonSettings(
     host_max_concurrent_turns: int = Field(
         default=0,
         ge=0,
-        alias="AVA_HOST_MAX_CONCURRENT_TURNS",
+        alias="MEIVA_HOST_MAX_CONCURRENT_TURNS",
         description="Hosted agent-runner: optional limit on active agent continuations. Zero (default) disables this admission limit; positive values queue excess agents until a running agent idles or exits. A continuation includes model/tool waits and may span many steps. Database client pools and provider concurrency have separate budgets; this setting does not resize them. Set a positive limit when host memory or execution capacity requires one.",
         json_schema_extra={
             "capability": "agent-runner",
@@ -27,8 +27,8 @@ class DaemonSettings(
     host_admission_wait_alert_seconds: float = Field(
         default=2400.0,
         gt=0,
-        alias="AVA_HOST_ADMISSION_WAIT_ALERT_SECONDS",
-        description="Hosted agent-runner: a turn queued on the admission gate (AVA_HOST_MAX_CONCURRENT_TURNS) for at least this many seconds emits one host_admission_wait_exceeded anomaly event per wait episode. Default 2400s mirrors the wedged-turn budget (AVA_WEDGED_AGENT_INBOUND_AGE_SECONDS) so 'too long' has one dialect, but the two knobs are independent: queue wait is capacity pressure, not a stalled turn, and the wait is exempt from stall cancellation. The event is a signal, never a cancellation; raise the limit or inspect the turns holding slots.",
+        alias="MEIVA_HOST_ADMISSION_WAIT_ALERT_SECONDS",
+        description="Hosted agent-runner: a turn queued on the admission gate (MEIVA_HOST_MAX_CONCURRENT_TURNS) for at least this many seconds emits one host_admission_wait_exceeded anomaly event per wait episode. Default 2400s mirrors the wedged-turn budget (MEIVA_WEDGED_AGENT_INBOUND_AGE_SECONDS) so 'too long' has one dialect, but the two knobs are independent: queue wait is capacity pressure, not a stalled turn, and the wait is exempt from stall cancellation. The event is a signal, never a cancellation; raise the limit or inspect the turns holding slots.",
         json_schema_extra={
             "capability": "agent-runner",
             "restart_required": "all",
@@ -41,7 +41,7 @@ class DaemonSettings(
     host_db_pool_max_size: int = Field(
         default=64,
         gt=0,
-        alias="AVA_HOST_DB_POOL_MAX_SIZE",
+        alias="MEIVA_HOST_DB_POOL_MAX_SIZE",
         description="Hosted agent-runner: maximum workload/checkpoint client connections per host, independent of active agent count. Connections open on demand. Budget the sum of all hosts' workload and control pools plus other clients below PgBouncer max_client_conn (or PostgreSQL max_connections when connecting directly). This is a client connection budget, not a measured database throughput limit.",
         json_schema_extra={
             "capability": "agent-runner",
@@ -55,7 +55,7 @@ class DaemonSettings(
     host_control_pool_max_size: int = Field(
         default=8,
         gt=0,
-        alias="AVA_HOST_CONTROL_POOL_MAX_SIZE",
+        alias="MEIVA_HOST_CONTROL_POOL_MAX_SIZE",
         description="Hosted agent-runner: maximum client connections reserved for ownership, lifecycle, recovery, and durable scans. Workload borrowers cannot consume this pool. Both pools still share the same PgBouncer backend pool; this reserves client capacity only. Include it in the cluster-wide client connection budget.",
         json_schema_extra={
             "capability": "agent-runner",
@@ -68,7 +68,7 @@ class DaemonSettings(
 
     host_agent_cache_size: int = Field(
         default=32,
-        alias="AVA_HOST_AGENT_CACHE_SIZE",
+        alias="MEIVA_HOST_AGENT_CACHE_SIZE",
         description="Hosted agent-runner: how many agents' prepared runtimes (chat model + this agent's startup housekeeping already done for them) the host keeps warm, evicted least-recently-used. A cold entry costs one model build plus this agent's startup housekeeping on its next wake; an unbounded cache would let a fleet-wide wake burst hold one per local agent forever.",
         json_schema_extra={
             "capability": "agent-runner",
@@ -81,7 +81,7 @@ class DaemonSettings(
 
     host_agent_idle_ttl_seconds: float = Field(
         default=900.0,
-        alias="AVA_HOST_AGENT_IDLE_TTL_SECONDS",
+        alias="MEIVA_HOST_AGENT_IDLE_TTL_SECONDS",
         description="Hosted agent-runner: how long a prepared agent runtime survives with no turn before the host drops it. The size cap alone would keep a long-silent agent warm forever on a lightly loaded runner; this is the other half, so a runner that goes quiet returns to holding nothing.",
         json_schema_extra={
             "capability": "agent-runner",
@@ -94,8 +94,8 @@ class DaemonSettings(
 
     host_turn_no_progress_timeout_seconds: float = Field(
         default=2400.0,
-        alias="AVA_HOST_TURN_NO_PROGRESS_TIMEOUT_SECONDS",
-        description="Hosted agent-runner: a graph invocation whose per-agent turn clock has shown no activity (a LangGraph node enter, a completed LLM step) for this long is treated as turn-level fake-alive and aborted: the invocation is cancelled with the bounded unwind, the row settles to idling, one Error event is emitted, and the next wake resumes from the checkpoint. The default covers exec_node_timeout (1200s) plus the LLM retry budget plus margin, matching AVA_WEDGED_AGENT_INBOUND_AGE_SECONDS. A days-long turn that keeps stepping is never aborted — only no-progress counts.",
+        alias="MEIVA_HOST_TURN_NO_PROGRESS_TIMEOUT_SECONDS",
+        description="Hosted agent-runner: a graph invocation whose per-agent turn clock has shown no activity (a LangGraph node enter, a completed LLM step) for this long is treated as turn-level fake-alive and aborted: the invocation is cancelled with the bounded unwind, the row settles to idling, one Error event is emitted, and the next wake resumes from the checkpoint. The default covers exec_node_timeout (1200s) plus the LLM retry budget plus margin, matching MEIVA_WEDGED_AGENT_INBOUND_AGE_SECONDS. A days-long turn that keeps stepping is never aborted — only no-progress counts.",
         json_schema_extra={
             "capability": "agent-runner",
             "restart_required": "all",
@@ -107,8 +107,8 @@ class DaemonSettings(
 
     host_turn_progress_scan_interval_seconds: float = Field(
         default=30.0,
-        alias="AVA_HOST_TURN_PROGRESS_SCAN_INTERVAL_SECONDS",
-        description="Hosted agent-runner: how often the no-progress stall guard polls the per-agent turn clock while a graph.ainvoke is running. Poll cadence only — it changes detection latency, never the abort threshold (AVA_HOST_TURN_NO_PROGRESS_TIMEOUT_SECONDS).",
+        alias="MEIVA_HOST_TURN_PROGRESS_SCAN_INTERVAL_SECONDS",
+        description="Hosted agent-runner: how often the no-progress stall guard polls the per-agent turn clock while a graph.ainvoke is running. Poll cadence only — it changes detection latency, never the abort threshold (MEIVA_HOST_TURN_NO_PROGRESS_TIMEOUT_SECONDS).",
         json_schema_extra={
             "capability": "agent-runner",
             "restart_required": "all",
@@ -120,7 +120,7 @@ class DaemonSettings(
 
     page_server_poll_interval_seconds: float = Field(
         default=2.0,
-        alias="AVA_PAGE_SERVER_POLL_INTERVAL_SECONDS",
+        alias="MEIVA_PAGE_SERVER_POLL_INTERVAL_SECONDS",
         description="Page server supervisor daemon poll interval (seconds): how often it reconciles open agent_pages rows against live page sessions.",
         json_schema_extra={
             "capability": "agent-runner",
@@ -133,7 +133,7 @@ class DaemonSettings(
 
     page_default_ttl_seconds: float = Field(
         default=86400.0,
-        alias="AVA_PAGE_DEFAULT_TTL_SECONDS",
+        alias="MEIVA_PAGE_DEFAULT_TTL_SECONDS",
         description="Default lifetime in seconds for agent-published pages when the SDK does not specify ttl. The gateway applies this policy when it registers the page.",
         json_schema_extra={
             "capability": "gateway",
@@ -147,7 +147,7 @@ class DaemonSettings(
     chrome_page_default_ttl_seconds: float = Field(
         default=86400.0,
         gt=0,
-        alias="AVA_CHROME_PAGE_DEFAULT_TTL_SECONDS",
+        alias="MEIVA_CHROME_PAGE_DEFAULT_TTL_SECONDS",
         description="Default lifetime in seconds for a Chrome page created through the shared browser (an explicit new_page call, or the auto-created page on a page-less first navigation). The browser-mcp daemon closes the page when the deadline passes; an agent extends it with the renew_page tool, at most 24h per renewal. Mirrors the persistent-shell TTL ruling: a page is a bounded resource, never extended by activity alone.",
         json_schema_extra={
             "capability": "agent-runner",
@@ -160,7 +160,7 @@ class DaemonSettings(
 
     notice_ttl_limit_seconds: float = Field(
         default=86400.0,
-        alias="AVA_NOTICE_TTL_LIMIT_SECONDS",
+        alias="MEIVA_NOTICE_TTL_LIMIT_SECONDS",
         description="Maximum lifetime in seconds for agent notices. Notices without an explicit expire_at use now + limit; notices requesting a longer lifetime are clamped to this limit.",
         json_schema_extra={
             "capability": "gateway",
@@ -173,7 +173,7 @@ class DaemonSettings(
 
     ttl_reaper_poll_interval_seconds: float = Field(
         default=60.0,
-        alias="AVA_TTL_REAPER_POLL_INTERVAL_SECONDS",
+        alias="MEIVA_TTL_REAPER_POLL_INTERVAL_SECONDS",
         description="TTL reaper service poll interval in seconds for expired pages, browser sessions, notices, impersonation leases and explicitly time-limited persistent shell sessions.",
         json_schema_extra={
             "capability": "gateway",
@@ -186,7 +186,7 @@ class DaemonSettings(
 
     schedule_fire_log_retention_days: int = Field(
         default=30,
-        alias="AVA_SCHEDULE_FIRE_LOG_RETENTION_DAYS",
+        alias="MEIVA_SCHEDULE_FIRE_LOG_RETENTION_DAYS",
         description="Days of schedule_fire_log claims kept by the TTL reaper's retention prune. schedule_fire_log is the at-most-once claim ledger of schedule slots; the prune deletes every row whose slot is older than this window.",
         json_schema_extra={
             "capability": "gateway",
@@ -199,7 +199,7 @@ class DaemonSettings(
 
     schedule_fire_log_cleanup_interval_seconds: float = Field(
         default=86400.0,
-        alias="AVA_SCHEDULE_FIRE_LOG_CLEANUP_INTERVAL_SECONDS",
+        alias="MEIVA_SCHEDULE_FIRE_LOG_CLEANUP_INTERVAL_SECONDS",
         description="How often the TTL reaper runs the schedule_fire_log retention prune (the clock is kept in maintenance_state, so a restart does not reset it). One bounded DELETE per pass; the default keeps a single daily pass.",
         json_schema_extra={
             "capability": "gateway",
@@ -212,7 +212,7 @@ class DaemonSettings(
 
     health_probe_agent_min: int = Field(
         default=1,
-        alias="AVA_HEALTH_PROBE_AGENT_MIN",
+        alias="MEIVA_HEALTH_PROBE_AGENT_MIN",
         description="Minimum running/idling agents the health-probe requires for a healthy verdict. A dev/QA cluster (any non-default home) has this seeded to 0 in its `.env` at birth: with no resident agents by design, the check would otherwise fail forever and --auto-rollback would cycle the checkout (2026-08-10 preview and 2026-09-12 dev-worktree incidents). An explicit value — including the prod default 1 — stands as written.",
         json_schema_extra={
             "restart_required": "",
@@ -224,7 +224,7 @@ class DaemonSettings(
 
     heartbeat_enabled: bool = Field(
         default=True,
-        alias="AVA_HEARTBEAT_ENABLED",
+        alias="MEIVA_HEARTBEAT_ENABLED",
         description="Run the heartbeat daemon on the gateway. On by default; set false to disable idle-agent check-ins cluster-wide.",
         json_schema_extra={
             "restart_required": "",
@@ -237,7 +237,7 @@ class DaemonSettings(
 
     heartbeat_interval_seconds: float = Field(
         default=300.0,
-        alias="AVA_HEARTBEAT_INTERVAL_SECONDS",
+        alias="MEIVA_HEARTBEAT_INTERVAL_SECONDS",
         description="Heartbeat daemon poll interval (seconds): how often it scans idle agents and sends a check-in to those that haven't paused. Longer = less disturbance, slower stall detection.",
         json_schema_extra={
             "restart_required": "all",
@@ -249,7 +249,7 @@ class DaemonSettings(
 
     heartbeat_idle_threshold_seconds: float = Field(
         default=300.0,
-        alias="AVA_HEARTBEAT_IDLE_THRESHOLD_SECONDS",
+        alias="MEIVA_HEARTBEAT_IDLE_THRESHOLD_SECONDS",
         description="Minimum idle time (seconds) since an agent's last completed turn before the heartbeat checks in on it. Measured from last activity, not status change, so an ops restart never resets the timer.",
         json_schema_extra={
             "restart_required": "all",
@@ -261,7 +261,7 @@ class DaemonSettings(
 
     heartbeat_backoff_consecutive_noop_nudges: int = Field(
         default=3,
-        alias="AVA_HEARTBEAT_BACKOFF_CONSECUTIVE_NOOP_NUDGES",
+        alias="MEIVA_HEARTBEAT_BACKOFF_CONSECUTIVE_NOOP_NUDGES",
         description="Platform-side nudge backoff (B7): consecutive heartbeat nudges that produce no real inbound and no agent pause raise the agent's backoff level, stretching the reminder interval by 2^level (cap 24h). Real inbound or a pause resets it.",
         json_schema_extra={
             "restart_required": "all",
@@ -273,7 +273,7 @@ class DaemonSettings(
 
     wedged_agent_inbound_age_seconds: float = Field(
         default=2400.0,
-        alias="AVA_WEDGED_AGENT_INBOUND_AGE_SECONDS",
+        alias="MEIVA_WEDGED_AGENT_INBOUND_AGE_SECONDS",
         description="Minimum age (seconds) of an unconsumed pending inbound before a running agent is considered wedged. Default 2400s (40 min) — exec_node_timeout_seconds (1200s) + LLM retry budget plus margin. Raise for agents doing long-running work; lower for tighter detection.",
         json_schema_extra={
             "capability": "agent-runner",
@@ -286,7 +286,7 @@ class DaemonSettings(
 
     events_maintenance_interval_seconds: float = Field(
         default=3600.0,
-        alias="AVA_EVENTS_MAINTENANCE_INTERVAL_SECONDS",
+        alias="MEIVA_EVENTS_MAINTENANCE_INTERVAL_SECONDS",
         description="Events-maintenance daemon poll interval (seconds): how often it recovers observations, replays the mirror and re-aggregates the last closed days. Hourly keeps the durable ledger fresh and recovers a downtime gap within the hour.",
         json_schema_extra={
             "restart_required": "all",
@@ -298,7 +298,7 @@ class DaemonSettings(
 
     events_maintenance_pass_deadline_s: float = Field(
         default=1500.0,
-        alias="AVA_EVENTS_MAINTENANCE_PASS_DEADLINE_S",
+        alias="MEIVA_EVENTS_MAINTENANCE_PASS_DEADLINE_S",
         description="Hard deadline in seconds for one hourly events-maintenance pass. Exceeding this bound wedges the loop for watchdog respawn.",
         json_schema_extra={
             "restart_required": "all",
@@ -310,7 +310,7 @@ class DaemonSettings(
 
     events_maintenance_resolution_deadline_s: float = Field(
         default=600.0,
-        alias="AVA_EVENTS_MAINTENANCE_RESOLUTION_DEADLINE_S",
+        alias="MEIVA_EVENTS_MAINTENANCE_RESOLUTION_DEADLINE_S",
         description="Hard deadline in seconds for one events-maintenance class-resolution pass; exceeding it wedges the loop for watchdog respawn.",
         json_schema_extra={
             "restart_required": "all",
@@ -323,7 +323,7 @@ class DaemonSettings(
     events_resolution_burst_threshold: int = Field(
         default=5,
         ge=0,
-        alias="AVA_EVENTS_RESOLUTION_BURST_THRESHOLD",
+        alias="MEIVA_EVENTS_RESOLUTION_BURST_THRESHOLD",
         description="A dismissed Loki event class reopens when its trailing ten-minute count is greater than this threshold. 0 reopens on the first matching event; the default 5 leaves normal low-volume recurrence dismissed.",
         json_schema_extra={
             "capability": "gateway",
@@ -337,7 +337,7 @@ class DaemonSettings(
     events_resolution_interval_seconds: int = Field(
         default=300,
         ge=1,
-        alias="AVA_EVENTS_RESOLUTION_INTERVAL_SECONDS",
+        alias="MEIVA_EVENTS_RESOLUTION_INTERVAL_SECONDS",
         description="Cadence in seconds for the immutable-event class-resolution slice: Loki count queries, burst reopen safety valve, and the six-hour unresolved gauges.",
         json_schema_extra={
             "capability": "gateway",
@@ -350,7 +350,7 @@ class DaemonSettings(
 
     events_auto_dismiss_enabled: bool = Field(
         default=False,
-        alias="AVA_EVENTS_AUTO_DISMISS_ENABLED",
+        alias="MEIVA_EVENTS_AUTO_DISMISS_ENABLED",
         description="Enable the daily stable-class auto-dismiss scan. Off by default: the normal resolution flow is an explicit authenticated API call by the ops agent or operator.",
         json_schema_extra={
             "capability": "gateway",
@@ -364,7 +364,7 @@ class DaemonSettings(
     events_auto_dismiss_days: int = Field(
         default=7,
         ge=1,
-        alias="AVA_EVENTS_AUTO_DISMISS_DAYS",
+        alias="MEIVA_EVENTS_AUTO_DISMISS_DAYS",
         description="Days of consecutive non-empty six-hour Loki slices required before the optional stable-class auto-dismiss creates a dismissal.",
         json_schema_extra={
             "capability": "gateway",
@@ -377,7 +377,7 @@ class DaemonSettings(
 
     computer_use_lease_s: float = Field(
         default=30.0,
-        alias="AVA_COMPUTER_LEASE_S",
+        alias="MEIVA_COMPUTER_LEASE_S",
         description="Computer-use screen-ownership lease: a holder that sends no action for this long loses the screen (Phase 2, task #1101).",
         json_schema_extra={
             "capability": "agent-runner",
@@ -391,7 +391,7 @@ class DaemonSettings(
 
     computer_use_queue_timeout_s: float = Field(
         default=30.0,
-        alias="AVA_COMPUTER_QUEUE_TIMEOUT_S",
+        alias="MEIVA_COMPUTER_QUEUE_TIMEOUT_S",
         description="How long a computer-use action waits in the FIFO queue before failing with 'screen busy' (Phase 2, task #1101).",
         json_schema_extra={
             "capability": "agent-runner",
@@ -405,7 +405,7 @@ class DaemonSettings(
 
     computer_use_session_idle_s: float = Field(
         default=600.0,
-        alias="AVA_COMPUTER_SESSION_IDLE_S",
+        alias="MEIVA_COMPUTER_SESSION_IDLE_S",
         description="Computer-use task-session idle threshold: a task_id with no action for this long emits computer_session_end (Phase 2, task #1101).",
         json_schema_extra={
             "capability": "agent-runner",
@@ -419,7 +419,7 @@ class DaemonSettings(
 
     computer_use_loop_stall_s: float = Field(
         default=180.0,
-        alias="AVA_COMPUTER_LOOP_STALL_S",
+        alias="MEIVA_COMPUTER_LOOP_STALL_S",
         description="Computer-use daemon loop-liveness window (seconds): a run loop that has not ticked for this long dumps all thread stacks and exits for a supervisor restart (2026-10-04: a wedged loop left the unit unstoppable for ~15 minutes).",
         json_schema_extra={
             "capability": "agent-runner",
@@ -433,7 +433,7 @@ class DaemonSettings(
 
     computer_use_shutdown_drain_s: float = Field(
         default=5.0,
-        alias="AVA_COMPUTER_SHUTDOWN_DRAIN_S",
+        alias="MEIVA_COMPUTER_SHUTDOWN_DRAIN_S",
         description="Computer-use daemon shutdown drain window (seconds): on stop, the daemon cancels its client handlers and waits at most this long for the listener to finish, then dumps all thread stacks and exits for a supervisor restart (2026-10-04: an unbounded drain left the process half-down — listener closed, stop signal consumed). Keep it below the supervisor's stop window (10s) so the drain reports first.",
         json_schema_extra={
             "capability": "agent-runner",

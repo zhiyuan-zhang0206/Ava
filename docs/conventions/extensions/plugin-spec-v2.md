@@ -18,7 +18,7 @@ Three incidents, one missing layer each:
   had no mechanism to stop the next package from making the same mistake.
 - **#1047 / #974** — the install registry had no version/dependency model, so
   "what is installed" and "what it claims to be" could drift with no signal.
-- **2026-08-12 17:57** — a test process resolved the real `~/.ava/.env`, wrote
+- **2026-08-12 17:57** — a test process resolved the real `~/.meiva/.env`, wrote
   synthetic agents into the prod DB. Extensions had no way to declare what
   context they require, and dangerous context was reachable by default.
 
@@ -49,7 +49,7 @@ No Cordis-style "everything is a plugin" runtime unification — see the
 borrow/not-borrow section.
 
 - A Claude Code plugin package is already a mixed release unit (skills +
-  commands + `.mcp.json`); `ava_builtins/plugins/ava_fleet` ships skills in the
+  commands + `.mcp.json`); `meiva_builtins/plugins/meiva_fleet` ships skills in the
   same repo. One manifest declares all contribution surfaces; the host
   dispatches each to its existing executor (the VS Code model).
 - Unifying runtimes is a misfit: skills are pure text with no runtime, MCP is a
@@ -66,27 +66,27 @@ borrow/not-borrow section.
 - The three runtimes share one vocabulary and one registry row; tooling sees
   one flat surface.
 
-## The manifest — `ava-plugin.json`
+## The manifest — `meiva-plugin.json`
 
-Placed at the package root. The name is **`ava-plugin.json`** (user ruling
+Placed at the package root. The name is **`meiva-plugin.json`** (user ruling
 2026-08-13): the Claude Code `.claude-plugin/plugin.json` has no
 version/dependency/lifecycle fields and its semantics stay ecosystem-owned;
-the adapter (`cli/commands/extensions/_claude_code_plugin.py`) translates it. Every Ava
+the adapter (`cli/commands/extensions/_claude_code_plugin.py`) translates it. Every Meiva
 plugin (a directory with a `plugin.py`) ships one: `load_manifest` refuses a plugin
 without it, the registry and provider loaders report that plugin as a load failure, and
 `scripts/content_lint/lint_core_content_manifests.py` requires one beside every builtin
-`plugin.py`. Packages in a format that comes from outside Ava (a bare skill, a Claude Code
+`plugin.py`. Packages in a format that comes from outside Meiva (a bare skill, a Claude Code
 plugin, an MCP server) may ship one; `load_optional_manifest` reads it when present.
 
-Example (the shape `ava_code` would declare):
+Example (the shape `meiva_code` would declare):
 
 ```json
 {
   "apiVersion": 2,
-  "name": "ava-code",
+  "name": "meiva-code",
   "version": "1.3.0",
   "description": "coding conventions + AGENTS.md auto-injection",
-  "engines": { "ava": ">=0.1.38" },
+  "engines": { "meiva": ">=0.1.38" },
   "contributions": {
     "hooks": ["after_init", "before_llm"],
     "sdkNamespaces": ["cwd"],
@@ -129,25 +129,25 @@ result with its plugin name to one system note. It records a
 `plugin_activation` on this surface for each included section. The existing
 compact bookmark owns once-per-window delivery and re-arms after compaction;
 contributors need no state, thresholds or graph hook. Disabled plugins
-contribute nothing. Runtime manifest gating and `ava plugins inspect` include
+contribute nothing. Runtime manifest gating and `meiva plugins inspect` include
 this surface.
 
 The agent still has ordinary tools to perform the requested preparation.
 This is best-effort preparation, not a callback executed on every compact:
 hard automatic compaction and manual requests may bypass it. Do not rely on
 it for the only copy of critical state. See
-[context management](../../../agent/graph/docs/context-window/context-window.ava.okf.md).
+[context management](../../../agent/graph/docs/context-window/context-window.meiva.okf.md).
 
 | Field | Meaning | Closes |
 |---|---|---|
 | `name` | Unique identity; dash/underscore-folded to the directory name (registry already folds via `base.packages.skills.names.match_key`) | duplicate rows / name collisions |
 | `version` (semver) | Package version; recorded beside `installed_hash` as `installed_version` when the registry schema v2 fields land (S3) | no version awareness (A1) |
-| `engines.ava` (semver range) | Host compatibility interval (npm `engines` / VS Code `engines.vscode` shape); compared against the **derived host version** (`YYYY.M.D` from the checkout's commit date — [`host-versioning.md`](../engineering/host-versioning.md)), checked at install/upgrade, at content-channel refresh landing, and at load. Required **unless** `requires_commit` is present | framework evolution silently breaking plugins (A3) |
-| `requires_commit` (commit SHA) | The host must *contain* this commit (`git merge-base --is-ancestor`) — the exactness layer beside the date axis, for content that needs a fresh kernel capability. Same enforcement points as `engines.ava` | content riding ahead of the code it needs, without a bump discipline |
+| `engines.meiva` (semver range) | Host compatibility interval (npm `engines` / VS Code `engines.vscode` shape); compared against the **derived host version** (`YYYY.M.D` from the checkout's commit date — [`host-versioning.md`](../engineering/host-versioning.md)), checked at install/upgrade, at content-channel refresh landing, and at load. Required **unless** `requires_commit` is present | framework evolution silently breaking plugins (A3) |
+| `requires_commit` (commit SHA) | The host must *contain* this commit (`git merge-base --is-ancestor`) — the exactness layer beside the date axis, for content that needs a fresh kernel capability. Same enforcement points as `engines.meiva` | content riding ahead of the code it needs, without a bump discipline |
 | `dependencies.plugins` | Plugin-to-plugin dependencies `{"other": ">=1.0"}`; resolved before load, missing → `failed`, never silently skipped (resolution lands S3) | load order by luck (A8) |
 | `dependencies.pythonPackages` | The Python dependency ranges this package is known to work with. For MCP packages this is the **mirror / validation anchor** of `pyproject.toml` dependencies. **Hard enforcement** (user ruling 2026-08-13): a declared range without an upper bound is a validator error, and an install/upgrade whose pyproject range falls outside the declared range is refused | **#1198, permanently**: unbounded or drifting pyproject ranges are stopped at install time |
 | `dependencies.hostCapabilities` | Host capability declarations — `db: none|ro|rw`, `network: none|local|any`, `shell: none|any`, `display: none|required`, `unixSocket: none|required`. **Two kinds of claim in one object** (S5): `display` / `unixSocket` are HOST REQUIREMENTS matched against the machine's capability set to decide placement, while `db` / `network` / `shell` are RESOURCE ACCESS gated by the context at injection time. The execution side of both lands with the context model (S5); today the manifest only declares, and MCP runtime keeps its existing `requires` check | context/capability declarations unified (D12/D13); generalizes the MCP `requires` keys |
-| `contributions.*` | Declared contribution surfaces (VS Code `contributes` analog). **The manifest is checked against the plugin's own declaration.** A plugin declares what it contributes in code (`contribute()` returning `PluginContributions`); `ava-plugin.json` states the same facts, and `base/packages/plugins/gate.py:check_manifest` compares them in both directions as the load-time gate (`base/packages/plugins/loading/registry.py:build_registry` for the surface and runtime faces, `base/packages/plugins/data_registry.py` for `metrics` / `inspectWidgets`): a mismatch is a load failure of that plugin. `ava plugins inspect <name>` reports the same diff (`agent/extensions/catalog.py:declared_vs_registered`) | surfaces pre-checkable, listable, auditable |
+| `contributions.*` | Declared contribution surfaces (VS Code `contributes` analog). **The manifest is checked against the plugin's own declaration.** A plugin declares what it contributes in code (`contribute()` returning `PluginContributions`); `meiva-plugin.json` states the same facts, and `base/packages/plugins/gate.py:check_manifest` compares them in both directions as the load-time gate (`base/packages/plugins/loading/registry.py:build_registry` for the surface and runtime faces, `base/packages/plugins/data_registry.py` for `metrics` / `inspectWidgets`): a mismatch is a load failure of that plugin. `meiva plugins inspect <name>` reports the same diff (`agent/extensions/catalog.py:declared_vs_registered`) | surfaces pre-checkable, listable, auditable |
 | `contributions.ui` | The console surfaces this package contributes, as data: `agentInspect` sections, `nav` entries, `stats` cards, `themes` token packs. Closed type set, closed icon vocabulary, and a theme token vocabulary that is the console's own `:root` custom properties — validated by `base/packages/plugins/surface/ui_contributions.py`. No registration side: the console reads the declaration itself (a `stats` card's label is declaration; its value is runtime data in `plugin_stats`, written by the plugin's own code). Design + the runtime slices: [`future/frontend-plugin-contributions.md`](../../../future/frontend-plugin-contributions.md) | a plugin can put a panel, a page, a live card, or a skin in front of the user without a frontend fork |
 | `config.schema` / `config.perAgentFields` | Pointer to the config schema (the Pydantic model, or a declarative schema) + which fields per-agent overlays may override | PR-E; pre-install config validation without importing plugin code |
 | `lifecycle.*` | See the lifecycle section | dispose contract (C9/C10) |
@@ -169,7 +169,7 @@ badge beside its `#id`; `title` may be left unset to take the console's
 localized default ("Tasks"). v1 covers builtin
 plugins (the gateway imports no third-party plugin code; the plugin-metric
 loader is the sibling precedent). Failure follows the plugin-load fail-soft
-contract (2026-08-28 ava_ledger incident; restated for plugins 2026-09-11):
+contract (2026-08-28 meiva_ledger incident; restated for plugins 2026-09-11):
 an `inspector.py` that fails to import, or a spec that fails registration, is
 reported (loguru ERROR + the `plugin_load_failed` event) and skipped — the
 endpoint keeps serving the remaining widgets, never a 500, never a silently
@@ -209,8 +209,8 @@ schema in `base/packages/plugins/surface/ui_contributions.py`. Enforcement point
 
 | Surface | What runs | When |
 |---|---|---|
-| `ava plugins install`, `ava skill install`, `ava mcp install` | manifest pre-validation: structure, ranges, `engines.ava` vs the host version | before landing; missing manifest → legacy path, unchanged |
-| `ava mcp install`, `ava mcp upgrade` | `dependencies.pythonPackages` mirror check against the fetched `pyproject.toml` | before landing; unbounded pyproject or a range outside the declared one → refused |
+| `meiva plugins install`, `meiva skill install`, `meiva mcp install` | manifest pre-validation: structure, ranges, `engines.meiva` vs the host version | before landing; missing manifest → legacy path, unchanged |
+| `meiva mcp install`, `meiva mcp upgrade` | `dependencies.pythonPackages` mirror check against the fetched `pyproject.toml` | before landing; unbounded pyproject or a range outside the declared one → refused |
 | any manifest consumer | upper-bound lint: an unbounded `pythonPackages` range is a **validator error**, not a warning | at validation |
 
 Deliberately **not** implemented today (red line: zero runtime behavior
@@ -261,7 +261,7 @@ Resource registration replaces "the author remembers to clean up":
   exception recorded, none blocking the rest.
 - Every existing `register_*` call (hook/state/config/namespace/wrap/service/
   metric) already carries plugin attribution — that attribution becomes
-  registration: framework-side cleanup (`ava.sdk_surface.install.uninstall`) merges
+  registration: framework-side cleanup (`meiva.sdk_surface.install.uninstall`) merges
   into the same dispose.
 - Optional `async def dispose()` plugin hook. Fixed order: ① plugin
   `dispose()` (framework state still intact) → ② `ctx.effect` table, LIFO →
@@ -280,7 +280,7 @@ stated rule.
 
 ## Context model (S5)
 
-`Context = {ava_home, db_role, cluster_scope, machine, enabled_set}` — five
+`Context = {meiva_home, db_role, cluster_scope, machine, enabled_set}` — five
 dimensions that today are scattered (D13), one concept.
 
 Two of the five mean something narrower than the names suggest, per
@@ -327,7 +327,7 @@ machine satisfying it.
 - **Test context rules** (specifying existing discipline): env block before
   project imports; derived keys to a tmp-home `.env`; `base/db/test_db_guard.py`
   fail-closed validation remains the single rule source.
-- **Multi-tenant**: today one user, context rooted at `AVA_HOME`; the tenant
+- **Multi-tenant**: today one user, context rooted at `MEIVA_HOME`; the tenant
   dimension extends with #1212 Step 5. This spec only requires context to be
   an object packages declare against and the framework injects.
 
@@ -352,7 +352,7 @@ machine satisfying it.
 2. **Event bus (`ctx.on`/`emit`)** — measured plugin-to-plugin communication
    demand: zero. Premature complexity; add it above the dependency declarations
    if it ever appears.
-3. **`reusable` multi-instance / fork trees** — Ava plugins are per-machine
+3. **`reusable` multi-instance / fork trees** — Meiva plugins are per-machine
    singletons; per-agent parameterization already exists (config overlay /
    birth config).
 4. **In-process HMR** — the reload boundary is `self.restart` (user ruling
@@ -363,15 +363,15 @@ machine satisfying it.
 
 | Mechanism | Where it lands |
 |---|---|
-| One `package.json` + `contributes` | `ava-plugin.json` + its contribution surfaces |
-| `engines.vscode` | `engines.ava` |
+| One `package.json` + `contributes` | `meiva-plugin.json` + its contribution surfaces |
+| `engines.vscode` | `engines.meiva` |
 | `extensionDependencies` | `dependencies.plugins` — resolved + refused, **not** auto-installed (auto-installing third-party code violates the install-scan gate) |
 | `activationEvents` | `lifecycle.activation` — the slot is declared (`immediate` only); event-driven activation is not implemented (six plugins, cheap imports — no benefit) |
 | `capabilities.untrustedWorkspaces` | `dependencies.hostCapabilities` + the context model — declared capability, unreachable by default |
 
 ### Not borrowed from VS Code
 
-1. **Marketplace / publishing channel** — Ava stays git-URL + local registry
+1. **Marketplace / publishing channel** — Meiva stays git-URL + local registry
    (user ruling 2026-08-12: generic MCP servers are user-installed and
    user-maintained; a store is infra a single-user deployment does not need).
 2. **Runtime component composition** — VS Code's *declarative* views/themes
@@ -386,7 +386,7 @@ machine satisfying it.
 
 ## Resolved decisions (authoritative)
 
-- **Manifest filename**: `ava-plugin.json` (2026-08-13). Not
+- **Manifest filename**: `meiva-plugin.json` (2026-08-13). Not
   `.claude-plugin/plugin.json` — the adapter keeps translating CC packages.
 - **`pythonPackages` enforcement**: hard (2026-08-13). Unbounded declaration =
   validator error (lint fail-fast); pyproject range outside the declared range
@@ -408,7 +408,7 @@ bumps 1 → 2.
 |---|---|---|---|
 | `version` | `str \| None` | manifest-declared package version | `None` = no manifest |
 | `installed_version` | `str \| None` | the version the last install/upgrade landed | `None` |
-| `engines` | `dict[str, str] \| None` | declared host ranges (e.g. `{"ava": ">=0.1.38"}`) | `None` |
+| `engines` | `dict[str, str] \| None` | declared host ranges (e.g. `{"meiva": ">=0.1.38"}`) | `None` |
 | `manifest_hash` | `str \| None` | sha256 of the manifest file as landed | `None` |
 | `state` | `"installed" \| "enabled" \| "ready" \| "failed" \| "disposed" \| None` | lifecycle state (S3) | derive on read: `enabled` when the enable bit is set, else `installed` |
 | `last_error` / `last_error_at` | `str \| None` / `str \| None` | activation failure + timestamp (S3) | `None` |

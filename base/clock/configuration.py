@@ -1,4 +1,4 @@
-# ava:ref base/clock/docs/clock.ava.okf.md#boot-clock-snapshot
+# meiva:ref base/clock/docs/clock.meiva.okf.md#boot-clock-snapshot
 from __future__ import annotations
 
 from base.clock import ClockConfig

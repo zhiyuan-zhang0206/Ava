@@ -177,7 +177,7 @@ class TestReasoningEffortDispatch:
     def test_adaptive_claude_defaults_to_summarized_display(
         self, monkeypatch: pytest.MonkeyPatch, *, model_catalog: ModelCatalog
     ) -> None:
-        # ava:ref base/packages/tests/lm/docs/contracts.ava.okf.md#reasoning-visibility
+        # meiva:ref base/packages/tests/lm/docs/contracts.meiva.okf.md#reasoning-visibility
         monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-test")
         for model in (
             "claude-sonnet-5",
@@ -212,7 +212,7 @@ class TestReasoningEffortDispatch:
     def test_adaptive_caller_display_respected(
         self, monkeypatch: pytest.MonkeyPatch, *, model_catalog: ModelCatalog
     ) -> None:
-        # ava:ref base/packages/tests/lm/docs/contracts.ava.okf.md#reasoning-visibility
+        # meiva:ref base/packages/tests/lm/docs/contracts.meiva.okf.md#reasoning-visibility
         monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-test")
         llm = build_chat_model(
             "claude-sonnet-5",

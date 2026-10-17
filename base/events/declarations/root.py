@@ -72,7 +72,7 @@ class RootUnitNotRevivable(TypedDict):
 
 
 class RootDiagnostic(TypedDict):
-    """`root_diagnostic` payload — services/supervision/ava_root_glue/diagnostics.py.
+    """`root_diagnostic` payload — services/supervision/meiva_root_glue/diagnostics.py.
 
     One row per non-alive diagnostic sample (WARNING, every sample while the
     condition persists) and one on recovery (INFO). ``diagnostic`` names the
@@ -184,7 +184,7 @@ class ServiceStartUnready(TypedDict):
     """`service_start_unready` payload — cli/commands/lifecycle/start.py.
 
     One row per non-critical service that missed its readiness window at an
-    `ava start` (the start does not fail on it).
+    `meiva start` (the start does not fail on it).
     """
 
     service: str
@@ -193,10 +193,10 @@ class ServiceStartUnready(TypedDict):
 class BootRetriesExhausted(TypedDict):
     """`boot_retries_exhausted` payload — cli/start_intent.py.
 
-    The OS boot job (`ava start --boot`) spent its attempt budget
+    The OS boot job (`meiva start --boot`) spent its attempt budget
     (`base.host.system.boot_policy`): ``attempts`` boot starts failed and the last
     one exited ``exit_code``. The scheduler is no longer asked to retry; the cause
-    is in the boot log and an operator runs `ava start`.
+    is in the boot log and an operator runs `meiva start`.
     """
 
     attempts: int
@@ -217,7 +217,7 @@ class LifecyclePointerStuck(TypedDict):
 class ScheduleVerifyFailed(TypedDict):
     """`schedule_verify_failed` payload — cli/commands/management/schedules_verify.py.
 
-    One row per non-clean `ava schedules verify` sweep of the live table:
+    One row per non-clean `meiva schedules verify` sweep of the live table:
     ``red`` in-store scripts failed out of ``checked``; ``tool_error`` is set
     when the sweep itself could not run; ``detail`` lists the failures.
     """
@@ -246,10 +246,10 @@ class ConvergeFilePreserved(TypedDict):
 EVENTS: dict[str, EventSpec] = {
     "lgtm_dashboard_render_failed": telemetry_event(
         "lgtm_dashboard_render_failed",
-        "ava-ops dashboard render failed during converge; the previous provisioning file was kept",
+        "meiva-ops dashboard render failed during converge; the previous provisioning file was kept",
         tier="anomaly",
         site=(
-            "cli/commands/observability/_lgtm_provisioning.py:_render_ava_ops_dashboard "
+            "cli/commands/observability/_lgtm_provisioning.py:_render_meiva_ops_dashboard "
             'telemetry.emit("telemetry", ...)'
         ),
     ),
@@ -321,7 +321,7 @@ EVENTS: dict[str, EventSpec] = {
     ),
     "maintenance_hold_overdue": telemetry_event(
         "maintenance_hold_overdue",
-        "this home's maintenance hold, or an unreadable hold journal, has been in place for more than the configured age (default 30 minutes) and freezes every wake on the machine; one event per hold, reporting only, release it with `ava start`",
+        "this home's maintenance hold, or an unreadable hold journal, has been in place for more than the configured age (default 30 minutes) and freezes every wake on the machine; one event per hold, reporting only, release it with `meiva start`",
         payload=MaintenanceHoldOverdue,
         tier="anomaly",
         site="services/supervision/healthchecks/maintenance_hold.py:_emit_overdue logger.error",
@@ -385,21 +385,21 @@ EVENTS: dict[str, EventSpec] = {
     ),
     "service_start_unready": telemetry_event(
         "service_start_unready",
-        "a non-critical service missed its readiness window at ava start",
+        "a non-critical service missed its readiness window at meiva start",
         payload=ServiceStartUnready,
         tier="anomaly",
         site="cli/commands/probe.py:report_non_critical_unready_services telemetry.emit",
     ),
     "boot_retries_exhausted": telemetry_event(
         "boot_retries_exhausted",
-        "the boot-time ava start failed through its whole attempt budget and is no longer retried",
+        "the boot-time meiva start failed through its whole attempt budget and is no longer retried",
         payload=BootRetriesExhausted,
         tier="anomaly",
         site="cli/start_intent.py:_run_boot_attempt telemetry.emit",
     ),
     "schedule_verify_failed": telemetry_event(
         "schedule_verify_failed",
-        "ava schedules verify found in-store schedule scripts that fail dry-import, an "
+        "meiva schedules verify found in-store schedule scripts that fail dry-import, an "
         "undefined-name read or call-signature binding, or the sweep itself failed",
         payload=ScheduleVerifyFailed,
         tier="anomaly",

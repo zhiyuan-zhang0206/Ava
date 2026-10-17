@@ -1,4 +1,4 @@
-"""`ava backup walg check|run|restore|status`: what an operator reads, and the parser that reaches it."""
+"""`meiva backup walg check|run|restore|status`: what an operator reads, and the parser that reaches it."""
 
 from __future__ import annotations
 
@@ -186,7 +186,7 @@ def test_status_when_off_says_so(
 
     assert walg_cmd.cmd_walg_status() == 0
 
-    assert capsys.readouterr().out == "WAL-G archiving is off (AVA_WALG_CONFIG_FILE is not set)\n"
+    assert capsys.readouterr().out == "WAL-G archiving is off (MEIVA_WALG_CONFIG_FILE is not set)\n"
 
 
 def test_status_shows_the_fingerprint_not_the_key(
@@ -198,7 +198,7 @@ def test_status_shows_the_fingerprint_not_the_key(
 
     out = capsys.readouterr().out
     assert f"key fingerprint: {fingerprint} (pinned: not yet)" in out
-    assert "prefix: oss://ava-backups/ava-walg/test-home/pg17/gen1/" in out
+    assert "prefix: oss://meiva-backups/meiva-walg/test-home/pg17/gen1/" in out
     assert "postgres: archiver state not read" in out
     assert "health: WAL archiving: the archiver state is unreadable" in out
     assert not any(secret in out for secret in SECRETS)
@@ -244,7 +244,7 @@ def test_a_postgres_that_kept_its_old_launch_arguments_is_flagged_at_start(
 
     err = capsys.readouterr().err
     assert "this Postgres is not running with the configured archive settings" in err
-    assert "`ava stop` and `ava start`" in err
+    assert "`meiva stop` and `meiva start`" in err
 
 
 def test_a_postgres_launched_with_the_arguments_is_not_flagged(

@@ -154,7 +154,7 @@ def _bridge(
     tasks: asyncio.TaskGroup | None = None,
     **config: Any,
 ) -> tuple[NoticeBridge, FakeAdapter]:
-    monkeypatch.setenv("AVA_HOME", str(tmp_path))
+    monkeypatch.setenv("MEIVA_HOME", str(tmp_path))
     core = IMBridgeCore(
         im_bridge_config(**config),
         cast(GatewayClient, gateway),
@@ -453,7 +453,7 @@ def _direct_bridge(
     from base.config import settings
 
     pool = ConnectionPool(settings.data_plane.db_url, min_size=1, max_size=2, open=True)
-    monkeypatch.setenv("AVA_HOME", str(tmp_path))
+    monkeypatch.setenv("MEIVA_HOME", str(tmp_path))
     core = IMBridgeCore(
         im_bridge_config(**config), gateway_client(), db_pool=pool, tasks=asyncio.TaskGroup()
     )

@@ -10,7 +10,7 @@ The `registry_gauge` loop samples it once per `FLUSH_INTERVAL_S` and emits ONE
 an int payload field to a Counter by default, but this value is absolute
 state, never a sum — the ``_METRIC_DISPOSITION`` override in
 ``base/telemetry/otlp/telemetry_otlp.py`` records it as an ObservableGauge, exported to
-Prometheus as ``ava_agent_registry_max_id_ratio`` (the unit-"1" gauge suffix,
+Prometheus as ``meiva_agent_registry_max_id_ratio`` (the unit-"1" gauge suffix,
 the same naming as ``resolution_status`` / ``checkpoint_table_sizes``).
 
 Wiring mirrors the task #1712 auth-401 aggregate (``gateway/http/auth/rejection_log.py``

@@ -1,7 +1,7 @@
 """Demo: sensitive operation gate — two-tier block/warn before exec.
 
 Motivation: GPT-5.6 was reported to autonomously delete user files, sparking
-concerns about AI agents with shell access. This hook demonstrates how Ava's
+concerns about AI agents with shell access. This hook demonstrates how Meiva's
 before_exec hook point can serve as a safety net — intercepting dangerous
 commands before they reach the shell.
 
@@ -30,7 +30,7 @@ from langgraph.runtime import Runtime
 from agent.hooks import Hook
 from agent.messages import NoteTag, system_note_message
 from agent.state import AgentState
-from base.agents.context import AvaContext, agent_id_from_config
+from base.agents.context import MeivaContext, agent_id_from_config
 from base.log import logger
 from base.packages.plugins.extensions import PluginContributions
 
@@ -151,7 +151,7 @@ def _build_block_message(
 ) -> str:
     """Build the system note displayed to the agent when blocked."""
     lines = [
-        "## 🛡️ Ava Security Policy Intercept",
+        "## 🛡️ Meiva Security Policy Intercept",
         "",
         "Your code triggered the security policy and was intercepted **before execution**.",
         "",
@@ -206,7 +206,7 @@ class _SensitiveOpGateHook(Hook):
     async def __call__(
         self,
         state: AgentState,
-        _runtime: Runtime[AvaContext],
+        _runtime: Runtime[MeivaContext],
         config: RunnableConfig,
         /,
     ) -> dict | None:

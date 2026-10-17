@@ -35,7 +35,7 @@ def static_mode(config: pytest.Config) -> bool:
 
 
 def pytest_addoption(parser: pytest.Parser) -> None:
-    group = parser.getgroup("Ava test environment")
+    group = parser.getgroup("Meiva test environment")
     group.addoption(
         "--test-environment",
         choices=tuple(TestEnvironment),

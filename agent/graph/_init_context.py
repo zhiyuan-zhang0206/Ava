@@ -4,7 +4,7 @@ The head is the SystemMessage plus the ordered context notes
 (`context_notes.context_notes`), rendered in the rank order that module
 documents — exec timeout, the shared memory index, the agent id, the per-agent
 memory index, any preloaded skills, then whatever else plugins register (the
-two memory indexes when `ava_memory` is enabled). It has to
+two memory indexes when `meiva_memory` is enabled). It has to
 be laid down twice in an agent's life — once when the agent first wakes with no
 history, and again after every compaction, which replaces the whole window —
 and both times in the same order.
@@ -38,7 +38,7 @@ from agent import state as _state
 from agent.impersonation_handoff import introduction_note
 from agent.nodes import INIT_CONTEXT, NodeName
 from agent.state import CapabilitiesState, ContextReset
-from base.agents.context import AvaContext, agent_id_from_config
+from base.agents.context import MeivaContext, agent_id_from_config
 from base.agents.history.timeline_inputs import TimelineReadInputs
 from base.agents.impersonation.notes import HandoffNotes
 from base.log import logger
@@ -51,7 +51,7 @@ from .prompt.system_prompt import build_system_prompt
 
 async def init_context_node(
     state: _state.AgentState,
-    runtime: Runtime[AvaContext],
+    runtime: Runtime[MeivaContext],
     config: RunnableConfig,
 ) -> Command[NodeName]:
     """Lay down the standing head when `messages` is empty, then route on.
@@ -124,7 +124,7 @@ async def init_context_node(
             reset.resume,
         )
         # Record what `# Capabilities` covers BEFORE rendering it. The section is
-        # frozen into the SystemMessage below while `ava.skills` stays an uncached
+        # frozen into the SystemMessage below while `meiva.skills` stays an uncached
         # live scan, so this snapshot is the only thing that can later tell the
         # two apart — see `agent/graph/hooks/capabilities.py`. Taken first on purpose:
         # a skill landing between the two calls is then rendered but not

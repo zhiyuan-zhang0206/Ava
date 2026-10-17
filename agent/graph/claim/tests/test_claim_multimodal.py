@@ -84,8 +84,8 @@ def test_plain_text_inbound_is_string_message() -> None:
     )
     assert isinstance(msg.content, str)  # pyright: ignore[reportUnknownMemberType]
     assert "hello there" in msg.content
-    assert msg.additional_kwargs["ava_msg_type"] == "inbound"  # pyright: ignore[reportUnknownMemberType]
-    assert "ava_image_urls" not in msg.additional_kwargs  # pyright: ignore[reportUnknownMemberType]
+    assert msg.additional_kwargs["meiva_msg_type"] == "inbound"  # pyright: ignore[reportUnknownMemberType]
+    assert "meiva_image_urls" not in msg.additional_kwargs  # pyright: ignore[reportUnknownMemberType]
 
 
 def test_multimodal_inbound_inlines_base64_and_keeps_url(
@@ -119,7 +119,7 @@ def test_multimodal_inbound_inlines_base64_and_keeps_url(
     assert base64.standard_b64decode(data_uri.removeprefix("data:image/png;base64,")) == raw
     # The reference url rides on additional_kwargs for the timeline thumbnail —
     # never the base64.
-    assert msg.additional_kwargs["ava_image_urls"] == ["/api/agents/7/uploads/shot.png"]  # pyright: ignore[reportUnknownMemberType]
+    assert msg.additional_kwargs["meiva_image_urls"] == ["/api/agents/7/uploads/shot.png"]  # pyright: ignore[reportUnknownMemberType]
 
 
 def test_image_only_message_has_empty_wrapped_text_block(
@@ -141,7 +141,7 @@ def test_image_only_message_has_empty_wrapped_text_block(
     # A leading (possibly envelope-only) text block, then the image.
     assert blocks[0]["type"] == "text"
     assert blocks[1]["type"] == "image_url"
-    assert msg.additional_kwargs["ava_image_urls"] == ["/api/agents/7/uploads/a.png"]  # pyright: ignore[reportUnknownMemberType]
+    assert msg.additional_kwargs["meiva_image_urls"] == ["/api/agents/7/uploads/a.png"]  # pyright: ignore[reportUnknownMemberType]
 
 
 def test_missing_image_degrades_to_text_note(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -184,7 +184,7 @@ def test_missing_image_degrades_to_text_note(monkeypatch: pytest.MonkeyPatch) ->
     assert all(b["type"] == "text" for b in blocks)
     assert any("unavailable" in b["text"] for b in blocks)
     # No image was successfully inlined → the urls key is omitted entirely.
-    assert "ava_image_urls" not in msg.additional_kwargs  # pyright: ignore[reportUnknownMemberType]
+    assert "meiva_image_urls" not in msg.additional_kwargs  # pyright: ignore[reportUnknownMemberType]
 
 
 def test_command_chain_expands_inside_the_one_message() -> None:
@@ -280,7 +280,7 @@ def test_scan_disabled_reports_no_finding(monkeypatch: pytest.MonkeyPatch) -> No
 
 
 def test_inbound_metadata_keeps_arrival_and_adds_pickup_time() -> None:
-    """`ava_created_at` stays the row's arrival time; `ava_picked_up_at` is the
+    """`meiva_created_at` stays the row's arrival time; `meiva_picked_up_at` is the
     claim-time moment the message enters the context (not before 'now')."""
     arrival = _inbound("x").created_at
     assert arrival is not None
@@ -292,5 +292,5 @@ def test_inbound_metadata_keeps_arrival_and_adds_pickup_time() -> None:
         expand_command=CommandCatalog(skills=list).expand,
     )
     kw = msg.additional_kwargs  # pyright: ignore[reportUnknownMemberType]
-    assert kw["ava_created_at"] == arrival.isoformat()
-    assert datetime.fromisoformat(kw["ava_picked_up_at"]) >= before
+    assert kw["meiva_created_at"] == arrival.isoformat()
+    assert datetime.fromisoformat(kw["meiva_picked_up_at"]) >= before

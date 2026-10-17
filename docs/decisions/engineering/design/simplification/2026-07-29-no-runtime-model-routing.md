@@ -2,7 +2,7 @@
 
 ## Context
 
-Ava supports 8 model providers behind one factory and one per-model
+Meiva supports 8 model providers behind one factory and one per-model
 fact/tuning registry (`shared/lm/registry.py:MODELS` — deepseek, claude,
 gemini, gpt, mimo, kimi, glm, grok), each with its own pricing, context
 window, effort vocabulary, and per-model tuning defaults
@@ -23,11 +23,11 @@ and never by an opaque framework heuristic that silently swaps the model to
 paper over an error or chase a cost/load signal. The mechanisms for making
 that choice are already first-class and are the intended surface:
 
-- `ava.agents.spawn(config_overlay={"llm_model": "..."})` — a per-agent
+- `meiva.agents.spawn(config_overlay={"llm_model": "..."})` — a per-agent
   overlay (`llm_model` is `per_agent`-overridable, `shared/config/lm.py`).
-- Saved `preset`s (`ava/agents/presets.py`) — named config templates a spawn
+- Saved `preset`s (`meiva/agents/presets.py`) — named config templates a spawn
   can start from.
-- The `ava_guide/models` skill (`ava_builtins/skills/ava_guide/models/SKILL.md`)
+- The `meiva_guide/models` skill (`meiva_builtins/skills/meiva_guide/models/SKILL.md`)
   — the judgment layer the registry itself cannot carry: which tier
   (`deepseek-v4-pro` for orchestration/judgment, `deepseek-v4-flash` for
   high-volume mechanical work) a given sub-task deserves.
@@ -72,7 +72,7 @@ per deployment — not a registry limit.
   operator needs to see. (This is the case the Scope section above carves
   back out once no operator is present — see the roadmap entry.)
 - **Cost-based automatic downgrading (route to a cheaper model under budget
-  pressure).** Rejected: this is what the `ava_guide/models` skill's
+  pressure).** Rejected: this is what the `meiva_guide/models` skill's
   pro/flash tiering already achieves, deliberately, at spawn — a flash worker
   fleet under a pro orchestrator (the skill's documented shape) rather than
   one model whose identity silently drifts based on a runtime budget counter.
@@ -97,10 +97,10 @@ per deployment — not a registry limit.
   unchanged.
 - What is foreclosed **today** is a runtime dispatcher choosing FOR the agent
   inside a turn boundary as a mistake-shim or an opaque router — there is no
-  `ava.lm.route(...)` and no gateway-side model selector to build toward under
+  `meiva.lm.route(...)` and no gateway-side model selector to build toward under
   today's positioning.
 - If a genuine need for faster model selection appears under today's
-  positioning, the extension point is a sharper `ava_guide/models` judgment or
+  positioning, the extension point is a sharper `meiva_guide/models` judgment or
   a spawn-time helper — not a hidden factory/gateway router. Trigger for
   revisiting *that*: a real workflow needs the tier choice made faster than an
   agent can reason about it once at spawn; even then the choice should stay

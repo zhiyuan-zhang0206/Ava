@@ -1,0 +1,163 @@
+---
+name: onboarding
+description: "Onboards new Meiva users or migrants from another agent tool. Use when initial preferences and a first useful task need setup."
+---
+
+# Onboarding — First Use of a Cluster
+
+A new cluster starts empty: no user profile in the memory pool, no standing
+tasks, no roles. The first conversation is the only chance to fill the two
+things every later turn depends on: **who the user is** (memory notes) and
+**what the user wants the cluster for** (the first piece of work). This
+sub-skill is that conversation, start to finish.
+
+This sub-skill helps the user begin using Meiva: establish their preferences,
+connect their goals to capabilities, and start useful work.
+
+## When this applies
+
+Run onboarding when any of these hold:
+
+- The memory pool has no `type/user` note for the person you are talking to
+  (`meiva.memory.search(...)` for their name, read `MEMORY.md`).
+- The user says they just installed the cluster, are new to Meiva, or asks
+  "what can you do?"
+- A new person joins an existing cluster (handover, collaborator).
+- The user is coming from another agent tool (Claude Code, Codex CLI, OpenClaw,
+  Hermes Agent) and asks how their setup maps to Meiva — see
+  [Migrating from another tool](#migrating-from-another-tool).
+
+Skip the interview when a current profile exists — go straight to work and
+fill only the gaps you notice (a missing timezone, an unrecorded gate).
+
+## End state
+
+Onboarding is finished when **all four** are true:
+
+1. The pool carries one `type/user` note (who the user is) plus the
+   `type/feedback` notes (how to work with them) — see
+   [Record to memory](#record-to-memory).
+2. One concrete piece of work is underway: a task created, a worker
+   spawned, or a schedule set.
+3. The user knows the two ways to reach you — the live dialog and
+   `meiva.ui.notify` — and which one fires when.
+4. Every preference you asked about is written down, so the user never
+   answers the same question twice.
+
+## Flow
+
+### 1. Check memory before asking anything
+
+Never interview cold. Read `meiva.memory.PATH/MEMORY.md` and search the pool
+for `type/user` notes first. A profile exists → skip to step 3, ask only
+about missing fields. Nothing exists → run the full flow.
+
+### 2. Preference interview
+
+Ask in small batches — two to four questions per message — and **write each
+answer down as it arrives**, not at the end. Order by how much later work
+depends on the answer:
+
+1. **Language** — which language should every agent use when talking to
+   you?
+2. **Notification channel** — live replies in the dialog; async
+   `meiva.ui.notify` when you are away. Which kinds of things deserve
+   `require_response` (decisions only you can make)?
+3. **Timezone** — schedules, reminders, and deadlines anchor to this.
+4. **Update rhythm** — how fast the cluster takes updates (`meiva cluster
+   update`): every release, on a schedule, or manual; plus maintenance
+   windows to avoid.
+5. **Confirmation gates** — which actions need the user's OK before
+   running: irreversible, outward-facing, spending real money, reaching a
+   real person.
+6. **Reporting style** — detail level, progress-update frequency, whether
+   finished work is served as a page (`meiva.ui.serve`).
+
+Exact wording in [Question list](#question-list).
+
+### 3. Discover intent
+
+Ask what the user wants the cluster for, then follow the matching branch in
+[Intent branches](#intent-branches).
+
+### 4. Record to memory
+
+Write the notes while the answers are fresh — see
+[Record to memory](#record-to-memory).
+
+### 5. Start the first piece of work
+
+End with one small, visible thing running — never "tell me when you need
+something". Create the task, spawn the worker, or set the schedule, then
+state plainly what is running and when the user will hear about it.
+
+### The conversation, turn by turn
+
+A recommended skeleton for the whole onboarding; compress when the user is
+impatient, but keep the order.
+
+| Turn | You say | What happens behind it |
+|---|---|---|
+| 1 | Greeting + "let me check what I already know about you" | Read the pool index, search `type/user`. This is the fork: profile found → jump to turn 4. |
+| 2 | Language + notification channel + timezone | First batch of questions (see below). Write answers as they come. |
+| 3 | Update rhythm + confirmation gates + reporting style | Second batch. Write answers as they come. |
+| 4 | "What do you want this cluster for?" | Branch A–D below; restate the goal or proposal in one sentence and confirm it. |
+| 5 | "Here is the first thing I am starting: …" | Kick off the first task, state when they hear back. Onboarding ends here. |
+
+## Question list
+
+Read [preference questions](references/preferences.md) only for missing initial
+preferences. Use recorded answers first; choose the relevant questions rather
+than presenting the whole bank.
+
+## Intent branches
+
+Read the matching [intent branch](references/intent-branches.md) when the user
+needs a first goal, an introduction, an ongoing service, or a contained trial.
+Do not establish a standing role for a one-off request.
+
+## Migrating from another tool
+
+A user arriving from another agent tool is not a blank slate — they bring
+skills, configs, automations, and habits shaped by the old tool. Give them
+the map instead of re-interviewing from scratch. One page per source tool:
+
+| Coming from | Read |
+|---|---|
+| Claude Code (Anthropic) | [migrate-from/claude-code.md](migrate-from/claude-code.md) |
+| OpenAI Codex CLI | [migrate-from/codex.md](migrate-from/codex.md) |
+| OpenClaw (ex Clawdbot/Moltbot) | [migrate-from/openclaw.md](migrate-from/openclaw.md) |
+| Hermes Agent (Nous Research) | [migrate-from/hermes.md](migrate-from/hermes.md) |
+
+Each page has the same shape: a concept-map table (their concept → its Meiva
+equivalent), migration steps, and the honest differences and pitfalls, with
+sources. Four facts cut across all four: skills port directly (same Agent
+Skills standard), instructions become memory (`type/feedback`), automations
+become `meiva schedules` / `meiva.watcher`, and every tool's permission system
+becomes recorded gates plus `require_response` notices. Read the page for the
+tool they name, then walk it with them.
+
+After the map, run the standard flow — intent discovery, record to memory,
+first piece of work. The migration pages replace only the "where does my old
+stuff go" part of the conversation.
+
+## Record to memory
+
+Before writing shared onboarding notes, read [memory records](references/memory-records.md)
+for frontmatter, tags, and destinations. User preferences belong in the shared
+pool at absolute paths; personal working state belongs in workspace memory.
+
+## Anti-patterns
+
+- **The questionnaire dump.** All six groups in one message reads as an
+  interrogation; the user answers short and you learn less. Two to four
+  questions per message, and write answers down as they arrive.
+- **Re-asking.** Interviewing before checking the pool, or not writing
+  answers down, makes the user repeat themselves. The pool is the whole
+  point.
+- **Personal-memory-only.** Preferences recorded only in `memory/` are
+  invisible to every other agent; the next spawn re-asks.
+- **Ending on "anything else?".** Onboarding ends with work running, not an
+  open floor. The open floor produces silence, not tasks.
+- **One-off scope.** Treating "don't email me, serve pages" as a one-time
+  instruction instead of writing the rule means re-learning it per task.

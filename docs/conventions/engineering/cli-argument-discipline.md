@@ -1,6 +1,6 @@
 # CLI argument discipline: parse-layer gates, retained defaults with reasons
 
-How the `ava` argparse surface treats a missing, malformed, or defaulted
+How the `meiva` argparse surface treats a missing, malformed, or defaulted
 argument. Read before adding or reviewing a CLI flag (user ruling 2026-09-20:
 CLI arguments are fully explicit; tasks #4085 / #4092).
 

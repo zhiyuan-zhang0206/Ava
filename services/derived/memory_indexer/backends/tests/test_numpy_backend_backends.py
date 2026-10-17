@@ -30,7 +30,7 @@ def test_probe_numpy_unreachable_is_actionable(
     )
     assert not result.fatal
     assert "memory_search service is not reachable" in (result.message or "")
-    assert "AVA_MEMORY_SEARCH_BACKEND=numpy" in (result.message or "")
+    assert "MEIVA_MEMORY_SEARCH_BACKEND=numpy" in (result.message or "")
 
 
 def test_probe_unknown_backend_is_fatal(*, database_gate: ProcessDbGate) -> None:

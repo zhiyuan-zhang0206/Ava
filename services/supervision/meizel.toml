@@ -1,6 +1,6 @@
-exports = ["ava_root", "ava_root_glue", "healthchecks", "roster"]
+exports = ["meiva_root", "meiva_root_glue", "healthchecks", "roster"]
 
 [uses]
-"ava_root" = ["healthchecks"]
-"ava_root_glue" = ["ava_root", "healthchecks", "roster"]
+"meiva_root" = ["healthchecks"]
+"meiva_root_glue" = ["meiva_root", "healthchecks", "roster"]
 "roster" = ["healthchecks"]

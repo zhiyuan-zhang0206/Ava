@@ -31,7 +31,7 @@ def test_report_uses_one_captured_gated_database(
     count.assert_not_called()
     gate = create.call_args.kwargs["gate"]
     assert isinstance(gate, ProcessDbGate)
-    assert gate.application_name() == "ava:preview:v7"
+    assert gate.application_name() == "meiva:preview:v7"
     count.assert_called_once_with(tmp_path, "captured-before-move")
     gate.observe_minimum(7)
     assert not gate.min_read_due()

@@ -1,6 +1,6 @@
 """Shared helpers for agent file uploads.
 
-An uploaded file for agent N lives at ``~/Downloads/AvaAgent-N/<name>`` and is
+An uploaded file for agent N lives at ``~/Downloads/MeivaAgent-N/<name>`` and is
 addressed over HTTP as ``/api/agents/N/uploads/<name>``. Three call sites must
 agree on that mapping: the gateway upload endpoint (writes the file + serves it
 back), the gateway message endpoint (validates that an image referenced in a
@@ -24,7 +24,7 @@ from base.paths.private_dir import ensure_private_dir
 
 def agent_upload_dir(agent_id: int, *, create: bool = True) -> Path:
     """Directory holding agent uploads; receipt lookup can omit filesystem creation."""
-    directory = Path.home() / "Downloads" / f"AvaAgent-{agent_id}"
+    directory = Path.home() / "Downloads" / f"MeivaAgent-{agent_id}"
     return ensure_private_dir(directory) if create else directory
 
 

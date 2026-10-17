@@ -6,11 +6,11 @@
   if (location.protocol === "tauri:" || location.hostname === "tauri.localhost") return;
 
   window.addEventListener("DOMContentLoaded", function () {
-    if (document.querySelector('[data-ava-app="settings"]')) return;
+    if (document.querySelector('[data-meiva-app="settings"]')) return;
     var button = document.createElement("button");
     button.type = "button";
-    button.setAttribute("data-ava-app", "settings");
-    button.setAttribute("aria-label", "Ava App settings");
+    button.setAttribute("data-meiva-app", "settings");
+    button.setAttribute("aria-label", "Meiva App settings");
     button.textContent = "⚙";
     button.style.cssText = [
       "position:fixed",
@@ -28,7 +28,7 @@
     ].join(";");
     button.addEventListener("click", function () {
       window.__TAURI_INTERNALS__.invoke("app_open_settings").catch(function (error) {
-        console.error("Ava App could not open settings", error);
+        console.error("Meiva App could not open settings", error);
       });
     });
     document.body.appendChild(button);

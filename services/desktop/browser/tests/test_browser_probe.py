@@ -1,6 +1,6 @@
 """`services.desktop.browser.probe` — the one service whose identity CDP cannot state.
 
-Every other Ava service proves it is ours from its own `/healthz` body. Chrome's
+Every other Meiva service proves it is ours from its own `/healthz` body. Chrome's
 DevTools Protocol carries no field we control, so identity is assembled from two
 facts this host can observe: a Chrome running on THIS cluster's `--user-data-dir`
 (`orphan.find_cluster_chrome`, the positive profile-token identification) that is
@@ -27,7 +27,7 @@ import pytest
 import services.desktop.browser.probe as probe_mod
 from base.daemon.health import ProbeVerdict
 
-_PROFILE = Path("/home/u/.ava/chrome-profile")
+_PROFILE = Path("/home/u/.meiva/chrome-profile")
 
 
 def _wire(

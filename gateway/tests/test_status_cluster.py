@@ -1,7 +1,7 @@
 """/api/status cluster sub-section integration tests.
 
 Agent-runners do not run a local gateway; probes dial the agent-runner's ops server directly
-to run the status_probe op (same source as the CLI `ava cluster status`). These tests stub
+to run the status_probe op (same source as the CLI `meiva cluster status`). These tests stub
 that async fan-out path and only validate the SystemStatus.cluster data pipeline.
 """
 
@@ -198,7 +198,9 @@ class TestClusterPanel:
         """gateway row → status_snapshot() (always online);
         agent-runner row → stub_remote_probe lookup."""
         _ = fake_flag
-        _insert_machine(db_conn, "cloud-test", "https://ava.example.com", "gateway", "central node")
+        _insert_machine(
+            db_conn, "cloud-test", "https://meiva.example.com", "gateway", "central node"
+        )
         _insert_machine(db_conn, "test-host", "http://test-host:18121", "agent-runner")
         _insert_machine(db_conn, "runner-test", _OPS_URL, "agent-runner")
         stub_remote_probe["test-host"] = (True, False)
@@ -227,7 +229,7 @@ class TestClusterPanel:
         _ = fake_flag
         _insert_machine(db_conn, "station-a", None, "observability-station")
         _insert_machine(
-            db_conn, "combo", "https://ava.example.com", "gateway,observability-station"
+            db_conn, "combo", "https://meiva.example.com", "gateway,observability-station"
         )
         stub_remote_probe["station-a"] = (True, False)
         stub_remote_probe["combo"] = (True, False)
@@ -589,7 +591,7 @@ class TestPanelCarriesNoFrozenPin:
         """The panel reports each node's checkout and carries no cluster target or
         known-good verdict."""
         _ = fake_flag, stub_machine_identity
-        _insert_machine(db_conn, "cloud-test", "https://ava.example.com", "gateway")
+        _insert_machine(db_conn, "cloud-test", "https://meiva.example.com", "gateway")
 
         monkeypatch.setattr(status_router, "prod_source_head_sha", lambda: "abc1234")
         with db_conn.cursor() as cur:

@@ -1,24 +1,24 @@
-"""$AVA_HOME path resolution — single-point entry shared by gateway /
+"""$MEIVA_HOME path resolution — single-point entry shared by gateway /
 agent / subprocess.
 
-`base.paths.home.resolve_ava_home` is the path source (`$AVA_HOME`,
-else `~/.ava`, read on every call); `ava_home()` adds the mkdir side effect for
+`base.paths.home.resolve_meiva_home` is the path source (`$MEIVA_HOME`,
+else `~/.meiva`, read on every call); `meiva_home()` adds the mkdir side effect for
 the home itself. A helper that takes `home` is a pure derivation (no environment,
 no mkdir); the zero-argument helpers that remain still create their directory on
 first access. The three process classes inherit the same variable.
-The package holds only this door; its doc nodes (`docs/paths.ava.okf.md`,
-`docs/lock-discipline.ava.okf.md`) sit beside it.
+The package holds only this door; its doc nodes (`docs/paths.meiva.okf.md`,
+`docs/lock-discipline.meiva.okf.md`) sit beside it.
 """
 
 from pathlib import Path
 
-from base.paths.home import home_checkout_error, resolve_ava_home
+from base.paths.home import home_checkout_error, resolve_meiva_home
 from base.paths.private_dir import ensure_private_dir
 
 
-def ava_home() -> Path:
+def meiva_home() -> Path:
     """User data root directory; create if missing."""
-    return ensure_private_dir(resolve_ava_home())
+    return ensure_private_dir(resolve_meiva_home())
 
 
 def run_dir(home: Path) -> Path:
@@ -38,8 +38,8 @@ def install_registry_path(home: Path) -> Path:
 
 
 def plugins_dir() -> Path:
-    """External plugin directory (~/.ava/plugins/); create if missing."""
-    target = ava_home() / "plugins"
+    """External plugin directory (~/.meiva/plugins/); create if missing."""
+    target = meiva_home() / "plugins"
     target.mkdir(parents=True, exist_ok=True)
     return target
 
@@ -56,7 +56,7 @@ def prod_service_checkout_error(repo: Path) -> str | None:
     base/paths/__init__.py", and a prod daemon bound to a dev clone's or worktree's
     code loses its floor when that checkout is deleted — routine worktree
     cleanup. A home that carries its own `<home>/source` checkout (the prod home
-    `~/.ava`) may only launch services from that checkout; a home with none (a
+    `~/.meiva`) may only launch services from that checkout; a home with none (a
     test home) accepts any. The rule is `base.paths.home.home_checkout_error`, shared
     with the CLI's pre-Settings gate.
     """
@@ -64,13 +64,13 @@ def prod_service_checkout_error(repo: Path) -> str | None:
 
 
 def repo_plugins_dir() -> Path:
-    """Built-in plugin directory (<repo>/ava_builtins/plugins/). Derived from this module's path."""
-    return repo_root() / "ava_builtins" / "plugins"
+    """Built-in plugin directory (<repo>/meiva_builtins/plugins/). Derived from this module's path."""
+    return repo_root() / "meiva_builtins" / "plugins"
 
 
 def logs_dir() -> Path:
-    """Per-unit log directory ($AVA_HOME/logs); create if missing."""
-    target = ava_home() / "logs"
+    """Per-unit log directory ($MEIVA_HOME/logs); create if missing."""
+    target = meiva_home() / "logs"
     target.mkdir(parents=True, exist_ok=True)
     return target
 
@@ -99,7 +99,7 @@ def permissions_helper_app_dir() -> Path:
     The app lives outside the source checkout so a release checkout cannot
     replace it or change its freshness metadata beneath a running helper.
     """
-    return ava_home() / "helper"
+    return meiva_home() / "helper"
 
 
 def traces_dir(home: Path) -> Path:
@@ -109,7 +109,7 @@ def traces_dir(home: Path) -> Path:
     Holds the local OTLP-JSON span mirror written by the OTel Collector
     sidecar's file exporter (task #1266): the active `spans.jsonl` plus
     rotated `spans-<ISO-timestamp>.jsonl` backups, each line one
-    `ExportTraceServiceRequest`. `ava trace ship` replays a window of it
+    `ExportTraceServiceRequest`. `meiva trace ship` replays a window of it
     straight to Tempo when the live fan-out missed data."""
     return home / "traces"
 
@@ -136,24 +136,24 @@ def otel_collector_config(home: Path) -> Path:
 
 
 def memory_dir() -> Path:
-    """Per-unit memory git repo root ($AVA_HOME/memory). Returns the path only;
+    """Per-unit memory git repo root ($MEIVA_HOME/memory). Returns the path only;
     the caller (memory_repo) runs git init / clone.
 
     On a unit that also carries 'gateway' capability, this is the agent-runner's
     authoring checkout (machine-<name> branch); the gateway indexes from a
     separate consolidated checkout returned by gateway_memory_dir()."""
-    return ava_home() / "memory"
+    return meiva_home() / "memory"
 
 
 def gateway_memory_dir(*, roles: frozenset[str]) -> Path:
     """Gateway's consolidated memory checkout path. On a combined unit
-    (gateway+agent-runner on one host) this is $AVA_HOME/gateway/memory to
+    (gateway+agent-runner on one host) this is $MEIVA_HOME/gateway/memory to
     keep the gateway's index source (main branch) separate from the
     agent-runner's authoring checkout (machine-<name> branch at memory_dir()).
     On a gateway-only unit it is the same as memory_dir(). Returns the path
     only."""
     if "agent-runner" in roles:
-        return ava_home() / "gateway" / "memory"
+        return meiva_home() / "gateway" / "memory"
     return memory_dir()
 
 
@@ -165,16 +165,16 @@ def skills_dir(home: Path) -> Path:
 
 
 def mcps_dir(home: Path) -> Path:
-    """Per-unit installed-MCP load dir (`<home>/mcps`) — where `ava mcp install`
+    """Per-unit installed-MCP load dir (`<home>/mcps`) — where `meiva mcp install`
     lands each installed MCP package (`<name>/` holding its own `.mcp.json` +
     `pyproject.toml` + `.venv`). The MCP config loader scans each `<name>/.mcp.json`
     here as its installed layer, gated by the install registry; built-in MCPs stay in
-    the repo's `<repo>/ava_builtins/mcps/`. Symmetric with `skills_dir(home)` / `plugins_dir()`."""
+    the repo's `<repo>/meiva_builtins/mcps/`. Symmetric with `skills_dir(home)` / `plugins_dir()`."""
     return home / "mcps"
 
 
 def workspace_dir(agent_id: int) -> Path:
-    """Per-agent workspace ($AVA_HOME/workspaces/<agent_id>); create if missing.
+    """Per-agent workspace ($MEIVA_HOME/workspaces/<agent_id>); create if missing.
 
     A stable scratch area for files an agent produces or downloads. Survives
     restarts and termination, is not git-managed, and is never garbage-collected
@@ -184,22 +184,22 @@ def workspace_dir(agent_id: int) -> Path:
     if agent_id is None:  # pyright: ignore[reportUnnecessaryComparison] — guards a bad call, type hint alone won't catch it at runtime
         raise ValueError(
             "workspace_dir(None) — pass a real agent_id. Check "
-            "ava.sdk_surface.agent_identity.agent_id() is not None first (pre-bootstrap has no "
+            "meiva.sdk_surface.agent_identity.agent_id() is not None first (pre-bootstrap has no "
             "workspace); callers that need a pre-bootstrap fallback use Path.home() "
             "explicitly instead of calling workspace_dir()."
         )
-    target = ava_home() / "workspaces" / str(agent_id)
+    target = meiva_home() / "workspaces" / str(agent_id)
     target.mkdir(parents=True, exist_ok=True)
     return target
 
 
 def workspace_dir_readonly(agent_id: int) -> Path:
-    """Per-agent workspace path ($AVA_HOME/workspaces/<agent_id>) with NO
+    """Per-agent workspace path ($MEIVA_HOME/workspaces/<agent_id>) with NO
     create side effect — the read path for ANOTHER agent's workspace (the
     inherited-memory note scans an ancestor's `memory/`). `workspace_dir`
     deliberately ensures its target; a reader must not manufacture a
     workspace that does not exist."""
-    return ava_home() / "workspaces" / str(agent_id)
+    return meiva_home() / "workspaces" / str(agent_id)
 
 
 def exec_run_dir(home: Path) -> Path:
@@ -210,21 +210,21 @@ def exec_run_dir(home: Path) -> Path:
 
 
 def root_run_dir(home: Path) -> Path:
-    """ava-root supervisor runtime dir (`<home>/run/ava-root`).
+    """meiva-root supervisor runtime dir (`<home>/run/meiva-root`).
 
     One directory per (machine x home) unit: the control socket
-    (`ava-root.sock`), the instance lock (`ava-root.lock`), the unit log tree
+    (`meiva-root.sock`), the instance lock (`meiva-root.lock`), the unit log tree
     (`logs/<unit>/output.log`) and the generated unit manifest
     (`manifests.json`) all live here, so the daemon's `--run-dir` argument is
-    this single path. Pure: `ava start` creates it before it writes the manifest."""
-    return run_dir(home) / "ava-root"
+    this single path. Pure: `meiva start` creates it before it writes the manifest."""
+    return run_dir(home) / "meiva-root"
 
 
 def root_manifests_path(home: Path) -> Path:
-    """The K2 unit manifest the root supervisor reads (`<home>/run/ava-root/manifests.json`).
+    """The K2 unit manifest the root supervisor reads (`<home>/run/meiva-root/manifests.json`).
 
-    Regenerated by every root-driven `ava start`
-    (`services.supervision.ava_root_glue.manifests.generate`) before the daemon is
+    Regenerated by every root-driven `meiva start`
+    (`services.supervision.meiva_root_glue.manifests.generate`) before the daemon is
     (re)spawned, so the running tree's shape always matches this file at
     launch time."""
     return root_run_dir(home) / "manifests.json"
@@ -241,16 +241,16 @@ def quarantined_exec_requests_dir(home: Path) -> Path:
 
 def launch_failures_path(home: Path) -> Path:
     """Path of the `<home>/last_launch_failures` file — the session names the
-    last `ava start` on this host could not launch.
+    last `meiva start` on this host could not launch.
 
-    Exists because the rollout's local leg runs `ava start` in a FRESH child
+    Exists because the rollout's local leg runs `meiva start` in a FRESH child
     process (`update._boot_gateway_fresh`), and an exit code cannot carry names.
     The parent orchestration needs the names to put them in the ROLLOUT
     aftermath block, and it cannot compute them itself: its own interpreter is
     the pre-pull one, so its service roster is the old tree's. The child has the
     new tree's roster and writes what it actually failed to launch.
 
-    Written by every `ava start` (an empty failure set unlinks it), so a read is
+    Written by every `meiva start` (an empty failure set unlinks it), so a read is
     never stale; taken — read then unlinked — by whoever consumes it.
 
     Returns the path only; ``base.deploy.lifecycle.launch_failures`` owns read/write.
@@ -262,7 +262,7 @@ def running_sha_path(home: Path) -> Path:
     """Path of the `<home>/running_sha` file that records the commit the
     gateway was last started on.
 
-    Written by `ava start` (on every host, regardless of role) right before
+    Written by `meiva start` (on every host, regardless of role) right before
     launching services; read by the update change-detection path so a manual
     `git pull` between start and update cannot hide code changes (the diff is
     against the running commit, not the current HEAD). Absent file = first-ever
@@ -299,10 +299,10 @@ def insights_pidfile(home: Path) -> Path:
 def mcp_daemon_shared_socket(home: Path) -> str:
     """Filesystem path of the per-machine shared MCP daemon socket — one
     socket under `<home>/run` serving every agent on the machine (the daemon
-    isolates sessions per client connection; see ava/mcps/_daemon.py). The
+    isolates sessions per client connection; see meiva/mcps/_daemon.py). The
     single source of truth for the naming convention: the daemon binds here and
-    the client (ava.mcps) connects here. Lives in base/ so the agent kernel
-    can import it without going through the agent-facing `ava.mcps`, which
-    AVA_SDK_DISABLE may replace with a stub. Run as an agent-runner service
+    the client (meiva.mcps) connects here. Lives in base/ so the agent kernel
+    can import it without going through the agent-facing `meiva.mcps`, which
+    MEIVA_SDK_DISABLE may replace with a stub. Run as an agent-runner service
     (ops roster session "mcp-daemon"), watchdog-managed like browser-mcp."""
     return str(run_dir(home) / "mcp_daemon.sock")

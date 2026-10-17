@@ -6,7 +6,7 @@ from typing import Any
 from pydantic import BaseModel
 
 
-# ava:ref base/packages/plugins/docs/plugin-config/config-view.ava.okf.md#plugin-pin-routing
+# meiva:ref base/packages/plugins/docs/plugin-config/config-view.meiva.okf.md#plugin-pin-routing
 def resolve_agent_plugin_pins(
     config_overlay: Mapping[str, Any] | None,
     configs: Mapping[str, BaseModel],
@@ -27,7 +27,7 @@ def resolve_agent_plugin_pins(
     return pins
 
 
-# ava:ref base/packages/plugins/docs/plugin-config/config-view.ava.okf.md#cluster-projection-gate
+# meiva:ref base/packages/plugins/docs/plugin-config/config-view.meiva.okf.md#cluster-projection-gate
 def with_cluster_policy[C: BaseModel](plugin: str, config: C) -> C:
     from pydantic import ValidationError
 

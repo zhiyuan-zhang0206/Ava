@@ -4,9 +4,9 @@
 
 Every logical backup artifact (`pg-backup`, snapshots, the pre-activation
 floor) is encrypted with `openssl enc -aes-256-cbc -pbkdf2` under one
-passphrase. It was `sha256(AVA_CLUSTER_SECRET)` until the secret first
+passphrase. It was `sha256(MEIVA_CLUSTER_SECRET)` until the secret first
 rotated, when the rotation pinned that value to
-`$AVA_HOME/backups/logical-backup.passphrase`. Two defects followed from
+`$MEIVA_HOME/backups/logical-backup.passphrase`. Two defects followed from
 deriving the key from the bearer:
 
 - An empty secret (the single-box default) made the key `sha256("")`, a public

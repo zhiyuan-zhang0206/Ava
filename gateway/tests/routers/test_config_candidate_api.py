@@ -41,15 +41,15 @@ def test_put_sets_the_offsite_backup_destination_beside_retired_keys(
     configured_home: Path,
 ) -> None:
     """The daily dump's destination lands in one atomic PUT, the exact patch the
-    rollout runs through `ava config set`. Keys a retired feature left in the
+    rollout runs through `meiva config set`. Keys a retired feature left in the
     `.env` are inert: they neither block the write nor change how it validates."""
     env_path = configured_home / ".env"
     env_path.write_text(
         env_path.read_text()
-        + "AVA_PITR_ENABLED=true\n"
-        + "AVA_PITR_STORE_BACKEND=oss\n"
-        + "AVA_PITR_GCS_BUCKET=retired\n"
-        + "AVA_PITR_SPOOL_HARD_BYTES=2362232013\n"
+        + "MEIVA_PITR_ENABLED=true\n"
+        + "MEIVA_PITR_STORE_BACKEND=oss\n"
+        + "MEIVA_PITR_GCS_BUCKET=retired\n"
+        + "MEIVA_PITR_SPOOL_HARD_BYTES=2362232013\n"
     )
     credentials = configured_home / "oss-credentials.json"
     with gateway_test_client() as client:
@@ -66,10 +66,10 @@ def test_put_sets_the_offsite_backup_destination_beside_retired_keys(
     assert body["applied"] is True
     assert "gateway" in body["restart_required"]
     aliases = dotenv_file.read_env_aliases()
-    assert aliases["AVA_BACKUP_OFFSITE_ENDPOINT"] == "https://oss-cn-shanghai.aliyuncs.com"
-    assert aliases["AVA_BACKUP_OFFSITE_BUCKET"] == "backups"
-    assert aliases["AVA_BACKUP_OFFSITE_CREDENTIALS_FILE"] == str(credentials)
-    assert aliases["AVA_PITR_STORE_BACKEND"] == "oss"  # the retired keys stay as they were
+    assert aliases["MEIVA_BACKUP_OFFSITE_ENDPOINT"] == "https://oss-cn-shanghai.aliyuncs.com"
+    assert aliases["MEIVA_BACKUP_OFFSITE_BUCKET"] == "backups"
+    assert aliases["MEIVA_BACKUP_OFFSITE_CREDENTIALS_FILE"] == str(credentials)
+    assert aliases["MEIVA_PITR_STORE_BACKEND"] == "oss"  # the retired keys stay as they were
 
 
 def test_put_unsets_the_offsite_backup_destination(configured_home: Path) -> None:
@@ -82,7 +82,7 @@ def test_put_unsets_the_offsite_backup_destination(configured_home: Path) -> Non
         response = client.put("/api/config", json={"backup_offsite_endpoint": None})
 
     assert response.status_code == 200, response.text
-    assert "AVA_BACKUP_OFFSITE_ENDPOINT" not in dotenv_file.read_env_aliases()
+    assert "MEIVA_BACKUP_OFFSITE_ENDPOINT" not in dotenv_file.read_env_aliases()
 
 
 def test_host_only_put_skips_cluster_candidate_validation(
@@ -102,7 +102,7 @@ def test_host_only_put_skips_cluster_candidate_validation(
 
     assert response.status_code == 200, response.text
     assert response.json()["applied"] is True
-    assert dotenv_file.read_env_aliases()["AVA_OPS_CONCURRENCY"] == "4"
+    assert dotenv_file.read_env_aliases()["MEIVA_OPS_CONCURRENCY"] == "4"
 
 
 def test_put_returns_conflict_when_cluster_candidate_goes_stale(

@@ -1,9 +1,9 @@
-# ava:ref base/config/docs/process-profiles.ava.okf.md#process-domains
+# meiva:ref base/config/docs/process-profiles.meiva.okf.md#process-domains
 from __future__ import annotations
 
 from typing import Literal
 
-AVA_PROCESS_PROFILE_ENV = "AVA_PROCESS_PROFILE"
+MEIVA_PROCESS_PROFILE_ENV = "MEIVA_PROCESS_PROFILE"
 ProcessProfile = Literal["gateway", "agent", "runner"]
 
 PROCESS_PROFILES: dict[ProcessProfile, frozenset[str]] = {
@@ -72,7 +72,7 @@ def profile_domain_error(profile: str, domain: str) -> AttributeError:
 
 def profile_unknown_error(profile: str) -> ValueError:
     return ValueError(
-        f"{AVA_PROCESS_PROFILE_ENV}={profile!r} is not a known process profile; "
+        f"{MEIVA_PROCESS_PROFILE_ENV}={profile!r} is not a known process profile; "
         f"must be one of {sorted(PROCESS_PROFILES)} — the marker is set by the "
         f"process launcher, not by hand"
     )

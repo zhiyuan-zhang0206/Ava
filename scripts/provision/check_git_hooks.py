@@ -102,8 +102,8 @@ def machine_checkouts(home: Path) -> list[Path]:
     Deliberately shallow — a bounded listing of ``home``, never a deep walk,
     which would trip macOS TCC prompts on operator machines.
     """
-    candidates = [home / "Ava", home / "MyAva"]
-    for directory in sorted(home.glob(".ava*")):
+    candidates = [home / "Meiva", home / "MyMeiva"]
+    for directory in sorted(home.glob(".meiva*")):
         candidates.append(directory / "source")
         candidates.append(directory)
     checkouts: list[Path] = []

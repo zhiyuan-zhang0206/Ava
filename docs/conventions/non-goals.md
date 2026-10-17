@@ -20,8 +20,8 @@ first and ask "what changed that made it worth doing".
   model for you is the same "plugin babysits the model" indirection already rejected in the item
   above for model-fallback / model-retry-budget plugins — opaque, hard to audit turn-to-turn, and
   today a single operator is present and can just swap config instead; (c) the right decision-maker
-  already has the context — `ava.agents.spawn(config_overlay={"llm_model": ...})` and the
-  `ava-guide/models` skill's standing policy put the model choice
+  already has the context — `meiva.agents.spawn(config_overlay={"llm_model": ...})` and the
+  `meiva-guide/models` skill's standing policy put the model choice
   in the hands of whoever is deciding the sub-task, once, at spawn, not a framework router with none
   of that context. **This is not a rejection of multi-model support**: the registry
   (`base/lm/registry.py`) backs 9 providers side by side, each with its own per-model tuning
@@ -38,7 +38,7 @@ first and ask "what changed that made it worth doing".
   history confuses the agent); use cancel + resend / fork instead — trigger:
   a real use case appears that needs "reset multiple agents together to a point in time", and fork
   can't solve it
-- **Sync `ava.agents.spawn` API**: only async fire-and-forget is provided — trigger:
+- **Sync `meiva.agents.spawn` API**: only async fire-and-forget is provided — trigger:
   the actual use case "spawn and immediately wait for a single sub-agent's result" pattern repeatedly surfaces and
   explicit wait inbound is too tedious to write
 - **Cascade cancel/terminate**: killing the parent does **not** automatically kill children; the admin UI
@@ -54,7 +54,7 @@ first and ask "what changed that made it worth doing".
   turn. The `before_exec` hook (`demos/permission-hooks/`) is a pattern-matching
   mitigation, not a boundary (see the `base/agents/messages/injection_scan.py` docstring). Isolation is
   a deployment decision — a dedicated OS user, machine, or VM per cluster — not
-  a runtime property Ava enforces around the code it executes. This is
+  a runtime property Meiva enforces around the code it executes. This is
   deliberate, not debt, for the same reason auth is not (see "Auth /
   multi-user" below): the actor a sandbox would defend against is the same
   actor holding `execute_code`, so a boundary drawn *inside* the process only
@@ -66,9 +66,9 @@ first and ask "what changed that made it worth doing".
   `execute_code` calls. Add one only if a use case appears where a single
   cluster must run agents against each other at different trust levels.
 - **Terminal UI (TUI)**: the product surface is the Next.js fleet console
-  ([`ui/web/docs/web.ava.okf.md`](../../ui/web/docs/web.ava.okf.md)) plus chat
-  channels (e.g. X, wired through `ava mcp install`) for talking to
-  individual agents — not a terminal. Ava is an always-on, multi-agent fleet:
+  ([`ui/web/docs/web.meiva.okf.md`](../../ui/web/docs/web.meiva.okf.md)) plus chat
+  channels (e.g. X, wired through `meiva mcp install`) for talking to
+  individual agents — not a terminal. Meiva is an always-on, multi-agent fleet:
   supervision means seeing which agents exist, their health, the spawn/fork/
   message graph between them, and task tracking across possibly many
   concurrent agents — state that does not compress into a terminal's
@@ -76,21 +76,21 @@ first and ask "what changed that made it worth doing".
   good enough to actually supervise a fleet ends up reinventing a windowing
   system inside a terminal emulator, which is strictly worse than the browser
   that already provides one. Trigger: basically won't do — this only becomes
-  worth building if Ava's primary usage shifts from an always-on fleet back to
+  worth building if Meiva's primary usage shifts from an always-on fleet back to
   a single foreground CLI session, which is a different product than the one
-  this repo builds. (`ava status` / `ava cluster status` remain simple
+  this repo builds. (`meiva status` / `meiva cluster status` remain simple
   one-shot ops commands; this non-goal is about a persistent TUI, not those.)
-- **Self-CODE-evolution**: agent modifies its own *code* — `ava.*`, the kernel, the
+- **Self-CODE-evolution**: agent modifies its own *code* — `meiva.*`, the kernel, the
   system-prompt-*building* code — trigger: evaluation harness (SWE-bench + GAIA subset)
   + the disposable-container sandbox land first; without both, no go. The fuse is real
   *for code*: self-generated code needs a blast-radius boundary, and a self-code-merge
   needs an objective scorecard. See [`roadmap/self-code-evolution.md`](../../future/roadmap/self-code-evolution.md).
   (This is the narrowed successor to the earlier blanket "Self-evolution: agent modifies
-  `ava.*` / system prompt / policy files" no — that wording lumped code together with
+  `meiva.*` / system prompt / policy files" no — that wording lumped code together with
   *text*, which the next item splits out.)
 - **Self-evolution of skill/memory *text* is NOT a non-goal** (active roadmap item,
   [`roadmap/autonomous-learning-loop.md`](../../future/roadmap/autonomous-learning-loop.md)):
-  an agent curating its own `~/.ava/skills/` + memory-pool markdown executes no new code
+  an agent curating its own `~/.meiva/skills/` + memory-pool markdown executes no new code
   and is `git revert`-reversible, so the sandbox/eval fuse above does not apply — the
   safety property is reversibility, not confinement. Listed here so the split from the
   code fence is explicit, not so the loop is rejected.
@@ -123,7 +123,7 @@ first and ask "what changed that made it worth doing".
   directly and browser users through an HttpOnly session cookie; an exact CORS
   allowlist and cookie-mutation `Origin` check constrain that ambient browser
   credential. Every cluster has a secret; a box that declares no reachable
-  address (`AVA_MACHINE_HOST`) binds loopback only. This does not attempt to restrain an agent inside
+  address (`MEIVA_MACHINE_HOST`) binds loopback only. This does not attempt to restrain an agent inside
   the boundary: the agent itself holds `execute_code` (= arbitrary bash + the
   full SDK), so any per-agent token available to its process could be read or
   bypassed. **Trigger** for distinct identities and permissions: onboarding
@@ -134,7 +134,7 @@ first and ask "what changed that made it worth doing".
   only makes sense with a sandbox. Changing SDK calls from "agent code directly SQL" to "agent code
   → HTTP → Gateway → SQL" adds latency + complexity but **does not** add defensive power — agent code
   is in the same process as the main agent process (in-process worker thread), can directly modify
-  `ava.self.AGENT_ID`, can read process env, any token / identity can be bypassed. Trigger:
+  `meiva.self.AGENT_ID`, can read process env, any token / identity can be bypassed. Trigger:
   sandbox lands (firecracker / gvisor / container / different UID), token-based auth
   + Gateway routing landing together with sandbox is the real boundary. Before then, rely only on SDK shape +
   controlled-task assumptions
@@ -156,7 +156,7 @@ first and ask "what changed that made it worth doing".
   self-rolling-release design record in git).
   (Distributed *tracing* is no longer on this list: `base/telemetry/tracing.py` records
   vendor-neutral OTLP/JSON spans to a local mirror — Traceloop/OpenLLMetry
-  auto-instruments the LLM/tool path; `ava trace ship` replays the mirror to a
+  auto-instruments the LLM/tool path; `meiva trace ship` replays the mirror to a
   self-hosted viewer out-of-band. That is span recording, not a metrics pipeline;
   the metrics/dashboard/anomaly rejection above still stands.)
 

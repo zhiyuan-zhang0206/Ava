@@ -6,7 +6,7 @@ exports = ["runner_inputs.py"]
 
 [debt.first-party-patch]
 "test_builtin_schedules_schedules.py#monkeypatch.setattr base.config.settings.gateway.provision_builtin_schedules" = 1
-"test_runner_lifecycle.py#monkeypatch.setattr ava.ensure_plugins_loaded" = 2
+"test_runner_lifecycle.py#monkeypatch.setattr meiva.ensure_plugins_loaded" = 2
 "test_runner_lifecycle.py#monkeypatch.setattr base.config.settings.gateway.schedule_stall_timeout_seconds" = 1
 "test_runner_lifecycle.py#monkeypatch.setattr services.wake.schedule_manager.engine.StallGuard" = 2
 "test_runner_lifecycle.py#monkeypatch.setattr services.wake.schedule_manager.engine.StallGuard._sample" = 7

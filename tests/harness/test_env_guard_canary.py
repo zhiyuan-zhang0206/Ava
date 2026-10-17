@@ -5,7 +5,7 @@ scenario-marked e2e test before ``tests/harness/test_home_isolation.py`` instead
 full ``tests/e2e/`` directory. The detectors' sensitivity depends on that warmup
 shape — they only speak when an earlier test in the same process mutated and
 (should have) restored the environment. This meta-test proves the property: a
-session-scoped fixture that mutates ``AVA_CLUSTER_SECRET`` and never restores it
+session-scoped fixture that mutates ``MEIVA_CLUSTER_SECRET`` and never restores it
 (the 2026-07-29 leak shape) must make the sentinel fail in the same process.
 
 Green here = the trimmed guard catches the leak. Red here = the detectors can no
@@ -47,7 +47,7 @@ def _write_leak_package(tmp_path: Path) -> Path:
         "# exist to catch.\n"
         '@pytest.fixture(scope="session", autouse=True)\n'
         "def _leak_operator_secret():\n"
-        '    os.environ["AVA_CLUSTER_SECRET"] = "mutated-sentinel-value"\n',
+        '    os.environ["MEIVA_CLUSTER_SECRET"] = "mutated-sentinel-value"\n',
         encoding="utf-8",
     )
     return pkg

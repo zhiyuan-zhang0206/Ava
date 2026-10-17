@@ -26,7 +26,7 @@ from agent import impersonation_process as _relay_process
 from agent import state as _state
 from agent.messages import inbound_message
 from agent.nodes import BEFORE_LLM, END, NodeName
-from base.agents.context import AvaContext, agent_id_from_config
+from base.agents.context import MeivaContext, agent_id_from_config
 from base.agents.impersonation.notes import HandoffNotes
 from base.agents.impersonation.relay import record_relay_failure
 from base.agents.impersonation.relay import stamp_relay_failure as stamp_relay_failure
@@ -77,7 +77,7 @@ async def active_lease(pool: AsyncConnectionPool, agent_id: int) -> bool:
 
 
 async def claim_gate(
-    state: _state.AgentState, agent_id: int, ctx: AvaContext
+    state: _state.AgentState, agent_id: int, ctx: MeivaContext
 ) -> Command[NodeName] | None:
     """Present consent once, or end the invocation without claiming input."""
     incarnation = ctx.original_incarnation
@@ -132,12 +132,12 @@ async def claim_gate(
             f"External agent requests to impersonate you. Request: {request_id}.\n"
             f"Reason: {session['reason']}\n"
             "To accept, save your working state and call "
-            f"ava.impersonation.accept({request_id!r}, start_message='your handoff "
+            f"meiva.impersonation.accept({request_id!r}, start_message='your handoff "
             "brief for the external session'); this ends your execution. The brief "
             "is delivered to the external session when the takeover starts and is "
             "required: cover the current work, the context it needs, and how to "
             "acknowledge incoming messages. "
-            f"To decline, call ava.impersonation.reject({request_id!r}, reason=...). "
+            f"To decline, call meiva.impersonation.reject({request_id!r}, reason=...). "
             "Acceptance pauses your native loop until release or lease expiry."
         )
         head = inbound_head(
@@ -174,7 +174,7 @@ def protect_native_hooks(
     """Fence automatic compaction and plugin hooks before the LLM node."""
 
     async def guarded(
-        state: _state.AgentState, runtime: Runtime[AvaContext], config: RunnableConfig
+        state: _state.AgentState, runtime: Runtime[MeivaContext], config: RunnableConfig
     ) -> Command[NodeName]:
         if runtime.context.ops_pool is not None:
             session = await native_status(
@@ -192,7 +192,7 @@ def protect_native_hooks(
 
 async def _activate_accepted(
     graph: CompiledStateGraph[
-        _state.BaseAgentState, AvaContext, _state.BaseAgentState, _state.BaseAgentState
+        _state.BaseAgentState, MeivaContext, _state.BaseAgentState, _state.BaseAgentState
     ],
     db: Database,
     bus: EventBus,
@@ -229,7 +229,7 @@ async def _activate_accepted(
 
 async def _apply_plugin_deltas(
     graph: CompiledStateGraph[
-        _state.BaseAgentState, AvaContext, _state.BaseAgentState, _state.BaseAgentState
+        _state.BaseAgentState, MeivaContext, _state.BaseAgentState, _state.BaseAgentState
     ],
     db: Database,
     session: dict[str, Any],
@@ -260,7 +260,7 @@ async def _apply_plugin_deltas(
 
 async def settle_checkpoint(
     graph: CompiledStateGraph[
-        _state.BaseAgentState, AvaContext, _state.BaseAgentState, _state.BaseAgentState
+        _state.BaseAgentState, MeivaContext, _state.BaseAgentState, _state.BaseAgentState
     ],
     db: Database,
     bus: EventBus,

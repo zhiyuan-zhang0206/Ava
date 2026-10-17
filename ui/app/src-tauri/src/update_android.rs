@@ -19,12 +19,12 @@ use tauri::{AppHandle, Manager, Runtime};
 
 use crate::update::{self, Manifest};
 
-const UPDATE_PLUGIN_CLASS: &str = "AvaUpdatePlugin";
+const UPDATE_PLUGIN_CLASS: &str = "MeivaUpdatePlugin";
 const UPDATE_PLUGIN_NAME: &str = "avaupdate";
 /// The rolling release's manifest asset. Fixed on purpose: the client must
 /// never accept an update location chosen by a page or by stored settings.
 const MANIFEST_URL: &str =
-    "https://github.com/zhiyuan-zhang0206/Ava/releases/download/android-latest/android-latest.json";
+    "https://github.com/zhiyuan-zhang0206/Meiva/releases/download/android-latest/android-latest.json";
 /// The manifest is a few hundred bytes; a slow network is not a reason to keep
 /// a page waiting for the check.
 const MANIFEST_TIMEOUT: Duration = Duration::from_secs(20);
@@ -231,7 +231,7 @@ fn download(cache_dir: &Path, manifest: &Manifest) -> Result<PathBuf, UpdateFail
             let _ = fs::remove_file(path);
         }
     }
-    let destination = directory.join(format!("ava-app-{}.apk", manifest.version_code));
+    let destination = directory.join(format!("meiva-app-{}.apk", manifest.version_code));
     let mut response = client(DOWNLOAD_TIMEOUT)?
         .get(&manifest.apk_url)
         .send()

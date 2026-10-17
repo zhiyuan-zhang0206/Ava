@@ -17,7 +17,7 @@ rows the numpy store keeps:
 The table is a **derived cache** (rebuildable from the memory pool by the
 indexer daemon's cold-start reconcile), exactly like the numpy store.
 Its DDL is not a migration (migrations govern business data and must apply
-without pgvector) and not a runtime effect either: the gateway's `ava start`
+without pgvector) and not a runtime effect either: the gateway's `meiva start`
 creates or rebuilds it through `prepare_table`, acting as the schema owner,
 and every runtime `connect()` only validates it. It requires the pgvector
 binary in the cluster's Postgres — provisioned by
@@ -212,7 +212,7 @@ def validate_schema(client: psycopg.Connection, dim: int) -> None:
     if problem is not None:
         raise RuntimeError(
             f"pgvector table {EMBEDDINGS_TABLE!r} {problem}; runtime connections never create or "
-            "rebuild it. Run `ava start` on the gateway: it prepares the table for the "
+            "rebuild it. Run `meiva start` on the gateway: it prepares the table for the "
             "configured embedding dimension."
         )
 

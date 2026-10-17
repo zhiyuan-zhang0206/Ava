@@ -12,7 +12,7 @@ def test_the_domain_is_registered_once_under_the_gateway_capability() -> None:
 
 def test_the_key_is_the_domains_only_field_and_off_by_default() -> None:
     assert list(WalgSettings.model_fields) == ["walg_config_file"]
-    assert WalgSettings.model_fields["walg_config_file"].alias == "AVA_WALG_CONFIG_FILE"
+    assert WalgSettings.model_fields["walg_config_file"].alias == "MEIVA_WALG_CONFIG_FILE"
     assert WalgSettings().walg_config_file is None
 
 

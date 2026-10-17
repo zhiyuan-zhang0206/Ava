@@ -8,11 +8,11 @@ took before it changed the cluster and released at the end
 (`acquire_update_lock`, `renew_update_lock`, a settle hold, `release_update_lock`).
 It was also the cluster's single "a deploy is under way" signal: the health
 probe, the heartbeat's machine-offline alert, the log sink, the package refresh,
-`ava stop`'s self-heal unpause, the roster and hosted admission all read it.
+`meiva stop`'s self-heal unpause, the roster and hosted admission all read it.
 
 It closed three failures:
 
-- **2026-06-01**: a manual rollout raced the cluster's own `ava.self.update` and
+- **2026-06-01**: a manual rollout raced the cluster's own `meiva.self.update` and
   both advanced the central schema.
 - **2026-07-29**: a second fleet update started while hosts of the first were
   still converging and force-terminated two agents that had done nothing wrong
@@ -20,13 +20,13 @@ It closed three failures:
   was the smallest of three independent bounds (`renew_update_lock`, the lattice
   ordering `NO_PROGRESS < LOCK_TTL`).
 - **A hard-killed rollout** left a live-looking lease and a paused host behind
-  (`ava cluster recover`).
+  (`meiva cluster recover`).
 
 The orchestrations that took the lease are gone. The last production caller of
 `acquire_update_lock` was removed with the release path
 ([decision](2026-09-30-remove-release-image-path.md)), and no code has held a
 settle hold since the old phase-based orchestration retired. The only production
-writer left was `ava cluster recover`, which claimed the lease for 60 seconds in
+writer left was `meiva cluster recover`, which claimed the lease for 60 seconds in
 order to clear a lease. Every reader therefore read "no lease": the roster's
 `deploy_hold` was always null, the log sink never quieted a record, the package
 refresh never skipped, the heartbeat never explained an offline runner, and the
@@ -45,8 +45,8 @@ compatibility layer:
   lease, the roster's `deploy_hold` field and banner, the heartbeat's deploy
   explanation, the log sink's rollout quieting (and its per-process
   `deployment_state` read), the package refresh's in-flight skip, and the lease
-  test in `ava stop`'s self-heal unpause.
-- `ava cluster recover` with `cluster_recover_op`, `pause_owner.clear` and
+  test in `meiva stop`'s self-heal unpause.
+- `meiva cluster recover` with `cluster_recover_op`, `pause_owner.clear` and
   `force_clear`, the owner lock, and `ClusterUpdateInProgress`.
 - `HostDeployState` stops reading `updater_lease_expires_at` and `paused_at`, and
   a posture write stops writing `paused_at`, so the columns are unused.
@@ -74,12 +74,12 @@ later migration.
   database borrow; no lease was ever what stopped it.
 - **A lease that lapses mid-operation.** There is no operation that holds one.
 - **A stranded pause.** The pause is the local maintenance journal, whose exits
-  are `ava maintenance resume --cancel` and `repair`
+  are `meiva maintenance resume --cancel` and `repair`
   ([graceful maintenance](../../../../conventions/operations/graceful-maintenance.md)).
 
 ## Alternatives rejected
 
-- **Keep `ava cluster recover`, cut down to an unpause and a journal clear.** Its
+- **Keep `meiva cluster recover`, cut down to an unpause and a journal clear.** Its
   forced clear of a journal it could not read is the opposite of the rule that a
   failed or unreadable ownership observation never permits a release. The
   journal's own exits cover every readable state; an unreadable one is removed by
@@ -93,16 +93,16 @@ later migration.
 
 ## Consequences
 
-- No verb clears a stranded pause. Read it with `ava maintenance status`; end it
+- No verb clears a stranded pause. Read it with `meiva maintenance status`; end it
   with `resume --cancel` or `repair`. An unreadable journal, or a `paused` record
   with no hold, is removed by hand
-  (`rm $AVA_HOME/run/deploy-pause-owner.json`) once no `ava stop` or `ava
+  (`rm $MEIVA_HOME/run/deploy-pause-owner.json`) once no `meiva stop` or `meiva
   maintenance` command is in flight.
 - The roster carries no deploy hold: `MachineStatus` (the roster at
   `/api/cluster/roster` and the cluster panel of `/api/status`) loses `deploy_hold`.
 - The deploy window reads posture only. A non-idle row on a machine that is not
   excluded and is not coming back keeps it "in flight" until that host's
-  `ava start` (or `ava cluster pause`, which excludes it).
+  `meiva start` (or `meiva cluster pause`, which excludes it).
 - `db_pool_acquire_slow`, `db_outage_*` and the query-cancellation line keep the
   level they were logged at across an update, as they always did in production.
 - A runner offline across an update is graded from its true start by the
@@ -111,9 +111,9 @@ later migration.
   `host_deploy_state` stay in the schema, unread and unwritten, until the storage
   cleanup migration.
 
-Forward link (2026-10-03): the stranded-pause exits are now `ava maintenance cancel` and
+Forward link (2026-10-03): the stranded-pause exits are now `meiva maintenance cancel` and
 `repair`; `resume --cancel` was renamed. See
 [the manual maintenance verbs deletion](../execution/converge/2026-10-03-delete-manual-maintenance-verbs.md).
 
-Forward link (2026-10-04): `ava maintenance` is deleted entirely; the stranded-pause read is `ava
-status` and the exit is `ava start`. See [delete-ava-maintenance](../../../agents/graph/2026-10-04-delete-ava-maintenance.md).
+Forward link (2026-10-04): `meiva maintenance` is deleted entirely; the stranded-pause read is `meiva
+status` and the exit is `meiva start`. See [delete-meiva-maintenance](../../../agents/graph/2026-10-04-delete-meiva-maintenance.md).

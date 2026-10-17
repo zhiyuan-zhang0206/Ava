@@ -1,4 +1,4 @@
-"""`ava start` admits only a home `ava init` initialized, and takes no identity input."""
+"""`meiva start` admits only a home `meiva init` initialized, and takes no identity input."""
 
 from __future__ import annotations
 
@@ -14,7 +14,7 @@ import cli.commands.lifecycle.start as lifecycle_start
 from base import cluster
 from base.host.permissions_helper.client import HelperFactory
 from base.host.system.hostport import Host
-from base.paths.home import resolve_ava_home
+from base.paths.home import resolve_meiva_home
 from cli import start_identity, start_intent, startup_support
 from cli.commands.cluster import unit_join
 from cli.commands.lifecycle import root_driver
@@ -49,7 +49,7 @@ def tools(tmp_path: Path) -> str:
 
 @pytest.fixture
 def start(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> list[dict[str, Any]]:
-    """The runtime half of `ava start` replaced by a recorder: the gate is under test."""
+    """The runtime half of `meiva start` replaced by a recorder: the gate is under test."""
     calls: list[dict[str, Any]] = []
 
     def runtime(**kwargs: Any) -> int:
@@ -77,13 +77,13 @@ def _home(
     roles: set[str],
     **extra: str,
 ) -> Path:
-    """A home `ava init` would have left: intent and `.env` published."""
+    """A home `meiva init` would have left: intent and `.env` published."""
     home = tmp_path / "home"
-    values = {"AVA_MACHINE_NAME": "gate", "AVA_SERVICE_PATH": tools, **extra}
+    values = {"MEIVA_MACHINE_NAME": "gate", "MEIVA_SERVICE_PATH": tools, **extra}
     start_identity.prepare_identity(
         start_identity.IdentityInput(home, tmp_path / "checkout", frozenset(roles), values)
     )
-    monkeypatch.setenv("AVA_HOME", str(home))
+    monkeypatch.setenv("MEIVA_HOME", str(home))
     return home
 
 
@@ -91,7 +91,7 @@ def _start(
     *flags: str, operator_database: OperatorDatabaseFactory, command_runtime: CommandRuntime
 ) -> int:
     producer = operator_event_pipeline(
-        operator_database, machine=command_runtime.machine, home=resolve_ava_home()
+        operator_database, machine=command_runtime.machine, home=resolve_meiva_home()
     )
     args = build_parser().parse_args(["start", *flags])
     args.runtime = command_runtime
@@ -119,11 +119,11 @@ def test_a_missing_home_is_refused_and_nothing_is_made(
     command_runtime: CommandRuntime,
 ) -> None:
     home = tmp_path / "never-initialized"
-    monkeypatch.setenv("AVA_HOME", str(home))
+    monkeypatch.setenv("MEIVA_HOME", str(home))
 
     assert _start(operator_database=operator_database, command_runtime=command_runtime) == 1
 
-    assert "not initialized: run `ava init` first" in capsys.readouterr().err
+    assert "not initialized: run `meiva init` first" in capsys.readouterr().err
     assert not home.exists() and start == []
 
 
@@ -137,7 +137,7 @@ def test_resources_without_an_intent_are_refused(
 ) -> None:
     home = tmp_path / "home"
     (home / "pg").mkdir(parents=True)
-    monkeypatch.setenv("AVA_HOME", str(home))
+    monkeypatch.setenv("MEIVA_HOME", str(home))
 
     assert _start(operator_database=operator_database, command_runtime=command_runtime) == 1
 
@@ -161,7 +161,7 @@ def test_a_claim_in_progress_sends_the_operator_back_to_init(
     assert _start(operator_database=operator_database, command_runtime=command_runtime) == 1
 
     err = capsys.readouterr().err
-    assert "partly initialized" in err and "Re-run `ava init`" in err
+    assert "partly initialized" in err and "Re-run `meiva init`" in err
     assert start == []
 
 
@@ -231,7 +231,7 @@ def test_start_never_joins_a_gateway(
         monkeypatch,
         tools,
         {"agent-runner"},
-        AVA_GATEWAY_URL="http://10.0.0.7:8000",
+        MEIVA_GATEWAY_URL="http://10.0.0.7:8000",
     )
 
     assert _start(operator_database=operator_database, command_runtime=command_runtime) == 0
@@ -246,10 +246,10 @@ def _rewrite_env(home: Path, edit: Callable[[list[str]], list[str]]) -> None:
 @pytest.mark.parametrize(
     ("roles", "drop", "message"),
     [
-        (_GATEWAY, "AVA_DB_URL=", "incomplete; explicit reattachment is required"),
-        (_GATEWAY, "AVA_REDIS_URL=", "incomplete; explicit reattachment is required"),
-        ({"agent-runner"}, "AVA_GATEWAY_URL=", "no gateway identity"),
-        (_GATEWAY, "AVA_SERVICE_PATH=", "explicit AVA_SERVICE_PATH declaration"),
+        (_GATEWAY, "MEIVA_DB_URL=", "incomplete; explicit reattachment is required"),
+        (_GATEWAY, "MEIVA_REDIS_URL=", "incomplete; explicit reattachment is required"),
+        ({"agent-runner"}, "MEIVA_GATEWAY_URL=", "no gateway identity"),
+        (_GATEWAY, "MEIVA_SERVICE_PATH=", "explicit MEIVA_SERVICE_PATH declaration"),
     ],
 )
 def test_an_incomplete_home_is_refused_before_any_effect(
@@ -264,7 +264,7 @@ def test_an_incomplete_home_is_refused_before_any_effect(
     operator_database: OperatorDatabaseFactory,
     command_runtime: CommandRuntime,
 ) -> None:
-    extra = {} if "gateway" in roles else {"AVA_GATEWAY_URL": "http://10.0.0.7:8000"}
+    extra = {} if "gateway" in roles else {"MEIVA_GATEWAY_URL": "http://10.0.0.7:8000"}
     home = _home(tmp_path, monkeypatch, tools, roles, **extra)
     _rewrite_env(home, lambda lines: [ln for ln in lines if not ln.startswith(drop)])
 
@@ -284,9 +284,9 @@ def test_a_remote_unit_that_records_the_human_secret_is_refused(
     command_runtime: CommandRuntime,
 ) -> None:
     home = _home(
-        tmp_path, monkeypatch, tools, {"agent-runner"}, AVA_GATEWAY_URL="http://10.0.0.7:8000"
+        tmp_path, monkeypatch, tools, {"agent-runner"}, MEIVA_GATEWAY_URL="http://10.0.0.7:8000"
     )
-    _rewrite_env(home, lambda lines: [*lines, "AVA_CLUSTER_SECRET=leaked"])
+    _rewrite_env(home, lambda lines: [*lines, "MEIVA_CLUSTER_SECRET=leaked"])
 
     assert _start(operator_database=operator_database, command_runtime=command_runtime) == 1
 
@@ -297,8 +297,8 @@ def test_a_remote_unit_that_records_the_human_secret_is_refused(
 @pytest.mark.parametrize(
     "env",
     [
-        pytest.param("AVA_GATEWAY_URL=http://10.0.0.7:8000\n", id="runner"),
-        pytest.param("AVA_DB_URL=postgresql://db.invalid/ava\n", id="gateway"),
+        pytest.param("MEIVA_GATEWAY_URL=http://10.0.0.7:8000\n", id="runner"),
+        pytest.param("MEIVA_DB_URL=postgresql://db.invalid/meiva\n", id="gateway"),
     ],
 )
 def test_a_home_with_an_identity_but_no_intent_is_refused(
@@ -312,13 +312,13 @@ def test_a_home_with_an_identity_but_no_intent_is_refused(
     command_runtime: CommandRuntime,
 ) -> None:
     """A home with no `start-intent.json` has no admission, whatever its `.env` and
-    capability flags declare: `ava start` takes an identity only from `ava init`."""
+    capability flags declare: `meiva start` takes an identity only from `meiva init`."""
     home = tmp_path / "predates-the-intent"
     home.mkdir(mode=0o700)
     (home / ".env").write_text(
-        f"{env}AVA_SERVICE_PATH={tools}\nAVA_MACHINE_SERVE_AGENT_RUNNER=true\n"
+        f"{env}MEIVA_SERVICE_PATH={tools}\nMEIVA_MACHINE_SERVE_AGENT_RUNNER=true\n"
     )
-    monkeypatch.setenv("AVA_HOME", str(home))
+    monkeypatch.setenv("MEIVA_HOME", str(home))
 
     assert _start(operator_database=operator_database, command_runtime=command_runtime) == 1
 

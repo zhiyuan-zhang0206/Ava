@@ -144,7 +144,7 @@ def test_default_window_comes_from_display_config(
     test_client: TestClient,
 ) -> None:
     """The implicit window is ``settings.display.messages_default_limit``
-    (``AVA_MESSAGES_DEFAULT_LIMIT``); the literal 100 is only that field's
+    (``MEIVA_MESSAGES_DEFAULT_LIMIT``); the literal 100 is only that field's
     default, not a hard-coded page size."""
     from langchain_core.messages import HumanMessage
 
@@ -338,7 +338,7 @@ def test_checkpoint_read_failure_returns_503(
     endpoint does not disguise an IO failure as an empty history (contrast the
     timeline GET, which tolerates the same failure to an empty view + 200).
 
-    Make Ava's explicitly constructed saver adapter fail at its tuple read,
+    Make Meiva's explicitly constructed saver adapter fail at its tuple read,
     exercising the CheckpointReadError -> 503 path.
     """
     from typing import NoReturn

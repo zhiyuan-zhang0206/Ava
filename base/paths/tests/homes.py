@@ -15,12 +15,12 @@ def unit_home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[Path]
     not an oversight to fix: this fixture legitimately models two different
     homes, and an empty dir is the only state both of them start from.
 
-    * A **virgin home** — never installed, never through `ava start`. Tests here
+    * A **virgin home** — never installed, never through `meiva start`. Tests here
       assert the ABSENCE of the identity files, e.g.
       `test_start_arg_writes_to_file_for_persistence`, whose premise is "all env
       empty, files also do not exist".
     * An **installed unit** — a home some earlier step gave an identity. The CLI
-      tests that run `ava skill install` need this one: a local-path install
+      tests that run `meiva skill install` need this one: a local-path install
       records `local:<machine>` provenance in the cluster registry, and
       its explicit machine owner rejects a missing name.
 
@@ -35,21 +35,21 @@ def unit_home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[Path]
     `tests/path_scoped/cli_tests.py` — a module takes it with one line:
     `pytestmark = pytest.mark.usefixtures("_installed_machine_identity")`.
     """
-    monkeypatch.setenv("AVA_HOME", str(tmp_path))
+    monkeypatch.setenv("MEIVA_HOME", str(tmp_path))
     yield tmp_path
 
 
 @pytest.fixture
 def default_home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
-    """A fake OS user whose `~/.ava` is this test's home, and so the default home.
+    """A fake OS user whose `~/.meiva` is this test's home, and so the default home.
 
     OS jobs belong to the default home only (`base.host.system.cron.owns_os_jobs`),
     so a test of a registrar or unregistrar needs this, not `unit_home`. `HOME`
     points into the tmp dir, which also keeps `~/Library/LaunchAgents` and the
     crontab lock off the operator's real ones; yields the user's home, whose
-    `.ava` is the default home."""
+    `.meiva` is the default home."""
     user_home = tmp_path / "user"
     user_home.mkdir()
     monkeypatch.setenv("HOME", str(user_home))
-    monkeypatch.setenv("AVA_HOME", str(user_home / ".ava"))
+    monkeypatch.setenv("MEIVA_HOME", str(user_home / ".meiva"))
     return user_home

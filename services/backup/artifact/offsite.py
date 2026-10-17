@@ -4,8 +4,8 @@
 
 `publish` uploads one encrypted ``.dump.enc`` iff absent as ``<root>/<name>``
 and logs the verified ACK; a missing or failed publish never costs the local
-artifact. The only backend is OSS (``AVA_BACKUP_OFFSITE_ENDPOINT``,
-``AVA_BACKUP_OFFSITE_BUCKET`` and ``AVA_BACKUP_OFFSITE_CREDENTIALS_FILE``); a home
+artifact. The only backend is OSS (``MEIVA_BACKUP_OFFSITE_ENDPOINT``,
+``MEIVA_BACKUP_OFFSITE_BUCKET`` and ``MEIVA_BACKUP_OFFSITE_CREDENTIALS_FILE``); a home
 that has not set all three skips the leg with one INFO line, because an
 unconfigured home is a supported state.
 
@@ -50,7 +50,7 @@ keeps a 20 GB object at 640 parts."""
 
 _FORBID_HEADER = {"x-oss-forbid-overwrite": "true"}
 _META_PREFIX = "x-oss-meta-"
-_METADATA = {"ava-artifact-kind": "logical-backup"}
+_METADATA = {"meiva-artifact-kind": "logical-backup"}
 _CONNECT_TIMEOUT_S = 300
 
 
@@ -129,9 +129,9 @@ def configured_target(
 ) -> OssTarget | None:
     """The configured OSS destination, or None (one INFO line says why)."""
     keys = {
-        "AVA_BACKUP_OFFSITE_ENDPOINT": endpoint_reader(),
-        "AVA_BACKUP_OFFSITE_BUCKET": bucket_reader(),
-        "AVA_BACKUP_OFFSITE_CREDENTIALS_FILE": credentials_file_reader(),
+        "MEIVA_BACKUP_OFFSITE_ENDPOINT": endpoint_reader(),
+        "MEIVA_BACKUP_OFFSITE_BUCKET": bucket_reader(),
+        "MEIVA_BACKUP_OFFSITE_CREDENTIALS_FILE": credentials_file_reader(),
     }
     unset = [key for key, value in keys.items() if not value]
     credentials_file = credentials_file_reader()

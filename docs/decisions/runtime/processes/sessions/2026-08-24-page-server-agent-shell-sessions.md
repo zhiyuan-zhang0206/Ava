@@ -1,6 +1,6 @@
 # Page-server agent-shell sessions
 
-Every `ava.ui.serve()` page now belongs to a persistent shell session owned by
+Every `meiva.ui.serve()` page now belongs to a persistent shell session owned by
 its serving agent. The page-server daemon creates the session, starts the page
 server as its initial command, and relaunches a crashed command in that same
 shell. A daemon restart adopts the durable session identity rather than

@@ -2,15 +2,15 @@
 skills match their sources (design `future/infra/lifecycle/core-package-update-channel.md`
 §5.3; tasks #2915 / #3267).
 
-The engine behind `ava packages refresh`. One code path for manual runs and the
+The engine behind `meiva packages refresh`. One code path for manual runs and the
 per-machine OS job (`--from-job` adds the job-only gates). It NEVER writes the
 checkout — the core channel fetches objects only (`git fetch`, FETCH_HEAD +
 object store, never the working tree) — and content lands only under
-`$AVA_HOME/skills/` via the same staged-swap + preserved-subtree machinery the
+`$MEIVA_HOME/skills/` via the same staged-swap + preserved-subtree machinery the
 converge path uses. It never restarts anything (activation is the next skill
 scan) and never passes `--accept-risk`: the scan gate refuses, nothing else.
 
-Skip conditions (job runs only: `AVA_OS_JOBS_ENABLED`, `refresh_enabled`;
+Skip conditions (job runs only: `MEIVA_OS_JOBS_ENABLED`, `refresh_enabled`;
 always: another pass holds the per-home flock, the registry is unreadable).
 
 Legacy rows carry no `applied_rev`. The design infers "the checkout's installed
@@ -128,7 +128,7 @@ class Pass:
         self.from_job = from_job
         self.now = now
         self.repo = repo or paths.repo_root()
-        self.skills_dir = paths.skills_dir(paths.ava_home())
+        self.skills_dir = paths.skills_dir(paths.meiva_home())
         self.registry: install_registry.Registry | None = None
         self.deltas: dict[str, _Delta] = {}
         self.channel: install_registry.ChannelState | None = None
@@ -728,10 +728,10 @@ def run_refresh(
         raise ValueError("package refresh requires a prepared configuration owner")
     moment = now or datetime.now(UTC)
     if from_job and not os_jobs_enabled(enabled_reader=lambda: config.view.general.os_jobs_enabled):
-        return _skip("OS jobs disabled (AVA_OS_JOBS_ENABLED=false)")
+        return _skip("OS jobs disabled (MEIVA_OS_JOBS_ENABLED=false)")
     if from_job and not config.view.packages.refresh_enabled:
-        return _skip("refresh disabled (AVA_PACKAGES_REFRESH_ENABLED=false)")
-    lock_path = paths.ava_home() / "packages-refresh.lock"
+        return _skip("refresh disabled (MEIVA_PACKAGES_REFRESH_ENABLED=false)")
+    lock_path = paths.meiva_home() / "packages-refresh.lock"
     try:
         with file_lock(lock_path, timeout_s=_QUEUE_LOCK_TIMEOUT_S):
             pass_ = Pass(

@@ -2,7 +2,7 @@
 
 A stable certificate preserves desktop permission identity. First start may
 build and register a helper; repeated start observes an unchanged loaded job.
-A stale installed artifact is replaced only after `ava stop` retired its job and
+A stale installed artifact is replaced only after `meiva stop` retired its job and
 no process runs it; isolated artifacts stay immutable. Normal converge never
 unloads its own possible permission ancestor.
 """
@@ -25,7 +25,7 @@ from base.config import settings
 from base.host.permissions_helper.client import HelperFactory
 from base.host.proc import run_bounded
 from base.log import logger
-from base.paths import ava_home, logs_dir, permissions_helper_socket
+from base.paths import logs_dir, meiva_home, permissions_helper_socket
 from services.desktop.permissions_helper import hardened_runtime
 from services.desktop.permissions_helper.build_state import (
     BUILD_STATE_NAME,
@@ -45,7 +45,7 @@ from services.desktop.permissions_helper.launchd_job import (
     require_retired_helper,
 )
 
-CERT_CN = "Ava Permissions Helper Code Signing"
+CERT_CN = "Meiva Permissions Helper Code Signing"
 _SERVICE_DIR = Path(__file__).resolve().parent
 SOURCE = _SERVICE_DIR / "helper" / "main.swift"
 INFO_PLIST = _SERVICE_DIR / "helper" / "Info.plist"
@@ -66,14 +66,14 @@ _AD_HOC_REFUSAL = (
     "the Screen Recording / Accessibility grants TCC keyed on the stable one, so "
     "the build stops here rather than downgrading. Unlock the login keychain on "
     "this host (`security unlock-keychain` from a local Terminal.app or a Screen "
-    "Sharing session) and re-run `ava converge`."
+    "Sharing session) and re-run `meiva converge`."
 )
 _ACL_REMEDY = (
     "Give /usr/bin/codesign standing access to the key on this host: in Keychain "
     "Access, open the private key under the login keychain's Keys and set Access "
     "Control to allow all applications, or from a local Terminal.app run "
     f"`security set-key-partition-list -S apple-tool:,apple: -s -l {CERT_CN!r}` "
-    "(it prompts once for the login password). Then re-run `ava converge`."
+    "(it prompts once for the login password). Then re-run `meiva converge`."
 )
 SIGNING_REACH_REMEDY = (
     "Align the signing keychain with the user search list. From a local Terminal.app, run "
@@ -83,7 +83,7 @@ SIGNING_REACH_REMEDY = (
 
 # Every tool below is local and has no network leg, so the only way one runs long
 # is that it stopped to ask a human. That is not hypothetical: on 2026-08-02 a
-# headless `ava update` sat 67 minutes inside `codesign --sign` while macOS held
+# headless `meiva update` sat 67 minutes inside `codesign --sign` while macOS held
 # up a SecurityAgent dialog asking whether codesign could use the signing key,
 # and the whole cluster rollout waited on it. These ceilings turn that wait into
 # a failed converge step, which the update path already knows how to abort and
@@ -138,7 +138,7 @@ class PermissionsHelperSigningUnavailableError(PermissionsHelperBuildError):
     the way it already does for a host with no swiftc or no display, while a real
     build failure still aborts converge.
 
-    Blocking the whole converge on it takes the cluster down: `ava start` runs
+    Blocking the whole converge on it takes the cluster down: `meiva start` runs
     converge first, so an updater that cannot sign leaves every service stopped
     with nothing to bring them back (2026-08-09 -- a rollout's force-checkout
     freshens main.swift's mtime, which forces the rebuild that reaches for the
@@ -189,7 +189,7 @@ def keychain_path() -> Path:
     """Return the signing keychain path.
 
     Defaults to the user's login keychain. CI sets the
-    ``AVA_PERMISSIONS_HELPER_KEYCHAIN`` setting to an isolated keychain it
+    ``MEIVA_PERMISSIONS_HELPER_KEYCHAIN`` setting to an isolated keychain it
     owns -- the hosted runner's login keychain password is unknowable, so the
     partition-list grant codesign needs cannot be authorized there.
     """
@@ -379,7 +379,7 @@ def preflight_signing_smoke() -> None:
 
 
 def app_executable(app: Path) -> Path:
-    return app / "Contents" / "MacOS" / "AvaPermissionsHelper"
+    return app / "Contents" / "MacOS" / "MeivaPermissionsHelper"
 
 
 def is_valid_stable_app(app: Path) -> bool:
@@ -456,7 +456,7 @@ def ensure_signing_cert() -> None:
                 "-out",
                 str(p12),
                 "-passout",
-                "pass:ava",
+                "pass:meiva",
                 "-name",
                 CERT_CN,
             ]
@@ -469,7 +469,7 @@ def ensure_signing_cert() -> None:
                 "-k",
                 keychain,
                 "-P",
-                "ava",
+                "meiva",
                 "-T",
                 "/usr/bin/codesign",
                 "-A",
@@ -502,14 +502,14 @@ def _replaces_installed(exe: Path, destination: Path | None) -> bool:
     """Whether this rebuild replaces an existing stale artifact, refusing when it must not.
 
     An isolated destination's artifact is immutable. The installed one is replaced
-    only once `ava stop` retired this home's helper -- it is ava-root's parent --
+    only once `meiva stop` retired this home's helper -- it is meiva-root's parent --
     and that is proved before the signing probes, so a host still running it is
     turned away before anything reaches for the signing key."""
     if not exe.exists():
         return False
     if destination is not None:
         raise PermissionsHelperBuildError(
-            "signed helper artifacts are immutable; prepare a new AVA_PERMISSIONS_HELPER_ARTIFACT_DIR "
+            "signed helper artifacts are immutable; prepare a new MEIVA_PERMISSIONS_HELPER_ARTIFACT_DIR "
             "and activate it after the home-specific helper job has been stopped and unregistered"
         )
     require_retired_helper(exe)
@@ -525,7 +525,7 @@ def build_and_sign(*, destination: Path | None = None) -> tuple[Path, bool]:
     installed bundle is rebuilt in place, only when `_replaces_installed` admits it."""
     build_dir = build_directory(destination)
     state_path = build_dir / BUILD_STATE_NAME
-    app = build_dir / "AvaPermissionsHelper.app"
+    app = build_dir / "MeivaPermissionsHelper.app"
     exe = app_executable(app)
     source_hash = source_content_hash()
     expected_dr = pinned_designated_requirement()
@@ -557,7 +557,7 @@ def build_and_sign(*, destination: Path | None = None) -> tuple[Path, bool]:
     preflight_signing_smoke()
 
     build_dir.mkdir(parents=True, exist_ok=True)
-    binary = build_dir / "AvaPermissionsHelper"
+    binary = build_dir / "MeivaPermissionsHelper"
     run_tool(["swiftc", "-O", str(SOURCE), "-o", str(binary)])
 
     if replacing:
@@ -641,7 +641,7 @@ def foreign_label_plists() -> list[Path]:
         if data.get("Label") == label():
             continue
         env: dict[str, object] = data.get("EnvironmentVariables") or {}
-        if env.get("AVA_PERMISSIONS_HELPER_SOCKET") == sock:
+        if env.get("MEIVA_PERMISSIONS_HELPER_SOCKET") == sock:
             foreign.append(plist)
     return foreign
 
@@ -661,15 +661,15 @@ def install_and_load(app: Path, *, rebuilt: bool, helper: HelperFactory, timers:
     A loaded helper is only observed. Replacement requires an external stop
     and exact-home unregister first, so a descendant cannot unload its parent."""
     refuse_foreign_label_jobs()
-    exe = app / "Contents" / "MacOS" / "AvaPermissionsHelper"
+    exe = app / "Contents" / "MacOS" / "MeivaPermissionsHelper"
     log = logs_dir() / "permissions-helper.log"
     plist = {
         "Label": label(),
         "ProgramArguments": [str(exe)],
         "EnvironmentVariables": {
-            "AVA_PERMISSIONS_HELPER_SOCKET": str(helper_socket()),
-            "AVA_PERMISSIONS_HELPER_ROOT_SEED": str(
-                base.paths.root_run_dir(base.paths.ava_home()) / "seed.json"
+            "MEIVA_PERMISSIONS_HELPER_SOCKET": str(helper_socket()),
+            "MEIVA_PERMISSIONS_HELPER_ROOT_SEED": str(
+                base.paths.root_run_dir(base.paths.meiva_home()) / "seed.json"
             ),
         },
         "RunAtLoad": True,
@@ -682,9 +682,9 @@ def install_and_load(app: Path, *, rebuilt: bool, helper: HelperFactory, timers:
     new_bytes = plistlib.dumps(plist)
     plist_changed = not path.exists() or path.read_bytes() != new_bytes
     loaded = is_loaded()
-    if loaded and helper_stop_intent(base.paths.ava_home()):
+    if loaded and helper_stop_intent(base.paths.meiva_home()):
         raise PermissionsHelperBuildError(
-            "helper retirement is incomplete; finish ava stop externally before starting"
+            "helper retirement is incomplete; finish meiva stop externally before starting"
         )
     if loaded and (plist_changed or rebuilt):
         raise PermissionsHelperBuildError(
@@ -692,10 +692,10 @@ def install_and_load(app: Path, *, rebuilt: bool, helper: HelperFactory, timers:
             "this home's helper from outside its process tree before activating the replacement"
         )
     if not loaded:
-        base.paths.root_run_dir(base.paths.ava_home()).mkdir(
+        base.paths.root_run_dir(base.paths.meiva_home()).mkdir(
             mode=0o700, parents=True, exist_ok=True
         )
-        clear_helper_stop_intent(base.paths.ava_home())
+        clear_helper_stop_intent(base.paths.meiva_home())
         path.write_bytes(new_bytes)
         run_tool(["launchctl", "bootstrap", launchd_domain(), str(path)])
     if not helper_answers_ping(helper, timers):
@@ -707,7 +707,7 @@ def install_and_load(app: Path, *, rebuilt: bool, helper: HelperFactory, timers:
 
 def helper_socket() -> Path:
     """This cluster's permissions-helper socket, from its configured helper port."""
-    return permissions_helper_socket(ava_home(), settings.services.permissions_helper_port)
+    return permissions_helper_socket(meiva_home(), settings.services.permissions_helper_port)
 
 
 def helper_answers_ping(helper: HelperFactory, timers: Timers) -> bool:
@@ -735,7 +735,7 @@ def helper_answers_ping(helper: HelperFactory, timers: Timers) -> bool:
 
 def _require_usable_socket_paths() -> None:
     """Refuse impossible macOS IPC names before signing or registering jobs."""
-    paths = (helper_socket(), base.paths.root_run_dir(base.paths.ava_home()) / "ava-root.sock")
+    paths = (helper_socket(), base.paths.root_run_dir(base.paths.meiva_home()) / "meiva-root.sock")
     for path in paths:
         # Darwin sockaddr_un.sun_path has 104 bytes, including the terminating NUL.
         if len(os.fsencode(path)) >= 104:

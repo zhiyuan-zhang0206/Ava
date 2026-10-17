@@ -352,7 +352,7 @@ async def probe_agent_runner(
 ) -> MachineStatus:
     """Probe an agent-runner now, by POSTing a `status_probe` op to its ops server.
 
-    The machine is reached at its ava-ops server (services/agent_runner/agent_ops), which
+    The machine is reached at its meiva-ops server (services/agent_runner/agent_ops), which
     dispatches `status_probe` via `ops.cluster.operations.cluster_status_op` in-process and
     returns the snapshot. Same path the heartbeat liveness pass uses. The local
     machine is no special case — its ops server is dialed at its registered
@@ -483,7 +483,7 @@ async def gather_cluster_status(
     description, stopped_at, is_staging); description + stopped_at + is_staging
     are threaded through unmodified onto each MachineStatus. Public because
     `gateway/cluster/router.py:get_cluster_machines` reuses the same fan-out to back
-    ava.agents.list_machines().
+    meiva.agents.list_machines().
 
     The rows come back sorted by machine name.
     """
@@ -552,7 +552,7 @@ def get_cluster_status(
     local_machine: MachineIdentity,
 ) -> ClusterPanel:
     """Assemble the cluster sub-section: SELECT the machines table (paused rows
-    excluded — the cluster panel shows only active members; `ava cluster resume`
+    excluded — the cluster panel shows only active members; `meiva cluster resume`
     brings a row back) and render each machine from the heartbeat liveness
     pass's last `status_probe` (`gateway/cluster/snapshots.py`), so the panel
     dials no runner (task #3507).

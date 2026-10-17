@@ -299,7 +299,7 @@ def test_the_admin_dial_is_custody_checked_and_bounded(
         yield _Conn()
 
     authority = pg_admin.OwnerAuthority(
-        admin_url="postgresql://zzy@/postgres?host=/sockets/ava-pg-home&port=5433",
+        admin_url="postgresql://zzy@/postgres?host=/sockets/meiva-pg-home&port=5433",
         database="db",
         owner="owner",
         data_dir=sandbox.home / "pg",

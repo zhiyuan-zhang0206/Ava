@@ -134,7 +134,7 @@ class SessionBackend(abc.ABC):
 
     # --- PTY-specific -------------------------------------------------------
     # Only backends that provide a terminal implement these.  Callers that need
-    # PTY (ava.shell.sessions) currently use the PTY backend directly; these methods exist
+    # PTY (meiva.shell.sessions) currently use the PTY backend directly; these methods exist
     # so a future PTY-capable backend can plug in without changing callers.
 
     def send(self, name: str, text: str) -> None:

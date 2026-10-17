@@ -5,7 +5,7 @@
 PR #956 put a readiness gate in front of Phase B: the rollout orchestrator dials the
 gateway through the same `probe_gateway_once` the runners' preflight uses, and only
 fans out on an authenticated 200. That closed the **systematic** race — prod's
-boot-to-serving exceeds `ava start`'s wait, which returns anyway on expiry, so the
+boot-to-serving exceeds `meiva start`'s wait, which returns anyway on expiry, so the
 gateway was reliably not serving when Phase B fired and every runner correctly
 declined (`refusing self-update: preflight failed - gateway unreachable`).
 
@@ -16,13 +16,13 @@ the poll reports them.
 Two things about that window are worth stating precisely, because both were guessed
 at before being measured:
 
-- **It is seconds, not milliseconds.** The runner's gateway dial happens inside `ava
+- **It is seconds, not milliseconds.** The runner's gateway dial happens inside `meiva
   restart`'s preflight, which the detached updater reaches only after `git fetch &&
   git checkout --force && uv sync`. `shared/deploy_timing.py` measures that whole leg
   at **2-15 s across 44 POSIX samples**; it is unmeasured on Windows.
 - **Recovery from a real gateway death is bounded below by 60 s.** Nothing brings the
   gateway back but the gateway watchdog, on a 60 s round
-  (`AVA_WATCHDOG_INTERVAL_SECONDS`), plus respawn plus uvicorn binding.
+  (`MEIVA_WATCHDOG_INTERVAL_SECONDS`), plus respawn plus uvicorn binding.
 
 ## Decision
 
@@ -89,7 +89,7 @@ ping-ponging with the runner's own watchdog self-heal.
 ## Consequences
 
 - A rollout can still report `INCOMPLETE` with runners that declined through no fault
-  of their own, and the operator re-runs `ava update`. That is the accepted cost.
+  of their own, and the operator re-runs `meiva update`. That is the accepted cost.
 - The accept rests on the failure being **legible**, and today it is legible one level
   short of what an operator needs: a runner that declined and a runner whose updater
   died both surface as `POLL_STALLED`, because `RESTART_DECLINED_EXIT_CODE` never

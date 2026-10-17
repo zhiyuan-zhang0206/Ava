@@ -27,11 +27,11 @@ rejected because it would silently authorize old cleanup and new ownership while
 the writer set is intentionally changing.
 
 The current contract is recorded in
-`shared/incarnation-resources.ava.okf.md`; publication selection and activation
+`shared/incarnation-resources.meiva.okf.md`; publication selection and activation
 remain owned by their separate runtime-publication documents.
 
 Update: the first native end-to-end proof showed that `SELECT ... FOR UPDATE`
-also requires table UPDATE privilege. Granting that privilege to `ava_runner`
+also requires table UPDATE privilege. Granting that privilege to `meiva_runner`
 would have crossed the deployment authority boundary. Runtime admission now
 takes only the row lock through a fixed security-definer function while keeping
 deployment-state reads under the runner's existing SELECT grant.

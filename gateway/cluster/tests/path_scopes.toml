@@ -3,6 +3,6 @@
 "tests.path_scoped.gateway_tests" = [
     "test_status_services.py",
 ]
-"ava.tests.fixtures.sdk" = [
+"meiva.tests.fixtures.sdk" = [
     "test_status_services.py",
 ]

@@ -12,66 +12,84 @@ from base.telemetry.metrics.plugin_metrics import (
 )
 
 EXPECTED = {
-    "ava_obs_llm_cost_usd": ("timeseries", ["grafana"], "llm_usage", "telemetry", 1),
-    "ava_obs_agent_llm_cost_usd": ("timeseries", ["inspector"], "llm_usage", "telemetry", 1),
-    "ava_obs_llm_error_rate": ("timeseries", ["grafana", "inspector"], "llm_usage", "telemetry", 2),
-    "ava_obs_turn_ok_rate": ("timeseries", ["grafana", "inspector"], "turn_end", "telemetry", 1),
-    "ava_obs_turn_duration_s": ("timeseries", ["grafana"], "turn_end", "telemetry", 2),
-    "ava_obs_compaction_summary_history_ratio": (
+    "meiva_obs_llm_cost_usd": ("timeseries", ["grafana"], "llm_usage", "telemetry", 1),
+    "meiva_obs_agent_llm_cost_usd": ("timeseries", ["inspector"], "llm_usage", "telemetry", 1),
+    "meiva_obs_llm_error_rate": (
+        "timeseries",
+        ["grafana", "inspector"],
+        "llm_usage",
+        "telemetry",
+        2,
+    ),
+    "meiva_obs_turn_ok_rate": ("timeseries", ["grafana", "inspector"], "turn_end", "telemetry", 1),
+    "meiva_obs_turn_duration_s": ("timeseries", ["grafana"], "turn_end", "telemetry", 2),
+    "meiva_obs_compaction_summary_history_ratio": (
         "timeseries",
         ["grafana"],
         "compaction_completed",
         "telemetry",
         1,
     ),
-    "ava_obs_compaction_rate": (
+    "meiva_obs_compaction_rate": (
         "timeseries",
         ["grafana"],
         "compaction_completed",
         "telemetry",
         5,
     ),
-    "ava_obs_compaction_soft_share": ("stat", ["grafana"], "compaction_completed", "telemetry", 2),
-    "ava_obs_exec_success_rate": ("timeseries", ["grafana"], "exec", "telemetry", 6),
-    "ava_obs_exec_envelope_size": ("timeseries", ["grafana"], "exec_envelope", "telemetry", 3),
-    "ava_obs_exec_envelope_serialize": (
+    "meiva_obs_compaction_soft_share": (
+        "stat",
+        ["grafana"],
+        "compaction_completed",
+        "telemetry",
+        2,
+    ),
+    "meiva_obs_exec_success_rate": ("timeseries", ["grafana"], "exec", "telemetry", 6),
+    "meiva_obs_exec_envelope_size": ("timeseries", ["grafana"], "exec_envelope", "telemetry", 3),
+    "meiva_obs_exec_envelope_serialize": (
         "timeseries",
         ["grafana"],
         "exec_envelope",
         "telemetry",
         3,
     ),
-    "ava_obs_syntax_fix_by_kind": ("timeseries", ["grafana"], "syntax_fix", "telemetry", 7),
-    "ava_obs_spawn_by_spawner": ("barchart", ["grafana"], "spawn", "audit", 1),
-    "ava_obs_lifecycle_counts": ("barchart", ["grafana"], "spawn", "audit", 1),
-    "ava_obs_sdk_call_top": ("table", ["grafana"], "sdk_call", "telemetry", 1),
-    "ava_obs_agent_llm_usage_table": ("table", ["grafana"], "llm_usage", "telemetry", 4),
-    "ava_obs_halt_breakdown": ("timeseries", ["grafana"], "halt", "telemetry", 4),
-    "ava_obs_delivery_stalled_count": (
+    "meiva_obs_syntax_fix_by_kind": ("timeseries", ["grafana"], "syntax_fix", "telemetry", 7),
+    "meiva_obs_spawn_by_spawner": ("barchart", ["grafana"], "spawn", "audit", 1),
+    "meiva_obs_lifecycle_counts": ("barchart", ["grafana"], "spawn", "audit", 1),
+    "meiva_obs_sdk_call_top": ("table", ["grafana"], "sdk_call", "telemetry", 1),
+    "meiva_obs_agent_llm_usage_table": ("table", ["grafana"], "llm_usage", "telemetry", 4),
+    "meiva_obs_halt_breakdown": ("timeseries", ["grafana"], "halt", "telemetry", 4),
+    "meiva_obs_delivery_stalled_count": (
         "stat",
         ["grafana"],
         "delivery_stalled",
         "telemetry",
         1,
     ),
-    "ava_obs_agent_delivery_stalled_count": (
+    "meiva_obs_agent_delivery_stalled_count": (
         "timeseries",
         ["inspector"],
         "delivery_stalled",
         "telemetry",
         1,
     ),
-    "ava_obs_events_rate": ("timeseries", ["grafana"], "log", "log", 1),
-    "ava_obs_frontend_interactions": (
+    "meiva_obs_events_rate": ("timeseries", ["grafana"], "log", "log", 1),
+    "meiva_obs_frontend_interactions": (
         "timeseries",
         ["grafana"],
         "frontend_interaction",
         "telemetry",
         1,
     ),
-    "ava_obs_frontend_top_elements": ("table", ["grafana"], "frontend_interaction", "telemetry", 1),
-    "ava_obs_frontend_page_views": ("table", ["grafana"], "frontend_interaction", "telemetry", 1),
-    "ava_obs_frontend_settings_changes": (
+    "meiva_obs_frontend_top_elements": (
+        "table",
+        ["grafana"],
+        "frontend_interaction",
+        "telemetry",
+        1,
+    ),
+    "meiva_obs_frontend_page_views": ("table", ["grafana"], "frontend_interaction", "telemetry", 1),
+    "meiva_obs_frontend_settings_changes": (
         "table",
         ["grafana"],
         "frontend_interaction",
@@ -100,7 +118,7 @@ def _assert_spec_matches_expected(name: str, spec: MetricSpec) -> None:
     assert spec.event_name == event_name, name
     assert spec.category == category, name
     assert spec.plugin == "core", name
-    expected_query_type = "promql" if name == "ava_obs_turn_duration_s" else "logql"
+    expected_query_type = "promql" if name == "meiva_obs_turn_duration_s" else "logql"
     assert spec.query_type == expected_query_type, name
     assert len(spec.targets or []) + 1 == n_targets, name
     if spec.target_names is not None:
@@ -123,7 +141,7 @@ def test_pack_registers_all_metrics() -> None:
 
 def test_logql_queries_have_event_stream_and_json() -> None:
     for name, exprs in _all_rendered().items():
-        if name == "ava_obs_turn_duration_s":
+        if name == "meiva_obs_turn_duration_s":
             continue
         for expr in exprs:
             assert 'service_name="unknown_service"' in expr, name
@@ -157,7 +175,7 @@ def test_logql_template_validation_rejects_drift() -> None:
 
 def test_cost_queries_unwrap_cost_usd() -> None:
     specs = {m.name: m for m in _pack()}
-    for name in ("ava_obs_llm_cost_usd", "ava_obs_agent_llm_cost_usd"):
+    for name in ("meiva_obs_llm_cost_usd", "meiva_obs_agent_llm_cost_usd"):
         query = specs[name].query
         assert "unwrap attributes_cost_usd" in query, name
         assert "CASE" not in query, name
@@ -165,7 +183,7 @@ def test_cost_queries_unwrap_cost_usd() -> None:
 
 
 def test_exec_breakdown_covers_every_outcome() -> None:
-    exprs = _all_rendered()["ava_obs_exec_success_rate"]
+    exprs = _all_rendered()["meiva_obs_exec_success_rate"]
     assert all("event_name=" in e.split("| json")[0] for e in exprs), exprs
     assert 'event_name="exec"' in exprs[0]
     assert 'event_name="exec_failed"' in exprs[1]
@@ -180,26 +198,26 @@ def test_exec_breakdown_covers_every_outcome() -> None:
 
 
 def test_turn_ok_rate_math_shape() -> None:
-    expr = _all_rendered()["ava_obs_turn_ok_rate"][0]
+    expr = _all_rendered()["meiva_obs_turn_ok_rate"][0]
     assert "100 * sum(count_over_time(" in expr
     assert 'attributes_ok="true"' in expr
     assert expr.count("sum(count_over_time(") == 2
 
 
 def test_turn_duration_uses_the_alert_histogram_quantiles() -> None:
-    spec = {metric.name: metric for metric in _pack()}["ava_obs_turn_duration_s"]
+    spec = {metric.name: metric for metric in _pack()}["meiva_obs_turn_duration_s"]
     assert spec.query_type == "promql"
     assert render_targets(spec) == [
-        "histogram_quantile(0.95, sum by (le) (rate(ava_turn_end_duration_seconds_bucket[10m])))",
-        "histogram_quantile(0.5, sum by (le) (rate(ava_turn_end_duration_seconds_bucket[10m])))",
+        "histogram_quantile(0.95, sum by (le) (rate(meiva_turn_end_duration_seconds_bucket[10m])))",
+        "histogram_quantile(0.5, sum by (le) (rate(meiva_turn_end_duration_seconds_bucket[10m])))",
     ]
     assert spec.target_names == ["p95_s", "p50_s"]
 
 
 def test_compaction_panels_measure_applied_ratio_and_frequency() -> None:
     rendered = _all_rendered()
-    ratio = rendered["ava_obs_compaction_summary_history_ratio"][0]
-    rate = rendered["ava_obs_compaction_rate"][0]
+    ratio = rendered["meiva_obs_compaction_summary_history_ratio"][0]
+    rate = rendered["meiva_obs_compaction_rate"][0]
 
     assert "unwrap attributes_summary_history_ratio" in ratio
     assert ratio.startswith("avg(100 * avg_over_time(")
@@ -211,7 +229,7 @@ def test_compaction_panels_measure_applied_ratio_and_frequency() -> None:
 
 
 def test_halt_breakdown_buckets() -> None:
-    exprs = _all_rendered()["ava_obs_halt_breakdown"]
+    exprs = _all_rendered()["meiva_obs_halt_breakdown"]
     assert 'attributes_body="no tool_call (idle)"' in exprs[0]
     assert 'attributes_body=~".*compact.*"' in exprs[1]
     assert 'attributes_body=~"lifecycle .*"' in exprs[2]
@@ -221,7 +239,7 @@ def test_halt_breakdown_buckets() -> None:
 
 
 def test_syntax_fix_kind_buckets() -> None:
-    exprs = _all_rendered()["ava_obs_syntax_fix_by_kind"]
+    exprs = _all_rendered()["meiva_obs_syntax_fix_by_kind"]
     assert 'attributes_fixes=~".*ruff_format.*"' in exprs[0]
     assert 'attributes_fixes=~".*ruff.*" | attributes_fixes!~".*ruff_format.*"' in exprs[1]
     for needle, idx in [
@@ -238,12 +256,12 @@ def test_syntax_fix_kind_buckets() -> None:
 
 
 def test_lifecycle_and_spawner_window_aggregates() -> None:
-    spawner = _all_rendered()["ava_obs_spawn_by_spawner"]
+    spawner = _all_rendered()["meiva_obs_spawn_by_spawner"]
     assert spawner == [
         'sum by (source) (count_over_time({service_name="unknown_service", event_name="spawn"} | json | '
         'category="audit" [$__interval])) / ($__interval_ms / 60000)'
     ]
-    life = _all_rendered()["ava_obs_lifecycle_counts"]
+    life = _all_rendered()["meiva_obs_lifecycle_counts"]
     assert life == [
         'sum by (event_name) (count_over_time({service_name="unknown_service", event_name=~"^(spawn|terminate|restart|resurrect|fork)$"} | json | '
         'category="audit" '
@@ -252,7 +270,7 @@ def test_lifecycle_and_spawner_window_aggregates() -> None:
 
 
 def test_sdk_call_top_table_shape() -> None:
-    expr = _all_rendered()["ava_obs_sdk_call_top"][0]
+    expr = _all_rendered()["meiva_obs_sdk_call_top"][0]
     assert expr.startswith("topk(20, sum by (attributes_fn) (sum_over_time(")
     assert "$__range" in expr
     assert 'unwrap attributes_sample_rate | __error__=""' in expr
@@ -260,27 +278,29 @@ def test_sdk_call_top_table_shape() -> None:
 
 
 def test_events_rate_uses_rate() -> None:
-    expr = _all_rendered()["ava_obs_events_rate"][0]
+    expr = _all_rendered()["meiva_obs_events_rate"][0]
     assert expr == 'sum(rate({service_name="unknown_service"} | json | __error__="" [1m]))'
 
 
 def test_frontend_table_shapes() -> None:
     rendered = _all_rendered()
-    assert rendered["ava_obs_frontend_top_elements"][0].startswith(
+    assert rendered["meiva_obs_frontend_top_elements"][0].startswith(
         "topk(15, sum by (attributes_element) (count_over_time("
     )
-    assert 'attributes_element="page-view"' in rendered["ava_obs_frontend_page_views"][0]
-    assert 'attributes_element="setting-change"' in rendered["ava_obs_frontend_settings_changes"][0]
+    assert 'attributes_element="page-view"' in rendered["meiva_obs_frontend_page_views"][0]
+    assert (
+        'attributes_element="setting-change"' in rendered["meiva_obs_frontend_settings_changes"][0]
+    )
     for name in (
-        "ava_obs_frontend_top_elements",
-        "ava_obs_frontend_page_views",
-        "ava_obs_frontend_settings_changes",
+        "meiva_obs_frontend_top_elements",
+        "meiva_obs_frontend_page_views",
+        "meiva_obs_frontend_settings_changes",
     ):
         assert 'source="user"' in rendered[name][0], name
 
 
 def test_agent_llm_usage_table_columns() -> None:
-    exprs = _all_rendered()["ava_obs_agent_llm_usage_table"]
+    exprs = _all_rendered()["meiva_obs_agent_llm_usage_table"]
     assert len(exprs) == 4
     assert "sum by (agent_id) (count_over_time(" in exprs[0]
     assert "unwrap attributes_in_total" in exprs[1]
@@ -292,7 +312,7 @@ def test_agent_llm_usage_table_columns() -> None:
 
 
 def test_inspector_agent_queries_render_agent_id() -> None:
-    for name in ("ava_obs_agent_llm_cost_usd", "ava_obs_agent_delivery_stalled_count"):
+    for name in ("meiva_obs_agent_llm_cost_usd", "meiva_obs_agent_delivery_stalled_count"):
         spec = next(m for m in _pack() if m.name == name)
         rendered = render_query(spec, agent_id=1234)
         assert 'agent_id="1234"' in rendered
@@ -302,7 +322,7 @@ def test_inspector_agent_queries_render_agent_id() -> None:
 
 def test_soft_compaction_share_excludes_manual_and_unattributed_history() -> None:
     rendered = _all_rendered()
-    share = rendered["ava_obs_compaction_soft_share"][0]
+    share = rendered["meiva_obs_compaction_soft_share"][0]
     assert 'attributes_compact_kind="compact_summary"' in share
     assert 'attributes_compact_kind=~"compact_summary|auto"' in share
     assert 'attributes_reminder_shown=~"true|false"' in share
@@ -312,7 +332,7 @@ def test_soft_compaction_share_excludes_manual_and_unattributed_history() -> Non
 
 
 def test_preparation_target_requires_a_reminder_in_the_completed_window() -> None:
-    reminded = _all_rendered()["ava_obs_compaction_soft_share"][1]
+    reminded = _all_rendered()["meiva_obs_compaction_soft_share"][1]
     assert 'attributes_reminder_shown="true"' in reminded
     assert 'attributes_compact_kind="compact_summary"' in reminded
     assert 'attributes_compact_kind=~"compact_summary|auto"' in reminded
@@ -320,7 +340,7 @@ def test_preparation_target_requires_a_reminder_in_the_completed_window() -> Non
 
 
 def test_completed_paths_separate_reminder_coverage_from_hard_fallback() -> None:
-    paths = _all_rendered()["ava_obs_compaction_rate"][1:]
+    paths = _all_rendered()["meiva_obs_compaction_rate"][1:]
     assert len(paths) == 4
     for query, (kind, shown) in zip(
         paths,

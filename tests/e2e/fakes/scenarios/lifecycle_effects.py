@@ -36,9 +36,9 @@ def build_relay(model: str, *, agent_id: int | None) -> RecordingModel:
     if _is_peer(agent_id):
         return RecordingModel(agent_id=agent_id, script=(say(PEER_REPLY),))
     code = (
-        "import ava\n"
+        "import meiva\n"
         f"peer = int(open({peer_id_file()!r}).read())\n"
-        f"ava.agents.send_message(peer, {PING!r})\n"
+        f"meiva.agents.send_message(peer, {PING!r})\n"
         "print('sent-to', peer)"
     )
     return RecordingModel(agent_id=agent_id, script=(exec_call(1, code), say(FINAL)))
@@ -48,8 +48,8 @@ def build_spawn(model: str, *, agent_id: int | None) -> RecordingModel:
     if _is_peer(agent_id):
         return RecordingModel(agent_id=agent_id, script=(say(CHILD_REPLY),))
     code = (
-        "import ava\nfrom uuid import uuid4\n"
-        f"child = ava.agents.spawn(prompt={CHILD_PROMPT!r}, idempotency_key=str(uuid4()))\n"
+        "import meiva\nfrom uuid import uuid4\n"
+        f"child = meiva.agents.spawn(prompt={CHILD_PROMPT!r}, idempotency_key=str(uuid4()))\n"
         "print('child-id', child)"
     )
     return RecordingModel(agent_id=agent_id, script=(exec_call(1, code), say(FINAL)))
@@ -73,5 +73,5 @@ def build_cancel(model: str, *, agent_id: int | None) -> RecordingModel:
 
 
 def build_self_compact(model: str, *, agent_id: int | None) -> RecordingModel:
-    code = f"import ava\nava.self.compact({COMPACT_SUMMARY!r})"
+    code = f"import meiva\nmeiva.self.compact({COMPACT_SUMMARY!r})"
     return RecordingModel(agent_id=agent_id, script=(exec_call(1, code), say(FINAL)))

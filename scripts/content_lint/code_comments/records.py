@@ -52,8 +52,8 @@ def list_field(data: dict[str, object], key: str, *, required: bool = True) -> t
 
 
 def validate_owner(path: str) -> None:
-    if not path.endswith(".ava.okf.md") or "docs" not in PurePosixPath(path).parts[:-1]:
-        raise ValueError("contracts belong in a component's docs/*.ava.okf.md")
+    if not path.endswith(".meiva.okf.md") or "docs" not in PurePosixPath(path).parts[:-1]:
+        raise ValueError("contracts belong in a component's docs/*.meiva.okf.md")
     if path.startswith(("docs/decisions/", "docs/postmortems/", "future/")):
         raise ValueError("historical records and plans cannot own current contracts")
 
@@ -123,10 +123,10 @@ def parse_document(path: str, text: str) -> tuple[list[Contract], list[Finding]]
         if match:
             fence = match[2]
             info = match[3].strip()
-            active = info == "ava-contract"
+            active = info == "meiva-contract"
             opening = line
             body = []
-            if info.startswith("ava-contract") and not active:
+            if info.startswith("meiva-contract") and not active:
                 findings.append(
                     Finding(path, line, "contract-schema", "contract fence takes no options")
                 )

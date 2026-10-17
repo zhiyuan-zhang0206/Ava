@@ -35,7 +35,7 @@ SURFACES: tuple[Surface, ...] = (
         entry_points=(PluginContributions,),
         manifest_key="hooks",
         protocol="agent.hooks.Hook.__call__"
-        "(state: AgentState, runtime: Runtime[AvaContext], config: RunnableConfig, /)"
+        "(state: AgentState, runtime: Runtime[MeivaContext], config: RunnableConfig, /)"
         " -> dict | None",
         note=(
             "`after_init` / `before_llm` / `before_exec` / `after_exec` of what `contribute()` "
@@ -62,7 +62,7 @@ SURFACES: tuple[Surface, ...] = (
         manifest_key="sdkNamespaces",
         protocol=None,
         note=(
-            "`sdk_namespaces` of what `plugin.py`'s `contribute()` returns: adds ava.<name> for the "
+            "`sdk_namespaces` of what `plugin.py`'s `contribute()` returns: adds meiva.<name> for the "
             "agent to call (`expand=True` also promotes it into the prompt's expanded SDK "
             "reference); a name that conflicts with an existing one refuses the plugin"
         ),
@@ -73,7 +73,7 @@ SURFACES: tuple[Surface, ...] = (
         manifest_key=None,
         protocol=None,
         note=(
-            "`sdk_members`: hangs one callable on an existing namespace (ava.self.set_label); preferred over "
+            "`sdk_members`: hangs one callable on an existing namespace (meiva.self.set_label); preferred over "
             "a new top-level name, and its docstring is what the agent reads"
         ),
     ),
@@ -83,7 +83,7 @@ SURFACES: tuple[Surface, ...] = (
         manifest_key=None,
         protocol=None,
         note=(
-            "`sdk_expansions`: promotes a dotted ava path into the system prompt's expanded SDK reference, "
+            "`sdk_expansions`: promotes a dotted meiva path into the system prompt's expanded SDK reference, "
             "ahead of the framework list"
         ),
     ),
@@ -93,8 +93,8 @@ SURFACES: tuple[Surface, ...] = (
         manifest_key="sdkWraps",
         protocol="wrapper(inner: Callable, *args, **kwargs) -> Any",
         note=(
-            "`sdk_wraps`: installs a layer around an existing ava callable; layers stack in plugin load "
-            "order and `ava.extend.stack(target)` shows the whole chain"
+            "`sdk_wraps`: installs a layer around an existing meiva callable; layers stack in plugin load "
+            "order and `meiva.extend.stack(target)` shows the whole chain"
         ),
     ),
     Surface(
@@ -190,8 +190,8 @@ SURFACES: tuple[Surface, ...] = (
         manifest_key="config",
         protocol=None,
         note=(
-            "`config`: a frozen BaseModel bound once from $AVA_HOME/configs/<plugin>/config.json and "
-            "read as ava.sdk_surface.settings.plugins.<plugin>; schema drift points at `ava plugins update`"
+            "`config`: a frozen BaseModel bound once from $MEIVA_HOME/configs/<plugin>/config.json and "
+            "read as meiva.sdk_surface.settings.plugins.<plugin>; schema drift points at `meiva plugins update`"
         ),
     ),
 )
@@ -213,7 +213,7 @@ def _unquoted(annotation: Any) -> Any:
     return _SourceText(annotation) if isinstance(annotation, str) else annotation
 
 
-# ava:ref agent/extensions/docs/catalog.ava.okf.md#catalog-reports-load-facts
+# meiva:ref agent/extensions/docs/catalog.meiva.okf.md#catalog-reports-load-facts
 def entry_point_signature(entry_point: type) -> str:
     signature = inspect.signature(entry_point)
     signature = signature.replace(
@@ -257,7 +257,7 @@ class Catalog:
     plugins: tuple[PluginView, ...]
 
     def plugin(self, name: str) -> PluginView:
-        # ava:ref agent/extensions/docs/catalog.ava.okf.md#catalog-reports-load-facts
+        # meiva:ref agent/extensions/docs/catalog.meiva.okf.md#catalog-reports-load-facts
         known = {p.name for p in self.plugins}
         resolved = names.find(name, known) or name
         for view in self.plugins:
@@ -273,11 +273,11 @@ class UnknownPluginError(Exception):
     pass
 
 
-# ava:ref agent/extensions/docs/catalog.ava.okf.md#catalog-reports-load-facts
+# meiva:ref agent/extensions/docs/catalog.meiva.okf.md#catalog-reports-load-facts
 def build_catalog() -> Catalog:
     from agent.state import plugin_state_schema
-    from ava.sdk_surface.extensions import load_extensions
     from base.packages.plugins.loading.registry import declarations
+    from meiva.sdk_surface.extensions import load_extensions
 
     config = load_extensions(validate_state=plugin_state_schema).config
     declared = {name: contributions for name, _dir, contributions in declarations()}
@@ -334,7 +334,7 @@ def _repo_plugins_dir() -> Path:
     return paths.repo_plugins_dir()
 
 
-# ava:ref agent/extensions/docs/catalog.ava.okf.md#manifest-diff-scope
+# meiva:ref agent/extensions/docs/catalog.meiva.okf.md#manifest-diff-scope
 def declared_vs_registered(view: PluginView) -> tuple[DiffEntry, ...]:
     entries: list[DiffEntry] = []
     for surface in SURFACES:
@@ -353,7 +353,7 @@ def declared_vs_registered(view: PluginView) -> tuple[DiffEntry, ...]:
     return tuple(entries)
 
 
-# ava:ref agent/extensions/docs/catalog.ava.okf.md#manifest-diff-scope
+# meiva:ref agent/extensions/docs/catalog.meiva.okf.md#manifest-diff-scope
 def _declared_identifiers(manifest: PluginManifest, key: str) -> set[str]:
     declared = manifest.contributions.get(key)
     if declared is None:

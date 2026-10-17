@@ -1,13 +1,13 @@
 """Running-commit bookmark — the commit the gateway was last started on.
 
-A single file (`$AVA_HOME/running_sha`) written by `ava start` right before
+A single file (`$MEIVA_HOME/running_sha`) written by `meiva start` right before
 services come up, and read by the update change-detection path. The update
 compares this bookmark against the latest `origin/main` (after `git fetch`)
 instead of against the current `HEAD` — so a manual `git pull` between start
 and update cannot empty out the diff and skip the restart.
 
 Scope note: this is a bookmark for *change detection*, not an answer to "what
-is running right now". `ava start` writes it one line before a launcher that
+is running right now". `meiva start` writes it one line before a launcher that
 leaves already-running sessions alone, so it advances on a start that restarted
 nothing. Status surfaces therefore ask `base.native_process.loaded_commit`, which each process
 freezes at its own boot; this file stays as the update baseline it always was.
@@ -20,12 +20,12 @@ update detection should compare its own running commit, not the cluster pin.
 
 from __future__ import annotations
 
-from base.paths import ava_home, running_sha_path
+from base.paths import meiva_home, running_sha_path
 
 
 def get() -> str | None:
     """The commit this host was last started on, or None if never recorded."""
-    path = running_sha_path(ava_home())
+    path = running_sha_path(meiva_home())
     try:
         content = path.read_text().strip()
     except FileNotFoundError:
@@ -37,7 +37,7 @@ def get() -> str | None:
 
 def set(sha: str) -> None:
     """Record `sha` as the commit this host is now running."""
-    path = running_sha_path(ava_home())
+    path = running_sha_path(meiva_home())
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(sha.strip() + "\n")
 
@@ -45,4 +45,4 @@ def set(sha: str) -> None:
 def clear() -> None:
     """Remove the bookmark (recovery — forces fallback-to-HEAD on the next
     update check)."""
-    running_sha_path(ava_home()).unlink(missing_ok=True)
+    running_sha_path(meiva_home()).unlink(missing_ok=True)

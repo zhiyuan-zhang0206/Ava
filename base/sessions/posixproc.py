@@ -17,8 +17,8 @@ The agent launch and the reap / status consumers use this surface:
   (gateway / ops daemon) never accumulates it as a zombie, and no PTY is
   allocated;
 - its identity (pid + start-time, to defeat pid recycling) is recorded as JSON
-  under `$AVA_HOME/run/sessions/<name>.json`;
-- stdout/stderr are redirected to `$AVA_HOME/logs/<name>.out.log` (+ an optional
+  under `$MEIVA_HOME/run/sessions/<name>.json`;
+- stdout/stderr are redirected to `$MEIVA_HOME/logs/<name>.out.log` (+ an optional
   split stderr file) so a crash's last words survive the process ending;
 - liveness = the record's pid is alive *and* its start-time matches the record;
 - kill signals the process's whole group (graceful SIGTERM → the agent's finally
@@ -26,7 +26,7 @@ The agent launch and the reap / status consumers use this surface:
 
 Agent liveness of record is `agents_meta.pid` in the DB — the respawn controller
 reaps by that pid, and force-terminate kills by it. This record layer is the
-*no-DB* fallback: `ava stop` tears the gateway + DB down, then reaps the agents
+*no-DB* fallback: `meiva stop` tears the gateway + DB down, then reaps the agents
 it left running by enumerating these records.
 """
 
@@ -45,7 +45,7 @@ import psutil
 from base.log import logger
 from base.native_process import pid_starttime_ticks
 from base.native_process.ownership import stable_create_time
-from base.paths import ava_home, logs_dir, run_dir
+from base.paths import logs_dir, meiva_home, run_dir
 from base.sessions.record import SessionRecord
 
 __all__ = [
@@ -84,7 +84,7 @@ _KILL_POLL_S = 0.05
 
 
 def _sessions_dir() -> Path:
-    d = run_dir(ava_home()) / "sessions"
+    d = run_dir(meiva_home()) / "sessions"
     d.mkdir(parents=True, exist_ok=True)
     return d
 
@@ -94,7 +94,7 @@ def record_path(name: str) -> Path:
 
 
 def session_log_path(name: str) -> Path:
-    """The combined stdout+stderr log for a session ($AVA_HOME/logs/<name>.out.log)."""
+    """The combined stdout+stderr log for a session ($MEIVA_HOME/logs/<name>.out.log)."""
     return logs_dir() / f"{name}.out.log"
 
 
@@ -175,7 +175,7 @@ def new_session(
     stdout_path = session_log_path(name)
     stderr_path = stderr_append if stderr_append is not None else stdout_path
     # `2>>{path}` / the helper's os.open do not mkdir; guarantee the dir on a
-    # fresh machine so the launch cannot fail on a missing $AVA_HOME/logs.
+    # fresh machine so the launch cannot fail on a missing $MEIVA_HOME/logs.
     logs_dir().mkdir(parents=True, exist_ok=True)
 
     # Run the reparent helper and wait for it (it exits in microseconds after
@@ -244,7 +244,7 @@ def graceful_signal(name: str, *, expected: SessionRecord | None = None) -> bool
 
     The agent converts SIGTERM to SystemExit and runs its finally (closing the
     MCP daemon + Claude Code subprocess it tracks). Returns True if a live
-    process was signaled. `ava stop`'s reap uses this to SIGTERM every agent, then
+    process was signaled. `meiva stop`'s reap uses this to SIGTERM every agent, then
     wait on all of them under one shared deadline before force-killing stragglers
     — so the teardown is O(slowest agent), not O(sum of agents).
     """

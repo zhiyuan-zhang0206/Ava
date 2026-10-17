@@ -1,7 +1,7 @@
 """The provider face is a declaration: `provider.py` exports `contribute()`, and the loader — the one
 writer of the model catalog — installs it after the manifest gate.
 
-A provider plugin whose `ava-plugin.json` disagrees with what its `contribute()` provides on the
+A provider plugin whose `meiva-plugin.json` disagrees with what its `contribute()` provides on the
 `providers` key (a prefix declared but not provided, or provided but not declared), that ships no
 manifest, or whose `provider.py` has no usable `contribute()`, refuses the complete catalog build.
 """
@@ -38,7 +38,7 @@ def _manifest(name: str, providers: list[str]) -> str:
             "apiVersion": 2,
             "name": name,
             "version": "1.0.0",
-            "engines": {"ava": ">=0.1.0"},
+            "engines": {"meiva": ">=0.1.0"},
             "contributions": {"providers": providers},
         }
     )
@@ -49,7 +49,7 @@ def test_a_manifest_that_matches_the_declared_prefix_installs_the_provider(
 ) -> None:
     provider_plugin(prefix="kept-", model="kept-1", dir_name="matching_provider")
     plugin_dir = paths.plugins_dir() / "matching_provider"
-    (plugin_dir / "ava-plugin.json").write_text(_manifest("matching_provider", ["kept-"]))
+    (plugin_dir / "meiva-plugin.json").write_text(_manifest("matching_provider", ["kept-"]))
 
     catalog = build_model_catalog()
 
@@ -62,7 +62,7 @@ def test_a_manifest_that_disagrees_refuses_the_catalog_and_can_be_corrected(
     provider_plugin(prefix="kept-", model="kept-1", dir_name="kept_provider")
     provider_plugin(prefix="gated-", model="gated-1", dir_name="gated_provider")
     gated_dir = paths.plugins_dir() / "gated_provider"
-    manifest = gated_dir / "ava-plugin.json"
+    manifest = gated_dir / "meiva-plugin.json"
     manifest.write_text(_manifest("gated_provider", ["other-"]))
 
     with pytest.raises(ContributionMismatch, match="gated_provider"):
@@ -78,9 +78,9 @@ def test_a_provider_plugin_without_a_manifest_refuses_the_catalog(
     provider_plugin: Callable[..., None],
 ) -> None:
     provider_plugin(prefix="bare-", model="bare-1", dir_name="bare_provider")
-    (paths.plugins_dir() / "bare_provider" / "ava-plugin.json").unlink()
+    (paths.plugins_dir() / "bare_provider" / "meiva-plugin.json").unlink()
 
-    with pytest.raises(ManifestError, match=r"bare_provider.*ava-plugin\.json not found"):
+    with pytest.raises(ManifestError, match=r"bare_provider.*meiva-plugin\.json not found"):
         build_model_catalog()
 
 
@@ -147,10 +147,10 @@ def test_the_manifest_gates_the_decision_providers_key(
         "apiVersion": 2,
         "name": "dec_plugin",
         "version": "1.0.0",
-        "engines": {"ava": ">=0.1.0"},
+        "engines": {"meiva": ">=0.1.0"},
         "contributions": {"decisionProviders": declared},
     }
-    (tmp_path / "ava-plugin.json").write_text(json.dumps(manifest))
+    (tmp_path / "meiva-plugin.json").write_text(json.dumps(manifest))
 
     if agrees:
         check_manifest("dec_plugin", tmp_path, _decision_contribution(), ("decisionProviders",))

@@ -5,7 +5,7 @@
 `decisions/2026-09-12-stop-window-contract.md` defined the quiesced window as `drained` ..
 `ready` and gave the host's pending-turn scan a narrower predicate (`in_stop_leg()`,
 `drained` .. `stopped`) so a booting host could scan while the unit was still held. The
-start leg that justified it never materialised: `ava start` authorizes bring-up against a
+start leg that justified it never materialised: `meiva start` authorizes bring-up against a
 `stopped` (or earlier) hold and releases the hold after readiness, and no command ever
 advanced the journal to `starting` or `ready`. Only tests entered those phases, which kept
 two predicates with identical membership alive.

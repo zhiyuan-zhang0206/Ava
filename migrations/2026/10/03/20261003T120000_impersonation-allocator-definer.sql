@@ -1,5 +1,5 @@
 -- The impersonation session allocator bumps agents.impersonation_index from a
--- BEFORE INSERT trigger on agent_impersonations, which `ava impersonate request`
+-- BEFORE INSERT trigger on agent_impersonations, which `meiva impersonate request`
 -- inserts as the runner role. As SECURITY INVOKER that made the runner's
 -- table-wide UPDATE on agents load-bearing. DEFINER (the convention of every
 -- other impersonation function) lets the refresh revoke that grant: agents is

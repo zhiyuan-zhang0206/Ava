@@ -7,8 +7,8 @@ from pathlib import Path
 
 
 def test_machine_value_and_pipeline_type_imports_do_not_load_settings(tmp_path: Path) -> None:
-    env = {key: value for key, value in os.environ.items() if not key.startswith("AVA_")}
-    env["AVA_HOME"] = str(tmp_path)
+    env = {key: value for key, value in os.environ.items() if not key.startswith("MEIVA_")}
+    env["MEIVA_HOME"] = str(tmp_path)
     result = subprocess.run(  # noqa: S603 — fixed interpreter and child script, isolated temporary home
         [
             sys.executable,

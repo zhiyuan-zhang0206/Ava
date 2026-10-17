@@ -6,7 +6,7 @@ On 2026-09-18 a DeepSeek balance exhaustion stopped the fleet in one blow: the
 provider answered HTTP 402, `classify_error` classified the rejection as
 PERMANENT, the recovery breaker halted automatic recovery after two consecutive
 rejections, and the corpse reaper terminated the rows — 23 agents in all. The
-only recovery was `ava agents resurrect <id>` per victim, a 5h43m manual loop
+only recovery was `meiva agents resurrect <id>` per victim, a 5h43m manual loop
 with no enumeration, no whitelist, no health gate, and no audit.
 
 Two standing constraints bound the fix:
@@ -27,7 +27,7 @@ not automate the trigger.
 
 An explicitly triggered batch-resurrect entry, dry-run by default:
 
-- **Surface.** `ava agents resurrect-billing` (CLI; `--execute` to act) over
+- **Surface.** `meiva agents resurrect-billing` (CLI; `--execute` to act) over
   `POST /api/agents/resurrect-billing` — `execute=false` is a strictly
   read-only preview.
 - **Whitelist.** `status='terminated'` + `closed_at IS NULL` +
@@ -66,7 +66,7 @@ An explicitly triggered batch-resurrect entry, dry-run by default:
   explicit-human ruling; a fleet-scale automatic revive races the provider
   state that caused the halt, and a balance readout is not a fleet
   willingness signal. No auto path is added.
-- **A script looping `ava agents resurrect <id>`.** No enumeration, no
+- **A script looping `meiva agents resurrect <id>`.** No enumeration, no
   whitelist, no balance gate, no audit — the manual cascade the outage
   exposed; it also cannot separate billing victims from user-finalized rows.
 - **Reusing `resurrect-explicit-v2` with a flag.** Embedding a new mutating
@@ -91,11 +91,11 @@ An explicitly triggered batch-resurrect entry, dry-run by default:
   repair (evidence in the incident's event stream) — never a guess-filled
   backfill. Whether to resurrect those rows is a separate explicit decision.
 - All failure surfaces are fail-closed: a balance-endpoint drift refuses (fix
-  via `AVA_BILLING_RECOVERY_*`); an unreachable home machine yields a
+  via `MEIVA_BILLING_RECOVERY_*`); an unreachable home machine yields a
   per-agent `failed` and a rerun converges; a deferred exit settlement stays
   with the existing resurrection-retry machinery. Rollback = stop calling the
   entry (the migration's paired down migration drops the column).
-- The per-agent `ava agents resurrect` contract is unchanged and remains the
+- The per-agent `meiva agents resurrect` contract is unchanged and remains the
   manual rescue path for user-terminated and closed rows.
 
 Partly superseded by: decisions/2026-09-27-terminate-has-no-closed-state.md (the

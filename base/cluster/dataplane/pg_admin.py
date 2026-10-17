@@ -46,17 +46,17 @@ _PLAIN_ROLE = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
 def pg_socket_dir(socket_root: Path | None = None, *, home: Path | None = None) -> Path:
     """A SHORT, cluster-unique socket directory. The Postgres socket path
     (`<dir>/.s.PGSQL.<port>`) is capped at 103 bytes, so it cannot live under a
-    deep `$AVA_HOME` / pytest-tmp data dir — a short `/tmp/ava-pg-<home-slug>`
+    deep `$MEIVA_HOME` / pytest-tmp data dir — a short `/tmp/meiva-pg-<home-slug>`
     (keyed on the cluster home path, never a name) stays well under the cap. The
     socket serves only the OS user's peer logins — local provisioning and the
     collector's monitoring role (the runtime connects over TCP); 0700 keeps it
-    owner-only. `home` defaults to `ava_home()` resolved in THIS module;
+    owner-only. `home` defaults to `meiva_home()` resolved in THIS module;
     the cli thin shell passes its own resolution so cli-layer steering (tests
-    patch `cli.commands.data_plane.cluster_instance.ava_home`) keeps flowing."""
+    patch `cli.commands.data_plane.cluster_instance.meiva_home`) keeps flowing."""
     if home is None:
-        from base.paths import ava_home
+        from base.paths import meiva_home
 
-        home = ava_home()
+        home = meiva_home()
     return ensure_private_dir(pg_socket_path(home, socket_root))
 
 
@@ -64,7 +64,7 @@ def pg_socket_path(home: Path, socket_root: Path | None = None) -> Path:
     """`pg_socket_dir`'s path for `home`, computed without touching the filesystem
     (for renderers that only name the socket, such as the collector config)."""
     root = Path("/tmp") if socket_root is None else socket_root  # noqa: S108 — OS-fixed production socket root
-    return root / f"ava-pg-{home_slug(home)}"
+    return root / f"meiva-pg-{home_slug(home)}"
 
 
 def pg_admin_url(pg_port: int) -> str:
@@ -200,17 +200,17 @@ def local_owner_authority(db_url: str, *, remote_plane: bool) -> OwnerAuthority:
         RuntimeError: the data plane is remote-managed (`remote_plane`; its provider URL is
             the only authority), or this home has no registry record.
     """
-    from base.paths import ava_home
+    from base.paths import meiva_home
 
     if remote_plane:
         raise RuntimeError("a remote-managed data plane has no local owner authority")
-    home = ava_home()
+    home = meiva_home()
     record = get_record(home)
     if record is None:
         raise RuntimeError(f"no registry record for home {home}; cannot dial its Postgres")
     database = conninfo_to_dict(db_url).get("dbname")
     if not isinstance(database, str) or not database:
-        raise RuntimeError("AVA_DB_URL names no database")
+        raise RuntimeError("MEIVA_DB_URL names no database")
     return OwnerAuthority(
         admin_url=pg_admin_url(record.ports["postgres"]),
         database=database,

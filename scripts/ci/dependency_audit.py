@@ -73,7 +73,7 @@ def _gh_api(path: str) -> Any:
     return json.loads(result.stdout)
 
 
-# ava:ref scripts/ci/docs/dependency-audit.ava.okf.md#osv-severity-grading
+# meiva:ref scripts/ci/docs/dependency-audit.meiva.okf.md#osv-severity-grading
 def osv_severity(advisory_ids: list[str], fetch: Fetch = _fetch_json) -> str:
     for advisory_id in advisory_ids:
         try:
@@ -135,7 +135,7 @@ def _no_forward_fix(fix: Any, packages: dict[str, Any]) -> bool:
     return _version_key(suggested) <= _version_key(version)
 
 
-# ava:ref scripts/ci/docs/dependency-audit.ava.okf.md#dev-only-exemption
+# meiva:ref scripts/ci/docs/dependency-audit.meiva.okf.md#dev-only-exemption
 def npm_vulnerabilities(
     audit_json: dict[str, Any], packages: dict[str, Any] | None = None
 ) -> list[Vulnerability]:
@@ -166,7 +166,7 @@ def npm_vulnerabilities(
     return found
 
 
-# ava:ref scripts/ci/docs/dependency-audit.ava.okf.md#incomplete-audit-guard
+# meiva:ref scripts/ci/docs/dependency-audit.meiva.okf.md#incomplete-audit-guard
 def run_json(argv: list[str], cwd: Path) -> dict[str, Any]:
     result = subprocess.run(argv, capture_output=True, text=True, cwd=cwd, timeout=600, check=False)
     try:
@@ -182,7 +182,7 @@ def run_json(argv: list[str], cwd: Path) -> dict[str, Any]:
     return cast("dict[str, Any]", parsed)
 
 
-# ava:ref scripts/ci/docs/dependency-audit.ava.okf.md#pinned-binary-constants
+# meiva:ref scripts/ci/docs/dependency-audit.meiva.okf.md#pinned-binary-constants
 PINS: tuple[tuple[str, str, str], ...] = (
     ("zonky Postgres", "base/cluster/dataplane/runtime_binaries.py", r'^PG_VERSION = "([^"]+)"'),
     ("pgvector", "base/cluster/dataplane/runtime_binaries.py", r'^PGVECTOR_VERSION = "([^"]+)"'),
@@ -204,7 +204,7 @@ def pinned_version(path: str, pattern: str, root: Path = _REPO_ROOT) -> str:
     return matches[0]
 
 
-# ava:ref scripts/ci/docs/dependency-audit.ava.okf.md#zonky-major-comparison
+# meiva:ref scripts/ci/docs/dependency-audit.meiva.okf.md#zonky-major-comparison
 def zonky_latest(pinned: str, metadata_xml: str) -> str:
     major = pinned.split(".", 1)[0]
     versions = re.findall(r"<version>([^<]+)</version>", metadata_xml)
@@ -249,7 +249,7 @@ def latest_binaries(
     ]
 
 
-# ava:ref scripts/ci/docs/dependency-audit.ava.okf.md#run-actionability
+# meiva:ref scripts/ci/docs/dependency-audit.meiva.okf.md#run-actionability
 def is_actionable(vulnerabilities: list[Vulnerability], binaries: list[Binary]) -> bool:
     return any(
         v.severity in _ACTIONABLE_SEVERITIES and not v.dev_only_no_fix for v in vulnerabilities
@@ -325,7 +325,7 @@ def _gh(argv: list[str]) -> str:
     ).stdout
 
 
-# ava:ref scripts/ci/docs/dependency-audit.ava.okf.md#weekly-issue-lifecycle
+# meiva:ref scripts/ci/docs/dependency-audit.meiva.okf.md#weekly-issue-lifecycle
 def sync_issue(
     repo: str, body: str, *, actionable: bool, gh: Callable[[list[str]], str] = _gh
 ) -> str:
@@ -387,7 +387,7 @@ def sync_issue(
     return f"closed {len(open_issues)} issue(s)"
 
 
-# ava:ref scripts/ci/docs/dependency-audit.ava.okf.md#weekly-report-run
+# meiva:ref scripts/ci/docs/dependency-audit.meiva.okf.md#weekly-report-run
 def main(argv: list[str]) -> int:
     parser = argparse.ArgumentParser(description="Weekly dependency audit report")
     parser.add_argument("--out", type=Path, required=True)

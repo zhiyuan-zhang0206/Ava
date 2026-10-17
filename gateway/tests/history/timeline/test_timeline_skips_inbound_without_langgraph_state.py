@@ -49,8 +49,8 @@ def test_timeline_skips_inbound_without_langgraph_state(
     assert [it for it in items if it["kind"] == "inbound_chat"] == []
 
 
-def test_item_created_at_prefers_real_ava_created_at_over_synthetic() -> None:
-    """A message carrying a real `ava_created_at` surfaces it verbatim — the
+def test_item_created_at_prefers_real_meiva_created_at_over_synthetic() -> None:
+    """A message carrying a real `meiva_created_at` surfaces it verbatim — the
     timeline shows the message's own wall-clock time, not the synthetic
     anchor+microsecond offset (which renders as 1970 when no chat preceded it)."""
     from langchain_core.messages import ToolMessage
@@ -59,8 +59,8 @@ def test_item_created_at_prefers_real_ava_created_at_over_synthetic() -> None:
         content="out",
         tool_call_id="t1",
         additional_kwargs={
-            "ava_msg_type": "exec_output",
-            "ava_created_at": "2026-06-19T12:00:00+00:00",
+            "meiva_msg_type": "exec_output",
+            "meiva_created_at": "2026-06-19T12:00:00+00:00",
         },
     )
     items, _ = build_timeline_items([msg], inputs=_TIMELINE_INPUTS)
@@ -75,18 +75,18 @@ def test_inbound_rejects_malformed_embedded_id(malformed_id: object) -> None:
     inbound = HumanMessage(
         content="message",
         additional_kwargs={
-            "ava_msg_type": "inbound",
-            "ava_source": "user",
-            "ava_inbound_id": malformed_id,
-            "ava_created_at": "2026-08-22T17:47:00+00:00",
+            "meiva_msg_type": "inbound",
+            "meiva_source": "user",
+            "meiva_inbound_id": malformed_id,
+            "meiva_created_at": "2026-08-22T17:47:00+00:00",
         },
     )
 
-    with pytest.raises(ValueError, match="ava_inbound_id"):
+    with pytest.raises(ValueError, match="meiva_inbound_id"):
         build_timeline_items([inbound], inputs=_TIMELINE_INPUTS)
 
 
-def test_aimessage_blocks_share_one_real_ava_created_at() -> None:
+def test_aimessage_blocks_share_one_real_meiva_created_at() -> None:
     """All blocks of one AIMessage carry the message's single real ts — the
     timeline no longer fans its reasoning/text/code items out across synthetic
     per-block microsecond offsets."""
@@ -97,7 +97,7 @@ def test_aimessage_blocks_share_one_real_ava_created_at() -> None:
             {"type": "thinking", "thinking": "hmm", "index": 0},
             {"type": "text", "text": "done", "index": 1},
         ],
-        additional_kwargs={"ava_created_at": "2026-06-19T12:00:00+00:00"},
+        additional_kwargs={"meiva_created_at": "2026-06-19T12:00:00+00:00"},
     )
     items, _ = build_timeline_items([msg], inputs=_TIMELINE_INPUTS)
     assert [it.created_at for it in items] == [
@@ -154,10 +154,10 @@ class TestMultimodalInbound:
                 },
             ],
             additional_kwargs={
-                "ava_msg_type": "inbound",
-                "ava_source": "user",
-                "ava_inbound_id": 1,
-                "ava_image_urls": ["/api/agents/7/uploads/shot.png"],
+                "meiva_msg_type": "inbound",
+                "meiva_source": "user",
+                "meiva_inbound_id": 1,
+                "meiva_image_urls": ["/api/agents/7/uploads/shot.png"],
             },
         )
 
@@ -182,10 +182,10 @@ class TestMultimodalInbound:
                 },
             ],
             additional_kwargs={
-                "ava_msg_type": "inbound",
-                "ava_source": "user",
-                "ava_inbound_id": 2,
-                "ava_image_urls": ["/api/agents/7/uploads/a.png"],
+                "meiva_msg_type": "inbound",
+                "meiva_source": "user",
+                "meiva_inbound_id": 2,
+                "meiva_image_urls": ["/api/agents/7/uploads/a.png"],
             },
         )
         items, _ = build_timeline_items([msg], inputs=_TIMELINE_INPUTS)
@@ -235,7 +235,7 @@ class TestSystemPromptInColdLoad:
         from langchain_core.messages import HumanMessage, SystemMessage
 
         tid = create_agent(db_conn)
-        messages: list[BaseMessage] = [SystemMessage(content="You are Ava.")]
+        messages: list[BaseMessage] = [SystemMessage(content="You are Meiva.")]
         for i in range(60):
             messages.append(HumanMessage(content=f"user msg {i}"))
         self._put_checkpoint(tid, messages)  # pyright: ignore[reportUnknownMemberType]
@@ -247,7 +247,7 @@ class TestSystemPromptInColdLoad:
         assert data["has_more"] is True
         assert data["items"][0]["item_id"] == "0.0"
         assert data["items"][0]["kind"] == "system_prompt"
-        assert data["items"][0]["payload"] == "You are Ava."
+        assert data["items"][0]["payload"] == "You are Meiva."
         assert len(data["items"]) == 51
         # The rest is the newest window in order (0.0 is prepended, not replacing)
         assert data["items"][1]["item_id"] == "11.0"
@@ -259,7 +259,7 @@ class TestSystemPromptInColdLoad:
         from langchain_core.messages import HumanMessage, SystemMessage
 
         tid = create_agent(db_conn)
-        messages: list[BaseMessage] = [SystemMessage(content="You are Ava.")]
+        messages: list[BaseMessage] = [SystemMessage(content="You are Meiva.")]
         for i in range(10):
             messages.append(HumanMessage(content=f"user msg {i}"))
         self._put_checkpoint(tid, messages)  # pyright: ignore[reportUnknownMemberType]
@@ -278,7 +278,7 @@ class TestSystemPromptInColdLoad:
         test_client: GatewayTestClient,
     ) -> None:
         """The implicit window is ``settings.display.timeline_default_limit``
-        (``AVA_TIMELINE_DEFAULT_LIMIT``); 50 is only that field's default."""
+        (``MEIVA_TIMELINE_DEFAULT_LIMIT``); 50 is only that field's default."""
         from langchain_core.messages import HumanMessage
 
         test_client.app.state.config_authority.runtime.display.timeline_default_limit = 5
@@ -305,13 +305,13 @@ class TestSystemPromptInColdLoad:
         from langchain_core.messages import HumanMessage, SystemMessage
 
         tid = create_agent(db_conn)
-        messages: list[BaseMessage] = [SystemMessage(content="You are Ava.")]
+        messages: list[BaseMessage] = [SystemMessage(content="You are Meiva.")]
         messages.append(
             HumanMessage(
                 content="Conversation summary line",
                 additional_kwargs={
-                    "ava_msg_type": "compact_summary",
-                    "ava_created_at": "2026-08-06T00:00:00+00:00",
+                    "meiva_msg_type": "compact_summary",
+                    "meiva_created_at": "2026-08-06T00:00:00+00:00",
                 },
             )
         )
@@ -340,13 +340,13 @@ class TestSystemPromptInColdLoad:
         from langchain_core.messages import HumanMessage, SystemMessage
 
         tid = create_agent(db_conn)
-        messages: list[BaseMessage] = [SystemMessage(content="You are Ava.")]
+        messages: list[BaseMessage] = [SystemMessage(content="You are Meiva.")]
         messages.append(
             HumanMessage(
                 content="Short summary",
                 additional_kwargs={
-                    "ava_msg_type": "compact_summary",
-                    "ava_created_at": "2026-08-06T00:00:00+00:00",
+                    "meiva_msg_type": "compact_summary",
+                    "meiva_created_at": "2026-08-06T00:00:00+00:00",
                 },
             )
         )
@@ -369,7 +369,7 @@ class TestSystemPromptInColdLoad:
         from langchain_core.messages import HumanMessage, SystemMessage
 
         tid = create_agent(db_conn)
-        messages: list[BaseMessage] = [SystemMessage(content="You are Ava.")]
+        messages: list[BaseMessage] = [SystemMessage(content="You are Meiva.")]
         for i in range(60):
             messages.append(HumanMessage(content=f"user msg {i}"))
         self._put_checkpoint(tid, messages)  # pyright: ignore[reportUnknownMemberType]

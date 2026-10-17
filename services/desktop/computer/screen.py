@@ -57,7 +57,7 @@ def current_scale(helper: PermissionsHelperClient, measured: float | None) -> fl
 
 
 def snapshot_path(agent_id: int | None) -> Path:
-    """A fresh capture path under $AVA_HOME/logs/computer/snapshots/."""
+    """A fresh capture path under $MEIVA_HOME/logs/computer/snapshots/."""
     directory = logs_dir() / "computer" / "snapshots"
     directory.mkdir(parents=True, exist_ok=True)
     stamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%S%f")

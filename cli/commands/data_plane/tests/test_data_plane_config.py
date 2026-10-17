@@ -9,8 +9,8 @@ import pytest
 from base.config.tests.configuration import snapshot_process_config
 from cli.commands.data_plane.config import DataPlaneConfig, data_plane_config_from_boot
 
-_LOOPBACK_DB = "postgresql://ava@127.0.0.1:5432/ava"
-_LOOPBACK_REDIS = "redis://ava@127.0.0.1:6380/0"
+_LOOPBACK_DB = "postgresql://meiva@127.0.0.1:5432/meiva"
+_LOOPBACK_REDIS = "redis://meiva@127.0.0.1:6380/0"
 _FOREIGN = "10.9.8.7"
 
 
@@ -20,14 +20,14 @@ def test_the_mapping_reads_every_field_from_its_own_setting(
     boot = snapshot_process_config()
     redis_bin = str(tmp_path_factory.mktemp("redis-bin"))
     expected = {
-        "db_url": "postgresql://owner:db-secret@db.example:5432/ava",
-        "redis_url": "redis://ava:redis-secret@cache.example:6380/0",
+        "db_url": "postgresql://owner:db-secret@db.example:5432/meiva",
+        "redis_url": "redis://meiva:redis-secret@cache.example:6380/0",
         "redis_admin_password": "mapped-admin-password",
         "cluster_secret": "mapped-cluster-secret-0123456789abcdef",
         "pgbouncer_enabled": False,
         "redis_bin_dir": redis_bin,
         "trusted_cidrs": "10.1.0.0/16",
-        "events_channel": "ava:mapped:events",
+        "events_channel": "meiva:mapped:events",
         "memory_search_backend": "numpy",
         "embedding_backend": "gemini",
     }
@@ -46,16 +46,16 @@ def test_is_remote_is_derived_from_the_urls_and_follows_a_replaced_url(
 ) -> None:
     local = dataclasses.replace(data_plane_config, db_url=_LOOPBACK_DB, redis_url=_LOOPBACK_REDIS)
     assert local.is_remote is False
-    assert dataclasses.replace(local, db_url=f"postgresql://ava@{_FOREIGN}:5432/ava").is_remote
-    assert dataclasses.replace(local, redis_url=f"redis://ava@{_FOREIGN}:6380/0").is_remote
+    assert dataclasses.replace(local, db_url=f"postgresql://meiva@{_FOREIGN}:5432/meiva").is_remote
+    assert dataclasses.replace(local, redis_url=f"redis://meiva@{_FOREIGN}:6380/0").is_remote
     assert "is_remote" not in {field.name for field in dataclasses.fields(local)}
 
 
 def test_no_secret_or_login_reaches_the_repr(data_plane_config: DataPlaneConfig) -> None:
     config = dataclasses.replace(
         data_plane_config,
-        db_url="postgresql://owner:db-secret@db.example:5432/ava",
-        redis_url="redis://ava:redis-secret@cache.example:6380/0",
+        db_url="postgresql://owner:db-secret@db.example:5432/meiva",
+        redis_url="redis://meiva:redis-secret@cache.example:6380/0",
         redis_admin_password="admin-secret-value",  # noqa: S106
         cluster_secret="cluster-secret-value",  # noqa: S106
     )

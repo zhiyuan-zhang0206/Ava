@@ -1,11 +1,11 @@
 """Lint agent-visible docstrings — block Chinese characters + framework impl details.
 
-Runs in pre-commit. Scope: the `ava/` modules on the agent surface — a module that
-declares `__all_for_ava__`, or the module of a namespace listed in
-`ava/__init__.py`'s `__all_for_ava__` — plus plugin modules bound to a
+Runs in pre-commit. Scope: the `meiva/` modules on the agent surface — a module that
+declares `__all_for_meiva__`, or the module of a namespace listed in
+`meiva/__init__.py`'s `__all_for_meiva__` — plus plugin modules bound to a
 namespace and every `plugin.py`. Agent visibility is that whitelist, never the
 `_` prefix, so a framework module with a public name stays out of scope. These
-docstrings are concatenated into the LLM system prompt via `ava.help()` and
+docstrings are concatenated into the LLM system prompt via `meiva.help()` and
 the plugin-declared system prompt sections; violations land in the agent's context
 window verbatim.
 
@@ -21,7 +21,7 @@ degrade.
 ### 2. Framework implementation keywords
 
 System components, history pointers, and design internals that leak the
-"how" of Ava's internals to the agent. Agent should see the contract
+"how" of Meiva's internals to the agent. Agent should see the contract
 ("read returns utf-8 text") not the mechanism ("state_handle.update
 mutates the working copy").
 
@@ -39,8 +39,8 @@ siblings are out of scope (legitimate cross-refs like cron -> launch).
 ### 4. SDK<->skill coupling (2026-06-10)
 
 An agent-visible docstring referencing skills — skill discovery belongs to
-the skills index section, not the SDK layer. `ava/skills/__init__.py` (whose subject
-IS skills) and the `ava/skills/` modules that carry its surface nodes are exempt.
+the skills index section, not the SDK layer. `meiva/skills/__init__.py` (whose subject
+IS skills) and the `meiva/skills/` modules that carry its surface nodes are exempt.
 
 ### 5. Markdown emphasis (2026-07-24)
 
@@ -104,8 +104,8 @@ _IMPL_KEYWORDS: list[tuple[str, str]] = [
     (r"\bINSERT inbound\b", "INSERT inbound (db plumbing)"),
     (r"\benvelope wrap\b", "envelope wrap (message plumbing)"),
     (r"\bcheckpoint\b", "checkpoint (LangGraph internals)"),
-    (r"\bava\.state(?!_)\b", "ava.state (framework-internal slot)"),
-    (r"\bava\.state_update\b", "ava.state_update (framework-internal slot)"),
+    (r"\bmeiva\.state(?!_)\b", "meiva.state (framework-internal slot)"),
+    (r"\bmeiva\.state_update\b", "meiva.state_update (framework-internal slot)"),
     # History pointers — never include in agent text.
     (r"\bPR #\d+", "PR # reference (history pointer)"),
     (r"\bdecisions/\b", "decision-record reference (history pointer)"),
@@ -119,7 +119,7 @@ _IMPL_KEYWORDS: list[tuple[str, str]] = [
     (r"\bO_APPEND\b", "O_APPEND (syscall flag)"),
     # Dev slogans / setup reminders that don't belong in agent prompt.
     (r"\bfail loud, not silent\b", "dev slogan"),
-    (r"\brequires AVA_", "setup reminder (let the code raise instead)"),
+    (r"\brequires MEIVA_", "setup reminder (let the code raise instead)"),
     # Storage / backend internals (observed leaks from the 2026-06-10 sweep).
     (r"\bagents_meta\b", "agents_meta (db table name)"),
     (r"\bwire[- ]encoded\b", "wire-encoded (transport detail)"),
@@ -142,27 +142,27 @@ _IMPL_KEYWORDS: list[tuple[str, str]] = [
 ]
 
 # Files whose docstrings ARE NOT agent-facing.
-# - `ava/_*.py` private modules (per AGENTS.md SDK docstring discipline exception).
-# - `ava/hooks.py` (plugin author audience, also per AGENTS.md exception).
+# - `meiva/_*.py` private modules (per AGENTS.md SDK docstring discipline exception).
+# - `meiva/hooks.py` (plugin author audience, also per AGENTS.md exception).
 # - `plugins/*/plugin.py` module-level top-of-file docstring describes the
 #   plugin to devs, not agents (the agent sees registered namespaces, not
 #   the plugin module itself). Functions inside plugin.py ARE still scanned
 #   because they may be wrap targets (e.g. `_wrapped_read` replaces
-#   `ava.files.read` and shows up in the prompt under that name).
+#   `meiva.files.read` and shows up in the prompt under that name).
 _PLUGIN_MODULE_DOCSTRING_EXEMPT: frozenset[str] = frozenset(
     {
-        "ava_builtins/plugins/ava_code/plugin.py",
-        "ava_builtins/plugins/ava_fleet/plugin.py",
-        "ava_builtins/plugins/ava_memory/plugin.py",
-        "ava_builtins/plugins/ava_sdk_reminder/plugin.py",
-        "ava_builtins/plugins/ava_silent_idle/plugin.py",
-        "ava_builtins/plugins/ava_syntax_fix/plugin.py",
+        "meiva_builtins/plugins/meiva_code/plugin.py",
+        "meiva_builtins/plugins/meiva_fleet/plugin.py",
+        "meiva_builtins/plugins/meiva_memory/plugin.py",
+        "meiva_builtins/plugins/meiva_sdk_reminder/plugin.py",
+        "meiva_builtins/plugins/meiva_silent_idle/plugin.py",
+        "meiva_builtins/plugins/meiva_syntax_fix/plugin.py",
     }
 )
 
 
 def _registered_namespace_files(plugin_py: Path, tree: ast.Module) -> set[Path]:
-    """The module files a plugin declares as `ava.X` namespaces (`SdkNamespace`)."""
+    """The module files a plugin declares as `meiva.X` namespaces (`SdkNamespace`)."""
     files: set[Path] = set()
     # Track `from . import <name> as <alias>` to resolve module references.
     imported_modules: dict[str, str] = {}
@@ -188,15 +188,15 @@ def _registered_namespace_files(plugin_py: Path, tree: ast.Module) -> set[Path]:
 
 
 def discover_plugin_namespace_modules(repo_root: Path) -> set[Path]:
-    """Find plugin module files declared as `ava.X` namespaces.
+    """Find plugin module files declared as `meiva.X` namespaces.
 
     Scans every `plugins/*/plugin.py` for `SdkNamespace("X", <module>)` declarations
     and returns the set of `<module>` file paths. Those modules are
     agent-facing (their docstrings + public function docstrings land in
-    `help(ava.X)`); other helper files in the same plugin dir aren't.
+    `help(meiva.X)`); other helper files in the same plugin dir aren't.
     """
     namespace_files: set[Path] = set()
-    for plugin_py in repo_root.glob("ava_builtins/plugins/*/plugin.py"):
+    for plugin_py in repo_root.glob("meiva_builtins/plugins/*/plugin.py"):
         try:
             tree = ast.parse(plugin_py.read_text(encoding="utf-8"))
         except SyntaxError:
@@ -206,9 +206,9 @@ def discover_plugin_namespace_modules(repo_root: Path) -> set[Path]:
 
 
 def _declares_agent_surface(tree: ast.Module) -> bool:
-    """The module assigns (or serves as a property) `__all_for_ava__`."""
+    """The module assigns (or serves as a property) `__all_for_meiva__`."""
     for node in ast.walk(tree):
-        if isinstance(node, ast.FunctionDef) and node.name == "__all_for_ava__":
+        if isinstance(node, ast.FunctionDef) and node.name == "__all_for_meiva__":
             return True
         targets = (
             node.targets
@@ -217,18 +217,18 @@ def _declares_agent_surface(tree: ast.Module) -> bool:
             if isinstance(node, ast.AnnAssign)
             else []
         )
-        if any(isinstance(t, ast.Name) and t.id == "__all_for_ava__" for t in targets):
+        if any(isinstance(t, ast.Name) and t.id == "__all_for_meiva__" for t in targets):
             return True
     return False
 
 
 def top_level_surface(repo_root: Path) -> list[str]:
-    """Names in `ava/__init__.py`'s `__all_for_ava__` list literal."""
-    tree = ast.parse((repo_root / "ava/__init__.py").read_text(encoding="utf-8"))
+    """Names in `meiva/__init__.py`'s `__all_for_meiva__` list literal."""
+    tree = ast.parse((repo_root / "meiva/__init__.py").read_text(encoding="utf-8"))
     for node in tree.body:
         if (
             isinstance(node, ast.Assign)
-            and any(isinstance(t, ast.Name) and t.id == "__all_for_ava__" for t in node.targets)
+            and any(isinstance(t, ast.Name) and t.id == "__all_for_meiva__" for t in node.targets)
             and isinstance(node.value, ast.List)
         ):
             return [
@@ -236,21 +236,21 @@ def top_level_surface(repo_root: Path) -> list[str]:
                 for e in node.value.elts
                 if isinstance(e, ast.Constant) and isinstance(e.value, str)
             ]
-    raise ValueError("ava/__init__.py declares no __all_for_ava__ list literal")
+    raise ValueError("meiva/__init__.py declares no __all_for_meiva__ list literal")
 
 
 def discover_agent_surface_modules(repo_root: Path) -> set[Path]:
-    """`ava/` module files on the agent surface: a module declaring
-    `__all_for_ava__`, or the module / package `__init__` of a top-level
-    namespace. Everything else under `ava/` is framework code, whatever its name."""
+    """`meiva/` module files on the agent surface: a module declaring
+    `__all_for_meiva__`, or the module / package `__init__` of a top-level
+    namespace. Everything else under `meiva/` is framework code, whatever its name."""
     namespaces = {
         path
         for name in top_level_surface(repo_root)
-        for path in (repo_root / f"ava/{name}.py", repo_root / f"ava/{name}/__init__.py")
+        for path in (repo_root / f"meiva/{name}.py", repo_root / f"meiva/{name}/__init__.py")
         if path.is_file()
     }
     surface: set[Path] = set()
-    for path in repo_root.glob("ava/**/*.py"):
+    for path in repo_root.glob("meiva/**/*.py"):
         if "__pycache__" in path.parts:
             continue
         if path in namespaces or _declares_agent_surface(
@@ -261,13 +261,13 @@ def discover_agent_surface_modules(repo_root: Path) -> set[Path]:
 
 
 def is_in_scope(
-    path: Path, plugin_namespace_files: set[Path], ava_surface_files: set[Path]
+    path: Path, plugin_namespace_files: set[Path], meiva_surface_files: set[Path]
 ) -> bool:
     """True if file's docstrings need linting."""
     rel = str(path).replace("\\", "/")
-    if rel.startswith("ava/"):
-        return path.resolve() in ava_surface_files
-    if rel.startswith("ava_builtins/plugins/") and path.suffix == ".py":
+    if rel.startswith("meiva/"):
+        return path.resolve() in meiva_surface_files
+    if rel.startswith("meiva_builtins/plugins/") and path.suffix == ".py":
         # plugin.py: scanned for wrap targets (see _check_file).
         if path.name == "plugin.py":
             return True
@@ -278,7 +278,7 @@ def is_in_scope(
 
 
 # SDK docstrings must not name skills (layering: SDK below, skills above —
-# the skills index section owns skill discovery). `ava/skills/__init__.py` is the one
+# the skills index section owns skill discovery). `meiva/skills/__init__.py` is the one
 # module whose subject IS skills, so it is exempt.
 SKILL_REF_RE = re.compile(r"\bskills?\b", re.IGNORECASE)
 
@@ -387,10 +387,10 @@ def module_doc_child_reference_violations(
 
 
 def static_agent_visible_names(tree: ast.Module) -> set[str] | None:
-    """Mirror `ava/sdk_surface/discovery.py:agent_visible_names` discovery, statically.
+    """Mirror `meiva/sdk_surface/discovery.py:agent_visible_names` discovery, statically.
 
     Returns the set of names whose docstrings appear in agent-visible
-    `help()` output for this module. `None` means "no `__all_for_ava__`
+    `help()` output for this module. `None` means "no `__all_for_meiva__`
     declared, use non-underscore default".
     """
     for node in tree.body:
@@ -399,7 +399,7 @@ def static_agent_visible_names(tree: ast.Module) -> set[str] | None:
         if len(node.targets) != 1:
             continue
         target = node.targets[0]
-        if isinstance(target, ast.Name) and target.id == "__all_for_ava__":
+        if isinstance(target, ast.Name) and target.id == "__all_for_meiva__":
             value = node.value
             if isinstance(value, ast.List):
                 return {
@@ -450,7 +450,7 @@ def _agent_visible_nodes(
 ) -> list[ast.FunctionDef | ast.AsyncFunctionDef | ast.ClassDef]:
     """The top-level defs whose docstrings reach the agent prompt."""
     if is_plugin_module:
-        # plugin.py is dev-facing. Only wrap targets (`ava.X.Y = <name>`)
+        # plugin.py is dev-facing. Only wrap targets (`meiva.X.Y = <name>`)
         # leak their docstrings into the agent prompt.
         wrap_targets = plugin_wrap_targets(tree)
         return [
@@ -459,8 +459,8 @@ def _agent_visible_nodes(
             if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef)
             and node.name in wrap_targets
         ]
-    # ava/*.py + plugins/*/_*.py: lint everything agent-visible per
-    # `help()` discovery (`__all_for_ava__` whitelist, else non-underscore).
+    # meiva/*.py + plugins/*/_*.py: lint everything agent-visible per
+    # `help()` discovery (`__all_for_meiva__` whitelist, else non-underscore).
     all_names = static_agent_visible_names(tree)
     return [
         node
@@ -480,7 +480,7 @@ def _check_file(path: Path) -> list[tuple[Path, int, str]]:
 
     out: list[tuple[Path, int, str]] = []
 
-    # The `ava/skills/` package is the one place whose subject IS skills; everywhere else
+    # The `meiva/skills/` package is the one place whose subject IS skills; everywhere else
     # an SDK docstring naming a skill couples the layers (skill discovery is
     # the skills index section's job).
     extra: list[tuple[re.Pattern[str], str]] = []
@@ -505,7 +505,7 @@ def _check_file(path: Path) -> list[tuple[Path, int, str]]:
             out.append((path, line_no, reason))
 
     # Walk top-level functions/classes only. Nested defs (closures, methods)
-    # are not directly agent-visible from `help(ava.X)`.
+    # are not directly agent-visible from `help(meiva.X)`.
     for node in _agent_visible_nodes(tree, is_plugin_module=is_plugin_module):
         for line_no, reason in docstring_violations(node, source_lines, extra=extra):
             out.append((path, line_no, reason))
@@ -530,16 +530,16 @@ def _check_agents_md(repo_root: Path) -> list[tuple[Path, int, str]]:
 def main() -> int:
     repo_root = Path(__file__).resolve().parent.parent.parent
     plugin_namespace_files = discover_plugin_namespace_modules(repo_root)
-    ava_surface_files = discover_agent_surface_modules(repo_root)
+    meiva_surface_files = discover_agent_surface_modules(repo_root)
     files = sorted(
         p
         for root in (
-            repo_root / "ava",
-            repo_root / "ava_builtins/plugins",
+            repo_root / "meiva",
+            repo_root / "meiva_builtins/plugins",
         )  # all `is_in_scope` accepts
         for p in root.rglob("*.py")
         if ".venv" not in p.parts
-        and is_in_scope(p.relative_to(repo_root), plugin_namespace_files, ava_surface_files)
+        and is_in_scope(p.relative_to(repo_root), plugin_namespace_files, meiva_surface_files)
     )
 
     violations: list[tuple[Path, int, str]] = []

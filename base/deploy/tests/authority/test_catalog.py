@@ -20,20 +20,20 @@ from base.host.db_authority.model import CatalogRefusedError
 
 # (mutation run by the admin, expected violation fragment)
 _UNKNOWN_EFFECTS = [
-    ("ALTER ROLE ava_g0_gateway CREATEDB", "ava_g0_gateway holds CREATEDB"),
-    (f"GRANT {OWNER} TO ava_g0_runner", "schema-owner membership"),
-    ("ALTER ROLE ava_g0_gateway SET work_mem = '8MB'", "ava_g0_gateway carries role settings"),
-    ("GRANT SELECT ON agents TO ava_g0_gateway", "ava_g0_gateway owns objects or holds direct"),
-    ("CREATE TABLE stray_owned (x int); ALTER TABLE stray_owned OWNER TO ava_g0_runner", "owns"),
+    ("ALTER ROLE meiva_g0_gateway CREATEDB", "meiva_g0_gateway holds CREATEDB"),
+    (f"GRANT {OWNER} TO meiva_g0_runner", "schema-owner membership"),
+    ("ALTER ROLE meiva_g0_gateway SET work_mem = '8MB'", "meiva_g0_gateway carries role settings"),
+    ("GRANT SELECT ON agents TO meiva_g0_gateway", "meiva_g0_gateway owns objects or holds direct"),
+    ("CREATE TABLE stray_owned (x int); ALTER TABLE stray_owned OWNER TO meiva_g0_runner", "owns"),
     (
-        "REVOKE ava_gateway FROM ava_g0_gateway;"
-        " GRANT ava_gateway TO ava_g0_gateway WITH INHERIT TRUE, SET TRUE, ADMIN FALSE",
+        "REVOKE meiva_gateway FROM meiva_g0_gateway;"
+        " GRANT meiva_gateway TO meiva_g0_gateway WITH INHERIT TRUE, SET TRUE, ADMIN FALSE",
         "differ from INHERIT-only",
     ),
-    ("ALTER ROLE ava_g0_gateway PASSWORD 'foreign-credential'", "stored verifier differs"),
-    ("ALTER ROLE ava_gateway LOGIN", "group ava_gateway can log in"),
-    (f"ALTER ROLE {OWNER} LOGIN", "schema owner ava_test_owner can log in"),
-    ("CREATE ROLE stray LOGIN PASSWORD 'stray-password'; GRANT ava_runner TO stray", "stray"),
+    ("ALTER ROLE meiva_g0_gateway PASSWORD 'foreign-credential'", "stored verifier differs"),
+    ("ALTER ROLE meiva_gateway LOGIN", "group meiva_gateway can log in"),
+    (f"ALTER ROLE {OWNER} LOGIN", "schema owner meiva_test_owner can log in"),
+    ("CREATE ROLE stray LOGIN PASSWORD 'stray-password'; GRANT meiva_runner TO stray", "stray"),
     ("CREATE ROLE aux LOGIN; GRANT INSERT ON agents TO aux", "grants INSERT to aux"),
     ("CREATE ROLE aux LOGIN; GRANT pg_write_all_data TO aux", "login aux holds write privileges"),
     ("CREATE ROLE su LOGIN SUPERUSER", "login su is an unexpected superuser"),
@@ -42,7 +42,7 @@ _UNKNOWN_EFFECTS = [
         f"ALTER DEFAULT PRIVILEGES FOR ROLE {OWNER} GRANT INSERT ON TABLES TO PUBLIC",
         "default privileges grant INSERT to PUBLIC",
     ),
-    ("DROP ROLE ava_g0_runner", "ava_g0_runner does not exist"),
+    ("DROP ROLE meiva_g0_runner", "meiva_g0_runner does not exist"),
 ]
 
 
@@ -61,16 +61,16 @@ def test_invariant_refuses_every_unknown_effect(
 
 # (drift of the converged monitoring login, expected violation fragment)
 _MONITOR_DRIFT = [
-    ("ALTER ROLE ava_monitor PASSWORD 'monitor-password'", "ava_monitor has a password"),
-    ("ALTER ROLE ava_monitor CREATEROLE", "ava_monitor holds attributes"),
-    ("ALTER ROLE ava_monitor SET work_mem = '8MB'", "ava_monitor holds attributes"),
-    ("GRANT pg_monitor TO ava_monitor", "ava_monitor memberships"),
-    ("CREATE ROLE aux LOGIN; GRANT ava_monitor TO aux", "ava_monitor has members"),
-    ("GRANT SELECT ON agents TO ava_monitor", "grants SELECT to ava_monitor"),
-    ("GRANT CONNECT ON DATABASE postgres TO ava_monitor", "holds grants beyond CONNECT"),
+    ("ALTER ROLE meiva_monitor PASSWORD 'monitor-password'", "meiva_monitor has a password"),
+    ("ALTER ROLE meiva_monitor CREATEROLE", "meiva_monitor holds attributes"),
+    ("ALTER ROLE meiva_monitor SET work_mem = '8MB'", "meiva_monitor holds attributes"),
+    ("GRANT pg_monitor TO meiva_monitor", "meiva_monitor memberships"),
+    ("CREATE ROLE aux LOGIN; GRANT meiva_monitor TO aux", "meiva_monitor has members"),
+    ("GRANT SELECT ON agents TO meiva_monitor", "grants SELECT to meiva_monitor"),
+    ("GRANT CONNECT ON DATABASE postgres TO meiva_monitor", "holds grants beyond CONNECT"),
     (
-        "CREATE TABLE monitor_owned (x int); ALTER TABLE monitor_owned OWNER TO ava_monitor",
-        "ava_monitor owns objects or holds grants",
+        "CREATE TABLE monitor_owned (x int); ALTER TABLE monitor_owned OWNER TO meiva_monitor",
+        "meiva_monitor owns objects or holds grants",
     ),
 ]
 
@@ -88,7 +88,7 @@ def test_invariant_holds_the_monitoring_login_to_its_shape(
         ensure_monitor(conn, database=cluster.database)
         facts = conn.execute(
             "SELECT rolcanlogin, rolpassword IS NULL, rolsuper FROM pg_authid"
-            " WHERE rolname = 'ava_monitor'"
+            " WHERE rolname = 'meiva_monitor'"
         ).fetchone()
         assert facts == (True, True, False)
         check_invariant(conn, cluster.home, database=cluster.database)
@@ -153,13 +153,13 @@ def test_ensure_groups_is_idempotent_and_never_changes_login(
                 conn, owner=cluster.owner, database=cluster.database, groups=cluster.groups
             )
         check_invariant(conn, cluster.home, database=cluster.database)
-        conn.execute("ALTER ROLE ava_runner LOGIN")
-        with pytest.raises(CatalogRefusedError, match="group ava_runner can log in"):
+        conn.execute("ALTER ROLE meiva_runner LOGIN")
+        with pytest.raises(CatalogRefusedError, match="group meiva_runner can log in"):
             ensure_groups(
                 conn, owner=cluster.owner, database=cluster.database, groups=cluster.groups
             )
         row = conn.execute(
-            "SELECT rolcanlogin FROM pg_roles WHERE rolname = 'ava_runner'"
+            "SELECT rolcanlogin FROM pg_roles WHERE rolname = 'meiva_runner'"
         ).fetchone()
         assert row == (True,)
 
@@ -172,7 +172,7 @@ def test_gateway_vacuum_requires_maintain_and_a_skip_is_a_failure(
         for table in ("checkpoints", "checkpoint_blobs", "checkpoint_writes"):
             vacuum_or_fail(gateway, table)
         with cluster.admin() as conn:
-            conn.execute("REVOKE MAINTAIN ON checkpoints FROM ava_gateway")
+            conn.execute("REVOKE MAINTAIN ON checkpoints FROM meiva_gateway")
         notices: list[str] = []
         gateway.add_notice_handler(lambda diag: notices.append(diag.message_primary or ""))
         gateway.execute("VACUUM (ANALYZE) checkpoints")  # plain VACUUM only warns

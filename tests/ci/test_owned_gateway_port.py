@@ -73,7 +73,7 @@ def test_owned_port_survives_delay_and_real_uvicorn_restart(tmp_path: Path) -> N
             )
         assert process.poll() is not None
     assert receipts[0]["pid"] != receipts[1]["pid"]
-    output = os.environ.get("AVA_PORT_PROOF_OUTPUT")
+    output = os.environ.get("MEIVA_PORT_PROOF_OUTPUT")
     if output:
         Path(output).write_text(json.dumps(receipts, indent=2))
 

@@ -14,7 +14,7 @@ from base.cluster import frontend_service_cmd
 from base.cluster.dataplane.redis_bridge import RedisBridgeUnconfiguredError, redis_bridge_endpoint
 from base.config import settings
 from base.daemon.health import DaemonProbe, probe_home
-from base.paths import ava_home, otel_collector_binary, otel_collector_config
+from base.paths import meiva_home, otel_collector_binary, otel_collector_config
 from services.supervision.roster import plugin_services
 from services.supervision.roster.healthz import (
     daemon_identity as daemon_identity,  # public: plugin services
@@ -40,7 +40,7 @@ def redis_bridge_command() -> tuple[str, str, int]:
     relay = "services/redis_bridge/relay.py"
     try:
         endpoint = redis_bridge_endpoint(
-            ava_home(),
+            meiva_home(),
             machine_host=lambda: settings.general.machine_host.strip() or "localhost",
             remote_data_plane=lambda: settings.data_plane.is_remote,
         )
@@ -66,7 +66,7 @@ def _frontend_probe() -> DaemonProbe:
 
     Next.js serves no /healthz it can sign, so the frontend is identified by
     process ownership: the app-port listener must belong to the frontend's
-    captured ava-root unit (services/supervision/healthchecks/frontend.py). An old orphan
+    captured meiva-root unit (services/supervision/healthchecks/frontend.py). An old orphan
     that answers 200 outside that process lineage is not frontend health.
     """
     from services.supervision.healthchecks.frontend import probe_frontend
@@ -100,8 +100,8 @@ def build_services() -> tuple[ServiceSpec, ...]:
     Authored in three capability groups so which machine runs a service is visible
     at a glance. The concatenation order is gateway-group, then agent-runner-group,
     then both-group; within each group the order is load-bearing where noted.
-    (memory-indexer is not here: it is declared by the ava_memory plugin, which
-    owns the pool it indexes — `plugins/ava_memory/services.py`.)
+    (memory-indexer is not here: it is declared by the meiva_memory plugin, which
+    owns the pool it indexes — `plugins/meiva_memory/services.py`.)
     """
     # Share the public entry/app port definition with the serving process.
     from services.agent_runner.pty_sessions import shutdown_budget as pty_sessions_budget
@@ -112,7 +112,7 @@ def build_services() -> tuple[ServiceSpec, ...]:
     from services.supervision.healthchecks.protocol_probe import probe as probe_protocol
     from services.supervision.healthchecks.redis_bridge import probe_relay
 
-    probe_protocol_service = partial(probe_protocol, home=ava_home())
+    probe_protocol_service = partial(probe_protocol, home=meiva_home())
     _fe_port = app_port()
     _fe_url = f"http://localhost:{_fe_port}"
     _bridge_cmd, _bridge_host, _bridge_port = redis_bridge_command()
@@ -122,7 +122,7 @@ def build_services() -> tuple[ServiceSpec, ...]:
     # reminders). They only INSERT inbound rows — the insert trigger wakes the
     # owner on any machine, so they belong to the single gateway, not each
     # runner. The gateway also owns the memory/vector stack.
-    # The fleet task-maintenance nudger lives in the ava_fleet plugin — see
+    # The fleet task-maintenance nudger lives in the meiva_fleet plugin — see
     # `plugin_services.plugin_services()`.
     gateway_services = (
         ServiceSpec(
@@ -130,10 +130,10 @@ def build_services() -> tuple[ServiceSpec, ...]:
             cmd=".venv/bin/python -m services.entrypoints.gate.daemon",
             capabilities=GATEWAY,
             requires_db=False,
-            curl_url=f"http://127.0.0.1:{entry_port()}/__ava/healthz",
+            curl_url=f"http://127.0.0.1:{entry_port()}/__meiva/healthz",
             identity_probe=probe_gate,
             healthcheck_module="services.supervision.healthchecks.gate",
-            # The gate's /__ava/healthz names its home (`probe_gate` checks it), so a
+            # The gate's /__meiva/healthz names its home (`probe_gate` checks it), so a
             # foreign gate on the entry port is recognisable before the launch.
             home_healthz=True,
         ),
@@ -185,7 +185,7 @@ def build_services() -> tuple[ServiceSpec, ...]:
         ),
         # delivery-watchdog: cluster-wide stale-pending-inbound tripwire. A
         # gateway daemon — it owns the data plane. Config-gated by
-        # AVA_DELIVERY_WATCHDOG_ENABLED.
+        # MEIVA_DELIVERY_WATCHDOG_ENABLED.
         healthz_daemon(
             "delivery-watchdog",
             module="services.wake.delivery_watchdog.daemon",
@@ -326,7 +326,7 @@ def build_services() -> tuple[ServiceSpec, ...]:
             capabilities=AGENT_RUNNER,
             requires_db=True,  # assert_schema_current at boot; serves DB-backed ops calls
         ),
-        # browser: config/capability-gated (AVA_BROWSER_ENABLED + display/Chrome/npx).
+        # browser: config/capability-gated (MEIVA_BROWSER_ENABLED + display/Chrome/npx).
         # CDP exposes HTTP at /json/version, so probe via curl_url (not tcp_port).
         ServiceSpec(
             session="browser",
@@ -377,7 +377,7 @@ def build_services() -> tuple[ServiceSpec, ...]:
         # plane is the Unix socket plus per-server stdio children.
         ServiceSpec(
             session="mcp-daemon",
-            cmd=".venv/bin/python -m ava.mcps._daemon",
+            cmd=".venv/bin/python -m meiva.mcps._daemon",
             capabilities=AGENT_RUNNER,
             # Config is local files (mcp.json); no DB at boot or runtime.
             requires_db=False,
@@ -401,7 +401,7 @@ def build_services() -> tuple[ServiceSpec, ...]:
         # pty-sessions: every agent shell on this machine, held by ONE ordinary
         # process (base/sessions/pty). A session outlives an agent, an agent host
         # or a gateway restarting; it ends with its shell or when this service
-        # stops, which `ava stop` does only after closing the sessions and
+        # stops, which `meiva stop` does only after closing the sessions and
         # writing their owners' notices. A Unix socket and a ledger file are its
         # whole data plane: no database at boot or runtime. The socket transport
         # (and pty itself) is why its gate is POSIX-only (see `_gate_reason`).
@@ -417,16 +417,16 @@ def build_services() -> tuple[ServiceSpec, ...]:
             session="otel-collector",
             cmd=shlex.join(
                 [
-                    str(otel_collector_binary(ava_home())),
+                    str(otel_collector_binary(meiva_home())),
                     "--config",
-                    str(otel_collector_config(ava_home())),
+                    str(otel_collector_config(meiva_home())),
                 ]
             ),
-            config_inputs=(otel_collector_config(ava_home()),),
+            config_inputs=(otel_collector_config(meiva_home()),),
             capabilities=BOTH,
             requires_db=False,
             # The healthcheck POSTs a valid empty ExportTraceServiceRequest; bare TCP is insufficient.
-            # The port follows AVA_TELEMETRY_OTLP_PORT (single source, task #1945).
+            # The port follows MEIVA_TELEMETRY_OTLP_PORT (single source, task #1945).
             tcp_port=settings.observability.telemetry_otlp_port,
             identity_probe=probe_collector,
             healthcheck_module="services.supervision.healthchecks.otel_collector",
@@ -446,8 +446,8 @@ def build_services() -> tuple[ServiceSpec, ...]:
     observability_services = tuple(
         ServiceSpec(
             session=name,
-            cmd=shlex.join(service_argv(ava_home(), name)),
-            config_inputs=service_input_paths(ava_home(), name),
+            cmd=shlex.join(service_argv(meiva_home(), name)),
+            config_inputs=service_input_paths(meiva_home(), name),
             capabilities=frozenset({"gateway", "agent-runner", "observability-station"}),
             requires_db=False,
             curl_url=urls[name] + HEALTH_PATHS[name],
@@ -457,7 +457,7 @@ def build_services() -> tuple[ServiceSpec, ...]:
         for name in BACKENDS
     )
     core = gateway_services + agent_runner_services + both_services + observability_services
-    # Plugin-registered services (e.g. ava_fleet's task-maintenance) are appended
+    # Plugin-registered services (e.g. meiva_fleet's task-maintenance) are appended
     # so this stays THE single roster: a plugin declares a ServiceSpec, ops
     # discovers it. Session-name collisions fail fast — the roster's keys must be
     # unique for the watchdog/status derivations keyed on `session`.

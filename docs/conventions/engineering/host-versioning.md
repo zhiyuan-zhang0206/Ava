@@ -1,6 +1,6 @@
 # Host versioning — derived from the commit, no bump discipline
 
-Ava's host version is the date axis of the running build, derived from the
+Meiva's host version is the date axis of the running build, derived from the
 checkout's commit — never a hand-maintained number. This page is the policy
 the content-channel gates compare against (task #2915 design §5.5; landed with
 tasks #2915 / #3267).
@@ -12,7 +12,7 @@ tasks #2915 / #3267).
   string every gate compares, so it always exists on every checkout-mode
   machine, advances by itself, and needs no release process.
 - **Display form:** `YYYY.M.D+g<short-sha>` (`host_version_display`) — for
-  humans only: `ava packages status`, log lines. Gates never see the suffix.
+  humans only: `meiva packages status`, log lines. Gates never see the suffix.
 - **Fallback:** a checkout-less runtime (wheel install) falls back to
   `[project].version` in `pyproject.toml`. The hand-maintained number is
   vestigial (`0.1.5` since the initial public release) and read by nothing in
@@ -22,12 +22,12 @@ tasks #2915 / #3267).
 
 ## What packages declare
 
-`ava-plugin.json` (spec: [`plugin-spec-v2.md`](../extensions/plugin-spec-v2.md)) carries the
-package's compatibility claims. Every Ava plugin ships one; a skill package may carry the
+`meiva-plugin.json` (spec: [`plugin-spec-v2.md`](../extensions/plugin-spec-v2.md)) carries the
+package's compatibility claims. Every Meiva plugin ships one; a skill package may carry the
 same manifest beside its `SKILL.md`; plugin bundles keep the plugin-level manifest as the
 single source of truth for their bundled skills.
 
-- **`engines.ava`** — a semver range (`>=A,<B`; either side unbounded),
+- **`engines.meiva`** — a semver range (`>=A,<B`; either side unbounded),
   compared against the bare derived host version. Min-and-max bounds exist in
   the range algebra; declare a max only when you mean it — the date axis
   advances every day the repo moves.
@@ -35,10 +35,10 @@ single source of truth for their bundled skills.
   *contain* (`git merge-base --is-ancestor`). Use it when content needs a
   fresh kernel capability; point it at the merge that introduced the
   capability. Zero bump discipline, exact within a day.
-- A manifest must declare **either** `engines.ava` **or** `requires_commit`
+- A manifest must declare **either** `engines.meiva` **or** `requires_commit`
   (both is fine). Core content that depends on a fresh kernel capability uses
-  `requires_commit`; third-party content, which targets released Ava
-  versions, uses date-axis `engines.ava` ranges.
+  `requires_commit`; third-party content, which targets released Meiva
+  versions, uses date-axis `engines.meiva` ranges.
 
 ## Where the gates fire
 
@@ -62,7 +62,7 @@ dependency of this policy.
 `scripts/content_lint/lint_core_content_manifests.py` (CI job `core-content manifests`,
 pre-commit `lint-core-content-manifests`) keeps core content honest:
 
-- every builtin plugin ships a manifest, every manifest under `ava_builtins/`
+- every builtin plugin ships a manifest, every manifest under `meiva_builtins/`
   validates, its `engines` ranges admit the repo's current derived version, and
   any `requires_commit` is an ancestor of HEAD (a typo'd or future SHA is red);
 - every other manifest in the tree is *audited* (report-only): its ranges are

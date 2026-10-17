@@ -3,15 +3,15 @@
 ## Context
 
 The [one cluster per host](../../../runtime/hosts/2026-09-30-one-cluster-per-host.md) work left a development
-checkout on the same host as the production cluster, with `AVA_HOME` unset meaning
-`~/.ava`: production. Two guards were built to keep development code off that home.
+checkout on the same host as the production cluster, with `MEIVA_HOME` unset meaning
+`~/.meiva`: production. Two guards were built to keep development code off that home.
 
 The first was a scan. Every script under `scripts/`, `.agents/skills/` and
-`ava_builtins/skills/` that imports application code had to enter a scratch `AVA_HOME`, or
+`meiva_builtins/skills/` that imports application code had to enter a scratch `MEIVA_HOME`, or
 declare the local cluster state it operates on, from a closed vocabulary of eleven states,
 in a comment line or a directory table. The scan came to about 600 lines of test, a dozen
 declaration comments and a scratch-home call in 22 scripts. It also taught three lessons
-the hard way: a call made at import time replaced `AVA_HOME` for a whole pytest worker; a
+the hard way: a call made at import time replaced `MEIVA_HOME` for a whole pytest worker; a
 call in a script CI runs on a bare `python3` failed because the call's own module imports a
 third-party package; and the worktree-removal guard has to read the real home, so a
 scratch home broke it. Each fix added a rule to the scan.
@@ -36,7 +36,7 @@ convention, written down once.
   hook script never reads the home its environment names.
 - **Every other script that imports application code** is run by a person or an agent on
   purpose. The rule is the convention in `conventions/dev-setup.md` and the
-  self-development skill: in a development checkout, set a temporary `AVA_HOME`, or run
+  self-development skill: in a development checkout, set a temporary `MEIVA_HOME`, or run
   inside the Docker or Tart verification boundary. There is no scan, no declaration form and
   no scratch-home call in those scripts.
 - **The CLI checkout guard** stays, because the act it prevents is irreversible: a foreign
@@ -49,7 +49,7 @@ Two small things stay because they are cheap and each was a real failure:
 `enter_scratch_home()` raises inside a pytest process (a tool imported at collection must
 never replace the session's home), and `scripts/check_worktree_remove.py` keeps the real
 home, because it reads this machine's live session registry, and only sets
-`AVA_CONFIG_FETCH=skip` so that it dials nothing.
+`MEIVA_CONFIG_FETCH=skip` so that it dials nothing.
 
 ## Alternatives rejected
 
@@ -61,7 +61,7 @@ home, because it reads this machine's live session registry, and only sets
 - **A wrapper every hook entry goes through.** One place, but 48 hook entries (nine of them
   shell commands) to route, and a new hook can forget it. The guard sits in the script that
   boots the config, so it covers every caller of that script.
-- **Setting `AVA_HOME` where git hooks are installed.** The hook shims are generated per
+- **Setting `MEIVA_HOME` where git hooks are installed.** The hook shims are generated per
   clone by pre-commit, and the repository forbids installing around them
   (`core.hooksPath` overrides).
 - **A code guard on every script, and a convention for none.** The first costs what the scan
@@ -70,7 +70,7 @@ home, because it reads this machine's live session registry, and only sets
 ## Consequences
 
 - A person who runs a non-hook development tool bare, on a host that runs production, reads
-  `~/.ava`. The convention is the only guard, and the self-development skill carries it
+  `~/.meiva`. The convention is the only guard, and the self-development skill carries it
   into agent briefs.
 - The CI smokes, `release_cut.py` and the post-deploy visual check no longer enter a scratch
   home. In CI the runner's home is its own; on a developer host the convention applies.

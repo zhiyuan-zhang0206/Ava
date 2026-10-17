@@ -5,14 +5,14 @@ exports = ["health_port_guard.py", "test_single_box.py"]
 "test_unit_capability_commands.py" = ["test_single_box.py"]
 
 [debt.env-patch]
-"test_plugins_update_retired_image.py#monkeypatch.setenv os.environ.AVA_HOME" = 1
+"test_plugins_update_retired_image.py#monkeypatch.setenv os.environ.MEIVA_HOME" = 1
 "test_single_box.py#monkeypatch.delitem os.environ" = 1
-"test_single_box.py#monkeypatch.setenv os.environ.AVA_HOME" = 1
+"test_single_box.py#monkeypatch.setenv os.environ.MEIVA_HOME" = 1
 "test_single_box.py#monkeypatch.setitem os.environ" = 1
-"test_single_box.py#monkeypatch.setitem os.environ.AVA_DB_URL" = 1
-"test_single_box.py#monkeypatch.setitem os.environ.AVA_MACHINE_SERVE_GATEWAY" = 1
+"test_single_box.py#monkeypatch.setitem os.environ.MEIVA_DB_URL" = 1
+"test_single_box.py#monkeypatch.setitem os.environ.MEIVA_MACHINE_SERVE_GATEWAY" = 1
 "test_single_box.py#patch.dict os.environ" = 1
-"test_unit_capability_commands.py#monkeypatch.setitem os.environ.AVA_MACHINE_SERVE_GATEWAY" = 1
+"test_unit_capability_commands.py#monkeypatch.setitem os.environ.MEIVA_MACHINE_SERVE_GATEWAY" = 1
 
 [debt.first-party-patch]
 "health_port_guard.py#monkeypatch.setattr cli.commands.probe.occupied_health_ports" = 1
@@ -29,7 +29,7 @@ exports = ["health_port_guard.py", "test_single_box.py"]
 "test_gateway_preflight_budget.py#monkeypatch.setattr cli.commands._repo.time" = 1
 "test_maintenance_recovery.py#monkeypatch.setattr base.deploy.maintenance.pause_owner.change_maintenance" = 3
 "test_maintenance_recovery.py#monkeypatch.setattr services.agent_runner.agent_host.runtime.validate_model_config" = 2
-"test_plugins_update_retired_image.py#monkeypatch.setattr base.paths.ava_home" = 1
+"test_plugins_update_retired_image.py#monkeypatch.setattr base.paths.meiva_home" = 1
 "test_plugins_update_retired_image.py#monkeypatch.setattr base.paths.plugins_dir" = 1
 "test_plugins_update_retired_image.py#monkeypatch.setattr base.paths.repo_plugins_dir" = 1
 "test_repo_browser_gate.py#monkeypatch.setattr base.config.settings.services.browser_enabled" = 6

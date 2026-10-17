@@ -2,7 +2,7 @@
 reachability probes and clear skips instead of managing a foreign service.
 
 The local instance management surface (`ensure_cluster_storage`,
-`stop_cluster_instance`, the `ava status` data-plane section) must never run
+`stop_cluster_instance`, the `meiva status` data-plane section) must never run
 against a data plane whose URLs name another host — the URL is the switch, and
 the management plane keys off `DataPlaneConfig.is_remote`.
 """
@@ -39,7 +39,7 @@ def _fake_record(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(cluster, "get_record", record)
 
 
-# ─── ava start: skip local bring-up, probe the URLs ──────────────────────────
+# ─── meiva start: skip local bring-up, probe the URLs ──────────────────────────
 
 
 def test_start_remote_skips_local_instance_and_probes(
@@ -122,4 +122,4 @@ def test_start_remote_unreachable_fails_fast_with_dial_detail(
     err = capsys.readouterr().err
     assert "remote data plane unreachable" in err
     assert "10.9.8.7" in err
-    assert "AVA_DB_URL" in err
+    assert "MEIVA_DB_URL" in err

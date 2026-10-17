@@ -9,7 +9,7 @@ from gateway.extensions.skills import get_skills
 
 
 def _mk_skill(name: str, body: str = "# skill\n") -> Path:
-    d = paths.skills_dir(paths.ava_home()) / name
+    d = paths.skills_dir(paths.meiva_home()) / name
     d.mkdir(parents=True, exist_ok=True)
     (d / "SKILL.md").write_text(body, encoding="utf-8")
     return d
@@ -77,7 +77,7 @@ def test_non_skill_rows_and_missing_dir_excluded(unit_home: Path) -> None:
 
 
 def test_empty_when_no_load_dir(unit_home: Path) -> None:
-    assert not paths.skills_dir(paths.ava_home()).exists()
+    assert not paths.skills_dir(paths.meiva_home()).exists()
     assert get_skills().skills == []
 
 
@@ -121,14 +121,14 @@ def test_put_accepts_the_canonical_dash_spelling_of_a_legacy_row(unit_home: Path
 
 
 def test_get_renders_legacy_underscore_dirs_in_canonical_spelling(unit_home: Path) -> None:
-    _mk_skill("ava_code")
+    _mk_skill("meiva_code")
     _mk_skill("auto_review.old")
     rows = {r.name: r for r in get_skills().skills}
-    assert "ava-code" in rows
+    assert "meiva-code" in rows
     assert "auto-review.old" in rows
-    assert "ava_code" not in rows
+    assert "meiva_code" not in rows
     assert "auto_review.old" not in rows
-    assert rows["ava-code"].layer == "untracked"
+    assert rows["meiva-code"].layer == "untracked"
 
 
 def test_preserved_subtree_not_reported_as_drift(unit_home: Path) -> None:
@@ -169,9 +169,9 @@ def test_dot_dirs_not_panel_rows(unit_home: Path) -> None:
 def test_registry_row_correlates_across_the_dash_underscore_fold(
     unit_home: Path,
 ) -> None:
-    d = _mk_skill("ava_code")
-    _register("ava-code", origin="repo", content_hash=tree_hash(d))
+    d = _mk_skill("meiva_code")
+    _register("meiva-code", origin="repo", content_hash=tree_hash(d))
     (row,) = get_skills().skills
-    assert row.name == "ava-code"
+    assert row.name == "meiva-code"
     assert row.layer == "core"
     assert row.modified_locally is False

@@ -1,14 +1,14 @@
 {
   "manifest_version": 3,
-  "name": "Ava Tab Groups",
+  "name": "Meiva Tab Groups",
   "version": "1",
-  "description": "Files the pages an Ava agent opens into one tab group per agent.",
+  "description": "Files the pages an Meiva agent opens into one tab group per agent.",
   "permissions": [
     "tabs",
     "tabGroups",
     "debugger"
   ],
   "background": {
-    "service_worker": "group-947e545987bb.js"
+    "service_worker": "group-7d21fe712cd3.js"
   }
 }

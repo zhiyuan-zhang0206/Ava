@@ -24,10 +24,10 @@ import pytest
 from agent.graph.exec._stream import StreamCap, StreamingTextIO
 from agent.graph.exec.output import wrap_code_output
 from agent.graph.exec.tests.output_inputs import CropConfig
-from ava.tests.fixtures.pin_agent import exec_context, pin_agent
 from base.clock import Clock
 from base.db import Database
 from base.log.tests.log_records import LogRecords
+from meiva.tests.fixtures.pin_agent import exec_context, pin_agent
 
 # ---------------------------------------------------------------------------
 # The accumulator: head + rolling tail under a fixed budget
@@ -207,7 +207,7 @@ def test_envelope_still_promises_the_full_output_when_uncapped(
     _overflow: Path, crop_config: CropConfig, output_clock: Clock
 ) -> None:
     """The uncapped path is unchanged: the archive really is complete, so the
-    banner keeps saying so (and the ava_code plugin's reuse of
+    banner keeps saying so (and the meiva_code plugin's reuse of
     `truncate_both_ends` keeps its wording)."""
     big = "HEAD_START" + ("M" * 5000) + "TAIL_END"
     out = wrap_code_output(

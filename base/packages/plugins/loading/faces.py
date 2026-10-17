@@ -7,7 +7,7 @@ pure `contribute()` that returns the `PluginContributions` fields it owns (`regi
   `flags`. Its imports must stay off the agent runtime (no `agent.state`, `agent.hooks`,
   `agent.graph.*`, or LangChain chain), because every process that runs agent code loads it.
 - ``default_config.py`` — optional sibling: the plugin's **config class** (`config`), declared on its own so
-  the gateway and `ava plugins update` can read it without importing `plugin.py`
+  the gateway and `meiva plugins update` can read it without importing `plugin.py`
   (`base/packages/plugins/config_face.py`). Loaded with the surface.
 - ``agent_runtime.py`` — optional sibling file: the plugin's **agent runtime** (hooks, state, system
   prompt sections, context notes). Imported on the full path only (the agent process, and
@@ -22,8 +22,8 @@ Entry points:
 - ``load_agent_faces()`` — runtime faces only, for a process that already loaded the surfaces (a child
   upgrading to the full load because its request carries a state snapshot).
 
-Installing the registry's SDK surface into `ava` is `ava.sdk_surface.extensions.load_extensions`; this
-module imports nothing from `ava` or `agent`. A plugin whose agent-runtime face declares state is
+Installing the registry's SDK surface into `meiva` is `meiva.sdk_surface.extensions.load_extensions`; this
+module imports nothing from `meiva` or `agent`. A plugin whose agent-runtime face declares state is
 validated against the agent kernel's state schema, which the caller that runs agent code supplies as
 `validate_state` (`agent.state.plugin_state_schema`).
 """
@@ -90,13 +90,13 @@ def import_faces(
     `agent_runtime.py` face. Surface form (`surface=True`): import only the `plugin.py` surfaces and
     the config class — the load an agent-launched child runs.
 
-    The import loop is fail-soft (2026-08-28 ava_ledger incident): a broken plugin — a missing sibling
+    The import loop is fail-soft (2026-08-28 meiva_ledger incident): a broken plugin — a missing sibling
     module, a syntax error, a top-level exception — is skipped with a loud report, never a blocked
-    `import ava` / host boot for the whole cluster. The remaining enabled plugins keep loading; the
+    `import meiva` / host boot for the whole cluster. The remaining enabled plugins keep loading; the
     half-executed module was dropped from `sys.modules` so a later reload retries from a clean slate.
 
     ``report`` receives each contained failure instead of the canonical reporter (log + telemetry);
-    `ava plugins verify` passes a collector, so the failures come back as values.
+    `meiva plugins verify` passes a collector, so the failures come back as values.
     """
     discovered, config = discovered_and_config(report)
 

@@ -34,9 +34,8 @@ from agent.graph.llm_errors import (
 )
 from agent.hooks.tests.fakes import make_fake_ops_pool
 from agent.state import AgentState
-from ava.tests.fixtures.pin_agent import hosted_resources as hosted_resources
 from base import config
-from base.agents.context import AvaContext
+from base.agents.context import MeivaContext
 from base.clock import Clock
 from base.config.tests.configuration import defaults
 from base.db import Database
@@ -46,13 +45,14 @@ from base.host.env.agent_slices import AgentSlices
 from base.lm.catalog import ModelCatalog
 from base.native_process.turn_identity import HostedTurnResources
 from base.packages.plugin_providers import build_model_catalog
+from meiva.tests.fixtures.pin_agent import hosted_resources as hosted_resources
 
 _CONFIG: RunnableConfig = {"configurable": {"thread_id": "7"}}
 
 
 async def _one_try(
     state: AgentState,
-    runtime: Runtime[AvaContext],
+    runtime: Runtime[MeivaContext],
     *,
     attempt: int = 1,
     started_ago: float = 0.0,
@@ -74,10 +74,10 @@ def _make_runtime(
     *,
     model_catalog: ModelCatalog,
     database_gate: ProcessDbGate,
-) -> Runtime[AvaContext]:
+) -> Runtime[MeivaContext]:
     """Same pattern as test_cancel.py: fake llm returns itself via bind_tools (chain method)."""
     llm.bind_tools.return_value = llm
-    ctx = AvaContext(
+    ctx = MeivaContext(
         hosted_resources=hosted_resources,
         ops_pool=make_fake_ops_pool(),
         llm=llm,

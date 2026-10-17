@@ -1,6 +1,6 @@
 """Single-box birth and ordinary start on the always-authenticated data plane.
 
-Real Postgres 17, PgBouncer and Redis under a temp `$AVA_HOME`, driven through
+Real Postgres 17, PgBouncer and Redis under a temp `$MEIVA_HOME`, driven through
 the official start steps (`ensure_gateway_data_plane` -> `prepare_gateway_schema`
 -> `cmd_migrations_apply` -> `complete_gateway_data_plane`) with an EMPTY
 cluster secret — the single-box default that used to mean "no credentials".
@@ -71,7 +71,7 @@ class Born:
         return self.record.ports["pgbouncer"]
 
     def endpoint(self) -> str:
-        return self.values["AVA_DB_URL"]
+        return self.values["MEIVA_DB_URL"]
 
     def login(self, cls: str) -> tuple[str, str]:
         secret = ledger.read_secret(self.home, delivery.active_generation(self.home))
@@ -84,7 +84,7 @@ class Born:
 
     def admin(self) -> psycopg.Connection[Any]:
         return psycopg.connect(
-            host=str(ci.pg_socket_dir()), port=self.pg_port, dbname="ava", autocommit=True
+            host=str(ci.pg_socket_dir()), port=self.pg_port, dbname="meiva", autocommit=True
         )
 
 
@@ -123,7 +123,7 @@ def _teardown(born: Born) -> None:
                 "shutdown",
                 "nosave",
             ],
-            env=ci.redis_cli_env(born.values["AVA_REDIS_ADMIN_PASSWORD"]),
+            env=ci.redis_cli_env(born.values["MEIVA_REDIS_ADMIN_PASSWORD"]),
             check=False,
             capture_output=True,
         )
@@ -137,7 +137,7 @@ def _configure(
 
     home = (tmp_path / "home").resolve()
     home.mkdir(mode=0o700)
-    monkeypatch.setenv("AVA_HOME", str(home))
+    monkeypatch.setenv("MEIVA_HOME", str(home))
     # Allocate the entire roster while every socket stays held: replacing only
     # storage slots with independent closed probes can duplicate another slot.
     ports = dict(
@@ -155,22 +155,22 @@ def _configure(
             {},
         ),
     )
-    assert values["AVA_CLUSTER_SECRET"]
-    assert "AVA_DB_ADMIN_PASSWORD" not in values
-    assert "AVA_RUNNER_DB_PASSWORD" not in values
+    assert values["MEIVA_CLUSTER_SECRET"]
+    assert "MEIVA_DB_ADMIN_PASSWORD" not in values
+    assert "MEIVA_RUNNER_DB_PASSWORD" not in values
     (home / ".env").write_text("".join(f"{key}={value}\n" for key, value in values.items()))
     _intent(home, record, values)
     passphrase.ensure_minted(home)  # as the birth's claim publication pins it
     dp = settings.data_plane
-    monkeypatch.setattr(dp, "cluster_secret", values["AVA_CLUSTER_SECRET"])
-    monkeypatch.setattr(dp, "db_url", values["AVA_DB_URL"])
-    monkeypatch.setattr(dp, "redis_url", values["AVA_REDIS_URL"])
-    monkeypatch.setattr(dp, "redis_admin_password", values["AVA_REDIS_ADMIN_PASSWORD"])
-    monkeypatch.setattr(dp, "events_channel", values["AVA_EVENTS_CHANNEL"])
+    monkeypatch.setattr(dp, "cluster_secret", values["MEIVA_CLUSTER_SECRET"])
+    monkeypatch.setattr(dp, "db_url", values["MEIVA_DB_URL"])
+    monkeypatch.setattr(dp, "redis_url", values["MEIVA_REDIS_URL"])
+    monkeypatch.setattr(dp, "redis_admin_password", values["MEIVA_REDIS_ADMIN_PASSWORD"])
+    monkeypatch.setattr(dp, "events_channel", values["MEIVA_EVENTS_CHANNEL"])
     monkeypatch.setattr(dp, "pgbouncer_enabled", True)
     # The start process adopts its delivered login into os.environ; the raw-env
     # seam restores the suite's own values at teardown.
-    monkeypatch.setitem(os.environ, "AVA_DB_URL", values["AVA_DB_URL"])
+    monkeypatch.setitem(os.environ, "MEIVA_DB_URL", values["MEIVA_DB_URL"])
     # The birth adopts the delivered generation next. `delitem(raising=False)` on an absent
     # key records nothing, so register the key (setitem) before removing it: teardown then
     # deletes whatever the birth assigned.
@@ -287,21 +287,21 @@ def test_fresh_birth_mints_generation_zero_behind_nologin_owner(
     born: Born, operator_database: OperatorDatabaseFactory
 ) -> None:
     current = ledger.require_ledger(born.home)
-    assert current.owner == "ava"
+    assert current.owner == "meiva"
     assert current.active is not None and current.active.number == 0
     assert current.active.origin.kind == "birth"
     with born.admin() as conn:
         owner = conn.execute(
-            "SELECT rolcanlogin, rolpassword IS NULL, rolsuper FROM pg_authid WHERE rolname = 'ava'"
+            "SELECT rolcanlogin, rolpassword IS NULL, rolsuper FROM pg_authid WHERE rolname = 'meiva'"
         ).fetchone()
         assert owner == (False, True, False)
         groups = conn.execute(
-            "SELECT rolname FROM pg_roles WHERE rolname IN ('ava_gateway', 'ava_runner')"
+            "SELECT rolname FROM pg_roles WHERE rolname IN ('meiva_gateway', 'meiva_runner')"
             " AND NOT rolcanlogin ORDER BY 1"
         ).fetchall()
-        assert groups == [("ava_gateway",), ("ava_runner",)]
+        assert groups == [("meiva_gateway",), ("meiva_runner",)]
         authority.check_invariant(
-            conn, born.home, database="ava", readonly_grantees=bringup.READONLY_GRANTEES
+            conn, born.home, database="meiva", readonly_grantees=bringup.READONLY_GRANTEES
         )
     # The start process adopted the delivered gateway login for its own dials.
     assert operator_database.db_url() == born.dsn("gateway")
@@ -314,13 +314,15 @@ def test_birth_refuses_unauthenticated_and_owner_logins(born: Born) -> None:
     for host in ("127.0.0.1", socket_dir):
         # The owner exists but can never log in, with or without a password.
         for password in ("", "anything"):
-            _refused(host=host, port=born.pg_port, user="ava", password=password, dbname="ava")
+            _refused(host=host, port=born.pg_port, user="meiva", password=password, dbname="meiva")
     # No password-less door over TCP, even for the OS-user superuser.
-    _refused(host="127.0.0.1", port=born.pg_port, user=getpass.getuser(), password="", dbname="ava")
+    _refused(
+        host="127.0.0.1", port=born.pg_port, user=getpass.getuser(), password="", dbname="meiva"
+    )
     # The pooler admits neither the owner nor a login without its password.
-    _refused(host="127.0.0.1", port=born.pooler_port, user="ava", password="x", dbname="ava")  # noqa: S106 — a wrong credential by design
+    _refused(host="127.0.0.1", port=born.pooler_port, user="meiva", password="x", dbname="meiva")  # noqa: S106 — a wrong credential by design
     name, _password = born.login("gateway")
-    _refused(host="127.0.0.1", port=born.pooler_port, user=name, password="wrong", dbname="ava")  # noqa: S106 — a wrong credential by design
+    _refused(host="127.0.0.1", port=born.pooler_port, user=name, password="wrong", dbname="meiva")  # noqa: S106 — a wrong credential by design
     # The OS user reaches the administrator only through peer on the owner-only socket.
     with born.admin() as conn:
         assert conn.execute(
@@ -336,14 +338,14 @@ def test_generation_logins_work_with_group_privileges(born: Born) -> None:
         with pytest.raises(psycopg.errors.InsufficientPrivilege):
             gw.execute("CREATE TABLE gateway_must_not_create (id int)")
         with pytest.raises(psycopg.errors.InsufficientPrivilege):
-            gw.execute("SET ROLE ava")
+            gw.execute("SET ROLE meiva")
     with psycopg.connect(born.dsn("runner"), prepare_threshold=None, autocommit=True) as runner:
         assert runner.execute("SELECT count(*) FROM agents WHERE id = 910001").fetchone() == (1,)
         runner.execute("UPDATE agents_meta SET status = 'idling' WHERE id = 910001")
         with pytest.raises(psycopg.errors.InsufficientPrivilege):
             runner.execute("INSERT INTO agents (id) VALUES (910002)")
         with pytest.raises(psycopg.errors.InsufficientPrivilege):
-            runner.execute("SET ROLE ava_gateway")
+            runner.execute("SET ROLE meiva_gateway")
 
 
 def test_pooler_admin_console_is_the_userlist_only_operator_entry(born: Born) -> None:
@@ -378,7 +380,7 @@ def test_pooler_restart_revokes_a_removed_user_a_reload_would_keep(
     rc = pooler.ensure_pgbouncer(
         pg_port=born.pg_port,
         listen_port=born.pooler_port,
-        db_name="ava",
+        db_name="meiva",
         userlist=without_gateway,
         admin_password=admin.password,
         machine=command_runtime.machine,
@@ -386,7 +388,7 @@ def test_pooler_restart_revokes_a_removed_user_a_reload_would_keep(
     assert rc == 0
     owner_after = ownership.pooler(base_pooler.ini_path(), base_pooler.pidfile_path())
     assert owner_after is not None and owner_after.pid != owner_before.pid
-    _refused(host="127.0.0.1", port=born.pooler_port, user=name, password=password, dbname="ava")
+    _refused(host="127.0.0.1", port=born.pooler_port, user=name, password=password, dbname="meiva")
 
 
 def test_unchanged_userlist_reloads_without_restart(
@@ -411,15 +413,15 @@ def test_ordinary_start_refuses_a_stray_group_member_and_leaves_it_untouched(
 ) -> None:
     with born.admin() as conn:
         conn.execute(
-            "CREATE ROLE ava_g7_runner LOGIN PASSWORD 'stale-password-xyz' IN ROLE ava_runner"
+            "CREATE ROLE meiva_g7_runner LOGIN PASSWORD 'stale-password-xyz' IN ROLE meiva_runner"
         )
-    with pytest.raises(model.CatalogRefusedError, match="ava_g7_runner"):
+    with pytest.raises(model.CatalogRefusedError, match="meiva_g7_runner"):
         bringup.complete_gateway_data_plane(
             born.plane, database_factory=operator_database, machine=command_runtime.machine
         )
     with born.admin() as conn:
         assert conn.execute(
-            "SELECT rolcanlogin FROM pg_roles WHERE rolname = 'ava_g7_runner'"
+            "SELECT rolcanlogin FROM pg_roles WHERE rolname = 'meiva_g7_runner'"
         ).fetchone() == (True,)
     assert delivery.active_generation(born.home).number == 0
 
@@ -500,7 +502,7 @@ def test_launched_services_receive_their_class_login_only(
     from services.supervision.roster.service_spec import ServiceSpec
 
     # The launcher's settings-free serve-gateway read (a born single box).
-    monkeypatch.setitem(os.environ, "AVA_MACHINE_SERVE_GATEWAY", "true")
+    monkeypatch.setitem(os.environ, "MEIVA_MACHINE_SERVE_GATEWAY", "true")
 
     gateway = ServiceSpec(
         session="gateway", cmd="x", capabilities=frozenset({"gateway"}), requires_db=True
@@ -511,10 +513,12 @@ def test_launched_services_receive_their_class_login_only(
     frontend = ServiceSpec(
         session="frontend", cmd="x", capabilities=frozenset({"gateway"}), requires_db=False
     )
-    assert service_extra_env(gateway, remote_data_plane=False)["AVA_DB_URL"] == born.dsn("gateway")
-    assert service_extra_env(runner, remote_data_plane=False)["AVA_DB_URL"] == born.dsn("runner")
+    assert service_extra_env(gateway, remote_data_plane=False)["MEIVA_DB_URL"] == born.dsn(
+        "gateway"
+    )
+    assert service_extra_env(runner, remote_data_plane=False)["MEIVA_DB_URL"] == born.dsn("runner")
     assert service_extra_env(runner, remote_data_plane=False)[delivery.GENERATION_ENV] == "0"
-    assert "AVA_DB_URL" not in service_extra_env(frontend, remote_data_plane=False)
+    assert "MEIVA_DB_URL" not in service_extra_env(frontend, remote_data_plane=False)
     # The born single box authenticates its API: each service is delivered its class
     # token, the database-free frontend included, and never the root itself.
     tokens = ledger.read_secret(born.home, delivery.active_generation(born.home)).api
@@ -522,7 +526,7 @@ def test_launched_services_receive_their_class_login_only(
     assert service_extra_env(runner, remote_data_plane=False)[API_TOKEN_ENV] == tokens.runner
     assert service_extra_env(frontend, remote_data_plane=False)[API_TOKEN_ENV] == tokens.gateway
     root = root_child_env()
-    assert "AVA_DB_URL" not in root and delivery.GENERATION_ENV not in root
+    assert "MEIVA_DB_URL" not in root and delivery.GENERATION_ENV not in root
     assert API_TOKEN_ENV not in root
 
 
@@ -591,7 +595,7 @@ def _scrape_like_the_receiver(receiver: dict[str, Any]) -> None:
             "SELECT datname, pg_database_size(datname) FROM pg_catalog.pg_database"
             " WHERE datistemplate = false"
         ).fetchall()
-        assert {name for name, _size in sizes} >= {"postgres", "ava"}
+        assert {name for name, _size in sizes} >= {"postgres", "meiva"}
         conn.execute("SELECT datname, count(*) FROM pg_stat_activity GROUP BY datname")
         conn.execute(
             "SELECT coalesce(pg_wal_lsn_diff(pg_current_wal_lsn(), replay_lsn), -1)"
@@ -624,9 +628,9 @@ def test_collector_postgres_receiver_keeps_no_credential(
     )
     assert receiver["username"] == authority.MONITOR_ROLE
     assert receiver["transport"] == "unix"
-    assert receiver["databases"] == ["ava"]
+    assert receiver["databases"] == ["meiva"]
     _scrape_like_the_receiver(receiver)
-    with _dial_as_receiver(receiver, "ava") as conn:
+    with _dial_as_receiver(receiver, "meiva") as conn:
         with pytest.raises(psycopg.errors.InsufficientPrivilege):
             conn.execute("SELECT id FROM agents LIMIT 1")
         with pytest.raises(psycopg.errors.InsufficientPrivilege):
@@ -637,12 +641,12 @@ def test_collector_postgres_receiver_keeps_no_credential(
         port=born.pg_port,
         user=authority.MONITOR_ROLE,
         password=receiver["password"],
-        dbname="ava",
+        dbname="meiva",
     )
 
     with born.admin() as conn:
         authority.check_invariant(
-            conn, born.home, database="ava", readonly_grantees=bringup.READONLY_GRANTEES
+            conn, born.home, database="meiva", readonly_grantees=bringup.READONLY_GRANTEES
         )
     # The unchanged config keeps scraping.
     assert (

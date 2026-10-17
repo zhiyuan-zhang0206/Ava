@@ -45,7 +45,7 @@ def test_projection_failure_keeps_jsonl_and_otlp_and_never_emits_recursively(
         attributes={"ok": True, "duration_seconds": 2.5},
     )
     pipeline = telemetry.build_pipeline(
-        database=lambda: database, machine=machine_identity(), home=Path(".ava")
+        database=lambda: database, machine=machine_identity(), home=Path(".meiva")
     )
     try:
         telemetry.emit_prepared(event, producer=lambda: pipeline)

@@ -109,7 +109,7 @@ async def test_ops_route_status_probe_serializes_datetime_fields(
                     "agent_id": 7,
                     "label": "",
                     "shells": [
-                        {"name": "ava-agent-7", "created_at": created, "uptime_seconds": 120}
+                        {"name": "meiva-agent-7", "created_at": created, "uptime_seconds": 120}
                     ],
                 }
             ],
@@ -136,7 +136,7 @@ async def test_ops_route_status_probe_serializes_datetime_fields(
     parsed = json.loads(body)
     assert parsed["status"] == "completed"
     shell = parsed["result"]["agent_groups"][0]["shells"][0]
-    assert shell["name"] == "ava-agent-7"
+    assert shell["name"] == "meiva-agent-7"
     assert shell["created_at"] == "2026-06-11T08:30:00Z"
 
 

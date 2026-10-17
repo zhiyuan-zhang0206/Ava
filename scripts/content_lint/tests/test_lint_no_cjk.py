@@ -74,7 +74,7 @@ def test_documented_locale_copy_is_exempt(
 @pytest.mark.parametrize(
     "rel",
     [
-        "ava_builtins/skills/pkg/SKILL.md",
+        "meiva_builtins/skills/pkg/SKILL.md",
         "base/other/copy.py",
         "docs/messages.md",
         "docs/decisions/history.md",

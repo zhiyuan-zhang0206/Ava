@@ -11,7 +11,7 @@ import pytest
 from agent import impersonation, impersonation_process
 from agent.tests.impersonation.test_impersonation import gate_ctx as gate_ctx
 from agent.tests.impersonation.test_impersonation import relays as relays
-from base.agents.context import AvaContext
+from base.agents.context import MeivaContext
 from base.agents.impersonation import terminal_notices
 from base.agents.observation.relay_supervision import RelayChild
 from base.cluster.machine import MachineIdentity
@@ -75,9 +75,9 @@ def active_codex_lease(
     url = config_authority.runtime.data_plane.db_url
     assert_test_db_url(url, context="real impersonation relay fixture")
     config_authority.env_path.write_text(
-        f"AVA_DB_URL={url}\n"
-        f"AVA_REDIS_URL={config_authority.runtime.data_plane.redis_url}\n"
-        f"AVA_MACHINE_NAME={machine_identity.name()}\n",
+        f"MEIVA_DB_URL={url}\n"
+        f"MEIVA_REDIS_URL={config_authority.runtime.data_plane.redis_url}\n"
+        f"MEIVA_MACHINE_NAME={machine_identity.name()}\n",
         encoding="utf-8",
     )
 
@@ -85,7 +85,7 @@ def active_codex_lease(
     monkeypatch.setattr(
         env_forwarding,
         "forward_env_dict",
-        Mock(return_value=forwarded | {"AVA_CONFIG_FETCH": "skip"}),
+        Mock(return_value=forwarded | {"MEIVA_CONFIG_FETCH": "skip"}),
     )
     aid = create_agent(db_conn)
     owner = RuntimeIncarnation(aid, uuid4(), uuid4())
@@ -181,7 +181,7 @@ async def test_dead_relay_child_is_degraded_and_never_replaced(
 @pytest.mark.parametrize("error", [None, "TimeoutError: ambiguous acceptance"])
 async def test_ended_lease_notice_is_submitted_once_and_a_failure_is_reported_not_retried(
     monkeypatch: pytest.MonkeyPatch,
-    gate_ctx: AvaContext,
+    gate_ctx: MeivaContext,
     loguru_records: list[dict[str, Any]],
     error: str | None,
 ) -> None:

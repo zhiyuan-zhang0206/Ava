@@ -79,7 +79,7 @@ def validated_observability_base(observability_url: str) -> str:
         problems.append(f"path must be omitted (got {parsed.path!r})")
     if problems:
         print(  # noqa: T201 - operator-facing warning on stderr, as the cli render path always printed it
-            "lgtm native: AVA_OBSERVABILITY_URL "
+            "lgtm native: MEIVA_OBSERVABILITY_URL "
             f"{observability_url!r} is malformed ({'; '.join(problems)}) — "
             "falling back to local loopback endpoints",
             file=sys.stderr,

@@ -28,7 +28,7 @@ _LOGIN_ATTRIBUTES = (
 
 def _generation_roles(conn: psycopg.Connection[Any]) -> list[str]:
     rows = conn.execute(
-        "SELECT rolname FROM pg_roles WHERE rolname ~ '^ava_g[0-9]+_(gateway|runner)$' ORDER BY 1"
+        "SELECT rolname FROM pg_roles WHERE rolname ~ '^meiva_g[0-9]+_(gateway|runner)$' ORDER BY 1"
     ).fetchall()
     return [row[0] for row in rows]
 
@@ -37,7 +37,10 @@ def test_birth_creates_exactly_generation_zero(authority_postgres: AuthorityClus
     cluster = authority_postgres
     ledger = require_ledger(cluster.home)
     assert ledger.pending is None
-    assert ledger.active is not None and ledger.active.roles == ("ava_g0_gateway", "ava_g0_runner")
+    assert ledger.active is not None and ledger.active.roles == (
+        "meiva_g0_gateway",
+        "meiva_g0_runner",
+    )
     assert ledger.active.origin.kind == "birth"
     with cluster.admin() as conn:
         verified = check_invariant(conn, cluster.home, database=cluster.database)
@@ -45,17 +48,17 @@ def test_birth_creates_exactly_generation_zero(authority_postgres: AuthorityClus
         for login in ledger.active.roles:
             row = conn.execute(_LOGIN_ATTRIBUTES, (login,)).fetchone()
             assert row == (True, False, True, False, False, False, False)
-        for role in (OWNER, "ava_gateway", "ava_runner"):
+        for role in (OWNER, "meiva_gateway", "meiva_runner"):
             row = conn.execute(_LOGIN_ATTRIBUTES, (role,)).fetchone()
             assert row is not None and row[0] is False and row[1] is False
         members = conn.execute(
             "SELECT g.rolname, m.rolname, am.admin_option, am.inherit_option, am.set_option"
             " FROM pg_auth_members am JOIN pg_roles g ON g.oid = am.roleid"
-            " JOIN pg_roles m ON m.oid = am.member WHERE m.rolname ~ '^ava_g' ORDER BY 1"
+            " JOIN pg_roles m ON m.oid = am.member WHERE m.rolname ~ '^meiva_g' ORDER BY 1"
         ).fetchall()
         assert members == [
-            ("ava_gateway", "ava_g0_gateway", False, True, False),
-            ("ava_runner", "ava_g0_runner", False, True, False),
+            ("meiva_gateway", "meiva_g0_gateway", False, True, False),
+            ("meiva_runner", "meiva_g0_runner", False, True, False),
         ]
     store = cluster.home / "db-authority"
     assert store.stat().st_mode & 0o777 == 0o700
@@ -76,7 +79,7 @@ def test_logins_authenticate_only_with_their_secret(
             assert row == (role.name, role.name)
         with pytest.raises(psycopg.OperationalError, match="password authentication failed"):
             cluster.login(role.name, role.password + "x", via=via)  # type: ignore[arg-type]
-    for nologin in (OWNER, "ava_gateway", "ava_runner"):
+    for nologin in (OWNER, "meiva_gateway", "meiva_runner"):
         with pytest.raises(psycopg.OperationalError):
             cluster.login(nologin, "anything", via=via)  # type: ignore[arg-type]
 
@@ -105,7 +108,7 @@ WHERE n.nspname = 'public'
 
 
 @pytest.mark.parametrize(
-    ("login", "group"), [("ava_g0_gateway", "ava_gateway"), ("ava_g0_runner", "ava_runner")]
+    ("login", "group"), [("meiva_g0_gateway", "meiva_gateway"), ("meiva_g0_runner", "meiva_runner")]
 )
 def test_login_privileges_equal_its_group(
     authority_postgres: AuthorityCluster, login: str, group: str
@@ -125,7 +128,7 @@ def test_login_privileges_equal_its_group(
 def test_gateway_group_holds_the_full_dml_surface(authority_postgres: AuthorityCluster) -> None:
     with authority_postgres.admin() as conn:
         rows = conn.execute(
-            _PRIVILEGE_MATRIX, {"login": "ava_g0_gateway", "group": "ava_gateway"}
+            _PRIVILEGE_MATRIX, {"login": "meiva_g0_gateway", "group": "meiva_gateway"}
         ).fetchall()
     required = {
         "table": {"SELECT", "INSERT", "UPDATE", "DELETE"},
@@ -148,7 +151,7 @@ def test_gateway_group_holds_the_full_dml_surface(authority_postgres: AuthorityC
 
 
 @pytest.mark.parametrize(
-    ("login", "group"), [("ava_g0_gateway", "ava_gateway"), ("ava_g0_runner", "ava_runner")]
+    ("login", "group"), [("meiva_g0_gateway", "meiva_gateway"), ("meiva_g0_runner", "meiva_runner")]
 )
 @pytest.mark.parametrize("table", ["audit_events", "telemetry_events"])
 def test_both_groups_append_event_tables_but_cannot_rewrite_them(
@@ -167,8 +170,8 @@ def test_login_is_denied_ddl_and_identity_changes(
     denials = (
         "CREATE TABLE denied_probe (x int)",
         "ALTER TABLE agents ADD COLUMN denied_probe int",
-        "SET ROLE ava_gateway",
-        "SET ROLE ava_runner",
+        "SET ROLE meiva_gateway",
+        "SET ROLE meiva_runner",
         f"SET ROLE {OWNER}",
         f"SET SESSION AUTHORIZATION {OWNER}",
         "CREATE SCHEMA denied_probe",
@@ -247,7 +250,7 @@ def test_mint_retry_after_crash_reconciles_the_same_generation(
         assert again == verified and verified.number == 0
         activate(cluster.home, verified)
         assert mint_generation(conn, cluster.home) == verified
-        assert _generation_roles(conn) == ["ava_g0_gateway", "ava_g0_runner"]
+        assert _generation_roles(conn) == ["meiva_g0_gateway", "meiva_g0_runner"]
         check_invariant(conn, cluster.home, database=cluster.database)
     ledger = require_ledger(cluster.home)
     assert ledger.active is not None and ledger.pending is None
@@ -255,7 +258,7 @@ def test_mint_retry_after_crash_reconciles_the_same_generation(
         "0.json"
     ]
     with cluster.connect_class("gateway") as conn:
-        assert conn.execute("SELECT current_user").fetchone() == ("ava_g0_gateway",)
+        assert conn.execute("SELECT current_user").fetchone() == ("meiva_g0_gateway",)
 
 
 def test_retry_holds_when_the_stored_verifier_differs(
@@ -268,10 +271,10 @@ def test_retry_holds_when_the_stored_verifier_differs(
         with cluster.admin() as conn, pytest.raises(_CrashError):
             mint_generation(conn, cluster.home)
     with cluster.admin() as conn:
-        conn.execute("ALTER ROLE ava_g0_gateway PASSWORD 'foreign-credential-value'")
+        conn.execute("ALTER ROLE meiva_g0_gateway PASSWORD 'foreign-credential-value'")
         with pytest.raises(CatalogRefusedError, match="stored verifier differs"):
             mint_generation(conn, cluster.home)
-        assert _generation_roles(conn) == ["ava_g0_gateway", "ava_g0_runner"]
+        assert _generation_roles(conn) == ["meiva_g0_gateway", "meiva_g0_runner"]
     ledger = require_ledger(cluster.home)
     assert ledger.pending is not None and ledger.active is None
 
@@ -280,7 +283,7 @@ def test_mint_holds_when_the_names_already_exist(authority_unborn: AuthorityClus
     cluster = authority_unborn
     _begin_birth(cluster)
     with cluster.admin() as conn:
-        conn.execute("CREATE ROLE ava_g0_runner NOLOGIN")
+        conn.execute("CREATE ROLE meiva_g0_runner NOLOGIN")
         with pytest.raises(CatalogRefusedError, match="already exist before their mint"):
             mint_generation(conn, cluster.home)
     assert require_ledger(cluster.home).pending is None
@@ -294,7 +297,7 @@ def test_mint_holds_while_another_login_holds_group_membership(
     _begin_birth(cluster)
     with cluster.admin() as conn:
         conn.execute("CREATE ROLE stray_writer LOGIN PASSWORD 'stray-writer-password'")
-        conn.execute("GRANT ava_runner TO stray_writer")
+        conn.execute("GRANT meiva_runner TO stray_writer")
         with pytest.raises(CatalogRefusedError, match="stray_writer"):
             mint_generation(conn, cluster.home)
     assert require_ledger(cluster.home).pending is None

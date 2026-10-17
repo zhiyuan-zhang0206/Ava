@@ -5,8 +5,8 @@
 -- (task #5236). Nothing on origin/main reads or writes either object below.
 --
 --   * agent_presets           - the template table behind the REST CRUD
---                               (/api/presets), the CLI (`ava presets`) and the
---                               SDK (ava.agents.presets);
+--                               (/api/presets), the CLI (`meiva presets`) and the
+--                               SDK (meiva.agents.presets);
 --   * agents_meta.preset_name - the display-only reference to the preset row a
 --                               spawn resolved, copied verbatim by a fork.
 --

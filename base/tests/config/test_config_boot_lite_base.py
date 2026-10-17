@@ -18,15 +18,15 @@ def _empty_home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """Point the children at an empty home: no `.env`, so the skip-mode placeholders apply."""
     home = tmp_path / "empty-home"
     home.mkdir()
-    monkeypatch.setenv("AVA_HOME", str(home))
+    monkeypatch.setenv("MEIVA_HOME", str(home))
 
 
 def _clean_env(**overrides: str) -> dict[str, str]:
-    env = {key: value for key, value in os.environ.items() if not key.startswith("AVA_")}
+    env = {key: value for key, value in os.environ.items() if not key.startswith("MEIVA_")}
     env.pop("VIRTUAL_ENV", None)
-    # Stripping AVA_* must not strip the home: a child without AVA_HOME falls back to the
-    # operator's `~/.ava` and boots against its production `.env`.
-    env["AVA_HOME"] = os.environ["AVA_HOME"]
+    # Stripping MEIVA_* must not strip the home: a child without MEIVA_HOME falls back to the
+    # operator's `~/.meiva` and boots against its production `.env`.
+    env["MEIVA_HOME"] = os.environ["MEIVA_HOME"]
     env.update(overrides)
     return env
 
@@ -46,7 +46,7 @@ def _spawn(
 
 
 def test_skip_mode_defers_prepare_and_plants_placeholders() -> None:
-    proc = _spawn(env={"AVA_CONFIG_FETCH": "skip"})
+    proc = _spawn(env={"MEIVA_CONFIG_FETCH": "skip"})
     assert proc.returncode == 0, proc.stderr
     assert proc.stdout.startswith("DEFER False True "), proc.stdout
     assert proc.stdout.rstrip().endswith("True"), proc.stdout

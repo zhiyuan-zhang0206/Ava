@@ -41,7 +41,7 @@ jobs:
         id: candidate
         env:
           GH_TOKEN: ${{ github.token }}
-          BRANCH: ava-bot/model-pricing
+          BRANCH: meiva-bot/model-pricing
         run: |
           CANDIDATE="$RUNNER_TEMP/model-pricing-candidate"
           OPEN_PR="$(gh pr list --head "$BRANCH" --state open --json number --jq 'length')"
@@ -99,7 +99,7 @@ jobs:
         run: |
           if git -C "$CANDIDATE" diff --quiet -- \
             base/lm/pricing/pricing_catalog_archive.json \
-            ':(glob)ava_builtins/plugins/lm_*/provider.py'; then
+            ':(glob)meiva_builtins/plugins/lm_*/provider.py'; then
             echo 'changed=false' >> "$GITHUB_OUTPUT"
           else
             echo 'changed=true' >> "$GITHUB_OUTPUT"
@@ -108,14 +108,14 @@ jobs:
       - name: Push a review branch
         if: steps.diff.outputs.changed == 'true'
         env:
-          BRANCH: ava-bot/model-pricing
+          BRANCH: meiva-bot/model-pricing
           CANDIDATE: ${{ steps.candidate.outputs.path }}
         run: |
-          git -C "$CANDIDATE" config user.name 'ava-pricing-bot'
+          git -C "$CANDIDATE" config user.name 'meiva-pricing-bot'
           git -C "$CANDIDATE" config user.email '41898282+github-actions[bot]@users.noreply.github.com'
           git -C "$CANDIDATE" add \
             base/lm/pricing/pricing_catalog_archive.json \
-            ':(glob)ava_builtins/plugins/lm_*/provider.py'
+            ':(glob)meiva_builtins/plugins/lm_*/provider.py'
           git -C "$CANDIDATE" commit -m 'fix: update model pricing'
           git -C "$CANDIDATE" push --force-with-lease origin "HEAD:refs/heads/$BRANCH"
 
@@ -123,7 +123,7 @@ jobs:
         if: steps.diff.outputs.changed == 'true'
         env:
           GH_TOKEN: ${{ github.token }}
-          BRANCH: ava-bot/model-pricing
+          BRANCH: meiva-bot/model-pricing
         run: |
           PR_NUMBER="$(gh pr list --head "$BRANCH" --state open --json number --jq '.[0].number // empty')"
           PR_BODY="$RUNNER_TEMP/model-pricing-pr.md"
@@ -131,7 +131,7 @@ jobs:
           cat > "$PR_BODY" <<'EOF'
           ## Summary
 
-          Ava’s reviewed archive or runtime plugin rates differ from the current
+          Meiva’s reviewed archive or runtime plugin rates differ from the current
           checked-in pricing state. A source adapter may have appended a provisional
           period, or a previously reviewed scheduled period may now be active.
           Runtime plugin rates are synchronized to the archive period covering the
@@ -141,7 +141,7 @@ jobs:
 
           ```text
           base/lm/pricing/pricing_catalog_archive.json      (M when changed) ★ effective-dated rates and provenance
-          ava_builtins/plugins/lm_*/provider.py       (M when changed) ★ synchronized runtime PriceRates
+          meiva_builtins/plugins/lm_*/provider.py       (M when changed) ★ synchronized runtime PriceRates
           ```
 
           ## Data flow

@@ -1,4 +1,4 @@
-"""The private write-generation ledger under ``$AVA_HOME/db-authority/``.
+"""The private write-generation ledger under ``$MEIVA_HOME/db-authority/``.
 
 Settings-free and database-free. ``ledger.json`` records the owner, the
 capability groups and every allocated generation; ``generations/<n>.json``

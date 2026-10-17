@@ -3,12 +3,12 @@
 Always-on gateway daemon (cluster-wide; the gateway owns the data plane). Resident
 loops under one `TaskGroup` (one that raises ends the process):
 
-- Hourly loop (`AVA_EVENTS_MAINTENANCE_INTERVAL_SECONDS`, default 1h): replay the JSONL mirror
+- Hourly loop (`MEIVA_EVENTS_MAINTENANCE_INTERVAL_SECONDS`, default 1h): replay the JSONL mirror
   into `telemetry_events` (`services.upkeep.events_maintenance.telemetry_replay`), recompute the
   day-grain rollup tables of the last closed days (`services.upkeep.events_maintenance.rollup`),
   run the incremental blob VACUUM (`services.upkeep.events_maintenance.blob_vacuum`), and the hourly
   checkpoint size/row-count telemetry sample.
-- Resolution loop (`AVA_EVENTS_RESOLUTION_INTERVAL_SECONDS`, default 5m):
+- Resolution loop (`MEIVA_EVENTS_RESOLUTION_INTERVAL_SECONDS`, default 5m):
   refresh immutable-event class-resolution state and gauges from `telemetry_events`.
 - Registry-gauge loop (every 60s): sample `max(agents.id)` and emit the
   `agent_registry` event the growth dashboard reads
@@ -87,7 +87,7 @@ from base.events.live.bus import EventBus, EventBusConfig
 from base.host.exit_codes import hard_exit as _hard_exit
 from base.native_process.code_version import CodeVersion
 from base.native_process.loaded_commit import LoadedCommit
-from base.paths import ava_home
+from base.paths import meiva_home
 from base.telemetry.pipeline_build import build_pipeline
 from base.telemetry.process_logging import init_gateway_process
 from services.pidfile import acquire_pidfile, pidfile_holds_daemon, remove_pidfile
@@ -533,7 +533,7 @@ def main() -> None:
     """Entry point: init logger + run asyncio loop.
 
     SIGTERM (the graceful stop the fleet update sends) and Ctrl-C converge on
-    the same `KeyboardInterrupt` unwind — see `base.daemon.shutdown`. `ava stop`
+    the same `KeyboardInterrupt` unwind — see `base.daemon.shutdown`. `meiva stop`
     default force-kill does not reach this.
     """
     from base.deploy.schema.migrations import assert_schema_current
@@ -542,7 +542,7 @@ def main() -> None:
     machine_config = ConfigBoot()
     machine_config.boot()
     machine = machine_from_boot(machine_config)
-    process_home = ava_home().resolve()
+    process_home = meiva_home().resolve()
     # Pre-startup sanity: schema version must match code; raises SchemaVersionMismatch if not.
     assert_schema_current(machine_config.view.data_plane.db_url)
     version = CodeVersion(image)

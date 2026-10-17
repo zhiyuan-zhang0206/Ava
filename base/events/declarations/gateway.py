@@ -82,7 +82,7 @@ class Auth401Rejected(TypedDict):
     reconnect storm (PR #665), which removed the central count too — this
     aggregate restores the counter at bounded volume (one event per window,
     never one per rejection), feeding the OTLP-mapped
-    ``ava_auth401_rejected_count_total`` Prometheus counter.
+    ``meiva_auth401_rejected_count_total`` Prometheus counter.
     """
 
     count: int
@@ -94,7 +94,7 @@ class AgentRegistry(TypedDict):
     One event per 60s window carrying the ``agents`` table high-water mark
     (max id) — the fleet's growth curve (task #2010). Absolute state, never
     a sum: the OTLP disposition override records it as an ObservableGauge
-    (``ava_agent_registry_max_id_ratio``), so a flat fleet does not accrue
+    (``meiva_agent_registry_max_id_ratio``), so a flat fleet does not accrue
     value the way a Counter would.
     """
 
@@ -107,8 +107,8 @@ class MemorySearchStats(TypedDict):
     One event per 60s window carrying the memory-search store's absolute
     state: total chunk rows plus the duration of the most recent successful
     npz save. Both are state, never sums: the OTLP disposition override
-    records them as ObservableGauges (``ava_memory_search_stats_rows_ratio``
-    / ``ava_memory_search_stats_last_save_seconds``), so a flat store does
+    records them as ObservableGauges (``meiva_memory_search_stats_rows_ratio``
+    / ``meiva_memory_search_stats_last_save_seconds``), so a flat store does
     not accrue value the way Counters would. ``last_save_seconds`` is absent
     until the first save since boot (an absent optional metric is not zero).
     """
@@ -191,7 +191,7 @@ EVENTS: dict[str, EventSpec] = {
     "sse_drop": telemetry_event(
         "sse_drop", "SSE event dropped", payload=SseDrop, tier="anomaly", persist=True
     ),
-    # ava.ui.serve page-restore
+    # meiva.ui.serve page-restore
     # gateway endpoint latency metering (Task #1091): 60s aggregates emitted
     # by gateway/http/middleware/latency.py — one event per (route, bucket), never per request
     "gateway_latency": telemetry_event(

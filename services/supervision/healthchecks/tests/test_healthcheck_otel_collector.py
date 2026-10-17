@@ -83,7 +83,7 @@ def test_collector_serves_this_home_requires_gateway_lgtm_marker(
         return tmp_path
 
     monkeypatch.setattr(hc, "gateway_observability_home", gateway_home)
-    monkeypatch.delitem(os.environ, "AVA_TELEMETRY_OTLP_ENDPOINT", raising=False)
+    monkeypatch.delitem(os.environ, "MEIVA_TELEMETRY_OTLP_ENDPOINT", raising=False)
     assert hc.collector_serves_this_home(machine=machine_identity) is False
     (tmp_path / "lgtm-host").touch()
     assert hc.collector_serves_this_home(machine=machine_identity) is True
@@ -92,7 +92,7 @@ def test_collector_serves_this_home_requires_gateway_lgtm_marker(
 def test_collector_serves_this_home_with_explicit_endpoint_skips_marker(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path, *, machine_identity: MachineIdentity
 ) -> None:
-    """An explicit AVA_TELEMETRY_OTLP_ENDPOINT opens the healthcheck's
+    """An explicit MEIVA_TELEMETRY_OTLP_ENDPOINT opens the healthcheck's
     collector responsibility on a non-LGTM gateway (marker OR override)."""
     machine_identity.set(role=frozenset({"gateway", "agent-runner"}))
 
@@ -101,7 +101,9 @@ def test_collector_serves_this_home_with_explicit_endpoint_skips_marker(
         return tmp_path
 
     monkeypatch.setattr(hc, "gateway_observability_home", gateway_home)
-    monkeypatch.setitem(os.environ, "AVA_TELEMETRY_OTLP_ENDPOINT", "http://collector.invalid:4318")
+    monkeypatch.setitem(
+        os.environ, "MEIVA_TELEMETRY_OTLP_ENDPOINT", "http://collector.invalid:4318"
+    )
     assert hc.collector_serves_this_home(machine=machine_identity) is True
 
 

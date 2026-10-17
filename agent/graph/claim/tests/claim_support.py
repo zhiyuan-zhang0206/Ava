@@ -10,8 +10,8 @@ from langchain_core.runnables import RunnableConfig
 from langgraph.runtime import Runtime
 from psycopg_pool import AsyncConnectionPool
 
-import ava
-from base.agents.context import AvaContext
+import meiva
+from base.agents.context import MeivaContext
 from base.agents.context.identity import AgentIdentity
 from base.clock import Clock
 from base.config.tests.configuration import defaults
@@ -42,7 +42,7 @@ def make_runtime(
     extensions: ExtensionRegistry = EMPTY,
     agent_id: int | None = None,
     database_gate: ProcessDbGate,
-) -> Runtime[AvaContext]:
+) -> Runtime[MeivaContext]:
     """Assemble a claim Runtime borrowing the test SDK root's clients and machine.
 
     `ops_pool=None` takes the container early-return path;
@@ -52,8 +52,8 @@ def make_runtime(
     mock to assert `pub.emit.call_args_list`.
 
     """
-    retained = ava.context
-    ctx = AvaContext(
+    retained = meiva.context
+    ctx = MeivaContext(
         clients=retained.clients,
         machine=retained.machine,
         original_incarnation=retained.original_incarnation,

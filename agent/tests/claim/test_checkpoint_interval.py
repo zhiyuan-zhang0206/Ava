@@ -32,7 +32,7 @@ from base.config.domains.agent.runtime import AgentRuntimeSettings
 class _StubSaver:
     """Duck-typed saver that records the write calls made by the wrapper."""
 
-    _ava_nstep_flush: Callable[[str], Awaitable[None]]
+    _meiva_nstep_flush: Callable[[str], Awaitable[None]]
 
     def __init__(self) -> None:
         self.aput_calls: list[
@@ -219,7 +219,7 @@ async def test_interval_keeps_real_graph_parents_and_write_targets_persisted() -
     await compiled.ainvoke(  # pyright: ignore[reportUnknownMemberType]
         {"count": 0}, {"configurable": {"thread_id": "nstep-chain"}}
     )
-    await cast(_StubSaver, saver)._ava_nstep_flush("nstep-chain")
+    await cast(_StubSaver, saver)._meiva_nstep_flush("nstep-chain")
 
     checkpoints = saver.storage["nstep-chain"][""]
     checkpoint_ids = set(checkpoints)
@@ -288,7 +288,7 @@ async def test_interval_one_is_pure_passthrough() -> None:
         [("channel", "first")],
         [(PUSH, "second")],
     ]
-    assert not hasattr(saver, "_ava_nstep_flush")
+    assert not hasattr(saver, "_meiva_nstep_flush")
 
 
 async def test_input_and_fork_checkpoints_are_never_throttled() -> None:
@@ -324,8 +324,8 @@ async def test_final_flush_persists_only_the_last_skipped_checkpoint_once() -> N
     await _aput(saver, 1)
     await _aput(saver, 2)
     await _aput(saver, 3)
-    await saver._ava_nstep_flush("default")
-    await saver._ava_nstep_flush("default")
+    await saver._meiva_nstep_flush("default")
+    await saver._meiva_nstep_flush("default")
 
     assert [call[2]["step"] for call in saver.aput_calls] == [3]
 
@@ -347,7 +347,7 @@ async def test_written_checkpoint_clears_skipped_tail_and_skipped_aput_returns_i
         {"channel": 1},
     )
     await _aput(saver, 4)
-    await saver._ava_nstep_flush("default")
+    await saver._meiva_nstep_flush("default")
 
     assert skipped_result is input_config
     assert [call[2]["step"] for call in saver.aput_calls] == [4]
@@ -360,11 +360,11 @@ async def test_interval_keeps_skipped_tails_isolated_by_thread() -> None:
 
     await _aput(saver, 1, thread_id="agent-a")
     await _aput(saver, 1, thread_id="agent-b")
-    await saver._ava_nstep_flush("agent-a")
+    await saver._meiva_nstep_flush("agent-a")
 
     assert _stored_thread_ids(saver) == ["agent-a"]
 
-    await saver._ava_nstep_flush("agent-b")
+    await saver._meiva_nstep_flush("agent-b")
 
     assert _stored_thread_ids(saver) == ["agent-a", "agent-b"]
 
@@ -383,7 +383,7 @@ async def test_a_write_carries_its_own_interval_over_the_default() -> None:
 
     assert _stored_thread_ids(saver) == ["agent-b", "agent-c"]
 
-    await saver._ava_nstep_flush("agent-a")
+    await saver._meiva_nstep_flush("agent-a")
 
     assert _stored_thread_ids(saver) == ["agent-b", "agent-c", "agent-a"]
 
@@ -392,12 +392,13 @@ def test_checkpoint_interval_config_is_per_agent_and_defaults_to_four() -> None:
     field = AgentRuntimeSettings.model_fields["checkpoint_interval"]
     extra = field.json_schema_extra
 
-    assert field.alias == "AVA_CHECKPOINT_INTERVAL"
+    assert field.alias == "MEIVA_CHECKPOINT_INTERVAL"
     assert field.default == 4
     assert isinstance(extra, dict)
     assert extra["per_agent"] is True
     assert (
-        AgentRuntimeSettings.model_validate({"AVA_CHECKPOINT_INTERVAL": 4}).checkpoint_interval == 4
+        AgentRuntimeSettings.model_validate({"MEIVA_CHECKPOINT_INTERVAL": 4}).checkpoint_interval
+        == 4
     )
 
 
@@ -430,7 +431,7 @@ async def test_final_flush_persists_blobs_for_current_channel_versions() -> None
     _wrap(saver, interval=4)
 
     await _aput(saver, 1, source="loop")
-    await saver._ava_nstep_flush("default")
+    await saver._meiva_nstep_flush("default")
 
     assert [call[2]["step"] for call in saver.aput_calls] == [1]
     flush_versions = saver.aput_calls[-1][3]
@@ -531,7 +532,7 @@ async def test_delta_thread_flush_has_no_throttled_tail() -> None:
 
     await _aput_delta(saver, 1, counters={"messages": (1, 1)})
     await _aput_delta(saver, 2)
-    await saver._ava_nstep_flush("default")
+    await saver._meiva_nstep_flush("default")
 
     assert [call[2]["step"] for call in saver.aput_calls] == [1, 2]
 
@@ -561,13 +562,13 @@ async def test_concurrent_flush_cannot_ack_before_the_inflight_save() -> None:
     saver = _BlockedSaver()
     _wrap(saver, interval=4)
     await _aput(saver, 1)
-    first = asyncio.ensure_future(saver._ava_nstep_flush("default"))
+    first = asyncio.ensure_future(saver._meiva_nstep_flush("default"))
     await asyncio.wait_for(saver.entered.wait(), timeout=2)
     started = asyncio.Event()
 
     async def second_flush() -> None:
         started.set()
-        await saver._ava_nstep_flush("default")
+        await saver._meiva_nstep_flush("default")
 
     second = asyncio.create_task(second_flush())
     try:
@@ -586,7 +587,7 @@ async def test_cancelled_flush_retains_the_tail_for_retry() -> None:
     saver = _BlockedSaver()
     _wrap(saver, interval=4)
     await _aput(saver, 1)
-    pending = asyncio.ensure_future(saver._ava_nstep_flush("default"))
+    pending = asyncio.ensure_future(saver._meiva_nstep_flush("default"))
     await asyncio.wait_for(saver.entered.wait(), timeout=2)
     pending.cancel()
     results = await asyncio.gather(pending, return_exceptions=True)
@@ -594,8 +595,8 @@ async def test_cancelled_flush_retains_the_tail_for_retry() -> None:
     assert saver.aput_calls == []
 
     saver.release.set()
-    await saver._ava_nstep_flush("default")
-    await saver._ava_nstep_flush("default")
+    await saver._meiva_nstep_flush("default")
+    await saver._meiva_nstep_flush("default")
     assert [call[2]["step"] for call in saver.aput_calls] == [1]
 
 
@@ -603,7 +604,7 @@ async def test_flush_does_not_discard_a_newer_pending_checkpoint() -> None:
     saver = _BlockedSaver()
     _wrap(saver, interval=4)
     await _aput(saver, 1)
-    pending = asyncio.ensure_future(saver._ava_nstep_flush("default"))
+    pending = asyncio.ensure_future(saver._meiva_nstep_flush("default"))
     await asyncio.wait_for(saver.entered.wait(), timeout=2)
     newer = asyncio.create_task(_aput(saver, 2))
     try:
@@ -611,7 +612,7 @@ async def test_flush_does_not_discard_a_newer_pending_checkpoint() -> None:
     finally:
         saver.release.set()
         await asyncio.wait_for(asyncio.gather(pending, newer), timeout=2)
-    await saver._ava_nstep_flush("default")
+    await saver._meiva_nstep_flush("default")
     assert [call[2]["step"] for call in saver.aput_calls] == [1, 2]
 
 
@@ -619,7 +620,7 @@ async def test_one_threads_flush_does_not_block_another_threads_save() -> None:
     saver = _BlockedSaver()
     _wrap(saver, interval=4)
     await _aput(saver, 1, thread_id="agent-a")
-    pending = asyncio.ensure_future(saver._ava_nstep_flush("agent-a"))
+    pending = asyncio.ensure_future(saver._meiva_nstep_flush("agent-a"))
     await asyncio.wait_for(saver.entered.wait(), timeout=2)
     try:
         await asyncio.wait_for(_aput(saver, 0, thread_id="agent-b"), timeout=2)
@@ -676,7 +677,7 @@ async def test_nstep_wrapper_delta_readback_matches_unwrapped_control(
     await wrapped.ainvoke(  # pyright: ignore[reportUnknownMemberType]
         {"messages": [], "n": 0, "target": 12}, wrapped_config, recursion_limit=200
     )
-    await wrapped_saver._ava_nstep_flush(wrapped_thread)  # type: ignore[attr-defined]
+    await wrapped_saver._meiva_nstep_flush(wrapped_thread)  # type: ignore[attr-defined]
 
     async def read_message_ids(config: RunnableConfig) -> list[str | None]:
         reader = build(AsyncPostgresSaver(aops_pool))

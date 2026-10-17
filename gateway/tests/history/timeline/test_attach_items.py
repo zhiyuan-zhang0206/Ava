@@ -29,7 +29,7 @@ _TIMELINE_INPUTS = TimelineReadInputs(
 
 
 class TestAttachItems:
-    """`build_timeline_items` dispatch for ava_msg_type="attach" messages.
+    """`build_timeline_items` dispatch for meiva_msg_type="attach" messages.
 
     An attach message (product of `agent/graph/_attach_drain.py`) carries a
     leading text caption block plus provider-native media blocks (image data
@@ -342,7 +342,7 @@ class TestTimelineDispatch:
             ToolMessage(  # 2
                 content="one\n",
                 tool_call_id="call_1",
-                additional_kwargs={"ava_msg_type": "exec_output"},
+                additional_kwargs={"meiva_msg_type": "exec_output"},
             ),
             inbound_message(
                 content="envelope:msg 2", source="user", inbound_id=2, body_start=0
@@ -366,7 +366,7 @@ class TestTimelineDispatch:
             ToolMessage(  # 5
                 content="two\n",
                 tool_call_id="call_2",
-                additional_kwargs={"ava_msg_type": "exec_output"},
+                additional_kwargs={"meiva_msg_type": "exec_output"},
             ),
         ]
         self._put_checkpoint(tid, messages)  # pyright: ignore[reportUnknownMemberType]
@@ -467,7 +467,7 @@ class TestTimelineDispatch:
         db_conn.commit()
 
         messages = [
-            SystemMessage(content="You are Ava."),  # 0
+            SystemMessage(content="You are Meiva."),  # 0
             inbound_message(content="envelope:hi", source="user", inbound_id=1, body_start=0),  # 1
             AIMessage(content="hello back"),  # 2
         ]
@@ -481,7 +481,7 @@ class TestTimelineDispatch:
             ("inbound_chat", "1.0"),
             ("agent_chat", "2.0"),
         ]
-        assert items[0]["payload"] == "You are Ava."
+        assert items[0]["payload"] == "You are Meiva."
         assert items[0]["created_at"] is None
 
     def test_aimessage_string_content_renders_as_chat(
@@ -507,7 +507,7 @@ class TestTimelineDispatch:
         self, db_conn: psycopg.Connection, test_client: TestClient
     ) -> None:
         """The endpoint orders items by item_id (msg_idx.block_idx) — the logical
-        append order — not by created_at. Two AIMessages whose real ava_created_at
+        append order — not by created_at. Two AIMessages whose real meiva_created_at
         runs backward vs their position must still render in position order; a
         created_at sort would flip them."""
         from langchain_core.messages import AIMessage
@@ -515,10 +515,11 @@ class TestTimelineDispatch:
         tid = create_agent(db_conn)
         messages = [
             AIMessage(
-                content="first", additional_kwargs={"ava_created_at": "2026-06-20T10:00:00+00:00"}
+                content="first", additional_kwargs={"meiva_created_at": "2026-06-20T10:00:00+00:00"}
             ),
             AIMessage(
-                content="second", additional_kwargs={"ava_created_at": "2026-06-19T08:00:00+00:00"}
+                content="second",
+                additional_kwargs={"meiva_created_at": "2026-06-19T08:00:00+00:00"},
             ),
         ]
         self._put_checkpoint(tid, messages)  # pyright: ignore[reportUnknownMemberType]

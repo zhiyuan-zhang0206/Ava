@@ -4,16 +4,16 @@
 When `trace_enabled` (default on), OpenLLMetry (traceloop-sdk) auto-instruments
 the Anthropic/OpenAI/Google SDKs + LangChain/LangGraph, and every span is
 exported over OTLP/HTTP (protobuf wire format) to the local OTel Collector
-sidecar (`AVA_TELEMETRY_OTLP_ENDPOINT`, default 127.0.0.1:4318) by
+sidecar (`MEIVA_TELEMETRY_OTLP_ENDPOINT`, default 127.0.0.1:4318) by
 `OtlpJsonHttpSpanExporter`; the slow import+init runs on a daemon thread off
 the boot path (use sites wait via ensure_init_resolved()). The sidecar (one
-per machine, supervised like every other Ava service) writes the local JSONL
-mirror under `$AVA_HOME/traces/` via its file exporter. A gateway sidecar fans out to loopback Tempo; a pure runner
+per machine, supervised like every other Meiva service) writes the local JSONL
+mirror under `$MEIVA_HOME/traces/` via its file exporter. A gateway sidecar fans out to loopback Tempo; a pure runner
 sidecar relays to the gateway collector's authenticated private receiver. Each
 line is one standard OTLP/JSON `ExportTraceServiceRequest` (the same wire shape
 any OTLP backend ingests), giving accepted batches a vendor-neutral, grep-able
 local recovery copy. A gap present in the mirror can be replayed with
-`ava trace ship`.
+`meiva trace ship`.
 
   **Metadata-only by default (trace v2, 2026-08-05)**: spans record chain
   metadata (span names, langgraph paths, checkpoint refs, agent_id, durations,
@@ -26,7 +26,7 @@ local recovery copy. A gap present in the mirror can be replayed with
   content back in). Turn content is fetched on demand from the checkpoints
   table by trace id — see `base/agents/history/checkpoint.py` / the gateway trace endpoint.
 
-- **Ship** (`cli/commands/observability/trace.py`, `ava trace ship`): replays a time window of
+- **Ship** (`cli/commands/observability/trace.py`, `meiva trace ship`): replays a time window of
   the sidecar's JSONL mirror to Tempo directly on a gateway, or through the
   gateway collector's authenticated receiver on a pure runner. This is the
   recovery path (backend down longer than the collector queue held, offline
@@ -42,7 +42,7 @@ exported) at turn START, so a trace always has its root even when the process
 is killed mid-turn (#1964); children export as they end and parent under the
 already-ended root via the kept OTel context. The
 root carries the vendor-neutral `session.id` (Tempo/Grafana group one agent's
-turns into a session by it) plus `ava.turn` (the per-process turn counter).
+turns into a session by it) plus `meiva.turn` (the per-process turn counter).
 
 claim_idle_wait_span() (used by the agent claim node) ends the open LangChain
 node span (`execute_task claim`) before the node parks in
@@ -114,10 +114,10 @@ __all__ = [
 # convention); the consumer groups one agent's spans into a session by it.
 _ATTR_NEUTRAL_SESSION_ID = "session.id"
 
-# `ava.turn` — the per-process turn counter on each turn's root span; orders
+# `meiva.turn` — the per-process turn counter on each turn's root span; orders
 # an agent's turns within one process lifetime (it restarts at 1 on respawn;
 # cross-process ordering comes from timestamps / checkpoint refs).
-_ATTR_TURN = "ava.turn"
+_ATTR_TURN = "meiva.turn"
 
 # LangChain/LangGraph node-span naming from the traceloop callback handler:
 # every graph node span is `execute_task <node>`. claim_idle_wait_span is only
@@ -137,7 +137,7 @@ TRACE_EXPORT_COOLDOWN_S = 30.0
 # ── LLM content stripping (trace v2) ─────────────────────────────────────────
 #
 # Span attributes that carry LLM content — the 99.89% of the 2026-08-05 mirror
-# blowup (31 GB/h with AVA_TRACE_ENABLED=true). Chain metadata lives in the
+# blowup (31 GB/h with MEIVA_TRACE_ENABLED=true). Chain metadata lives in the
 # `traceloop.association.properties.*` / `gen_ai.task.*` / `langgraph.*`
 # attributes and never appears here; these keys are pure payload.
 #
@@ -255,10 +255,10 @@ class OtlpJsonHttpSpanExporter(SpanExporter):
     (defensive layer 2 — content never leaves the process), re-serialized to
     the OTLP `ExportTraceServiceRequest` protobuf and POSTed to
     `{endpoint}/v1/traces` with `Content-Type: application/x-protobuf` — the
-    same wire path `ava trace ship` uses. Protobuf, not OTLP/JSON, on the
+    same wire path `meiva trace ship` uses. Protobuf, not OTLP/JSON, on the
     wire: the collector's JSON receiver rejects the SDK's padded-base64 ids
     (verified 2026-08-14 against otelcol-contrib 0.155.0). The endpoint is
-    the LOCAL sidecar (``AVA_TELEMETRY_OTLP_ENDPOINT``, default
+    the LOCAL sidecar (``MEIVA_TELEMETRY_OTLP_ENDPOINT``, default
     127.0.0.1:4318); agents never dial a backend directly.
 
     The sidecar is supervised (watchdog, 60s), so a failed POST returns FAILURE
@@ -417,7 +417,7 @@ def _arm_tracing(
         from traceloop.sdk import Traceloop
         from traceloop.sdk.instruments import Instruments
 
-        # Mirror the LLM call paths Ava actually uses. LangGraph rides on the
+        # Mirror the LLM call paths Meiva actually uses. LangGraph rides on the
         # LANGCHAIN instrumentor (its callback handler nests node spans), so
         # there is no separate LANGGRAPH instrument. LiteLLM, when used,
         # surfaces through the provider instrumentors at the SDK layer.
@@ -444,14 +444,14 @@ def _arm_tracing(
                 return
             try:
                 Traceloop.init(  # pyright: ignore[reportUnknownMemberType]
-                    app_name="ava",
+                    app_name="meiva",
                     exporter=OtlpJsonHttpSpanExporter(endpoint=endpoint),
                     instruments=instruments,
                     disable_batch=False,
                     telemetry_enabled=False,
                     resource_attributes={
                         "cluster": cluster_label(home),
-                        "service.line": "ava",
+                        "service.line": "meiva",
                         "environment": "prod" if production else "dev",
                     },
                 )
@@ -722,7 +722,7 @@ def turn_span(*, name: str, session_id: str, turn: int) -> Generator[None, None,
         return
     from opentelemetry import trace as otel_trace
 
-    tracer = otel_trace.get_tracer("ava.session")
+    tracer = otel_trace.get_tracer("meiva.session")
     # Placeholder root: created, attributed and ended at turn start so the
     # trace has its root even if this process dies mid-turn. The context
     # stays attached (end_on_exit=False) so every child span of the turn
@@ -788,7 +788,7 @@ def claim_idle_wait_span() -> Generator[None, None, None]:
         yield
         return
     current.end()
-    tracer = otel_trace.get_tracer("ava.claim")
+    tracer = otel_trace.get_tracer("meiva.claim")
     with tracer.start_as_current_span(_IDLE_WAIT_SPAN_NAME):
         yield
 

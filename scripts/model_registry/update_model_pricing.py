@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Fetch official DeepSeek pricing and reconcile it with Ava's archive.
+"""Fetch official DeepSeek pricing and reconcile it with Meiva's archive.
 
 Provider adapters are intentionally strict and independent. A changed page
 shape, missing model, unknown meter, or unit invariant is an error: automation
@@ -427,7 +427,7 @@ def sync_plugin_rates(
 def _fetch_deepseek_html() -> str:
     response = requests.get(
         _DEEPSEEK_PRICING_URL,
-        headers={"User-Agent": "Ava model-pricing updater"},
+        headers={"User-Agent": "Meiva model-pricing updater"},
         timeout=30,
     )
     response.raise_for_status()
@@ -436,7 +436,7 @@ def _fetch_deepseek_html() -> str:
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
-        description="Compare Ava's reviewed catalog with official provider pricing."
+        description="Compare Meiva's reviewed catalog with official provider pricing."
     )
     mode = parser.add_mutually_exclusive_group()
     mode.add_argument(

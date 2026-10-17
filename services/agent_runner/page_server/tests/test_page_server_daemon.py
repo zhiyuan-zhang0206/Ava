@@ -131,7 +131,7 @@ def test_open_row_creates_persistent_page_session_and_persists_token(
     reconcile(sync_pool, managed)
 
     token, page_session = _token_and_session(db_conn, agent_id, "My_Page")
-    assert page_session == f"ava-agent-{agent_id}-shell-0-page-my-page"
+    assert page_session == f"meiva-agent-{agent_id}-shell-0-page-my-page"
     assert set(managed) == {(agent_id, "My_Page")}
     assert backend.new_calls == [
         (
@@ -221,7 +221,7 @@ def test_managed_row_liveness_uses_record_scan_not_backend_round_trip(
         machine=machine_identity,
     )
     key = (agent_id, "scan-live")
-    page_session = f"ava-agent-{agent_id}-shell-9-page-scan-live"
+    page_session = f"meiva-agent-{agent_id}-shell-9-page-scan-live"
     insert_page_row(
         db_conn,
         agent_id,
@@ -273,7 +273,7 @@ def test_healthy_page_is_not_resent(
         database_gate=database_gate,
         machine=machine_identity,
     )
-    page_session = f"ava-agent-{agent_id}-shell-3-page-live"
+    page_session = f"meiva-agent-{agent_id}-shell-3-page-live"
     backend.sessions.add(page_session)
     insert_page_row(
         db_conn,
@@ -555,7 +555,7 @@ def test_daemon_restart_kills_the_persisted_session_of_a_closed_row(
         database_gate=database_gate,
         machine=machine_identity,
     )
-    page_session = f"ava-agent-{agent_id}-shell-4-page-closed-after-restart"
+    page_session = f"meiva-agent-{agent_id}-shell-4-page-closed-after-restart"
     backend.sessions.add(page_session)
     insert_page_row(
         db_conn, agent_id, "closed-after-restart", 12014, tmp_path, session=page_session
@@ -592,7 +592,7 @@ def test_lost_page_session_is_closed_without_relaunch_or_agent_notice(
         12111,
         tmp_path,
         token=secrets.token_hex(16),
-        session=f"ava-agent-{agent_id}-shell-1-page-lost",
+        session=f"meiva-agent-{agent_id}-shell-1-page-lost",
     )
     before = db_conn.execute(
         "SELECT count(*) FROM inbound_messages WHERE agent_id = %s", (agent_id,)

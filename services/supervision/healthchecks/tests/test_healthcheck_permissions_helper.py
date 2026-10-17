@@ -20,7 +20,7 @@ from services.supervision.healthchecks import permissions_helper as hc
 # stuck shape deliberately keeps BOTH the top-level `state = spawn scheduled`
 # line and the `job state = spawn failed` line: the classifier must read the
 # latter only (PR #2500 review; the top-level `state` never carries it).
-_STUCK_JOB = """gui/501/com.ava.test.f5-lwcr-stub = {
+_STUCK_JOB = """gui/501/com.meiva.test.f5-lwcr-stub = {
 	active count = 0
 	managed_by = com.apple.xpc.ServiceManagement
 	state = spawn scheduled
@@ -34,7 +34,7 @@ _STUCK_JOB = """gui/501/com.ava.test.f5-lwcr-stub = {
 
 # The lag window: `spawn failed` is already visible, the LWCR marker too, but
 # launchd has not recorded the exit code yet — marker-first still classifies.
-_STUCK_MARKER_ONLY = """gui/501/com.ava.test.f5-lwcr-stub = {
+_STUCK_MARKER_ONLY = """gui/501/com.meiva.test.f5-lwcr-stub = {
 	state = spawn scheduled
 	job state = spawn failed
 	properties = keepalive | needs LWCR update | has LWCR
@@ -42,7 +42,7 @@ _STUCK_MARKER_ONLY = """gui/501/com.ava.test.f5-lwcr-stub = {
 
 # The mirror lag: the 78 exit is recorded but no LWCR marker shows in the
 # properties — the exit code alone already identifies the stuck class.
-_STUCK_78_NO_MARKER = """gui/501/com.ava.test.f5-lwcr-stub = {
+_STUCK_78_NO_MARKER = """gui/501/com.meiva.test.f5-lwcr-stub = {
 	state = spawn scheduled
 	job state = spawn failed
 	properties = keepalive
@@ -50,7 +50,7 @@ _STUCK_78_NO_MARKER = """gui/501/com.ava.test.f5-lwcr-stub = {
 }"""
 
 # Spawn failed without any LWCR mark: the next round re-classifies.
-_SPAWN_FAILED_BARE = """gui/501/com.ava.test.f5-lwcr-stub = {
+_SPAWN_FAILED_BARE = """gui/501/com.meiva.test.f5-lwcr-stub = {
 	state = spawn scheduled
 	last exit code = 1: EPERM
 	job state = spawn failed
@@ -59,12 +59,12 @@ _SPAWN_FAILED_BARE = """gui/501/com.ava.test.f5-lwcr-stub = {
 
 # Exit 78 without spawn-failed: not an LWCR verdict (78 is a generic spawn
 # failure code, e.g. a missing app).
-_EXIT_78_ONLY = """gui/501/com.ava.test.f5-lwcr-stub = {
+_EXIT_78_ONLY = """gui/501/com.meiva.test.f5-lwcr-stub = {
 	state = running
 	last exit code = 78: EX_CONFIG
 }"""
 
-_RUNNING_JOB = """gui/501/com.ava.test.f5-lwcr-stub = {
+_RUNNING_JOB = """gui/501/com.meiva.test.f5-lwcr-stub = {
 	state = running
 	pid = 4242
 }"""

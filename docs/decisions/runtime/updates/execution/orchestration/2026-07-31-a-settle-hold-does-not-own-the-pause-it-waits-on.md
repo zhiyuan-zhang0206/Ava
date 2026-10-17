@@ -39,7 +39,7 @@ The settle hold is not independent evidence of ownership. It is *derived from* t
 absence of an owner:
 
 1. Phase A pauses agent-runner X. Phase B triggers X's self-update; X acks.
-2. X's updater dies — SIGKILL, killed session, machine crash — before the `ava start`
+2. X's updater dies — SIGKILL, killed session, machine crash — before the `meiva start`
    that unlinks the flag.
 3. The gateway polls X. `cli/commands/update.py:_probe_verdict` mints `POLL_STALLED`
    from `paused=true` **and** `current_orchestration=null`, confirmed
@@ -85,7 +85,7 @@ Treating an awaited hold as a licence to unpause *immediately* would reintroduce
 race for one lease shape and split one rule into two. Rejected.
 
 **The local-session signal is untouched.** Only the lease half narrows. A
-watchdog-spawned `ava-updater` takes no lease at all, so a settle hold says nothing
+watchdog-spawned `meiva-updater` takes no lease at all, so a settle hold says nothing
 whatever about it.
 
 **A crashed *executing* lease still owns the pause, up to `LOCK_TTL_S`.** A killed
@@ -94,7 +94,7 @@ False for it and this change does not touch it. That is correct and not a gap we
 close here: the holder is `<other-machine>:pid<N>`, and `ops/ops_cluster.py`'s
 `_lock_holder_is_live` can only probe a pid on the machine it runs on. From X there is
 no way to distinguish a crashed remote rollout from a working one, which is what the
-TTL is for; `ava cluster recover`, run on the holder's machine, is the operator escape.
+TTL is for; `meiva cluster recover`, run on the holder's machine, is the operator escape.
 A settle hold is discriminable only because its `note` is *self-describing*.
 
 **The round that unpauses still returns `BlockScope.ALL`.** The heals land one 60 s
@@ -117,9 +117,9 @@ by an out-of-process observer, not by the failing process.**
   that test red.
 
 - **(b) `_RESTART_RECOVERY_SH` means the pause would be cleared while the
-  ava-updater session is still alive with its recovery start pending.** The clearing
+  meiva-updater session is still alive with its recovery start pending.** The clearing
   decision here is made by the watchdog, whose second signal *is* that session — a
-  live `ava-updater` makes `current_orchestration()` answer `"update"` and the
+  live `meiva-updater` makes `current_orchestration()` answer `"update"` and the
   unpause is declined. A process cannot see its own successor; an observer can. (For
   the record: both surviving `_release_self_heal_pause` calls are narrower than the
   defect describes — `cmd_restart` and the agent-runner self-update each call it only

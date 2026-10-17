@@ -6,9 +6,9 @@
 The agent→user surface had grown two near-identical primitives, each with its own
 table, SDK verb, endpoints, events, and snapshot projection:
 
-- `ava.ui.ask_question` → `agent_questions` (needs a response; `blocking` bool;
+- `meiva.ui.ask_question` → `agent_questions` (needs a response; `blocking` bool;
   answered_at/answer + closed_at/closed_by).
-- `ava.ui.submit_report` → `agent_reports` (FYI; no blocking, no answer; read_at +
+- `meiva.ui.submit_report` → `agent_reports` (FYI; no blocking, no answer; read_at +
   closed_at).
 
 The two tables shared `id / agent_id / title / content / priority / created_at`
@@ -21,7 +21,7 @@ column"). This entry reverses that.
 
 ## Decision
 
-One table `agent_notices`, one create verb `ava.ui.notify`, discriminated by a
+One table `agent_notices`, one create verb `meiva.ui.notify`, discriminated by a
 `require_response` bool. The primitive is one object at three obligation rungs;
 `priority` (P0..P3, stakes) is an orthogonal axis:
 
@@ -45,7 +45,7 @@ transport asymmetry (snapshot-inline bounded worklist vs off-snapshot FYI feed)
 as a predicate rather than a second table. Six endpoints converge to three:
 `POST .../notices/{id}/resolve` (explicit `action`), `GET /api/notices/open`
 (FYI feed), `GET /api/notices/resolved` (history). Two new agent verbs land on
-the way: `ava.ui.edit_notice` (revise an open notice) and `ava.ui.list_notices`.
+the way: `meiva.ui.edit_notice` (revise an open notice) and `meiva.ui.list_notices`.
 
 ## Alternatives rejected
 
@@ -76,7 +76,7 @@ the way: `ava.ui.edit_notice` (revise an open notice) and `ava.ui.list_notices`.
 
 - One data migration (`0053`, create+copy+drop). Reversible via a paired
   `.down.sql` that rebuilds both old tables and copies rows back; safe to drop in
-  one migration because `ava update` pauses agent-runners before migrating, so no
+  one migration because `meiva update` pauses agent-runners before migrating, so no
   old-code process writes the old tables across it.
 - The SDK now hands the agent a small bool matrix on one call instead of two
   named verbs — accepted in exchange for one primitive / one name end to end.

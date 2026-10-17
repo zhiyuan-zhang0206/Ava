@@ -5,18 +5,18 @@
 The ops service roster is single-sourced in `ops/spec.py:build_services()` (the
 just-landed ops-module slice 1): every service — its launch command, probe
 metadata, capability group, and watchdog healthcheck — is one `ServiceSpec`, and
-`ava start` / the watchdog keepalive roster / `ava status` all derive from that
+`meiva start` / the watchdog keepalive roster / `meiva status` all derive from that
 one tuple.
 
 One of its entries did not belong there. `task-maintenance` — the gateway-side
 daemon that nudges overdue task owners and escalates to their delegator — is
 entirely fleet domain: it reads/writes `agent_tasks`, delivers through the fleet
 notice path, and only makes sense when a human is supervising the fleet. That
-domain already has a home, the `ava_fleet` plugin (`plugins/ava_fleet/`, which
-owns `ava.tasks`, `ava.self`, `ava.ui`, the fleet system-prompt section). Yet its
+domain already has a home, the `meiva_fleet` plugin (`plugins/meiva_fleet/`, which
+owns `meiva.tasks`, `meiva.self`, `meiva.ui`, the fleet system-prompt section). Yet its
 `ServiceSpec` sat hardcoded in the core `ops/spec.py` roster and its daemon +
 healthcheck lived under `services/`, and `_gate_reason` carried a fleet-specific
-`AVA_TASK_MAINTENANCE_ENABLED` branch. A low layer (ops) was naming a high-layer
+`MEIVA_TASK_MAINTENANCE_ENABLED` branch. A low layer (ops) was naming a high-layer
 concept. The question raised: should plugins be able to register a service, with
 a spec/contract that keeps the single-source roster intact?
 
@@ -35,7 +35,7 @@ Direction is **"plugin declares, ops discovers"**: ops never imports a specific
 plugin's domain code. The `services.py` manifest is deliberately light — it
 imports only `ops.spec.ServiceSpec` + `shared` — so the ops/CLI/watchdog process
 that discovers it never drags the agent kernel in. The daemon and healthcheck
-move under the plugin namespace (`plugins/ava_fleet/task_maintenance/{daemon,
+move under the plugin namespace (`plugins/meiva_fleet/task_maintenance/{daemon,
 healthcheck}.py`); they launch via `python -m` / `importlib`, which only touches
 empty package `__init__.py`s, never the plugin's `plugin.py` (whose registration
 side effects are agent-only). A plugin service may carry its own
@@ -48,8 +48,8 @@ Single-source is preserved: the watchdog / start / status still derive from
 ### Discovery keys on presence, not the agent enable-state
 
 A tempting shortcut was to key discovery on the plugin *enable-state*
-(`plugins_config.json`, what `ava plugins enable/disable` writes), so disabling
-the `ava_fleet` plugin would drop task-maintenance from the roster — matching the
+(`plugins_config.json`, what `meiva plugins enable/disable` writes), so disabling
+the `meiva_fleet` plugin would drop task-maintenance from the roster — matching the
 plugin's "disable the plugin, strip the whole surface" philosophy. Rejected.
 
 The enable-state plane is the *agent-plugin-registration* plane: `agent/graph/
@@ -65,19 +65,19 @@ per-agent overlays via `plugin_config_registry`), so the shortcut would have
 
 Instead: **discovery keys on plugin code presence** (deterministic filesystem),
 and a service's cluster-level on/off is an **explicit settings field read by
-`ServiceSpec.gate`** — for task-maintenance, `AVA_TASK_MAINTENANCE_ENABLED`
+`ServiceSpec.gate`** — for task-maintenance, `MEIVA_TASK_MAINTENANCE_ENABLED`
 (scope=host, remote-writable), evaluated deterministically at daemon-start and
 unaffected by any per-agent overlay. Two clean planes: "is the plugin's code
-here" (presence) and "should its daemon run" (explicit gate). `ava plugins
-disable ava_fleet` strips the *agent* surface (namespaces, prompt) but does not by
-itself stop the gateway daemon — that is `AVA_TASK_MAINTENANCE_ENABLED`.
+here" (presence) and "should its daemon run" (explicit gate). `meiva plugins
+disable meiva_fleet` strips the *agent* surface (namespaces, prompt) but does not by
+itself stop the gateway daemon — that is `MEIVA_TASK_MAINTENANCE_ENABLED`.
 
 ### Why this mechanism (rejected alternatives)
 
-- **ops imports each plugin's specs directly** (`from plugins.ava_fleet.services
+- **ops imports each plugin's specs directly** (`from plugins.meiva_fleet.services
   import services`). Rejected: a hardcoded reverse edge from the low ops layer into
   named plugin modules — the exact coupling being removed — and it would not reach
-  external `~/.ava/plugins/` plugins off the `plugins.` package path.
+  external `~/.meiva/plugins/` plugins off the `plugins.` package path.
 
 - **Runtime registry via import side effect** (plugin `plugin.py` calls
   `ops.register_service(...)` when imported, like `register_namespace_member`).
@@ -95,8 +95,8 @@ itself stop the gateway daemon — that is `AVA_TASK_MAINTENANCE_ENABLED`.
 
 ### Config ownership: daemon config stays global
 
-The daemon's operational config — `AVA_TASK_MAINTENANCE_ENABLED` / `_INTERVAL_S`
-/ `AVA_TASK_NUDGE_BACKOFF_SECONDS` / `AVA_TASK_ESCALATE_N`, the pidfile, and the
+The daemon's operational config — `MEIVA_TASK_MAINTENANCE_ENABLED` / `_INTERVAL_S`
+/ `MEIVA_TASK_NUDGE_BACKOFF_SECONDS` / `MEIVA_TASK_ESCALATE_N`, the pidfile, and the
 `daemon_health` port 8108 — stays in the global env-driven `shared.config` /
 `shared.daemon_health`, read by the daemon exactly as every other daemon
 (heartbeat, labeler, memory-indexer…) reads its own. It was **not** moved into the
@@ -115,13 +115,13 @@ and it is uniform with every other daemon. If plugin-owned daemons proliferate, 
 ## Consequences
 
 - `build_services()` now depends on which plugins are present on disk, where it
-  was a pure function. Builtin plugins (ava_fleet) are always checked in, so in the
-  repo's canonical state it is deterministic; only an external `~/.ava/plugins/`
+  was a pure function. Builtin plugins (meiva_fleet) are always checked in, so in the
+  repo's canonical state it is deterministic; only an external `~/.meiva/plugins/`
   plugin adds machine variance. The roster lint (`scripts/lint_doc_roster.py`) and
   roster tests run in that canonical state.
 
 - The mechanism generalizes to any future plugin daemon (builtin or external under
-  `~/.ava/plugins/`) — the plugin authors its own `ServiceSpec.cmd` (a venv-direct
+  `~/.meiva/plugins/`) — the plugin authors its own `ServiceSpec.cmd` (a venv-direct
   `.venv/bin/python -m …` launch, relative to the source checkout the service
   starts in; no `uv run` wrapper), so how its daemon is launched is the plugin's
   concern, not ops's.

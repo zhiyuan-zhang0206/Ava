@@ -8,7 +8,7 @@ import pytest
 
 from base.config import FIELD_INFOS, AgentSettings, per_agent_field_names
 from base.packages.extensions import install_registry
-from base.paths import ava_home, skills_dir
+from base.paths import meiva_home, skills_dir
 
 
 @pytest.fixture(autouse=True)
@@ -17,7 +17,7 @@ def _isolate_load_dir(unit_home: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     the real ~/.agents/skills/ never leaks into a scan; fake_skills_dir creates it."""
 
     def _all_enabled() -> set[str]:
-        d = skills_dir(ava_home())
+        d = skills_dir(meiva_home())
         return {p.name for p in d.iterdir() if p.is_dir()} if d.is_dir() else set()
 
     monkeypatch.setattr(install_registry, "loadable_skill_names", _all_enabled)
@@ -32,8 +32,8 @@ def test_field_default_is_empty() -> None:
 
 def test_env_comma_string_parses() -> None:
     """The env form (a comma string) splits into stripped entries."""
-    s = AgentSettings(AVA_SKILLS_TO_EXPAND_AT_START="ultra_speed, ava_memory.consolidation")  # pyright: ignore[reportArgumentType]
-    assert s.skills_to_expand_at_start == ["ultra_speed", "ava_memory.consolidation"]
+    s = AgentSettings(MEIVA_SKILLS_TO_EXPAND_AT_START="ultra_speed, meiva_memory.consolidation")  # pyright: ignore[reportArgumentType]
+    assert s.skills_to_expand_at_start == ["ultra_speed", "meiva_memory.consolidation"]
 
 
 def test_field_is_per_agent_overridable() -> None:

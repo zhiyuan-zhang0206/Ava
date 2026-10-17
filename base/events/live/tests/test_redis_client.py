@@ -137,7 +137,7 @@ async def test_publish_retries_auth_failures_with_bounded_exponential_delays(
     monkeypatch.setattr(mod, "sleep_async", _record_sleep, raising=False)
     monkeypatch.setattr(mod, "auth_retry_jitter", _max_jitter, raising=False)
 
-    assert await _bus.publish_best_effort("payload", channel="ava:events") == 3
+    assert await _bus.publish_best_effort("payload", channel="meiva:events") == 3
     assert publisher.attempts == 3
     assert delays == [0.5, 1.0]
 
@@ -155,7 +155,7 @@ async def test_publish_auth_retry_stops_within_its_total_wait_budget(
     monkeypatch.setattr(mod, "sleep_async", _record_sleep, raising=False)
     monkeypatch.setattr(mod, "auth_retry_jitter", _max_jitter, raising=False)
 
-    assert await _bus.publish_best_effort("payload", channel="ava:events") is None
+    assert await _bus.publish_best_effort("payload", channel="meiva:events") is None
     assert publisher.attempts > 1
     assert sum(delays) <= 60.0
     assert max(delays) <= 10.0
@@ -173,7 +173,7 @@ async def test_publish_does_not_retry_connection_errors(
     patch_async_redis(monkeypatch, lambda: publisher)
     monkeypatch.setattr(mod, "sleep_async", _record_sleep, raising=False)
 
-    assert await _bus.publish_best_effort("payload", channel="ava:events") is None
+    assert await _bus.publish_best_effort("payload", channel="meiva:events") is None
     assert publisher.attempts == 1
     assert delays == []
 
@@ -199,7 +199,7 @@ async def test_best_effort_publish_bounds_a_half_open_health_check_read(
     patch_async_redis(monkeypatch, lambda: publisher)
     quick = EventBus(replace(event_bus_config_from_settings(), publish_attempt_timeout_s=0.01))
 
-    task = asyncio.create_task(quick.publish_best_effort("payload", channel="ava:events"))
+    task = asyncio.create_task(quick.publish_best_effort("payload", channel="meiva:events"))
     await asyncio.wait_for(publisher.read_started.wait(), timeout=1.0)
     done, _ = await asyncio.wait({task}, timeout=0.5)
     finished_within_bound = bool(done)
@@ -225,7 +225,7 @@ def test_sync_publish_retries_auth_failures_with_bounded_exponential_delays(
     monkeypatch.setattr(mod, "sleep_sync", _record_sleep, raising=False)
     monkeypatch.setattr(mod, "auth_retry_jitter", _max_jitter, raising=False)
 
-    assert _bus.publish_best_effort_sync("payload", channel="ava:events") == 3
+    assert _bus.publish_best_effort_sync("payload", channel="meiva:events") == 3
     assert publisher.attempts == 3
     assert delays == [0.5, 1.0]
 
@@ -431,7 +431,7 @@ class TestDeadTransportRecovery:
 
         # Before the fix this raised TypeError('NoneType' object is not
         # callable) from `_send_packed_command`; now it reconnects.
-        receivers = await client.publish("ava:test:dead-transport", "hello")  # pyright: ignore[reportUnknownMemberType]
+        receivers = await client.publish("meiva:test:dead-transport", "hello")  # pyright: ignore[reportUnknownMemberType]
         assert receivers == 0
         # The pool connection was rebuilt, not poisoned.
         assert conn.is_connected
@@ -445,7 +445,7 @@ class TestDeadTransportRecovery:
         and a post-recovery publish still wakes the consumer."""
         client = _make_client(connection_class=TransportAwareAsyncConnection)
         pubsub = client.pubsub(ignore_subscribe_messages=True)  # pyright: ignore[reportUnknownMemberType]
-        await pubsub.subscribe("ava:test:dead-transport-pubsub")
+        await pubsub.subscribe("meiva:test:dead-transport-pubsub")
         conn = pubsub.connection
         assert isinstance(conn, TransportAwareAsyncConnection)
 
@@ -462,7 +462,7 @@ class TestDeadTransportRecovery:
         # a loop like the listener's `_consume_one` — the first read after
         # reconnect may consume the health-check PONG (returned as None).
         publisher = _make_client()
-        await publisher.publish("ava:test:dead-transport-pubsub", "wake!")  # pyright: ignore[reportUnknownMemberType]
+        await publisher.publish("meiva:test:dead-transport-pubsub", "wake!")  # pyright: ignore[reportUnknownMemberType]
         msg = None
         for _ in range(5):
             msg = await asyncio.wait_for(pubsub.get_message(timeout=1.0), timeout=10)  # pyright: ignore[reportUnknownArgumentType]
@@ -482,7 +482,7 @@ class TestDeadTransportRecovery:
         the un-fixed "write a connection_lost transport" crash)."""
         client = _make_client()
         pubsub = client.pubsub(ignore_subscribe_messages=True)  # pyright: ignore[reportUnknownMemberType]
-        await pubsub.subscribe("ava:test:dead-transport-pubsub")
+        await pubsub.subscribe("meiva:test:dead-transport-pubsub")
         conn = pubsub.connection
         assert conn is not None
         await _abort_transport(conn)

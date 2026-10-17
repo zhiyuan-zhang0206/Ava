@@ -1,7 +1,7 @@
 """Tests for base.sessions.posixproc — the native POSIX process supervisor that hosts
 detached agent processes. These spawn REAL child processes (the double-fork
 reparent path is the whole point), so they are POSIX-only and use the unit_home
-fixture to keep records/logs under a tmp $AVA_HOME.
+fixture to keep records/logs under a tmp $MEIVA_HOME.
 """
 
 from __future__ import annotations
@@ -108,7 +108,7 @@ def test_new_session_reparents_to_init_no_zombie(
     """The launched child double-forks to init or an ancestor subreaper,
     so the spawner (this test process) accretes no zombie, and the record tracks
     the real child pid."""
-    name = "ava-test-agent-1"
+    name = "meiva-test-agent-1"
     spawner = psutil.Process()
     before_children = set(spawner.children())
     before_descendants = set(spawner.children(recursive=True))
@@ -153,7 +153,7 @@ def test_new_session_reparents_to_init_no_zombie(
             what="new session is reported live",
         )
         poll_until(
-            lambda: name in posixproc.list_sessions(prefix="ava-test-agent-"),
+            lambda: name in posixproc.list_sessions(prefix="meiva-test-agent-"),
             what="new session appears in the session list",
         )
 
@@ -193,7 +193,7 @@ def test_zombie_check_ignores_a_zombie_an_earlier_test_left() -> None:
 def test_graceful_signal_terminates(unit_home) -> None:
     """graceful_signal sends SIGTERM; a default-disposition child dies, so the
     session goes away (the reap's O(slowest-agent) shared-deadline path)."""
-    name = "ava-test-agent-2"
+    name = "meiva-test-agent-2"
     _new(name, list(_SLEEP), unit_home)  # pyright: ignore[reportUnknownArgumentType]
     try:
         assert posixproc.graceful_signal(name) is True
@@ -208,7 +208,7 @@ def test_graceful_signal_terminates(unit_home) -> None:
 def test_kill_session_force_kills_sigterm_ignoring_survivor(unit_home: Path) -> None:
     """graceful kill_session SIGTERMs, waits, then SIGKILLs a straggler that
     ignored SIGTERM — the force floor under the graceful reap."""
-    name = "ava-test-agent-3"
+    name = "meiva-test-agent-3"
     # A process that ignores SIGTERM, so only SIGKILL takes it down. The marker
     # file proves SIG_IGN is installed BEFORE the kill: a SIGTERM that lands in
     # the pre-exec / handler-install window kills the child "gracefully", which
@@ -241,7 +241,7 @@ def test_kill_session_force_kills_sigterm_ignoring_survivor(unit_home: Path) -> 
 def test_kill_session_reaps_process_tree(unit_home) -> None:
     """A force kill takes down the child's own descendants too (Claude Code /
     subprocesses an agent spawns), not just the top process."""
-    name = "ava-test-agent-4"
+    name = "meiva-test-agent-4"
     # Parent python spawns a child `sleep` and prints its pid, then idles.
     argv = [
         sys.executable,
@@ -271,7 +271,7 @@ def test_kill_session_reaps_process_tree(unit_home) -> None:
 
 
 def test_has_session_false_when_process_gone(unit_home) -> None:
-    name = "ava-test-agent-5"
+    name = "meiva-test-agent-5"
     _new(name, list(_SLEEP), unit_home)  # pyright: ignore[reportUnknownArgumentType]
     pid = _pid(name)
     posixproc.kill_session(name, graceful=False)
@@ -288,7 +288,7 @@ def test_has_session_false_when_process_gone(unit_home) -> None:
 def test_list_sessions_reaps_dead_record(unit_home) -> None:
     """A record whose process is gone is unlinked as list_sessions walks it, so the
     listing reflects reality."""
-    name = "ava-test-agent-6"
+    name = "meiva-test-agent-6"
     _new(name, list(_SLEEP), unit_home)  # pyright: ignore[reportUnknownArgumentType]
     pid = _pid(name)
     # Kill the process out from under the record WITHOUT going through kill_session,
@@ -303,14 +303,14 @@ def test_list_sessions_reaps_dead_record(unit_home) -> None:
         what="externally killed process disappears",
     )
     assert posixproc.record_path(name).exists()
-    assert posixproc.list_sessions(prefix="ava-test-agent-") == []
+    assert posixproc.list_sessions(prefix="meiva-test-agent-") == []
     assert not posixproc.record_path(name).exists()
 
 
 @pytest.mark.skipif(not is_linux(), reason="Linux /proc start-time identity")
 def test_starttime_identity_survives_wall_clock_drift(unit_home: Path) -> None:
     """A stable kernel start tick keeps a live record despite a bad epoch time."""
-    name = "ava-test-agent-starttime-drift"
+    name = "meiva-test-agent-starttime-drift"
     child = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(300)"])
     try:
         poll_until(
@@ -331,7 +331,7 @@ def test_starttime_identity_survives_wall_clock_drift(unit_home: Path) -> None:
 
         assert rec.identifies(child.pid) is True
         assert posixproc.has_session(name) is True
-        assert posixproc.list_sessions(prefix="ava-test-agent-starttime-") == [name]
+        assert posixproc.list_sessions(prefix="meiva-test-agent-starttime-") == [name]
         assert posixproc.record_path(name).exists()
     finally:
         try:
@@ -358,7 +358,7 @@ def test_session_record_spans_import_epochs(
     psosx: Any = _psosx  # the macOS-only stub does not declare `INIT_BOOT_TIME`
 
     base = psosx.INIT_BOOT_TIME
-    name = "ava-test-agent-epoch-span"
+    name = "meiva-test-agent-epoch-span"
     monkeypatch.setattr(psosx, "INIT_BOOT_TIME", base + 3600.0)
     assert _new(name, _SLEEP, unit_home)
     monkeypatch.setattr(psosx, "INIT_BOOT_TIME", base)
@@ -371,7 +371,7 @@ def test_session_record_spans_import_epochs(
 @pytest.mark.skipif(not is_linux(), reason="Linux /proc start-time identity")
 def test_list_sessions_reaps_starttime_pid_reuse(unit_home: Path) -> None:
     """A live pid with different start ticks is a recycled pid and is reaped."""
-    name = "ava-test-agent-starttime-reuse"
+    name = "meiva-test-agent-starttime-reuse"
     rec = SessionRecord(
         pid=os.getpid(),
         create_time=psutil.Process().create_time(),
@@ -384,7 +384,7 @@ def test_list_sessions_reaps_starttime_pid_reuse(unit_home: Path) -> None:
 
     assert rec.identifies(os.getpid()) is False
     assert posixproc.has_session(name) is False
-    assert posixproc.list_sessions(prefix="ava-test-agent-starttime-") == []
+    assert posixproc.list_sessions(prefix="meiva-test-agent-starttime-") == []
     assert not posixproc.record_path(name).exists()
 
 
@@ -393,7 +393,7 @@ def test_list_sessions_keeps_live_legacy_record_with_clock_drift(
     loguru_records: list[dict[str, object]],
 ) -> None:
     """A legacy timestamp mismatch cannot make a live session unowned."""
-    name = "ava-test-agent-legacy-drift"
+    name = "meiva-test-agent-legacy-drift"
     SessionRecord(
         pid=os.getpid(),
         create_time=1.0,
@@ -403,7 +403,7 @@ def test_list_sessions_keeps_live_legacy_record_with_clock_drift(
     ).write(posixproc.record_path(name))
 
     assert posixproc.has_session(name) is False
-    assert posixproc.list_sessions(prefix="ava-test-agent-legacy-") == []
+    assert posixproc.list_sessions(prefix="meiva-test-agent-legacy-") == []
     assert posixproc.record_path(name).exists()
     assert any(
         "retaining live session record" in str(record["message"]) for record in loguru_records
@@ -423,7 +423,7 @@ def test_list_sessions_keeps_recycled_pid_record_while_group_occupied(
     Reordering the checks would reap exactly the records whose surviving
     descendants are the orphans #2123 preserves, so the order is pinned here.
     """
-    name = "ava-test-agent-reuse-held-group"
+    name = "meiva-test-agent-reuse-held-group"
     holder = subprocess.Popen(
         [sys.executable, "-c", "import time; time.sleep(60)"],
         start_new_session=True,
@@ -447,7 +447,7 @@ def test_list_sessions_keeps_recycled_pid_record_while_group_occupied(
         assert occupied_group == pgid
         # The group gate decided; the reuse criterion never ran.
         assert "process group" in why and "reused" not in why
-        assert posixproc.list_sessions(prefix="ava-test-agent-reuse-") == [name]
+        assert posixproc.list_sessions(prefix="meiva-test-agent-reuse-") == [name]
         assert posixproc.record_path(name).exists()
         assert any(
             "retaining live session record" in str(record["message"]) for record in loguru_records
@@ -461,7 +461,7 @@ def test_list_sessions_keeps_recycled_pid_record_while_group_occupied(
 def test_new_session_idempotent_when_live(unit_home) -> None:
     """A second new_session for a still-live name is a no-op (returns True without
     relaunching) — matching the has-session guard at the call site."""
-    name = "ava-test-agent-7"
+    name = "meiva-test-agent-7"
     _new(name, list(_SLEEP), unit_home)  # pyright: ignore[reportUnknownArgumentType]
     try:
         first_pid = _pid(name)
@@ -472,8 +472,8 @@ def test_new_session_idempotent_when_live(unit_home) -> None:
 
 
 def test_kill_session_noop_on_absent(unit_home) -> None:
-    assert posixproc.kill_session("ava-test-agent-does-not-exist") == (True, "noop")
-    assert posixproc.graceful_signal("ava-test-agent-does-not-exist") is False
+    assert posixproc.kill_session("meiva-test-agent-does-not-exist") == (True, "noop")
+    assert posixproc.graceful_signal("meiva-test-agent-does-not-exist") is False
 
 
 def test_kill_session_survivor_reports_and_keeps_record(
@@ -485,7 +485,7 @@ def test_kill_session_survivor_reports_and_keeps_record(
     2026-08-08 P1). The old code reported
     success unconditionally and unlinked the record, so a live-but-unbacked
     session became a service nothing starts."""
-    name = "ava-test-agent-survivor"
+    name = "meiva-test-agent-survivor"
     argv = [sys.executable, "-c", "import time; time.sleep(300)"]
     _new(name, argv, unit_home)  # pyright: ignore[reportUnknownArgumentType]
     pid = _pid(name)
@@ -508,8 +508,8 @@ def test_kill_session_survivor_reports_and_keeps_record(
 
     # Real kill for cleanup (restore the real terminate_tree first); the
     # record is then reaped normally. NOTE: never monkeypatch.undo() here —
-    # it would also undo `unit_home`'s ava_home patch and the cleanup would
-    # hit the real $AVA_HOME.
+    # it would also undo `unit_home`'s meiva_home patch and the cleanup would
+    # hit the real $MEIVA_HOME.
     monkeypatch.setattr(posixproc, "terminate_tree", _real_terminate_tree)
     ok, _mode = posixproc.kill_session(name, graceful=False)
     assert ok is True
@@ -526,7 +526,7 @@ def test_kill_session_terminate_error_keeps_record(
 ) -> None:
     """terminate_tree raising (not just failing silently) must also report
     False and keep the record — the raise path is the same lie, one line up."""
-    name = "ava-test-agent-err"
+    name = "meiva-test-agent-err"
     argv = [sys.executable, "-c", "import time; time.sleep(300)"]
     _new(name, argv, unit_home)  # pyright: ignore[reportUnknownArgumentType]
     pid = _pid(name)
@@ -563,7 +563,7 @@ def test_new_session_dead_child_records_sentinel(
     match a reused pid, not time.time() (audit 2026-08-08 P2: the old value
     made `process_for_record` accept the pid's next innocent occupant, and a
     later kill_session could SIGKILL an unrelated process tree)."""
-    name = "ava-test-agent-dying"
+    name = "meiva-test-agent-dying"
     real_process = psutil.Process
 
     class _NoCreateTime:
@@ -592,8 +592,8 @@ def test_new_session_dead_child_records_sentinel(
 
     # The real child is still alive (the patch only faked the create_time
     # read); clean it up directly. Restore the real Process class, not
-    # monkeypatch.undo() — the latter would also undo `unit_home`'s ava_home
-    # patch and the cleanup would touch the real $AVA_HOME.
+    # monkeypatch.undo() — the latter would also undo `unit_home`'s meiva_home
+    # patch and the cleanup would touch the real $MEIVA_HOME.
     pid = rec.pid
     monkeypatch.setattr(posixproc.psutil, "Process", real_process)
     with contextlib.suppress(psutil.NoSuchProcess):
@@ -612,7 +612,7 @@ def test_kill_session_group_kill_reaps_late_spawned_child(
     orphaned (task #2249). The late child is the discriminating half: the top
     process spawns it half a second into the kill — strictly after any
     pre-captured children snapshot."""
-    name = "ava-test-agent-late"
+    name = "meiva-test-agent-late"
     ready_file = tmp_path / "ready"
     late_file = tmp_path / "late.pid"
     # The top process installs a no-op SIGTERM handler (it does NOT exit on the
@@ -677,7 +677,7 @@ def test_kill_session_group_kill_reaps_sigterm_ignoring_wrapper(
     coverage, not a discriminator — the old children-snapshot walk also killed
     this pair (the child was in the snapshot); the discriminating tests are the
     late-spawned-child and detached-descendant ones."""
-    name = "ava-test-agent-bashwrap"
+    name = "meiva-test-agent-bashwrap"
     # `trap '' TERM` makes bash ignore SIGTERM (and the exec'd sleep inherits
     # SIG_IGN across fork+exec); `& wait` keeps a child alive under it, the
     # shape of a wrapper sitting on a foreground command.
@@ -711,7 +711,7 @@ def test_kill_session_signals_the_process_group(
     page-server daemon's TTL reconcile) signals the session's process GROUP,
     not just the recorded pid — the regression guard for the group-kill fix
     (task #2249)."""
-    name = "ava-test-agent-grp"
+    name = "meiva-test-agent-grp"
     _new(name, list(_SLEEP), unit_home)  # pyright: ignore[reportUnknownArgumentType]
     pid = _pid(name)
     pgid = os.getpgid(pid)
@@ -739,7 +739,7 @@ def test_kill_session_group_kill_reaps_detached_descendant(
     setsid'd worker) is unreachable by group signal — the pre-captured
     children walk is the only handle on it, and the kill must reap it too
     (review nit on #1301; pty-orphan history)."""
-    name = "ava-test-agent-detached"
+    name = "meiva-test-agent-detached"
     ready = tmp_path / "ready"
     detached_file = tmp_path / "detached.pid"
     argv = [

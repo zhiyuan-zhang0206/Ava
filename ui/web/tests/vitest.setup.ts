@@ -65,7 +65,7 @@ vi.stubGlobal("IntersectionObserver", ImmediateIntersectionObserver);
 
 // -- Global network guard ----------------------------------------------------
 //
-// Dev boxes run a real Ava gateway on :8000. A test that forgets to mock
+// Dev boxes run a real Meiva gateway on :8000. A test that forgets to mock
 // @/lib/api (or @/lib/useEventStream for SSE) doesn't fail locally — it
 // silently round-trips against that real gateway — and only breaks in CI,
 // where nothing is listening. That gap let two real leaks (providers.test.tsx,

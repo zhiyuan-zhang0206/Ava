@@ -1,4 +1,4 @@
--- The compact-boundary event enqueue's ava_runner surface on EXISTING
+-- The compact-boundary event enqueue's meiva_runner surface on EXISTING
 -- clusters (task #4674): the agent process's `mark_compact_boundary` twin
 -- INSERTs one hierarchy_jobs row per new compaction boundary — idempotent,
 -- ON CONFLICT DO NOTHING against the live partial unique index; the SELECT
@@ -16,7 +16,7 @@
 -- birth.
 DO $$
 BEGIN
-    IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'ava_runner') THEN
-        GRANT INSERT ON hierarchy_jobs TO ava_runner;
+    IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'meiva_runner') THEN
+        GRANT INSERT ON hierarchy_jobs TO meiva_runner;
     END IF;
 END $$;

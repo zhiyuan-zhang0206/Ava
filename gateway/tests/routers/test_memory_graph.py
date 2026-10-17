@@ -17,7 +17,7 @@ import pytest
 from base.cluster.machine import MachineRoleMissing
 from base.config.tests.configuration import snapshot_process_config
 from base.packages.docs.notes import Note
-from base.paths import ava_home
+from base.paths import meiva_home
 from gateway.http.config import GatewayConfig, gateway_config_from_boot
 from tests.fixtures.gateway_config import gateway_test_client, gateway_test_process
 
@@ -31,7 +31,7 @@ def test_memory_root_captures_boot_roles(serve_runner: bool) -> None:
     owner = snapshot_process_config()
     owner.set_field("machine_serve_gateway", True)
     owner.set_field("machine_serve_agent_runner", serve_runner)
-    expected = ava_home() / ("gateway/memory" if serve_runner else "memory")
+    expected = meiva_home() / ("gateway/memory" if serve_runner else "memory")
 
     config = gateway_config_from_boot(owner)
     owner.set_field("machine_serve_agent_runner", not serve_runner)
@@ -50,12 +50,12 @@ def test_memory_root_rejects_missing_machine_roles() -> None:
         gateway_config_from_boot(owner)
 
 
-# ava:ref gateway/tests/routers/docs/memory-graph-fixture.ava.okf.md#memory-graph-repo-disables-auto-maintenance
+# meiva:ref gateway/tests/routers/docs/memory-graph-fixture.meiva.okf.md#memory-graph-repo-disables-auto-maintenance
 def _init_repo(root: Path) -> None:
     (root / "MEMORY.md").write_text("# index")
     (root / "notes").mkdir()
     (root / "notes" / "a.md").write_text(
-        "---\ntype: Memory\nava_agent: '1'\ndescription: a\ntags: [x]\n---\nbody\n"
+        "---\ntype: Memory\nmeiva_agent: '1'\ndescription: a\ntags: [x]\n---\nbody\n"
     )
     for cmd in (
         ["git", "init", "-q", "-b", "main"],
@@ -101,7 +101,7 @@ def test_graph_builds_once_per_pool_revision(
 
     # A pull/consolidation commit moves HEAD — the next request rebuilds.
     (root / "notes" / "a.md").write_text(
-        "---\ntype: Memory\nava_agent: '1'\ndescription: a\ntags: [x]\n---\nbody2\n"
+        "---\ntype: Memory\nmeiva_agent: '1'\ndescription: a\ntags: [x]\n---\nbody2\n"
     )
     for cmd in (
         ["git", "-c", "user.email=a@b", "-c", "user.name=t", "add", "-A"],

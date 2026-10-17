@@ -27,15 +27,15 @@ from base.host.net.url_secret import redacted_url, url_with_port, url_with_useri
 # every cluster owns its instance (exactly one tenant), so the identifier carries
 # no cluster distinction. Existing clusters keep whatever identifier their `.env`
 # URLs carry (names-as-data) until an ops rename.
-DATA_PLANE_IDENTITY = "ava"
+DATA_PLANE_IDENTITY = "meiva"
 
 # The provider-provisioned runner role's FIXED name and the gateway-.env key
 # carrying its password, for REMOTE-MANAGED data planes only (write generations
 # are unsupported there until an operator-declared provider admin authority
 # exists). A local plane's runners log in as its write generation's runner
 # login instead (`base.cluster.authority`); nothing local mints this password.
-RUNNER_ROLE = "ava_runner"
-RUNNER_DB_PASSWORD_ENV = "AVA_RUNNER_DB_PASSWORD"  # noqa: S105 — the env KEY name, not a credential
+RUNNER_ROLE = "meiva_runner"
+RUNNER_DB_PASSWORD_ENV = "MEIVA_RUNNER_DB_PASSWORD"  # noqa: S105 — the env KEY name, not a credential
 
 
 def swap_db(url: str, db_name: str) -> str:
@@ -53,8 +53,8 @@ def home_label(home: Path) -> str:
 def production_identity(machine: MachineIdentity, *, home: Path) -> bool:
     """Whether this process has the registered production identity.
 
-    A configured machine (it has a name) running against the production ``~/.ava`` home
-    (its label is ``.ava``). Tests, ad-hoc processes without a machine identity, and other
+    A configured machine (it has a name) running against the production ``~/.meiva`` home
+    (its label is ``.meiva``). Tests, ad-hoc processes without a machine identity, and other
     homes are not production; a home whose label cannot be derived is not either.
     """
     try:
@@ -62,7 +62,7 @@ def production_identity(machine: MachineIdentity, *, home: Path) -> bool:
     except MachineNameMissing:
         return False
     try:
-        return home_label(home) == ".ava"
+        return home_label(home) == ".meiva"
     except RuntimeError:
         return False
 
@@ -91,15 +91,15 @@ def identity_from_url(url: str) -> str:
             guessed — a wiped/malformed `.env` URL must fail loudly here, not
             send the ensure machinery off re-affirming a wrong role/ACL user
             (which turns every downstream error into an unexplained auth
-            failure). Fix the URL (e.g. `postgresql://ava:...@host:port/ava`).
+            failure). Fix the URL (e.g. `postgresql://meiva:...@host:port/meiva`).
     """
     user = urlsplit(url).username
     if not user:
         raise ValueError(
             f"data-plane URL carries no username (the db/role/ACL identity): "
             f"{redacted_url(url)!r}. Identity is read from the URL as data, never "
-            "guessed — fix the .env URL (e.g. postgresql://ava:<secret>@host:port/ava, "
-            "redis://ava:<secret>@host:port/0)."
+            "guessed — fix the .env URL (e.g. postgresql://meiva:<secret>@host:port/meiva, "
+            "redis://meiva:<secret>@host:port/0)."
         )
     return user
 
@@ -111,7 +111,7 @@ def db_identity(db_url: str) -> str:
     The database and its NOLOGIN owner share the identifier (provisioning
     creates `DATABASE <identity> OWNER <identity>`). The database is read rather
     than the username because a delivered write-generation login
-    (`ava_g0_<class>`) replaces the URL's username, never its database.
+    (`meiva_g0_<class>`) replaces the URL's username, never its database.
 
     Raises:
         ValueError: `db_url` names no database."""
@@ -133,24 +133,24 @@ def redis_identity(redis_url: str) -> str:
 
 
 def session_name(service: str) -> str:
-    """Compose the session name `ava-<service>`.
+    """Compose the session name `meiva-<service>`.
 
     Single source for cli / gateway / services (all import this from shared, the
-    lowest layer). The `ava-` prefix marks the session as belonging to this
+    lowest layer). The `meiva-` prefix marks the session as belonging to this
     system; neither machine nor cluster is encoded — the session backend is
     host-local AND per-home, so the home already scopes every session.
     """
-    return f"ava-{service}"
+    return f"meiva-{service}"
 
 
 def fe_build_env(*, gateway_port: int, browser_origin: str) -> str:
     """The `NEXT_PUBLIC_*` assignment prefix the frontend's `npm run build` needs.
 
     NEXT_PUBLIC_* are inlined into the JS bundle at build time, not read at
-    runtime, and the session env only forwards AVA_* + bootstrap secrets — so a
+    runtime, and the session env only forwards MEIVA_* + bootstrap secrets — so a
     NEXT_PUBLIC_GATEWAY_PORT placed in a unit's `.env` never reaches the build
     subprocess. Instead derive it from the single source of truth
-    (AVA_GATEWAY_PORT == the gateway's `gateway_port` setting) and inject it directly on the
+    (MEIVA_GATEWAY_PORT == the gateway's `gateway_port` setting) and inject it directly on the
     build command line. The browser then dials `${hostname}:${gateway_port}`
     (ui/web/src/lib/transport/api.ts), correct on any host whose gateway is not on the
     default 8000 (e.g. the prod VPS on 8800, co-located with another service
@@ -159,7 +159,7 @@ def fe_build_env(*, gateway_port: int, browser_origin: str) -> str:
     Single source for both build paths — the canonical ServiceSpec
     (cli/commands/_repo.py) AND the frontend healthcheck respawn
     (services/supervision/healthchecks/frontend.py) — so a watchdog restart can never bake a
-    different (stale) gateway port than `ava start` did.
+    different (stale) gateway port than `meiva start` did.
     """
     gateway_env = f"NEXT_PUBLIC_GATEWAY_PORT={gateway_port}"
     if not browser_origin:
@@ -213,7 +213,7 @@ def redis_admin_url(redis_url: str, admin_password: str) -> str:
     per-cluster runtime identity.
 
     Every cluster owns its Redis instance. Its `default` user password is an
-    independent gateway-only credential (`AVA_REDIS_ADMIN_PASSWORD`, also the
+    independent gateway-only credential (`MEIVA_REDIS_ADMIN_PASSWORD`, also the
     instance's `requirepass`). Host/port come from this cluster's own
     `redis_url` (loopback + its per-cluster port), never a hardcoded 6379."""
     parts = urlsplit(redis_url)
@@ -232,16 +232,16 @@ def redis_password_from_env() -> str:
     bring-up refuses it."""
     from dotenv import dotenv_values
 
-    from base.paths import ava_home
+    from base.paths import meiva_home
 
-    return (dotenv_values(ava_home() / ".env").get(REDIS_PASSWORD_ENV) or "").strip()
+    return (dotenv_values(meiva_home() / ".env").get(REDIS_PASSWORD_ENV) or "").strip()
 
 
 def runner_db_url_projection() -> str:
     """The provider runner login for agents on a remote-managed gateway plane.
 
     A remote-managed (provider) plane has no write generation: its agents dial
-    the provider-provisioned `ava_runner` with the gateway `.env`'s recorded
+    the provider-provisioned `meiva_runner` with the gateway `.env`'s recorded
     provider credential, read with its URL from one current file snapshot, never
     a cached URL combined with a newly rotated password. Only a gateway-config
     unit projects this; a pure agent-runner's services receive their installed
@@ -256,9 +256,9 @@ def runner_db_url_projection() -> str:
             "installed unit capability"
         )
     aliases = read_env_aliases()
-    snapshot_url = aliases.get("AVA_DB_URL")
+    snapshot_url = aliases.get("MEIVA_DB_URL")
     if not snapshot_url:
-        raise RuntimeError("AVA_DB_URL is missing from the gateway config snapshot")
+        raise RuntimeError("MEIVA_DB_URL is missing from the gateway config snapshot")
     return project_runner_db_url(snapshot_url, aliases.get(RUNNER_DB_PASSWORD_ENV) or "")
 
 
@@ -266,14 +266,14 @@ def project_runner_db_url(db_url: str, runner_password: str) -> str:
     """Pure credential projection; both inputs must belong to one config snapshot."""
     if not runner_password:
         raise RuntimeError(
-            "AVA_RUNNER_DB_PASSWORD is missing from the gateway initialization; "
+            "MEIVA_RUNNER_DB_PASSWORD is missing from the gateway initialization; "
             "restore its recorded credential before starting services or agents."
         )
     return url_with_userinfo(db_url, RUNNER_ROLE, runner_password)
 
 
 def redis_channel_prefix(events_channel: str) -> str:
-    """The pub/sub channel prefix (`ava`) — the events channel is `<prefix>:events`,
+    """The pub/sub channel prefix (`meiva`) — the events channel is `<prefix>:events`,
     so strip that suffix. Fixed across clusters now that each owns its redis: there
     is no neighbour to prefix away from."""
     return events_channel.removesuffix(":events")
@@ -281,10 +281,10 @@ def redis_channel_prefix(events_channel: str) -> str:
 
 def inbound_channel(agent_id: int, events_channel: str) -> str:
     """The Redis pub/sub channel an agent waits on for inbound wake-ups —
-    `ava:inbound:<agent_id>`, via `redis_channel_prefix(events_channel)`.
+    `meiva:inbound:<agent_id>`, via `redis_channel_prefix(events_channel)`.
 
     Publish (`base.agents.inbox.insert.insert_inbound_message` / `insert_compact_request_inbound`,
-    `ava.self`) and subscribe (`RedisInboundListener`) both derive the channel here
+    `meiva.self`) and subscribe (`RedisInboundListener`) both derive the channel here
     so the two halves can never drift."""
     return f"{redis_channel_prefix(events_channel)}:inbound:{agent_id}"
 
@@ -302,18 +302,18 @@ def derive_env(
     """Map a cluster record to the env vars a unit needs. Daemons read these via
     settings, so the cluster layer touches no daemon code.
 
-    `cluster_secret` is written as `AVA_CLUSTER_SECRET`, the control-plane
-    bearer every enrolled runner needs. `AVA_DB_URL` is the CREDENTIAL-FREE
+    `cluster_secret` is written as `MEIVA_CLUSTER_SECRET`, the control-plane
+    bearer every enrolled runner needs. `MEIVA_DB_URL` is the CREDENTIAL-FREE
     endpoint (`postgresql://<identity>@host:port/<identity>`): the schema owner
     is NOLOGIN, and every process dials as a write-generation login its launcher
     delivers (`base.cluster.authority`), never with a password from `.env`.
-    `AVA_REDIS_URL` carries the runtime ACL password. Both URLs carry the fixed
+    `MEIVA_REDIS_URL` carries the runtime ACL password. Both URLs carry the fixed
     `DATA_PLANE_IDENTITY` db/role/ACL user **as data**: every consumer reads the
     identity back from these URLs; nothing re-derives it from a name. Redis
     always authenticates, so both Redis passwords are required whatever the
-    bearer. Pub/sub channels are fixed (`ava:*`).
+    bearer. Pub/sub channels are fixed (`meiva:*`).
 
-    `AVA_DB_URL` is the ONE access endpoint; `pgbouncer_enabled` decides its port
+    `MEIVA_DB_URL` is the ONE access endpoint; `pgbouncer_enabled` decides its port
     at generation — pooler (default) or direct Postgres. No pgbouncer-port env key."""
     p = rec.ports
     if not cluster_secret:
@@ -333,26 +333,26 @@ def derive_env(
     if pgbouncer_enabled:
         db_url = url_with_port(db_url, p["pgbouncer"])
     env = {
-        "AVA_CLUSTER_SECRET": cluster_secret,
-        "AVA_REDIS_ADMIN_PASSWORD": redis_default_password,
+        "MEIVA_CLUSTER_SECRET": cluster_secret,
+        "MEIVA_REDIS_ADMIN_PASSWORD": redis_default_password,
         REDIS_PASSWORD_ENV: runtime_password,
-        "AVA_GATEWAY_PORT": str(p["gateway"]),
+        "MEIVA_GATEWAY_PORT": str(p["gateway"]),
         # A gateway box reaches its OWN gateway over loopback (same-machine call);
         # the address remote agent-runners dial is handed to them out-of-band at
-        # runner first start, never stored here. Materialized so `ava start` reads the URL
+        # runner first start, never stored here. Materialized so `meiva start` reads the URL
         # from .env with no runtime default (an enrolled runner overwrites this with
         # the gateway's reachable URL).
-        "AVA_GATEWAY_URL": f"http://localhost:{p['gateway']}",
-        "AVA_GATEWAY_HEALTH_URL": f"http://localhost:{p['gateway']}/api/health",
-        "AVA_FRONTEND_HEALTHCHECK_URL": f"http://localhost:{p['frontend']}",
-        "AVA_APP_PORT": str(p["app"]),
-        "AVA_MEMORY_SEARCH_PORT": str(p["memory_search"]),
-        "AVA_MEMORY_SEARCH_URI": f"http://127.0.0.1:{p['memory_search']}",
-        "AVA_BROWSER_CDP_PORT": str(p["browser"]),
-        "AVA_PERMISSIONS_HELPER_PORT": str(p["permissions_helper"]),
-        "AVA_DB_URL": db_url,
-        "AVA_REDIS_URL": url_with_userinfo(base_redis_url, DATA_PLANE_IDENTITY, runtime_password),
-        "AVA_EVENTS_CHANNEL": "ava:events",
+        "MEIVA_GATEWAY_URL": f"http://localhost:{p['gateway']}",
+        "MEIVA_GATEWAY_HEALTH_URL": f"http://localhost:{p['gateway']}/api/health",
+        "MEIVA_FRONTEND_HEALTHCHECK_URL": f"http://localhost:{p['frontend']}",
+        "MEIVA_APP_PORT": str(p["app"]),
+        "MEIVA_MEMORY_SEARCH_PORT": str(p["memory_search"]),
+        "MEIVA_MEMORY_SEARCH_URI": f"http://127.0.0.1:{p['memory_search']}",
+        "MEIVA_BROWSER_CDP_PORT": str(p["browser"]),
+        "MEIVA_PERMISSIONS_HELPER_PORT": str(p["permissions_helper"]),
+        "MEIVA_DB_URL": db_url,
+        "MEIVA_REDIS_URL": url_with_userinfo(base_redis_url, DATA_PLANE_IDENTITY, runtime_password),
+        "MEIVA_EVENTS_CHANNEL": "meiva:events",
     }
     # The health-port services are a subset of the closed ClusterPorts keys.
     by_service = cast("dict[str, int]", p)

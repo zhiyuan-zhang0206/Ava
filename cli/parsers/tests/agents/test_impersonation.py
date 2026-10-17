@@ -171,7 +171,7 @@ def test_request_records_the_shared_app_server_endpoint(
         return {"id": "lease", "expires_at": datetime(2026, 9, 5, tzinfo=UTC)}
 
     monkeypatch.setattr(sessions, "request", request)
-    endpoint = "unix:///home/u/.ava-lc/run/codex-app-server.0123456789ab-01234567.sock"
+    endpoint = "unix:///home/u/.meiva-lc/run/codex-app-server.0123456789ab-01234567.sock"
     assert (
         cli.cmd_impersonate(
             _args(
@@ -239,7 +239,7 @@ def test_claude_request_reports_the_relay_handoff(
     )
     output = capsys.readouterr()
     assert json.loads(output.out)["relay_token"] == "relay-token"
-    assert "AVA_IMPERSONATION_RELAY_TOKEN" in output.err
+    assert "MEIVA_IMPERSONATION_RELAY_TOKEN" in output.err
     assert "relay-token" not in output.err
 
 
@@ -480,7 +480,7 @@ def test_send_delivers_as_the_borrowed_agent(
     }
 
 
-@pytest.mark.parametrize("remote", [None, "unix:///tmp/ava-codex.sock"])
+@pytest.mark.parametrize("remote", [None, "unix:///tmp/meiva-codex.sock"])
 def test_relay_parser(remote: str | None, *, command_runtime: CommandRuntime) -> None:
     args = _args(
         "relay",
@@ -629,7 +629,7 @@ def test_dsh_request_writes_the_plugin_stub_and_never_prints_the_credential(
 
     request = Mock(return_value={"id": "lease", "session_id": 9, "relay_token": "tok-9"})
     monkeypatch.setattr(sessions, "request", request)
-    monkeypatch.delenv("DSH_AVA_RELAY_STUB", raising=False)
+    monkeypatch.delenv("DSH_MEIVA_RELAY_STUB", raising=False)
     argv = ("request", "--name", "Fix", "--agent", "405", "--as", "dsh", "--ttl", "600")
     args = (*argv, "--provider", "dsh", "--batch-window", "0")
     assert (
@@ -639,9 +639,9 @@ def test_dsh_request_writes_the_plugin_stub_and_never_prints_the_credential(
         == 1
     )  # no plugin: refused before any lease
     request.assert_not_called()
-    assert "DSH_AVA_RELAY_STUB is unset" in capsys.readouterr().err
+    assert "DSH_MEIVA_RELAY_STUB is unset" in capsys.readouterr().err
     stub = tmp_path / "session-1.env"
-    monkeypatch.setenv("DSH_AVA_RELAY_STUB", str(stub))
+    monkeypatch.setenv("DSH_MEIVA_RELAY_STUB", str(stub))
     assert (
         cli.cmd_impersonate(
             _args(*args, command_runtime=command_runtime), database_factory=operator_database
@@ -651,7 +651,7 @@ def test_dsh_request_writes_the_plugin_stub_and_never_prints_the_credential(
     output = capsys.readouterr()
     assert "relay_token" not in json.loads(output.out) and "tok-9" not in output.out + output.err
     assert stub.read_text() == (
-        "SID=9\nAGENT=405\nAVA_IMPERSONATION_RELAY_TOKEN=tok-9\n"
-        f"AVA_IMPERSONATION_RELAY_PY={cli.sys.executable}\n"
+        "SID=9\nAGENT=405\nMEIVA_IMPERSONATION_RELAY_TOKEN=tok-9\n"
+        f"MEIVA_IMPERSONATION_RELAY_PY={cli.sys.executable}\n"
     )
     assert (stub.stat().st_mode & 0o777) == 0o600

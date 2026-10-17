@@ -25,10 +25,10 @@ def test_capture_returns_none_without_a_session(monkeypatch: pytest.MonkeyPatch)
 
 def test_capture_reads_the_live_sessions_pane(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(
-        session_control, "get_shell_backend", lambda: _Backend({"ava-schedule-123"})
+        session_control, "get_shell_backend", lambda: _Backend({"meiva-schedule-123"})
     )
 
-    assert session_control.capture_blocking(123, 50) == "ava-schedule-123:50"
+    assert session_control.capture_blocking(123, 50) == "meiva-schedule-123:50"
 
 
 def test_capture_uses_the_shell_backend() -> None:

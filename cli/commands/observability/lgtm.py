@@ -11,7 +11,7 @@ def roles_declare_station(roles: MachineRoles | None) -> bool:
 
 
 def is_station_ctx(ctx: ConvergeCtx) -> bool:
-    return (ctx.ava_home / "lgtm-host").exists() or roles_declare_station(ctx.roles)
+    return (ctx.meiva_home / "lgtm-host").exists() or roles_declare_station(ctx.roles)
 
 
 def cmd_lgtm_status(*, machine: MachineIdentity) -> int:
