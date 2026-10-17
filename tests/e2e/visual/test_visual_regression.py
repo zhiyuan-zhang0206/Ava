@@ -21,7 +21,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
-from playwright.sync_api import Browser, Locator, Page, Route, expect
+from playwright.sync_api import Browser, FloatRect, Locator, Page, Route, expect
 
 from tests.e2e._ports import FRONTEND_URL
 from tests.e2e.visual._visual_snapshot import assert_visual_snapshot
@@ -53,7 +53,7 @@ _AGENT = {
 }
 
 _FROZEN_NOW = datetime(2026, 10, 17, 12, 0, tzinfo=UTC)
-_TIMELINE = {"items": [], "msg_count": 0, "has_more": False}
+_TIMELINE: dict[str, object] = {"items": [], "msg_count": 0, "has_more": False}
 _TOKEN_USAGE = {
     "input_tokens": 0,
     "output_tokens": 0,
@@ -323,13 +323,26 @@ def test_plugin_quota_rows_wrap_inside_statistics_popover(
     page.get_by_role("button", name="Statistics", exact=True).click()
     dialog = page.get_by_role("dialog").filter(has=page.get_by_text(label, exact=True))
     dialog.wait_for(state="visible")
-    bounds = dialog.bounding_box()
-    assert bounds is not None
+    dialog.get_by_text(detail, exact=True).first.wait_for(state="visible")
+    bounds = _settled_dialog_bounds(dialog)
     assert 0 <= bounds["x"] <= width - bounds["width"]
     assert 0 <= bounds["y"] <= height - bounds["height"]
     assert dialog.evaluate("el => el.scrollWidth <= el.clientWidth")
     assert dialog.evaluate("el => el.scrollHeight > el.clientHeight")
     _assert_quota_text_is_readable(dialog, (label, reset, detail))
+
+
+def _settled_dialog_bounds(dialog: Locator) -> FloatRect:
+    previous = dialog.bounding_box()
+    assert previous is not None
+    for _ in range(20):
+        dialog.page.wait_for_timeout(50)
+        current = dialog.bounding_box()
+        assert current is not None
+        if current == previous:
+            return current
+        previous = current
+    return previous
 
 
 def _assert_quota_text_is_readable(dialog: Locator, texts: tuple[str, ...]) -> None:
