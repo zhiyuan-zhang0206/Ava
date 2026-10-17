@@ -83,6 +83,10 @@ PEER_FEEDBACK_KEYWORDS = [
 ]
 
 
+HUMAN_SOURCES = frozenset({"user", "ui:web"})
+SYSTEM_PREAMBLE = "[system]"
+
+
 def _detect_correction(content: str) -> bool:
     if not content:
         return False
@@ -208,26 +212,49 @@ def _mode(values: list[str]) -> str:
     return Counter(value for value in values if value).most_common(1)[0][0] if any(values) else ""
 
 
+# meiva:ref meiva_builtins/skills/platform/meiva-self-evolution/docs/collection.meiva.okf.md#task-prompt-origin
+def _task_source(source: str, spawner: str) -> str:
+    if source in HUMAN_SOURCES:
+        return "human"
+    if spawner and source == spawner:
+        return "spawner"
+    if source.startswith("schedule:"):
+        return "schedule"
+    return ""
+
+
+# meiva:ref meiva_builtins/skills/platform/meiva-self-evolution/docs/collection.meiva.okf.md#task-prompt-origin
+def _first_human_message(transcript: list[dict[str, str]]) -> str:
+    for message in transcript:
+        content = message.get("content") or ""
+        if message.get("type") != "human" or not content.strip():
+            continue
+        if content.lstrip().startswith(SYSTEM_PREAMBLE):
+            continue
+        return content
+    return ""
+
+
+# meiva:ref meiva_builtins/skills/platform/meiva-self-evolution/docs/collection.meiva.okf.md#task-prompt-origin
 def _task_prompt(
-    spawner: str,
-    user_messages: list[str],
-    agent_messages: list[dict[str, Any]],
-    inbounds: list[dict[str, Any]],
+    spawner: str, messages: list[dict[str, Any]], transcript: list[dict[str, str]]
 ) -> tuple[str, str]:
-    if user_messages and user_messages[0].strip():
-        return user_messages[0], "user"
-    if spawner.startswith("agent:"):
-        spawner_messages = [
-            message
-            for message in agent_messages
-            if message["source"] == spawner and message["is_in_collection_window"]
-        ]
-        if spawner_messages and spawner_messages[0]["content"].strip():
-            return spawner_messages[0]["content"], "spawner"
-    system_messages = [message["content"] for message in inbounds if message["source"] == "system"]
-    if system_messages and system_messages[0].strip():
-        return system_messages[0], "system"
-    return "", "none"
+    for wanted in ("human", "spawner", "schedule"):
+        for message in messages:
+            if _task_source(message["source"], spawner) != wanted:
+                continue
+            if message["content"].strip():
+                return message["content"], wanted
+    inherited = _first_human_message(transcript)
+    return (inherited, "transcript") if inherited else ("", "none")
+
+
+# meiva:ref meiva_builtins/skills/platform/meiva-self-evolution/docs/collection.meiva.okf.md#task-prompt-origin
+def task_prompt_of(record: dict[str, Any]) -> str:
+    prompt = (record.get("task_prompt") or "").strip()
+    if prompt:
+        return record["task_prompt"]
+    return _first_human_message(record.get("transcript") or [])
 
 
 def _peer_feedback(spawner: str, agent_messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -295,15 +322,6 @@ def _event_stats(events: list[tuple]) -> _EventStats:
     )
 
 
-def _per_agent_messages(
-    inbounds: list[dict[str, Any]],
-) -> tuple[list[str], list[dict[str, Any]]]:
-    per_agent = [message for message in inbounds if not message["is_broadcast"]]
-    user_messages = [message["content"] for message in per_agent if message["source"] == "user"]
-    agent_messages = [message for message in per_agent if message["source"].startswith("agent:")]
-    return user_messages, agent_messages
-
-
 def _leak_fields(code_bodies: list[str], agent_id: int, leak_paths: LeakPaths) -> dict[str, Any]:
     findings = scan(code_bodies, agent_id=agent_id, leak_paths=leak_paths)
     return {
@@ -312,6 +330,25 @@ def _leak_fields(code_bodies: list[str], agent_id: int, leak_paths: LeakPaths) -
             for finding in findings
         ],
         "invalidated": invalidated(findings),
+    }
+
+
+def _prompt_fields(
+    spawner: str, inbounds: list[dict[str, Any]], transcript: list[dict[str, str]]
+) -> dict[str, Any]:
+    per_agent = [message for message in inbounds if not message["is_broadcast"]]
+    human_messages = [
+        message["content"] for message in per_agent if message["source"] in HUMAN_SOURCES
+    ]
+    agent_messages = [message for message in per_agent if message["source"].startswith("agent:")]
+    task_prompt, task_prompt_source = _task_prompt(spawner, per_agent, transcript)
+    followups = human_messages[1:] if task_prompt_source == "human" else human_messages
+    return {
+        "task_prompt": task_prompt,
+        "task_prompt_source": task_prompt_source,
+        "followup_prompts": [m for m in followups if not _detect_correction(m)],
+        "corrections": [m for m in followups if _detect_correction(m)],
+        "peer_feedback": _peer_feedback(spawner, agent_messages),
     }
 
 
@@ -375,20 +412,18 @@ def build_record(
     meta: tuple,
     *,
     database: Database,
+    transcript: list[dict[str, str]] | None = None,
     leak_paths: LeakPaths | None = None,
     task_receipts: dict[str, int] | None = None,
 ) -> dict[str, Any]:
     spawner, status, last_message_text = meta
 
-    user_messages, agent_messages = _per_agent_messages(inbounds)
-    task_prompt, prompt_source = _task_prompt(spawner, user_messages, agent_messages, inbounds)
-
-    corrections = [m for m in user_messages[1:] if _detect_correction(m)]
-    followup_prompts = [m for m in user_messages[1:] if not _detect_correction(m)]
+    if transcript is None:
+        transcript = _transcript(agent_id, database=database)
+    prompts = _prompt_fields(spawner, inbounds, transcript)
 
     stats = _event_stats(events)
     compactions = sum(1 for event_type, _ in log_events if event_type == "compact")
-    transcript = _transcript(agent_id, database=database)
 
     plugins_activated, plugins_activated_skipped = _plugins_activated(events)
     if plugins_activated_skipped:
@@ -402,10 +437,7 @@ def build_record(
         "week": week,
         "spawner": spawner,
         "model": _mode(stats.models),
-        "task_prompt": task_prompt,
-        "followup_prompts": followup_prompts,
-        "corrections": corrections,
-        "peer_feedback": _peer_feedback(spawner, agent_messages),
+        **prompts,
         "transcript": transcript,
         "final_output": last_message_text or "",
         "turns": stats.turns,
@@ -430,8 +462,8 @@ def build_record(
         inbounds,
         stats,
         status=status,
-        task_prompt=task_prompt,
-        prompt_source=prompt_source,
+        task_prompt=prompts["task_prompt"],
+        prompt_source=prompts["task_prompt_source"],
         final_output=record["final_output"],
         task_receipts=task_receipts,
     )
