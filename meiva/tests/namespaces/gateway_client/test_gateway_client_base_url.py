@@ -146,6 +146,22 @@ def test_use_client_leaves_the_lazy_default_unbuilt_when_none_was_installed() ->
     assert clients._gateway is None
 
 
+def test_use_client_leaves_the_caller_client_open_and_restores_the_bound_context() -> None:
+    bound = process_context.current_context()
+    supplied = _answering("injected", [])
+
+    with use_client(supplied):
+        assert process_context.current_context() is not bound
+    assert process_context.current_context() is bound
+    assert not supplied.is_closed
+
+    with pytest.raises(RuntimeError, match="boom"), use_client(supplied):
+        raise RuntimeError("boom")
+    assert process_context.current_context() is bound
+    assert not supplied.is_closed
+    supplied.close()
+
+
 def test_client_carries_the_configured_timeout(
     monkeypatch: pytest.MonkeyPatch, client_config: ConfigBoot
 ) -> None:

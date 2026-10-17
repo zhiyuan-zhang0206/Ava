@@ -152,6 +152,20 @@ def test_a_derived_gateway_never_reaches_the_owner_it_came_from() -> None:
     handed.close()
 
 
+def test_closing_a_derived_sibling_releases_the_client_its_builder_returned() -> None:
+    parent = ClientSet(
+        gateway_url="http://own.test", gateway=lambda url: httpx.Client(base_url=url)
+    )
+    handed = httpx.Client(base_url="http://derived.test")
+    derived = parent.with_gateway(lambda _url: handed)
+
+    assert derived.gateway is handed
+    derived.close()
+    assert handed.is_closed
+    assert not parent.gateway.is_closed
+    parent.close()
+
+
 def test_a_client_that_cannot_be_built_raises_at_the_call() -> None:
     def refuses() -> Any:
         raise OSError("no socket")
