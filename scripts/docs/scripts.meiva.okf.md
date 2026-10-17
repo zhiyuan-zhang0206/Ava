@@ -20,13 +20,8 @@ tags:
 Split by kind: code/AST/Python-convention guards in [[scripts/lint/docs/lint.meiva.okf.md]]; document/OKF/skill/migration-format guards in [[scripts/content_lint/docs/content_lint.meiva.okf.md]].
 
 ### `audit/` — read-only drift audits
-`branch_protection.py` compares live GitHub protection with `.trunk/trunk.yaml`.
-Before changes, `where_used.py` groups importers, tests, strings, docs and baseline
-entries of symbols/modules/paths (`--json`); `where_used_scan.py` owns matching.
-After moves, `module_moves.py` rejects remaining old references and missing names.
-Both CLI owners expose `main(argv, *, repo_root=None)` with shared diagnostics and
-exit codes, defaulting to their checkout. Move imports use the caller's Python
-environment; validation algorithms stay local.
+GitHub protection, reference and move inventories, runtime impact, SDK usage and
+live schema drift: [[scripts/audit/docs/audit.meiva.okf.md]].
 
 ### `codegen/` — derived-artifact generation and OKF tooling
 Tool and artifact owners: [[scripts/codegen/docs/codegen.meiva.okf.md]].
