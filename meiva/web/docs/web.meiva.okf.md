@@ -1,7 +1,7 @@
 ---
 type: doc
 title: meiva.web — Web Access
-description: '`meiva.web` provides web search and concurrent content fetching. Search results come from a search engine, content fetching uses LLM reading comprehension (not raw HTML), batch fetch executes concurrently.'
+description: '`meiva.web` provides web search and concurrent content fetching over a configurable provider (Brave or DeepSeek search; Jina or DeepSeek reader), content fetching uses LLM reading comprehension (not raw HTML), batch fetch executes concurrently.'
 tags:
 - agent-view
 - sdk
@@ -12,7 +12,11 @@ tags:
 
 ## What it is
 
-`meiva.web` provides web search and concurrent content fetching. Search results come from a search engine, content fetching uses LLM reading comprehension (not raw HTML).
+`meiva.web` provides web search and concurrent content fetching. Search results come from a search engine — Brave or DeepSeek, chosen by configuration — and content fetching pairs a page reader (Jina Reader or the DeepSeek Fetch tool) with LLM reading comprehension rather than raw HTML.
+
+## Providers
+
+`search()` and `fetch()` each run on one of two interchangeable providers, chosen by `MEIVA_WEB_SEARCH_PROVIDER` (`brave` by default, or `deepseek`) and `MEIVA_WEB_FETCH_READER` (`jina` by default, or `deepseek`). Both DeepSeek tools reuse `DEEPSEEK_API_KEY`. See [[providers.meiva.okf.md]] for what changes for the caller, the rate contract that keeps a batch under DeepSeek's 5 QPS, and the two provider contracts.
 
 ## Core API
 
@@ -38,20 +42,20 @@ retry authority. Reader failures and empty model answers still raise `FetchError
 - `SearchResult`: title, url, snippet, kind (`kind` is the source partition: web / news / videos / discussions)
 
 ## Key Dependencies
-- **Does not depend on browser service**: `search` uses Brave Search API (`MEIVA_WEB_BRAVE_SEARCH_ENDPOINT`, default `https://api.search.brave.com/res/v1/web/search`), `fetch` uses Jina Reader (`MEIVA_WEB_JINA_BASE_URL`, default `https://r.jina.ai/`, server-side headless fetching); hitting a hard login wall raises `FetchError` (`_GATED_SITE_SKILLS` currently empty, login site adapters moved to private install)
+- **Does not depend on browser service**: `search` uses Brave Search API (`MEIVA_WEB_BRAVE_SEARCH_ENDPOINT`, default `https://api.search.brave.com/res/v1/web/search`) or the DeepSeek Search tool; `fetch` uses Jina Reader (`MEIVA_WEB_JINA_BASE_URL`, default `https://r.jina.ai/`, server-side headless fetching) or the DeepSeek Fetch tool. On the Jina path a hard login wall raises `FetchError` (`_GATED_SITE_SKILLS` currently empty, login site adapters moved to private install); DeepSeek reports the same situation as HTTP 403/404.
 
 ## Notes
 `fetch()` returns LLM-refined answers. For events/versions/releases after training cutoff, verify with `search` + `fetch`—do not rely on time-sensitive information in training data.
 
 ## Structure
-`meiva/web/__init__.py` is the namespace module: `search` and `fetch` validate through `plans.py` (no ambient reads) and each builds only its own operation's deps in `wiring.py` — `search_deps()` reads the four Brave settings and the network; `fetch_deps()` reads the Jina and fetch-model settings, the model catalog, the model overrides, the provider factory, the network and the injection check — then runs the batch in `runner.py`. `brave.py` searches one query from `SearchDeps`; `reader.py` reads one page and answers a prompt from `FetchDeps`; `deps.py` declares both values and their config records (`BraveConfig`, `JinaConfig`, `FetchModel`). A non-model SDK installation therefore searches without a model catalog, while fetch still refuses one before any request. Tests hand them a fake network and the values they want instead of patching settings. The implementation modules load at the first call, not at `import meiva`.
+`meiva/web/__init__.py` is the namespace module: `search` and `fetch` validate through `plans.py` (no ambient reads) and each builds only its own operation's deps in `wiring.py` — `search_deps()` reads the search-provider settings, the shared search timeout and the network; `fetch_deps()` reads the reader settings, the fetch-model settings, the model catalog, the model overrides, the provider factory, the network and the injection check — then runs the batch in `runner.py`. `runner.py` dispatches each query to `brave.py` or `deepseek.py`, both of which expose the same `search_one(query, count, deps, make_result)` ([[providers.meiva.okf.md]]); `reader.py` dispatches the page read to Jina or `deepseek.read_page` and answers the prompt from `FetchDeps`; `deps.py` declares both values and their config records, one per provider. A non-model SDK installation therefore searches without a model catalog, while fetch still refuses one before any request. Tests hand them a fake network and the values they want instead of patching settings. The implementation modules load at the first call, not at `import meiva`.
 
 ```meiva-contract
 id = "webdeps-split"
 kind = "invariant"
-statement = "SearchDeps carries the Brave provider, the URL opener and the content scan; FetchDeps carries the Jina reader, the fetch model with its provider factory, the URL opener, the content scan and the injection check. The search path must never read the model catalog or the model overrides."
+statement = "SearchDeps carries the selected search provider with both provider configs, the URL opener and the content scan; FetchDeps carries the selected reader with both reader configs, the fetch model with its provider factory, the URL opener, the content scan and the injection check. The search path must never read the model catalog or the model overrides."
 code = ["meiva/web/deps.py:<module>", "meiva/web/deps.py:SearchDeps", "meiva/web/deps.py:FetchDeps", "meiva/web/wiring.py:search_deps_for"]
-tests = ["meiva/tests/namespaces/web/test_web_search.py::test_search_deps_read_only_brave_fields", "meiva/tests/namespaces/web/test_web_search_owner.py::test_search_runs_without_a_model_catalog"]
+tests = ["meiva/tests/namespaces/web/test_web_search.py::test_search_deps_reads_only_search_fields", "meiva/tests/namespaces/web/test_web_search_owner.py::test_search_runs_without_a_model_catalog"]
 ```
 
 ```meiva-contract
