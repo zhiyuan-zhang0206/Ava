@@ -192,7 +192,7 @@ function itemOwnMs(it: BackendTimelineItem): number {
     case "agent_code":
       return it.code_elapsed_ms ?? it.codeElapsedMs ?? 0;
     case "code_output":
-      return it.exec_ms ?? 0;
+      return it.exec_ms ?? it.execElapsedMs ?? 0;
     default:
       return 0;
   }

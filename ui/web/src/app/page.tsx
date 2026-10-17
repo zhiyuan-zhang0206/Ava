@@ -261,7 +261,7 @@ function HomeContent({
   );
 
   const { items, compactBuffer, streamingCode, turnActive, hasMoreOlder, loadingOlder, loadOlder, isLoading, retainedItemsMax, error: timelineError, isFetching, retryTimeline } =
-    useTimeline(activeId, showError);
+    useTimeline(activeId, showError, activeAgent?.status);
   const { contextTokens, maxContextTokens, softCompactTokens, hardCompactTokens, contextPending } = useTokenUsage(
     activeId,
     showError,

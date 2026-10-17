@@ -239,11 +239,10 @@ const ROLE_CASES: readonly RoleCase[] = [
     streamingCode: "set-false",
     tokenUsage: "keep",
   },
-  // codeEnd only: exec_output / compact_done
   {
-    name: "exec_output → streaming set false; turnActive keep",
+    name: "exec_output → turnActive set false + streaming set false",
     event: { role: "exec_output", agent_id: 42, item_id: "2.0", content: "out" },
-    turnActive: "keep",
+    turnActive: "set-false",
     streamingCode: "set-false",
     tokenUsage: "keep",
   },
@@ -1864,5 +1863,36 @@ describe("retained compact reading windows", () => {
     expect(buffer.epoch).toBe(17);
     expect(() => useTimelineStore.getState().switchThread(43, [], true, buffer)).toThrow("must belong");
     expect(useTimelineStore.getState().activeThreadId).toBe(42);
+  });
+});
+
+describe("live clock freezing and settleTurn", () => {
+  it("freezes execStartedAt into execElapsedMs on exec_output", () => {
+    const store = useTimelineStore.getState();
+    store.switchThread(42, [], false);
+    store.processSseEvent({ role: "exec_start", agent_id: 42, item_id: "2.0" });
+    expect(useTimelineStore.getState().items[0].execStartedAt).toEqual(expect.any(Number));
+    store.processSseEvent({ role: "exec_output", agent_id: 42, item_id: "2.0", content: "ok" });
+    const out = useTimelineStore.getState().items[0];
+    expect(out.execStartedAt).toBeUndefined();
+    expect(out.execElapsedMs).toEqual(expect.any(Number));
+    expect(useTimelineStore.getState().turnActive).toBe(false);
+  });
+
+  it("settleTurn freezes live clocks, drops empty exec placeholders, and clears turnActive", () => {
+    const store = useTimelineStore.getState();
+    store.switchThread(42, [], false);
+    store.processSseEvent({ role: "code_start", agent_id: 42, item_id: "1.0" });
+    store.processSseEvent({ role: "code_delta", agent_id: 42, item_id: "1.0", content: "x=1" });
+    store.processSseEvent({ role: "exec_start", agent_id: 42, item_id: "2.0" });
+    expect(useTimelineStore.getState().turnActive).toBe(true);
+    store.settleTurn();
+    const settled = useTimelineStore.getState();
+    expect(settled.turnActive).toBe(false);
+    expect(settled.streamingCode).toBe(false);
+    expect(settled.streamingIds.size).toBe(0);
+    expect(settled.items.map((it) => it.item_id)).toEqual(["1.0"]);
+    expect(settled.items[0].codeStartedAt).toBeUndefined();
+    expect(settled.items[0].codeElapsedMs).toEqual(expect.any(Number));
   });
 });

@@ -2250,4 +2250,23 @@ describe("latest-message refresh lifecycle", () => {
     await waitFor(() => expect(result.current.isFetching).toBe(false));
     expect(result.current.items.some((item) => item.payload === "New reply")).toBe(true);
   });
+
+  it("settles lingering turn state and live clocks when agentStatus leaves running", async () => {
+    queryClient.setQueryData(["timeline", 7], tlResp([]));
+    const { result, rerender } = renderHook(
+      ({ status }: { status?: string }) => useTimeline(7, vi.fn(), status),
+      { wrapper, initialProps: { status: "running" } },
+    );
+    act(() => {
+      pushEvent({ role: "code_start", agent_id: 7, item_id: "1.0" });
+      pushEvent({ role: "code_delta", agent_id: 7, item_id: "1.0", content: "print(1)" });
+      pushEvent({ role: "exec_start", agent_id: 7, item_id: "2.0" });
+    });
+    expect(result.current.turnActive).toBe(true);
+    rerender({ status: "idle" });
+    await waitFor(() => expect(result.current.turnActive).toBe(false));
+    expect(result.current.items.map((it) => it.item_id)).toEqual(["1.0"]);
+    expect(result.current.items[0].codeStartedAt).toBeUndefined();
+    expect(result.current.items[0].codeElapsedMs).toEqual(expect.any(Number));
+  });
 });

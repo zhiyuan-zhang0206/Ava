@@ -698,9 +698,10 @@ function OutputSummary({ item, payload, now }: { item: BackendTimelineItem; payl
   // the execution streams (execStartedAt set, exec_ms not yet committed), show a
   // live "Running for Xs" clock.
   const liveExec = isLiveExecution(item);
+  const execMs = item.exec_ms ?? item.execElapsedMs;
   let ran: string | null = null;
-  if (item.exec_ms != null) {
-    ran = t("ranIn", { duration: formatDuration(item.exec_ms) });
+  if (execMs != null) {
+    ran = t("ranIn", { duration: formatDuration(execMs) });
   } else if (liveExec && item.execStartedAt != null) {
     ran = t("runningFor", { duration: formatDuration(now - item.execStartedAt) });
   }
