@@ -9,6 +9,11 @@ from pathlib import Path
 RESERVED_PORT_BASE = 20000
 RESERVED_PORT_STRIDE = 64
 RESERVED_PORT_ATTEMPTS = 8
+RESERVED_PORT_BLOCK = RESERVED_PORT_STRIDE * RESERVED_PORT_ATTEMPTS
+HEALTH_PORT_ATTEMPTS = 32
+HEALTH_PORT_BLOCK = RESERVED_PORT_STRIDE * HEALTH_PORT_ATTEMPTS
+HEALTH_PORT_BASE = RESERVED_PORT_BASE + RESERVED_PORT_BLOCK
+HEALTH_PORT_KINDS = ("ops", "agent-host")
 
 
 def ephemeral_port_floor() -> int:
@@ -60,6 +65,13 @@ def reserve_port(
         f"every reserved port candidate for slot {slot} is in use: "
         f"{[base + n * stride + slot for n in range(attempts)]}"
     )
+
+
+def reserve_health_port(kind: str) -> PortReservation:
+    if kind not in HEALTH_PORT_KINDS:
+        raise ValueError(f"unknown health-port kind {kind!r}; known: {HEALTH_PORT_KINDS}")
+    base = HEALTH_PORT_BASE + HEALTH_PORT_KINDS.index(kind) * HEALTH_PORT_BLOCK
+    return reserve_port(_worker_slot(), base=base, attempts=HEALTH_PORT_ATTEMPTS)
 
 
 def _worker_slot() -> int:

@@ -6,9 +6,12 @@ from collections.abc import Iterator
 import pytest
 
 from tests.e2e._ports import (
+    HEALTH_PORT_BASE,
+    HEALTH_PORT_BLOCK,
     RESERVED_PORT_BASE,
     RESERVED_PORT_STRIDE,
     ephemeral_port_floor,
+    reserve_health_port,
     reserve_port,
 )
 
@@ -107,3 +110,45 @@ def test_a_block_inside_the_ephemeral_range_is_refused() -> None:
 def test_a_slot_outside_the_stride_is_refused() -> None:
     with pytest.raises(ValueError, match="outside"):
         _reserve(_STRIDE)
+
+
+def test_health_port_kinds_own_separate_blocks_below_the_ephemeral_range() -> None:
+    ops = reserve_health_port("ops")
+    host = reserve_health_port("agent-host")
+    try:
+        assert HEALTH_PORT_BASE <= ops.port < HEALTH_PORT_BASE + HEALTH_PORT_BLOCK
+        assert (
+            HEALTH_PORT_BASE + HEALTH_PORT_BLOCK
+            <= host.port
+            < HEALTH_PORT_BASE + 2 * HEALTH_PORT_BLOCK
+        )
+        assert ephemeral_port_floor() > HEALTH_PORT_BASE + 2 * HEALTH_PORT_BLOCK
+    finally:
+        ops.release()
+        host.release()
+
+
+def test_a_health_port_is_held_against_a_listener_until_released() -> None:
+    reservation = reserve_health_port("ops")
+    try:
+        with pytest.raises(OSError) as taken:
+            _node_like_listen(reservation.port)
+        assert taken.value.errno == errno.EADDRINUSE
+    finally:
+        reservation.release()
+    with contextlib.closing(_node_like_listen(reservation.port)) as listener:
+        assert listener.getsockname()[1] == reservation.port
+
+
+def test_two_health_ports_of_one_kind_take_different_candidates() -> None:
+    first, second = reserve_health_port("agent-host"), reserve_health_port("agent-host")
+    try:
+        assert second.port == first.port + RESERVED_PORT_STRIDE
+    finally:
+        first.release()
+        second.release()
+
+
+def test_an_unknown_health_port_kind_is_refused() -> None:
+    with pytest.raises(ValueError, match="unknown health-port kind"):
+        reserve_health_port("gateway")
