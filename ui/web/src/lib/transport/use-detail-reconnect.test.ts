@@ -56,7 +56,7 @@ function composedSnapshot(value: number): ConversationSnapshotResponse {
   return {
     timeline: { items: [], msg_count: 0, has_more: false },
     token_usage: tokenSnapshot(value),
-    pending: [{ id: value, content: String(value), source: "user", images: null,
+    pending: [{ id: value, content: String(value), source: "user", sender: "user", images: null,
       created_at: "2026-09-16T00:00:00Z" }],
   };
 }
@@ -80,7 +80,8 @@ beforeEach(() => {
   }));
   vi.mocked(api.getPendingMessages).mockImplementation((id, signal) => new Promise((resolve) => {
     reads.push({ id, signal, domain: "pending", finish: (value) => resolve([
-      { id: value, content: String(value), source: "user", images: null, created_at: "2026-09-16T00:00:00Z" },
+      { id: value, content: String(value), source: "user", sender: "user", images: null,
+        created_at: "2026-09-16T00:00:00Z" },
     ]) });
   }));
   vi.mocked(api.getConversationSnapshot).mockImplementation((id, signal) => new Promise((resolve) => {
