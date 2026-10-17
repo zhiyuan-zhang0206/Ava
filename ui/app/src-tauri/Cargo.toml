@@ -1,6 +1,6 @@
 [package]
 name = "meiva-app"
-version = "0.4.2"
+version = "1.0.0"
 description = "Meiva desktop and mobile app"
 authors = ["Meiva"]
 edition = "2021"

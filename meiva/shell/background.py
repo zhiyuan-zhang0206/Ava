@@ -1,25 +1,4 @@
-"""Shared plumbing for background commands that report back on completion.
-
-`meiva.shell.run_background` and `meiva.watcher.spawn.run` share one shape: run a
-command inside a persistent session with its output teed to a per-agent log
-file and the session capture, then deliver a completion notice through the
-`meiva agents send` CLI (log path + output tail) when its notification
-policy allows it. This module builds that command line and allocates the log
-files; the session mechanics stay in `sessions.py`.
-
-The session shell is Bash, so the generated pipeline captures the command's
-exit status from `PIPESTATUS[0]` immediately after `tee` (only to propagate it
-as the session's own exit status; it never reaches the notice). `pipefail` would
-both let a failed `tee` replace the command status and mutate a kept
-interactive shell's state.
-
-The notice is sent from the shell level (not from inside the command's own
-process) so it fires on every exit path — including a SIGKILL'd or OOM'd child
-whose in-process cleanup never runs. `&& exit` closes the session only after
-the notice is delivered: if the send fails, the session survives as the
-post-mortem site and the agent finds it via `sessions.list()`.
-"""
-
+# meiva:ref meiva/shell/docs/shell.meiva.okf.md#background-notice-fires-on-command-exit
 from __future__ import annotations
 
 import re
@@ -105,13 +84,7 @@ def validate_notify(notify: str | None) -> str | None:
 
 
 def write_launch_file(line: str, path: Path) -> str:
-    """Put a notification pipeline on disk and return a short shell source command.
-
-    Fresh PTYs can still be canonical during login-shell startup, when input
-    buffers truncate long lines. Source in the same shell to retain PIPESTATUS,
-    `keep`/exit behavior and the watcher's orphan-guard parent. The sourced file
-    removes itself before running; callers prune any never-started carrier.
-    """
+    # meiva:ref meiva/shell/docs/shell.meiva.okf.md#background-notice-fires-on-command-exit
     quoted = shlex.quote(str(path))
     path.write_text(f"command rm -f -- {quoted}\n{line}\n")
     return f". {quoted}"
@@ -127,22 +100,7 @@ def notified_line(
     keep: bool,
     notify: str | None = None,
 ) -> str:
-    """Build the shell line: run `cmd` in a subshell, tee stdout+stderr to
-    `output_path` and the session capture, then deliver the completion notice,
-    then close the session unless `keep`.
-
-    `cmd` must be a single line: the line is typed into the session's shell,
-    so an embedded newline would submit a partial command. The subshell makes
-    the pipeline cover a compound `cmd` (`a; b`) as one unit;
-    `${PIPESTATUS[0]}` captures the subshell's exit code immediately before any
-    other command can reset it. `pipefail` is unsuitable because a failed
-    `tee` could replace that exit code and it would mutate a kept interactive
-    shell's state. Omitting `notify` marks the send as a platform completion; the
-    gateway then applies the agent's policy (`notify="always"` bypasses it).
-    The notice carries no exit status: the agent reads the log tail it carries. `label`
-    and `source` are caller-controlled literals (no user text), and the
-    double-quoted notice only expands `${_ec}`.
-    """
+    # meiva:ref meiva/shell/docs/shell.meiva.okf.md#background-notice-fires-on-command-exit
     notify = validate_notify(notify)
     if "\n" in cmd or "\r" in cmd:
         raise ValueError(
@@ -162,7 +120,7 @@ def notified_line(
         f'{shlex.quote(str(cli_path()))} agents send {agent_id} "{notice}" '
         f"--source {source} --tail-file {q_path}"
     )
-    line = f"( {cmd} ) 2>&1 | tee {q_path}; _ec=${{PIPESTATUS[0]}}; "
+    line = f"exec 3> >(tee {q_path}); ( {cmd} ) >&3 2>&1; _ec=$?; exec 3>&-; "
     line += send_notice if notify == "always" else f"{send_notice} --completion"
     if not keep:
         line += "; exit $_ec"

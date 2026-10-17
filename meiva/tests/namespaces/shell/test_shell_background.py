@@ -4,6 +4,7 @@
 The e2e tests run through a real pty-sessions service + real bash
 (`pty_service` fixture)."""
 
+import contextlib
 import os
 import shlex
 import sys
@@ -37,7 +38,7 @@ def test_notified_line_structure(tmp_path: Path) -> None:
     )
     # Subshell so the pipeline covers a compound cmd; command exit code pinned
     # before anything else runs; CLI notice with source + tail; close after delivery.
-    assert line.startswith(f"( make build ) 2>&1 | tee {log}; _ec=${{PIPESTATUS[0]}}; ")
+    assert line.startswith(f"exec 3> >(tee {log}); ( make build ) >&3 2>&1; _ec=$?; exec 3>&-; ")
     assert "agents send 5" in line
     assert "Background command 'build' finished. Full output at" in line
     assert "exited with code" not in line
@@ -214,9 +215,9 @@ def test_run_background_line_and_handle(monkeypatch: pytest.MonkeyPatch, tmp_pat
     assert Path(handle.output_path).exists()  # tailable immediately
     assert shlex.split(captured["cmd"]) == [".", str(Path(handle.output_path).with_suffix(".sh"))]
     cmd = Path(handle.output_path).with_suffix(".sh").read_text().splitlines()[1]
-    assert "( echo hi )" in cmd
-    assert "2>&1 | tee" in cmd
-    assert "_ec=${PIPESTATUS[0]}" in cmd
+    assert cmd.startswith("exec 3> >(tee ")
+    assert "( echo hi ) >&3 2>&1" in cmd
+    assert "_ec=$?" in cmd
     assert "--source shell:7" in cmd
     assert "--completion" in cmd
     assert cmd.endswith("; exit $_ec")
@@ -267,6 +268,22 @@ def test_run_background_e2e_notice_log_and_close(
     # (delivery is best-effort; a failed send must not leave the shell behind).
     _poll_until(lambda: handle.session_id not in meiva.shell.sessions.list(), 10)
     assert handle.session_id not in meiva.shell.sessions.list()
+
+    argv_file.unlink()
+    held = meiva.shell.run_background(
+        "( bash -c 'echo started; sleep 20 &' )",
+        name="test-bg-grandchild",
+        cwd=str(tmp_path),
+        ttl=120,
+        notify="always",
+    )
+    try:
+        _poll_until(argv_file.exists, 10)
+        assert argv_file.exists(), "notice waited for the grandchild holding stdout"
+        assert "started" in Path(held.output_path).read_text()
+    finally:
+        with contextlib.suppress(Exception):
+            meiva.shell.sessions.kill(held.session_id)
 
 
 @pytest.mark.flaky  # real pty session + signal delivery polling (15s deadline)

@@ -338,8 +338,7 @@ def run(request: SpawnRequest, deps: SpawnDeps) -> int:
     # its profile. That input buffer can truncate a long line before readline
     # takes over (macOS: observed at 1024 bytes). Keep repeated absolute paths
     # and the notification pipeline on disk, not in the terminal input stream.
-    # Source in the SAME shell: PIPESTATUS, session exit and the Python child's
-    # orphan-guard parent retain their existing semantics.
+    # meiva:ref meiva/watcher/docs/launch-line.meiva.okf.md#watcher-launch-line-sourced-from-disk
     launch_path = script_path.with_name(f"watcher_{session_id}_launch.sh")
     try:
         launch_line = deps.background.write_launch_file(line, launch_path)
