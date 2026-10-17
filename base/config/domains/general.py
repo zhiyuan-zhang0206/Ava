@@ -43,6 +43,20 @@ class GeneralSettings(EnvSettings):
         },
     )
 
+    self_evolution_coverage_alert_floor: float = Field(
+        default=0.5,
+        ge=0.0,
+        le=1.0,
+        alias="MEIVA_SELF_EVOLUTION_COVERAGE_ALERT_FLOOR",
+        description="Share of a daily self-evolution scan window's runs that must be judgeable (ok, fumbled or failed) before the scan keeps its normal alert path. Below this floor it exits with reason data-quality: low-coverage instead: a batch it cannot judge says nothing about the fleet and must not read as healthy. Evidence grading leaves roughly a quarter of records unjudgeable in current traffic, so 0.5 leaves that much headroom.",
+        json_schema_extra={
+            "restart_required": "",
+            "writable": True,
+            "sensitive": False,
+            "scope": "cluster-pinned",
+        },
+    )
+
     timezone: str = Field(
         default="America/Los_Angeles",
         alias="MEIVA_TIMEZONE",

@@ -41,10 +41,14 @@ def _record(label: str, agent_id: int = 1, **overrides: object) -> dict[str, obj
         "transcript": [],
         "final_output": "done",
         "turns": 3,
+        "exec_ok": 1,
         "exec_failed": 0,
+        "tokens_in": 1_000,
+        "tokens_out": 500,
         "last_exec_failed": False,
         "compactions": 0,
         "terminated": False,
+        "evidence_grade": "complete",
         "label": label,
     }
     rec.update(overrides)
@@ -362,15 +366,75 @@ def test_render_reports_the_unknown_bucket_with_reasons(daily_scan: Any) -> None
     assert "#4 unknown" not in out
 
 
-def test_unknown_runs_do_not_alert_or_enter_the_bad_list(daily_scan: Any) -> None:
+def test_unknown_runs_stay_out_of_the_bad_list(daily_scan: Any) -> None:
     ds = daily_scan
     records = [
-        _record("unknown", agent_id=1, unknown_reason="no_telemetry"),
-        _record("unknown", agent_id=2, unknown_reason="no_task"),
+        _record("ok", agent_id=1),
+        _record("unknown", agent_id=2, unknown_reason="no_telemetry", evidence_grade="partial"),
     ]
 
     out = ds.render(records, Path("daily.jsonl"), 1)
 
-    assert ds.alert_exit(records) == 0
-    assert "ALERT" not in out
-    assert "unknown 2 (no_task 1, no_telemetry 1)" in out
+    assert "worth mining" not in out
+    assert "#2 unknown" not in out
+    assert "unknown 1 (no_telemetry 1)" in out
+
+
+def test_unknown_share_below_the_floor_keeps_the_scan_quiet(daily_scan: Any) -> None:
+    ds = daily_scan
+    records = [_record("ok", agent_id=i) for i in range(1, 10)] + [
+        _record("unknown", agent_id=10, unknown_reason="no_task", evidence_grade="partial")
+    ]
+
+    assert ds.alert_verdict(records).code == 0
+    assert ds.alert_verdict(records).reason is None
+
+
+def test_coverage_headline_reports_the_judgeable_share(daily_scan: Any) -> None:
+    ds = daily_scan
+    records = [_record("ok", agent_id=i) for i in range(1, 106)] + [
+        _record("unknown", agent_id=i, unknown_reason="no_telemetry", evidence_grade="none")
+        for i in range(106, 893)
+    ]
+
+    out = ds.render(records, Path("daily.jsonl"), 1)
+
+    assert "batch 892 runs · judgeable 105 (11.8%)" in out
+    assert "unknown 787 (no_telemetry 787)" in out
+    assert " · scored " in out
+
+
+def test_low_coverage_alerts_with_the_data_quality_reason(daily_scan: Any) -> None:
+    ds = daily_scan
+    records = [_record("ok", agent_id=1)] + [
+        _record("unknown", agent_id=i, unknown_reason="no_terminal", evidence_grade="partial")
+        for i in range(2, 11)
+    ]
+
+    verdict = ds.alert_verdict(records)
+    out = ds.render(records, Path("daily.jsonl"), 1)
+
+    assert verdict == (2, "data-quality: low-coverage")
+    assert "ALERT — data-quality: low-coverage" in out
+    assert "largest unknown gap no_terminal (9 run(s))" in out
+
+
+def test_empty_window_alerts_as_an_empty_window(daily_scan: Any) -> None:
+    ds = daily_scan
+
+    assert ds.alert_verdict([]) == (2, "empty-window")
+    assert ds.alert_exit([]) == 2
+    assert "0 runs collected" in ds.render([], Path("d.jsonl"), 1)
+
+
+def test_regression_keeps_its_own_reason(daily_scan: Any) -> None:
+    ds = daily_scan
+
+    assert ds.alert_verdict([_record("ok"), _record("failed", agent_id=2)]) == (2, "regression")
+
+
+def test_test_only_window_still_exits_zero(daily_scan: Any) -> None:
+    ds = daily_scan
+    counts = {"seen": 3, "excluded_test": 3, "skipped_meta": 0}
+
+    assert ds.alert_verdict([], counts) == (0, None)

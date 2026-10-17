@@ -17,6 +17,13 @@ def test_unavailable_skill_renders_na() -> None:
     assert "0.0" not in html
 
 
+def test_no_baseline_card_renders_na() -> None:
+    html = render._render_score_skills(
+        {"score_skills": [{"skill": "demo", "dimensions": [], "n": 12, "unavailable": False}]}
+    )
+    assert "n/a — no earlier stamp to compare" in html
+
+
 def test_delta_average_ignores_unavailable_skills() -> None:
     data = render.build_report_data(
         week="2026-10-17",

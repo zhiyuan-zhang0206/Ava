@@ -37,6 +37,13 @@ def _load_template() -> str:
 # ── Section renderers ───────────────────────────────────────────────
 
 
+def _na_card(skill: str, reason: str) -> str:
+    return f"""<div class="score-card">
+    <div class="score-skill-name">{skill}</div>
+    <div class="score-row"><span class="score-dim">n/a — {reason}</span></div>
+  </div>"""
+
+
 def _render_score_skills(data: dict[str, Any]) -> str:
     skills = data.get("score_skills")
     if not skills:
@@ -45,12 +52,7 @@ def _render_score_skills(data: dict[str, Any]) -> str:
     cards = []
     for s in skills:
         if s.get("unavailable"):
-            cards.append(
-                f"""<div class="score-card">
-    <div class="score-skill-name">{s["skill"]}</div>
-    <div class="score-row"><span class="score-dim">n/a — no scorable runs ({s.get("n", 0)} replayed)</span></div>
-  </div>"""
-            )
+            cards.append(_na_card(s["skill"], f"no scorable runs ({s.get('n', 0)} replayed)"))
             continue
         dims_html = []
         for d in s.get("dimensions", []):
@@ -67,6 +69,9 @@ def _render_score_skills(data: dict[str, Any]) -> str:
       <span class="score-delta {d["delta_class"]}">{d["delta_str"]}</span>
     </div>"""
             )
+        if not dims_html:
+            cards.append(_na_card(s["skill"], "no earlier stamp to compare"))
+            continue
         cards.append(
             f"""<div class="score-card">
     <div class="score-skill-name">{s["skill"]}</div>
@@ -286,14 +291,13 @@ def build_report_data(
     See the JSON schema documented in the template's companion README or the
     sample at `skills/meiva-self-evolution/references/sample_report.json`.
     """
-    overall_delta = 0.0
-    scored = [s for s in score_skills if s.get("dimensions")]
-    for s in scored:
-        for d in s["dimensions"]:
-            if d.get("label") == "overall":
-                overall_delta += d.get("delta", 0)
-    if scored:
-        overall_delta = round(overall_delta / len(scored), 3)
+    deltas = [
+        delta
+        for s in score_skills
+        for d in s.get("dimensions", [])
+        if d.get("label") == "overall" and (delta := d.get("delta")) is not None
+    ]
+    overall_delta = f"{round(sum(deltas) / len(deltas), 3):+.3f}" if deltas else "n/a"
 
     tasks_replayed = eval_results.get("replayed", 0) if eval_results else 0
     improved = eval_results.get("improved", 0) if eval_results else 0
@@ -305,7 +309,7 @@ def build_report_data(
         "skill_count": len(score_skills),
         "total_runs": total_runs,
         "changes_count": len(changes),
-        "overall_delta": f"{overall_delta:+.3f}",
+        "overall_delta": overall_delta,
         "tasks_replayed": tasks_replayed,
         "improved": improved,
         "regressed": regressed,
