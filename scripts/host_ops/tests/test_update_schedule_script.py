@@ -272,7 +272,9 @@ def test_utf8_digest_preserves_newlines() -> None:
     assert repair.script_sha256("pass\r\n") != repair.script_sha256("pass\n")
 
 
-# meiva:ref scripts/host_ops/tests/docs/schedule-maintenance.meiva.okf.md#installed-runtime-writer
+# meiva:note
+# The external maintenance script uses the selected installation's interpreter and real writer while preserving schedule enabled/stopped state and the pause journal; it stores the new body without executing it.
+# meiva:link scripts/host_ops/tests/docs/schedule-maintenance.meiva.okf.md
 def test_external_file_uses_installed_runtime_and_real_writer(
     db_conn: psycopg.Connection,
     database: Database,

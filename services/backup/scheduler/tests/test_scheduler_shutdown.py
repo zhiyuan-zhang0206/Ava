@@ -37,7 +37,7 @@ def postgres_base(tmp_path: Path) -> Iterator[Path]:
         assert not Path(pgdata.read_text()).exists()
 
 
-# meiva:ref services/backup/scheduler/docs/timing-and-exit.meiva.okf.md#shutdown-harness-processes
+# meiva:link services/backup/scheduler/docs/timing-and-exit.meiva.okf.md
 def _block(root: Path, mode: str) -> None:
     if mode == "stubborn":
         signal.signal(signal.SIGTERM, signal.SIG_IGN)
@@ -282,7 +282,7 @@ def _kill_harness_processes(tmp_path: Path, process: subprocess.Popen[str]) -> N
     process.communicate(timeout=5)
 
 
-# meiva:ref services/backup/scheduler/docs/timing-and-exit.meiva.okf.md#shutdown-harness-processes
+# meiva:link services/backup/scheduler/docs/timing-and-exit.meiva.okf.md
 def _assert_sigterm_reaps_job_before_scheduler_exits(
     tmp_path: Path, mode: str, postgres_base: Path
 ) -> None:

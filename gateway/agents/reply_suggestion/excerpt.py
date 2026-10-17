@@ -1,4 +1,6 @@
-# meiva:ref gateway/agents/docs/reply-suggestion/reply-suggestion.meiva.okf.md#excerpt-budget-priority
+# meiva:note
+# The excerpt fits the user's latest message before the agent's last-turn text: the message survives whole whenever it fits the budget, a longer agent turn keeps its newest words instead of evicting it, and whichever part must be cut keeps its tail.
+# meiva:link gateway/agents/docs/reply-suggestion/reply-suggestion.meiva.okf.md
 from __future__ import annotations
 
 from collections.abc import Sequence

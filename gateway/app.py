@@ -446,7 +446,7 @@ async def cluster_auth_middleware(
     )
 
 
-# meiva:ref gateway/docs/error-responses-and-middleware-order.meiva.okf.md#error-response-cors
+# meiva:link gateway/docs/error-responses-and-middleware-order.meiva.okf.md
 def create_app(
     config: GatewayConfig,
     *,

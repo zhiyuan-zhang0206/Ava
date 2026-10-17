@@ -81,28 +81,4 @@ test execution or semantic truth. The contribution's independent review owns
 those judgments. The current migration and reviewer rules are in
 [structured code comments](../../../../docs/conventions/engineering/structured-code-comments.md).
 
-```meiva-contract
-id = "python-entry-shebang"
-kind = "invariant"
-statement = "A Python shebang is syntax only at the start of the first line and only for the exact supported interpreter forms, including the unversioned /usr/bin/env python entry. Arguments, trailing prose, forged interpreters and misplaced shebangs remain rejected comments."
-code = ["scripts/content_lint/code_comments/python_source.py:parse_python"]
-tests = ["scripts/content_lint/code_comments/tests/test_check.py::test_python_entry_shebang_is_syntax", "scripts/content_lint/code_comments/tests/test_check.py::test_python_shebang_does_not_hide_comments"]
-```
-
-```meiva-contract
-id = "api-help-owner"
-kind = "invariant"
-statement = "An API contract binds the documentation owner proved by the canonical SDK resolver. A module property's annotation can own PEP 224 help without weakening ambiguous getter/setter rejection. Rendering preserves executable syntax and leaves source untouched when provenance is unproved."
-code = ["scripts/content_lint/code_comments/check.py:check_api"]
-tests = ["scripts/content_lint/code_comments/tests/test_api.py::test_module_property_help_is_projected_at_the_annotation", "scripts/content_lint/code_comments/tests/test_api.py::test_unproved_property_help_remains_untouched", "scripts/content_lint/code_comments/tests/test_api.py::test_unproved_dynamic_attribute_fails_without_deleting_help"]
-```
-
 Parent: [[scripts/content_lint/docs/content_lint.meiva.okf.md]].
-
-```meiva-contract
-id = "python-machine-directives"
-kind = "invariant"
-statement = "Strict Python lint directives contain only explicit Ruff or Pyright rule lists and use a valid rationale bound to the same lexical definition, never a local assignment, sibling or enclosing definition. Ambient markers remain audited call data and quiesce markers remain exact bound references consumed by the existing stop-window check. Ordinary prose and unbounded suppressions remain rejected."
-code = ["scripts/content_lint/code_comments/directives.py:ambient_call_lines", "scripts/content_lint/code_comments/directives.py:comment_kind", "scripts/content_lint/code_comments/check.py:check_notes"]
-tests = ["scripts/content_lint/code_comments/tests/test_directives.py::test_line_directive_uses_its_definition_contract", "scripts/content_lint/code_comments/tests/test_directives.py::test_directive_cannot_borrow_sibling_or_outer_rationale", "scripts/content_lint/code_comments/tests/test_directives.py::test_signature_and_method_directives_bind_the_method", "scripts/content_lint/code_comments/tests/test_directives.py::test_unbounded_or_prose_directives_stay_rejected", "scripts/content_lint/code_comments/tests/test_directives.py::test_ambient_marker_only_names_an_audited_call", "scripts/content_lint/code_comments/tests/test_directives.py::test_quiesce_consumer_keeps_loop_and_stale_marker_checks", "scripts/content_lint/code_comments/tests/test_directives.py::test_duplicate_definition_cannot_borrow_enclosing_rationale", "scripts/content_lint/code_comments/tests/test_directives.py::test_module_directive_cannot_borrow_the_next_function"]
-```

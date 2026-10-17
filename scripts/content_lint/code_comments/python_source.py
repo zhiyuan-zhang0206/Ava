@@ -5,13 +5,15 @@ import re
 import tokenize
 from collections import Counter
 from collections.abc import Collection
-from dataclasses import replace
+from dataclasses import dataclass, replace
 from itertools import pairwise
 
 from scripts.content_lint.code_comments.directives import (
     ambient_call_lines,
     comment_kind,
-    is_quiesce_reference,
+    comment_text,
+    link_target,
+    note_header,
 )
 from scripts.content_lint.code_comments.fixtures import fixture_owners
 from scripts.content_lint.code_comments.model import Note, NoteKind, Source, Symbol
@@ -219,7 +221,96 @@ def definition_identities(definitions: list[Symbol]) -> list[Symbol]:
     return result
 
 
-# meiva:ref scripts/content_lint/code_comments/docs/code_comments.meiva.okf.md#python-entry-shebang
+@dataclass(frozen=True)
+class Block:
+    line: int
+    end_line: int
+    kind: NoteKind
+    text: str
+    links: tuple[str, ...]
+    raw_text: str
+
+
+def comment_blocks(
+    comments: list[tuple[int, int, str]], ambient: frozenset[int]
+) -> list[Block]:
+    blocks: list[Block] = []
+    index = 0
+    while index < len(comments):
+        line, column, text = comments[index]
+        if note_header(text):
+            body: list[str] = []
+            links: list[str] = []
+            raw = [text]
+            last = line
+            cursor = index + 1
+            while cursor < len(comments):
+                next_line, next_column, next_text = comments[cursor]
+                if (
+                    next_column != column
+                    or next_line != last + 1
+                    or note_header(next_text)
+                    or link_target(next_text) is not None
+                    or comment_kind(next_text, next_line, ambient) != NoteKind.COMMENT
+                ):
+                    break
+                body.append(comment_text(next_text))
+                raw.append(next_text)
+                last = next_line
+                cursor += 1
+            while cursor < len(comments):
+                next_line, next_column, next_text = comments[cursor]
+                target = link_target(next_text)
+                if next_column != column or next_line != last + 1 or target is None:
+                    break
+                links.append(target)
+                raw.append(next_text)
+                last = next_line
+                cursor += 1
+            blocks.append(
+                Block(
+                    line,
+                    last,
+                    NoteKind.NOTE,
+                    "\n".join(body).strip("\n"),
+                    tuple(links),
+                    "\n".join(raw),
+                )
+            )
+            index = cursor
+            continue
+        target = link_target(text)
+        if target is not None:
+            links = [target]
+            raw = [text]
+            last = line
+            cursor = index + 1
+            while cursor < len(comments):
+                next_line, next_column, next_text = comments[cursor]
+                found = link_target(next_text)
+                if next_column != column or next_line != last + 1 or found is None:
+                    break
+                links.append(found)
+                raw.append(next_text)
+                last = next_line
+                cursor += 1
+            blocks.append(Block(line, last, NoteKind.NOTE, "", tuple(links), "\n".join(raw)))
+            index = cursor
+            continue
+        blocks.append(
+            Block(
+                line,
+                line,
+                comment_kind(text, line, ambient),
+                comment_text(text),
+                (),
+                text,
+            )
+        )
+        index += 1
+    return blocks
+
+
 def parse_python(path: str, text: str) -> Source:
     tree = ast.parse(text, filename=path)
     collector = SymbolCollector(text, fixture_owners(tree))
@@ -234,7 +325,8 @@ def parse_python(path: str, text: str) -> Source:
         )
         for note in collector.notes
     ]
-    ambient_lines = ambient_call_lines(path, tree)
+    ambient = ambient_call_lines(path, tree)
+    comments: list[tuple[int, int, str]] = []
     for item in tokenize.generate_tokens(io.StringIO(text).readline):
         if item.type != tokenize.COMMENT:
             continue
@@ -242,23 +334,30 @@ def parse_python(path: str, text: str) -> Source:
             r"#!/usr/bin/(?:env python(?:3(?:\.12)?)?|python3(?:\.12)?)", item.string
         ):
             continue
-        kind = comment_kind(item.string, item.start[0], ambient_lines)
-        machine_reference = kind == NoteKind.LINT_DIRECTIVE or is_quiesce_reference(item.string)
-        lexical_owner = comment_owner(
-            collector.definitions, item.start[0], following=not machine_reference
-        )
+        comments.append((item.start[0], item.start[1], item.string))
+    for block in comment_blocks(comments, ambient):
+        machine = block.kind in {NoteKind.LINT_DIRECTIVE, NoteKind.MACHINE}
+        anchor = block.end_line
+        lexical_owner = comment_owner(collector.definitions, anchor, following=not machine)
         owner = (
             lexical_owner
-            if machine_reference
-            else comment_owner(collector.symbols.values(), item.start[0])
+            if machine
+            else comment_owner(collector.symbols.values(), anchor, following=True)
         )
         scope = enclosing_definition(
-            collector.definitions,
-            item.start[0],
-            following=not machine_reference and not item.line[: item.start[1]].strip(),
+            collector.definitions, anchor, following=not machine
         ).lexical_key
         collector.notes.append(
-            Note(kind, item.start[0], item.end[0], item.string, owner, scope, item.string)
+            Note(
+                block.kind,
+                block.line,
+                block.end_line,
+                block.text,
+                owner,
+                scope,
+                block.raw_text,
+                block.links,
+            )
         )
     return Source(
         path,

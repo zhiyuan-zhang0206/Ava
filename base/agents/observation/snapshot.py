@@ -181,7 +181,7 @@ class AgentSnapshot(BaseModel):
     heartbeat_paused_until: datetime | None
 
 
-# meiva:ref base/agents/observation/docs/observation.meiva.okf.md#agent-capability-projection
+# meiva:link base/agents/observation/docs/observation.meiva.okf.md
 def agent_supports_vision(
     config_overlay: Any,
     birth_config: Any,

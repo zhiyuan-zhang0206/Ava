@@ -1,4 +1,6 @@
-# meiva:ref services/agent_runner/agent_ops/docs/request-ownership.meiva.okf.md#request-ownership
+# meiva:note
+# A committed request claim remains after effect failure, cancellation or result-write failure: pending means uncertain and never authorizes re-execution. Duplicate keys validate immutable request identity and wait only for a bounded interval. Only OperationalError is eligible for connection retry. Running workers remain in maintenance accounting after their HTTP waiter is cancelled; repeated stop signals cannot interrupt bounded draining, and default-executor joining cannot prevent process exit. A modeled failed operation remains an HTTP 200 response so callers distinguish its result from transport failure; unexpected result values are string-serialized rather than breaking the control-plane response.
+# meiva:link services/agent_runner/agent_ops/docs/request-ownership.meiva.okf.md
 from __future__ import annotations
 
 import argparse

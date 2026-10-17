@@ -1,4 +1,6 @@
-# meiva:ref meiva_builtins/skills/platform/meiva-self-evolution/docs/meiva-self-evolution.meiva.okf.md#record-assembly
+# meiva:note
+# `record.py` shapes one self-evolution dataset record from telemetry events, log events, inbound messages, and checkpoint transcripts while staying separate from `collect.py`'s database and HTTP transport. `count_tool_calls` parses executed code with `SyntaxWarning` suppressed so agent regex escapes do not leak into schedule stderr. `_is_exec_fail` matches only terminal failure event names (`exec_envelope` is a wrapper, not a failure). `_msg_text` extracts human-visible text from checkpoint message blocks and skips `thinking` and `tool_use` blocks so silent tool turns do not serialize as `"thinking tool_use"`. Broadcast inbound instructions are excluded from per-agent `corrections` and `followup_prompts`.
+# meiva:link meiva_builtins/skills/platform/meiva-self-evolution/docs/meiva-self-evolution.meiva.okf.md
 from __future__ import annotations
 
 import ast

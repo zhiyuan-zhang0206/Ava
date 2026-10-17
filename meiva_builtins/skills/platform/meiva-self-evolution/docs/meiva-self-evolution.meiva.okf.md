@@ -24,23 +24,6 @@ read/compute safety and evidence constraints; schedules retain their own
 authorization scope.
 Output data lands in `$MEIVA_HOME/self_evolution/` (per-deployment private), not in the repo. Triggered by a weekly cron job spawn; the skill directory name contains hyphens, so `scripts/` itself cannot be a package — all of it (the CLI entry points `daily_scan.py` / `evaluate.py` / `mine.py` / `aggregate.py` / `collect.py` / `render_report.py`, plus the shared collection/scoring/report modules they import as flat siblings, `record.py` / `audit.py` / `label.py` / `rubric.py`) runs only via `.venv/bin/python`, importing each other through a one-line `__file__`-derived `sys.path` guard (structure Rule 6's endorsed within-skill exception). `render_report.py`'s template lives beside it in `assets/report_template.html`.
 
-## Record assembly
-
-```meiva-contract
-id = "record-assembly"
-kind = "invariant"
-code = ["meiva_builtins/skills/platform/meiva-self-evolution/scripts/record.py:<module>"]
-tests = [
-  "meiva_builtins/skills/platform/meiva-self-evolution/tests/test_self_evolution_record.py::test_exec_outcome_classification",
-  "meiva_builtins/skills/platform/meiva-self-evolution/tests/test_self_evolution_record.py::test_count_tool_calls_ignores_syntax_warnings",
-  "meiva_builtins/skills/platform/meiva-self-evolution/tests/test_self_evolution_record.py::test_broadcast_instruction_is_excluded_from_per_agent_corrections",
-  "meiva_builtins/skills/platform/meiva-self-evolution/tests/test_self_evolution_record.py::test_msg_text_skips_thinking_and_tool_use_blocks",
-]
-statement = """
-`record.py` shapes one self-evolution dataset record from telemetry events, log events, inbound messages, and checkpoint transcripts while staying separate from `collect.py`'s database and HTTP transport. `count_tool_calls` parses executed code with `SyntaxWarning` suppressed so agent regex escapes do not leak into schedule stderr. `_is_exec_fail` matches only terminal failure event names (`exec_envelope` is a wrapper, not a failure). `_msg_text` extracts human-visible text from checkpoint message blocks and skips `thinking` and `tool_use` blocks so silent tool turns do not serialize as `"thinking tool_use"`. Broadcast inbound instructions are excluded from per-agent `corrections` and `followup_prompts`.
-"""
-```
-
 ## Key dependencies
 - [[meiva_builtins/skills/docs/skills.meiva.okf.md|Skills index]] — full skills catalog
 - [[meiva/skills/docs/skills.meiva.okf.md|Skill System]] — the target of mining regressions is the skill library itself

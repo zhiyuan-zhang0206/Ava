@@ -79,18 +79,4 @@ On desktop the home page mounts the panel for every selected agent (the document
 area owns its empty and legacy states); on narrow viewports the header's To user
 action opens the same panel as the reading view.
 
-```meiva-contract
-id = "panel-composition"
-kind = "invariant"
-statement = "The panel's body is the agent's document with the notice area inside it; the inspector is a secondary view that replaces the body while open — the document body stays mounted while hidden so reply drafts and reading position survive — and the document shows again when the inspector closes; the home shell mounts the panel for every selected agent, so a missing document shows its empty state instead of collapsing the panel."
-code = ["ui/web/src/components/context/shared-context-panel.tsx:SharedContextPanel", "ui/web/src/app/page.tsx:HomeShell"]
-tests = ["ui/web/src/components/context/shared-context-panel.test.tsx::shows the document as the panel's body without a view switcher", "ui/web/src/components/context/shared-context-panel.test.tsx::swaps to the inspector view and keeps the mounted document hidden", "ui/web/src/components/context/shared-context-panel.test.tsx::keeps the notice area inside the document body"]
-```
-
-```meiva-contract
-id = "refresh-ownership"
-kind = "invariant"
-statement = "The global SSE fold invalidates document queries on root file changes and reconnect. Explicit refresh, mount and window focus re-read the document and attachment stamps; attachments are not recursively watched. A changed attachment version refreshes its resource URL even when the Markdown text is unchanged."
-code = ["ui/web/src/lib/context/use-to-user.ts:<module>"]
-tests = ["ui/web/src/lib/fold/fold.test.ts::repairs only the changed agent's shared context and repairs it after reconnect", "base/agents/tests/test_to_user.py::test_linked_file_revision_changes_without_document_edit"]
-```
+The panel's body is the agent's document with the notice area inside it; the inspector is a secondary view that replaces the body while open — the document body stays mounted while hidden so reply drafts and reading position survive — and the document shows again when the inspector closes; the home shell mounts the panel for every selected agent, so a missing document shows its empty state instead of collapsing the panel.

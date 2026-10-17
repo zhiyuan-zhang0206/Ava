@@ -308,7 +308,9 @@ def test_init_keep_local_fresh_repo_inits_without_remote(
     *,
     machine_identity: MachineIdentity,
 ) -> None:
-    # meiva:ref base/deploy/git/tests/docs/memory-repo-tests.meiva.okf.md#initialization-command-recorder
+    # meiva:note
+    # The existing initialization test records list-shaped subprocess argv and verifies that a fresh keep-local checkout initializes locally without clone or remote access. Its narrow Pyright annotation covers the dynamically typed argv item obtained through the existing subprocess replacement.
+    # meiva:link base/deploy/git/tests/docs/memory-repo-tests.meiva.okf.md
     machine_identity.set(role="agent-runner", name="test-host-2")
     monkeypatch.setattr(memory_repo.settings.general, "memory_keep_local", True)
     monkeypatch.setattr(memory_repo, "is_initialized", lambda: False)

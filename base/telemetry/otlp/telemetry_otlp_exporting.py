@@ -30,7 +30,7 @@ class ExportingEventPipeline(EventPipeline):
         return super().stopped and self._exports_finished
 
     def stop(self, timeout: float = 5.0) -> DrainResult:
-        # meiva:ref base/telemetry/otlp/docs/telemetry-otlp/exit-flush.meiva.okf.md#two-wait-classes-one-deadline
+        # meiva:link base/telemetry/otlp/docs/telemetry-otlp/exit-flush.meiva.okf.md
         if not math.isfinite(timeout) or timeout < 0:
             raise ValueError("event drain timeout must be finite and non-negative")
         deadline = time.monotonic() + timeout

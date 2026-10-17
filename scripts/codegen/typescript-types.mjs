@@ -19,7 +19,9 @@ function retainDeprecation(node) {
   ts.forEachChild(node, retainDeprecation);
 }
 
-// meiva:ref scripts/codegen/docs/types.meiva.okf.md#generated-types
+// meiva:note
+// The TypeScript projection preserves openapi-typescript's type declarations and omits generated prose while preserving exact machine-readable deprecation markers. The OpenAPI input retains descriptions, examples, defaults and deprecation metadata.
+// meiva:link scripts/codegen/docs/types.meiva.okf.md
 export async function generateTypes(schema) {
   const nodes = await openapiTS(schema);
   nodes.forEach(retainDeprecation);

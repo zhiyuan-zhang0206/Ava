@@ -31,13 +31,7 @@ Only the body of an entry file counts: a leading frontmatter block is skipped
 via the pool validator's own split, so a marker inside frontmatter never opens a
 block; CRLF files split like LF ones.
 
-```meiva-contract
-id = "inheritable-block-fences"
-kind = "invariant"
-statement = "The inheritable blocks of one entry file: only the body counts — a leading frontmatter block is skipped via the pool validator's split — CRLF is normalized, and fences match line-anchored after strip; malformed fencing fails soft with warnings — an unclosed open fence drops its region without sweeping to EOF, a close without an open or a nested open is ignored — and an empty block declares nothing."
-code = ["meiva_builtins/plugins/meiva_memory/inherit.py:parse_inheritable_blocks", "meiva_builtins/plugins/meiva_memory/inherit.py:_frontmatter_parts", "meiva_builtins/plugins/meiva_memory/inherit.py:INHERITABLE_OPEN", "meiva_builtins/plugins/meiva_memory/inherit.py:INHERITABLE_CLOSE"]
-tests = ["meiva_builtins/plugins/meiva_memory/tests/test_meiva_memory_inherit.py::test_parser_reads_multiple_blocks_in_order", "meiva_builtins/plugins/meiva_memory/tests/test_meiva_memory_inherit.py::test_parser_skips_frontmatter_and_takes_only_the_body", "meiva_builtins/plugins/meiva_memory/tests/test_meiva_memory_inherit.py::test_parser_normalizes_crlf", "meiva_builtins/plugins/meiva_memory/tests/test_meiva_memory_inherit.py::test_parser_fails_soft_on_malformed_fences"]
-```
+The inheritable blocks of one entry file: only the body counts — a leading frontmatter block is skipped via the pool validator's split — CRLF is normalized, and fences match line-anchored after strip; malformed fencing fails soft with warnings — an unclosed open fence drops its region without sweeping to EOF, a close without an open or a nested open is ignored — and an empty block declares nothing.
 
 ## The chain read
 
@@ -46,13 +40,7 @@ degrades to no note with a warning and is not cached. Only ancestors whose
 `agents_meta.machine` is this host contribute; an ancestor with no local store
 is skipped quietly.
 
-```meiva-contract
-id = "inherited-chain-read"
-kind = "invariant"
-statement = "The note reads the first memory_inherit_depth ancestors off the immutable birth chain in one light gateway call, re-read at each establishment; a failed read degrades to no note with a warning and is not cached; only ancestors whose agents_meta.machine is this host contribute — a remote ancestor is skipped and named in the footer (same-machine read, v1) — and one with no local store is skipped quietly."
-code = ["meiva_builtins/plugins/meiva_memory/inherit.py:_ancestor_chain", "meiva_builtins/plugins/meiva_memory/inherit.py:_collect_blocks", "meiva_builtins/plugins/meiva_memory/inherit.py:_REMOTE_FOOTER"]
-tests = ["meiva_builtins/plugins/meiva_memory/tests/test_meiva_memory_inherit.py::test_disabled_and_empty_chain_yield_no_note", "meiva_builtins/plugins/meiva_memory/tests/test_meiva_memory_inherit.py::test_depth_slices_the_chain", "meiva_builtins/plugins/meiva_memory/tests/test_meiva_memory_inherit.py::test_remote_ancestors_are_skipped_and_footered", "meiva_builtins/plugins/meiva_memory/tests/test_meiva_memory_inherit.py::test_chain_read_failure_degrades_and_is_not_cached", "meiva_builtins/plugins/meiva_memory/tests/test_meiva_memory_inherit.py::test_chain_is_read_at_each_establishment"]
-```
+The note reads the first memory_inherit_depth ancestors off the immutable birth chain in one light gateway call, re-read at each establishment; a failed read degrades to no note with a warning and is not cached; only ancestors whose agents_meta.machine is this host contribute — a remote ancestor is skipped and named in the footer (same-machine read, v1) — and one with no local store is skipped quietly.
 
 ## Size guardrails
 
@@ -60,13 +48,7 @@ One oversized block must not balloon every descendant's context: the per-block
 cap applies first, then the total budget clips the crossing section to its
 remainder and omits the rest behind one marker; `0` disables either.
 
-```meiva-contract
-id = "inherited-size-guardrails"
-kind = "invariant"
-statement = "Size guardrails truncate oversized declarations with visible markers plus warnings: the per-block cap (memory_inherit_max_block_chars) first, then the total budget (memory_inherit_max_total_chars) clips the crossing section to its remainder and omits the rest behind one marker; 0 disables either; the lengths are the shared character measure."
-code = ["meiva_builtins/plugins/meiva_memory/inherit.py:_group_blocks", "meiva_builtins/plugins/meiva_memory/inherit.py:_fit_sections", "meiva_builtins/plugins/meiva_memory/inherit.py:_BLOCK_TRUNCATION"]
-tests = ["meiva_builtins/plugins/meiva_memory/tests/test_meiva_memory_inherit.py::test_block_guardrail_truncates_with_a_visible_marker", "meiva_builtins/plugins/meiva_memory/tests/test_meiva_memory_inherit.py::test_total_guardrail_clips_and_omits", "meiva_builtins/plugins/meiva_memory/tests/test_meiva_memory_inherit.py::test_guardrails_can_be_disabled"]
-```
+Size guardrails truncate oversized declarations with visible markers plus warnings: the per-block cap (memory_inherit_max_block_chars) first, then the total budget (memory_inherit_max_total_chars) clips the crossing section to its remainder and omits the rest behind one marker; 0 disables either; the lengths are the shared character measure.
 
 ## The note
 
@@ -76,13 +58,7 @@ timestamps, so unchanged state renders byte-identical (the property the fork's
 prefix-cache stability relies on). The assembled text is scanned like the shared
 index and armed when flagged.
 
-```meiva-contract
-id = "inherited-note-assembly"
-kind = "invariant"
-statement = "The note renders one section per ancestor entry — nearest ancestor first, file names sorted, the fences of one file joined into one section — behind the framing; the content carries no timestamps, so unchanged state renders byte-identical; it is None when the layer is off, no agent id is established, the chain read failed, or nothing was declared."
-code = ["meiva_builtins/plugins/meiva_memory/inherit.py:inherited_memory_note", "meiva_builtins/plugins/meiva_memory/inherit.py:_section", "meiva_builtins/plugins/meiva_memory/inherit.py:_FRAMING"]
-tests = ["meiva_builtins/plugins/meiva_memory/tests/test_meiva_memory_inherit.py::test_blocks_render_nearest_first_with_sorted_entries", "meiva_builtins/plugins/meiva_memory/tests/test_meiva_memory_inherit.py::test_content_is_deterministic", "meiva_builtins/plugins/meiva_memory/tests/test_meiva_memory_inherit.py::test_fork_notes_graft_the_new_agent_s_own_chain"]
-```
+The note renders one section per ancestor entry — nearest ancestor first, file names sorted, the fences of one file joined into one section — behind the framing; the content carries no timestamps, so unchanged state renders byte-identical; it is None when the layer is off, no agent id is established, the chain read failed, or nothing was declared.
 
 ## Key Dependencies
 

@@ -10,10 +10,4 @@ The SDK environment fixture supplies one prepared configuration, lazy client set
 
 Identity helpers are separate from the autouse restoration plugin because direct helper imports must not pre-import a pytest plugin before assertion rewriting. Metering cleanup removes only the installation's own outer recorders.
 
-```meiva-contract
-id = "fixture-clock-owner"
-kind = "invariant"
-statement = "The bound SDK reads its context clock owner and refuses a context without one instead of borrowing the installation clock."
-code = ["meiva/tests/fixtures/pin_agent.py:<module>", "meiva/tests/fixtures/sdk.py:<module>"]
-tests = ["tests/components/meiva/test_sdk_clock_owner.py::test_bound_sdk_clock_uses_context_without_borrowing_installation", "tests/components/meiva/test_sdk_clock_owner.py::test_partial_context_refuses_clock_instead_of_falling_back"]
-```
+The bound SDK reads its context clock owner and refuses a context without one instead of borrowing the installation clock.

@@ -1,4 +1,4 @@
-# meiva:ref gateway/docs/error-responses-and-middleware-order.meiva.okf.md#test-credential-isolation
+# meiva:link gateway/docs/error-responses-and-middleware-order.meiva.okf.md
 import os
 from collections.abc import Iterator
 from concurrent.futures import ThreadPoolExecutor
@@ -282,7 +282,7 @@ def test_missing_or_wrong_admission_headers_cannot_write(
     assert _counts(db_conn) == before
 
 
-# meiva:ref gateway/docs/error-responses-and-middleware-order.meiva.okf.md#test-credential-isolation
+# meiva:link gateway/docs/error-responses-and-middleware-order.meiva.okf.md
 def test_revoked_principals_cannot_replay(
     client: GatewayTestClient,
     db_conn: psycopg.Connection,

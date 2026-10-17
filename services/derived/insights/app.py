@@ -1,4 +1,4 @@
-# meiva:ref services/derived/insights/docs/insights.meiva.okf.md#insights-service-ownership
+# meiva:link services/derived/insights/docs/insights.meiva.okf.md
 from __future__ import annotations
 
 import os

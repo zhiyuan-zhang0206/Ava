@@ -1,4 +1,6 @@
-# meiva:ref agent/graph/prompt/docs/composition.meiva.okf.md#context-order
+# meiva:note
+# Framework and plugin notes are stably sorted by cache rank, placing stable settings before changing memory indexes. Agent identity and concrete workspace paths live in re-graftable notes rather than the shared system prompt, so forks do not inherit source identity. The timezone IANA name remains authoritative when an offset becomes stale across DST. Fork skill additions append at the tail to preserve the inherited prefix.
+# meiva:link agent/graph/prompt/docs/composition.meiva.okf.md
 from __future__ import annotations
 
 from collections.abc import Sequence

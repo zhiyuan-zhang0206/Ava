@@ -64,19 +64,6 @@ Compact replacement starts with a summary/request note that closes prior work.
 OpenAPI descriptions are runtime schema metadata, preserving published docs
 when internal source prose is migrated.
 
+Prepared recent and panned windows query indexed rows without decoding historical checkpoints; details read only their own segment with stable indices, prompts and usage. Dense windows report an exact omitted count.
 
-```meiva-contract
-id = "indexed-history-windows"
-kind = "invariant"
-statement = "Prepared recent and panned windows query indexed rows without decoding historical checkpoints; details read only their own segment with stable indices, prompts and usage. Dense windows report an exact omitted count."
-code = ["services/derived/insights/run_timeline/projection/derive.py:<module>", "services/derived/insights/run_timeline/projection/model.py:<module>", "services/derived/insights/run_timeline/projection/nodes.py:<module>", "services/derived/insights/run_timeline/projection/reader.py:<module>", "services/derived/insights/run_timeline/projection/source.py:<module>", "services/derived/insights/run_timeline/projection/store.py:<module>", "services/derived/insights/run_timeline/history.py:<module>", "services/derived/insights/run_timeline/router.py:<module>", "services/derived/insights/run_timeline/context.py:<module>", "services/derived/insights/run_timeline/messages.py:<module>", "services/derived/insights/run_timeline/tokens.py:<module>", "services/derived/insights/run_timeline/schemas.py:<module>"]
-tests = ["services/derived/insights/run_timeline/tests/test_projection.py::test_cold_recent_range_and_pan_never_read_historical_bodies", "services/derived/insights/run_timeline/tests/test_projection.py::test_next_request_across_a_segment_boundary_fetches_only_its_own_segment", "services/derived/insights/run_timeline/tests/test_projection.py::test_dense_window_omits_all_detail_but_preserves_summaries", "services/derived/insights/run_timeline/tests/test_projection.py::test_compact_replacement_closes_work_before_the_next_segment", "services/derived/insights/run_timeline/tests/test_history_cache.py::test_recent_head_check_cannot_revive_an_absolutely_expired_snapshot"]
-```
-
-```meiva-contract
-id = "bounded-projection-preparation"
-kind = "invariant"
-statement = "The request worker and operator backfill share atomic segment publication. Requested agents rotate after each segment; failed receipts cannot permanently fill admission. Shutdown stops new segments and reports unfinished work."
-code = ["services/derived/insights/run_timeline/projection/jobs.py:<module>", "services/derived/insights/run_timeline/projection/backfill.py:<module>"]
-tests = ["services/derived/insights/run_timeline/tests/test_projection_jobs.py::test_pending_agents_rotate_after_each_segment_and_admission_is_bounded", "services/derived/insights/run_timeline/tests/test_projection_jobs.py::test_unread_failures_do_not_consume_admission_and_explicit_retry_runs", "services/derived/insights/run_timeline/tests/test_projection_jobs.py::test_close_reports_an_active_segment_and_never_starts_queued_work"]
-```
+The request worker and operator backfill share atomic segment publication. Requested agents rotate after each segment; failed receipts cannot permanently fill admission. Shutdown stops new segments and reports unfinished work.

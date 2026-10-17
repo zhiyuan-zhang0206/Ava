@@ -31,7 +31,9 @@ __all__ = [
 ]
 
 
-# meiva:ref base/agents/history/docs/timeline/note-timestamp-policy.meiva.okf.md#note-timestamp-policy
+# meiva:note
+# system_marker.show_timestamp hides the ts for ambient context and the one-time guidance notes (compact reminder, SDK hint, agent reply, silent idle-continue, security, exec timeout, timezone, the to_user soft limit); heartbeats, lifecycle_* transitions, task notifications, impersonation and NEW_SKILLS keep it. NEW_SKILLS stays visible deliberately: the drift note is the only place that mid-window install is visible. The split is closed over NoteTag — a new member needs an explicit decision.
+# meiva:link base/agents/history/docs/timeline/note-timestamp-policy.meiva.okf.md
 _NO_TIMESTAMP_NOTE_TAGS = frozenset(
     {
         NoteTag.MEMORY,
@@ -73,7 +75,9 @@ def _inbound_text(content: str | list[str | dict[str, Any]]) -> str:
     return str(content)
 
 
-# meiva:ref base/agents/history/docs/timeline/timeline.meiva.okf.md#timeline-window-contract
+# meiva:note
+# The render is incremental-safe: `start` renders only messages[start:] while item_ids keep ABSOLUTE msg_idx (streaming SSE ids stay aligned); msg_count is ALWAYS the full len(messages) — the frontend's future-partial boundary depends on it; segment_prefix is reserved for cold-loaded compact history and prefixes local ids. An unrecognized message shape raises — fail-loud.
+# meiva:link base/agents/history/docs/timeline/timeline.meiva.okf.md
 def build_timeline_items(
     messages: Sequence[BaseMessage],
     *,
@@ -224,7 +228,7 @@ def _attach_images(content: str | list[str | dict[str, Any]]) -> list[str] | Non
     return urls or None
 
 
-# meiva:ref base/agents/history/docs/timeline/timeline.meiva.okf.md#attach-caption-pairing
+# meiva:link base/agents/history/docs/timeline/timeline.meiva.okf.md
 def _attach_image_captions(content: str | list[str | dict[str, Any]]) -> list[str] | None:
     from base.lm.reasoning import content_blocks
 
@@ -316,7 +320,7 @@ def _compact_item(
     )
 
 
-# meiva:ref base/agents/history/docs/timeline/timeline.meiva.okf.md#human-fallback-fail-loud
+# meiva:link base/agents/history/docs/timeline/timeline.meiva.okf.md
 def _fallback_human_item(msg_idx: int, content: str, created_at: str | None) -> TimelineItem:
     return TimelineItem(
         item_id=f"{msg_idx}.0",
@@ -328,7 +332,7 @@ def _fallback_human_item(msg_idx: int, content: str, created_at: str | None) -> 
     )
 
 
-# meiva:ref base/agents/history/docs/timeline/timeline.meiva.okf.md#timeline-window-unit
+# meiva:link base/agents/history/docs/timeline/timeline.meiva.okf.md
 def timeline_default_limit(*, limit_reader: Callable[[], int]) -> int:
     return limit_reader()
 
@@ -419,7 +423,7 @@ def _chat_item(msg_idx: int, block_idx: int, payload: str, created_at: str | Non
     )
 
 
-# meiva:ref base/agents/history/docs/timeline/timeline.meiva.okf.md#reasoning-timing
+# meiva:link base/agents/history/docs/timeline/timeline.meiva.okf.md
 def _content_block_item(
     block: str | dict[str, Any],
     pos: int,
@@ -461,7 +465,7 @@ def _content_block_item(
     return _chat_item(msg_idx, block_idx, t, created_at), block_idx, reasoning_attached
 
 
-# meiva:ref base/agents/history/docs/timeline/timeline.meiva.okf.md#tool-call-block-offset
+# meiva:link base/agents/history/docs/timeline/timeline.meiva.okf.md
 def _tool_call_items(
     msg: AIMessage,
     msg_idx: int,

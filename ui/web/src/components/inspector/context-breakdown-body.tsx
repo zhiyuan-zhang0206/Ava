@@ -45,7 +45,7 @@ function httpStatus(error: unknown): number | null {
   return typeof status === "number" ? status : null;
 }
 
-// meiva:ref ui/web/src/docs/frontend-components/context-breakdown.meiva.okf.md#context-point-and-failure
+// meiva:link ui/web/src/docs/frontend-components/context-breakdown.meiva.okf.md
 export function ContextBreakdownCard({
   agentId,
   at,
@@ -101,7 +101,7 @@ export function ContextBreakdownCard({
   );
 }
 
-// meiva:ref ui/web/src/docs/frontend-components/context-breakdown.meiva.okf.md#context-point-and-failure
+// meiva:link ui/web/src/docs/frontend-components/context-breakdown.meiva.okf.md
 export function ContextBreakdownBody({
   agentId,
   categoryHighlight,
@@ -119,7 +119,7 @@ export function ContextBreakdownBody({
   return <BreakdownQuery query={query} categoryHighlight={categoryHighlight} />;
 }
 
-// meiva:ref ui/web/src/docs/frontend-components/context-breakdown.meiva.okf.md#context-point-and-failure
+// meiva:link ui/web/src/docs/frontend-components/context-breakdown.meiva.okf.md
 function BreakdownQuery({
   query,
   categoryHighlight,
@@ -163,7 +163,9 @@ function BreakdownQuery({
   return <BreakdownContent data={data} categoryHighlight={categoryHighlight} />;
 }
 
-// meiva:ref ui/web/src/docs/frontend-components/context-breakdown.meiva.okf.md#context-category-display
+// meiva:note
+// Category shares use the input total. System-note markers and automation are merged only for display, with summed tokens and propagated estimation, then sorted by descending tokens. Unknown category names remain visible. Sections begin collapsed; categories without corresponding timeline blocks are labels rather than toggle buttons.
+// meiva:link ui/web/src/docs/frontend-components/context-breakdown.meiva.okf.md
 function BreakdownContent({
   data,
   categoryHighlight,

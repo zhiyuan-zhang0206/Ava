@@ -1,4 +1,4 @@
-# meiva:ref scripts/codegen/sdk_surface/docs/provenance.meiva.okf.md#static-declarations
+# meiva:link scripts/codegen/sdk_surface/docs/provenance.meiva.okf.md
 
 from __future__ import annotations
 
@@ -123,7 +123,9 @@ def _marker_mutated(tree: ast.Module) -> bool:
     return False
 
 
-# meiva:ref scripts/codegen/sdk_surface/docs/provenance.meiva.okf.md#canonical-markers
+# meiva:note
+# A canonical SDK marker must be one unchanged literal list of valid names. Missing, opaque, rebound or locally mutated declarations do not grant a fallback proof, and private names remain hidden.
+# meiva:link scripts/codegen/sdk_surface/docs/provenance.meiva.okf.md
 def declared_names(tree: ast.Module) -> tuple[str, ...] | None:
     marker = _marker(tree)
     if marker is None:
@@ -375,7 +377,9 @@ def _module_property(module: str, path: str, tree: ast.Module, name: str) -> _De
     )
 
 
-# meiva:ref scripts/codegen/sdk_surface/docs/provenance.meiva.okf.md#property-help-owner
+# meiva:note
+# Only a statically proved ModuleType property with one unconditional module-level annotation without a value can use that annotation as its documentation owner. This does not replace getter provenance, authorize dynamic children, or repair a replaced property or ambiguous declaration.
+# meiva:link scripts/codegen/sdk_surface/docs/provenance.meiva.okf.md
 def _property_documentation_name(tree: ast.Module, path: str, name: str) -> str | None:
     if bindings.Scope(tree, path).stores[name] != 1:
         return None
@@ -528,7 +532,7 @@ def _resolve_plugin(sources: _Sources, exposed: str, candidate: _Candidate) -> _
     return origin
 
 
-# meiva:ref scripts/codegen/sdk_surface/docs/provenance.meiva.okf.md#static-declarations
+# meiva:link scripts/codegen/sdk_surface/docs/provenance.meiva.okf.md
 def query(index: ModuleSourceLookup, exposed_path: str) -> MemberProof | Unknown:
     parts = exposed_path.split(".")
     if parts[0] != "meiva" or not all(part.isidentifier() for part in parts):

@@ -1,4 +1,6 @@
-# meiva:ref services/backup/scheduler/docs/timing-and-exit.meiva.okf.md#daily-dump-policy
+# meiva:note
+# A failed dump is reported and waits for the next backup hour, without making health request a restart solely for that failure.
+# meiva:link services/backup/scheduler/docs/timing-and-exit.meiva.okf.md
 
 from __future__ import annotations
 
@@ -228,7 +230,9 @@ async def run(*, config: ConfigBoot, image: LoadedCommit, runtime: Path, clock: 
         _log.info("[pg-backup] daemon stopped")
 
 
-# meiva:ref services/backup/scheduler/docs/timing-and-exit.meiva.okf.md#bounded-backup-exit
+# meiva:note
+# SIGTERM exits within the shutdown bound even while a default-executor job is wedged.
+# meiva:link services/backup/scheduler/docs/timing-and-exit.meiva.okf.md
 def main() -> None:
     from base.deploy.schema.migrations import assert_schema_current
 

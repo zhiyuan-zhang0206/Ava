@@ -1,4 +1,6 @@
-# meiva:ref schedules/docs/entry-composition.meiva.okf.md#entry-admission-owner
+# meiva:note
+# A fresh schedule entry retains the loaded image and one admission gate for database handles instead of relabeling code after checkout changes.
+# meiva:link schedules/docs/entry-composition.meiva.okf.md
 
 from collections.abc import Generator
 from contextlib import contextmanager

@@ -23,7 +23,9 @@ def state_handle() -> PluginStateHandle[MeivaCodeState]:
     return PluginStateHandle(MeivaCodeState, "meiva_code")
 
 
-# meiva:ref meiva_builtins/plugins/meiva_code/docs/runtime-notes.meiva.okf.md#after-exec-messages
+# meiva:note
+# The after-exec hook returns a messages delta containing pending cwd and project-skills notes. It consumes cwd_note and emits the project-skills note once per compaction version; without pending notes it returns None.
+# meiva:link meiva_builtins/plugins/meiva_code/docs/runtime-notes.meiva.okf.md
 class _InjectCwdNotesAfterExecHook(Hook):
     async def __call__(
         self,
@@ -77,7 +79,9 @@ def _logical_cwd_error(cwd: Path) -> OSError | None:
     return None
 
 
-# meiva:ref meiva_builtins/plugins/meiva_code/docs/runtime-notes.meiva.okf.md#logical-cwd
+# meiva:note
+# After initialization, a valid persisted logical cwd is preserved. An absent or unusable cwd is replaced by the invoking agent's workspace, or home when no agent identity exists. This does not change the Python process cwd.
+# meiva:link meiva_builtins/plugins/meiva_code/docs/runtime-notes.meiva.okf.md
 class ValidateCwdAfterInitHook(Hook):
     async def __call__(
         self,

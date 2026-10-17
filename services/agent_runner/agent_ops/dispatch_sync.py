@@ -1,4 +1,6 @@
-# meiva:ref services/agent_runner/agent_ops/docs/request-ownership.meiva.okf.md#serialized-config-writes
+# meiva:note
+# Config and inventory read-modify-write operations share a thread lock so simultaneous workers cannot overwrite one another's fields or secrets. An event-loop lock cannot serialize these worker threads. This lock is process-local; the runtime config owner retains cross-process file locking. Blocking operations use the daemon-owned executor.
+# meiva:link services/agent_runner/agent_ops/docs/request-ownership.meiva.okf.md
 from __future__ import annotations
 
 import threading

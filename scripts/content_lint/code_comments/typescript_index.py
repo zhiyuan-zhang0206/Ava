@@ -23,13 +23,16 @@ class ParserSymbol(ParserRecord):
 
 
 class ParserNote(ParserRecord):
-    kind: Literal[NoteKind.COMMENT, NoteKind.DOCSTRING, NoteKind.UNUSED_STRING]
+    kind: Literal[
+        NoteKind.COMMENT, NoteKind.NOTE, NoteKind.DOCSTRING, NoteKind.UNUSED_STRING
+    ]
     line: int = Field(ge=1)
     end_line: int = Field(ge=1)
     text: str
     owner: str
     lexical_owner: str = Field(min_length=1)
     raw_text: str = Field(min_length=1)
+    links: list[str] = Field(default_factory=list)
 
 
 class ParserSource(ParserRecord):
@@ -73,6 +76,7 @@ def parse_source(item: ParserSource) -> Source:
                 value.owner,
                 value.lexical_owner,
                 value.raw_text,
+                tuple(value.links),
             )
         )
     return Source(path, symbols, tuple(notes))

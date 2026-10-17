@@ -1,4 +1,6 @@
-# meiva:ref agent/graph/prompt/docs/composition.meiva.okf.md#capabilities-index
+# meiva:note
+# The `# Capabilities` section is the system prompt's single index of available skills and live MCP servers, rendering only non-empty halves and omitting the section when both are empty. It directs the agent to match every task against the index before starting so established playbooks and domain capabilities are not skipped or rebuilt. Skill resolution shares one resolver across the index and preloaded skills, folding descendants under selected ancestor entry skills on wildcard selection while preserving full catalog membership for drift tracking and preloading. Untrusted skill descriptions are flattened and truncated to one 300-character line, and injection-flagged descriptions are withheld from the index and excluded from recall candidates along with preloaded skills. Disable checks honor configured `Prompt.sdk_disable` and runtime eval-isolation removals while leaving unconfigured missing paths eligible for expansion diagnostics. Index drift diffs live membership in one scan and caps additions at 20 lines while advancing the snapshot over full membership. Prompt assembly records no skill attribution and requests no capability report in final output.
+# meiva:link agent/graph/prompt/docs/composition.meiva.okf.md
 import logging
 from collections.abc import Sequence
 from typing import Any, NamedTuple

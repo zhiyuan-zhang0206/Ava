@@ -82,11 +82,3 @@ for every content shape or every run.
 (`ui/app/src-tauri/scripts/update-check.js`) inside a Node VM with canned
 command results, so every assertion observes the real source rather than a copy
 of its selection rules.
-
-```meiva-contract
-id = "android-update-prompt-harness"
-kind = "invariant"
-statement = "Each Android update prompt case executes the checked-in injected script with canned native command results and reads only the elements it appended."
-code = ["tests/ui/test_android_update_check.py:_run"]
-tests = ["tests/ui/test_android_update_check.py::test_offers_a_newer_build_with_an_install_action", "tests/ui/test_android_update_check.py::test_a_failed_install_falls_back_to_the_download_page"]
-```

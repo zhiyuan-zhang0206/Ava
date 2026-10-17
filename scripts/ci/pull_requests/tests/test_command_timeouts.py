@@ -104,7 +104,9 @@ def test_limbo_timeout_remains_missing_evidence(probe: str) -> None:
 
 @pytest.mark.parametrize("probe", ["gh", "git"])
 def test_freshness_timeout_still_submits_the_green_pr(probe: str) -> None:
-    # meiva:ref scripts/ci/pull_requests/docs/command-timeouts.meiva.okf.md#queue-fixture-token
+    # meiva:note
+    # The freshness-timeout test passes a literal fixture token only through its injected FakeUrlOpener, with no real credential or network request. The exact S106 suppression identifies this intentional test input at the call site; moving the same literal behind a constant would only hide it from the security check. The test still verifies both expected queue requests.
+    # meiva:link scripts/ci/pull_requests/docs/command-timeouts.meiva.okf.md
     runner = FakeCommands()
     error = subprocess.TimeoutExpired(probe, 30)
     runner.on(["gh", "api", "repos/o/r/issues/42/timeline"], Reply(stdout="null"))

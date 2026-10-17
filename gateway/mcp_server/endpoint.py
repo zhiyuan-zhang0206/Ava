@@ -499,7 +499,7 @@ def _register_fleet_tools(
         return result.model_dump(mode="json")
 
 
-# meiva:ref gateway/mcp_server/docs/mcp-endpoint/model-capability-failures.meiva.okf.md#lazy-sdk-types
+# meiva:link gateway/mcp_server/docs/mcp-endpoint/model-capability-failures.meiva.okf.md
 def _build_server(  # noqa: ANN202
     pool: Any,
     db: Database,
@@ -537,7 +537,7 @@ def _build_server(  # noqa: ANN202
     return server
 
 
-# meiva:ref gateway/mcp_server/docs/mcp-endpoint/model-capability-failures.meiva.okf.md#lazy-sdk-types
+# meiva:link gateway/mcp_server/docs/mcp-endpoint/model-capability-failures.meiva.okf.md
 def build_manager(  # noqa: ANN201
     pool: Any,
     db: Database,

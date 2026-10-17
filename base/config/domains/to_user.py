@@ -1,4 +1,6 @@
-# meiva:ref base/config/docs/to-user-limits.meiva.okf.md#to-user-read-limits
+# meiva:note
+# The four read-side guards are `settings.to_user` fields, cluster-pinned and consumed by both the ops listener and the gateway. max_document_bytes (1 MiB) guards against reading the wrong file as a document, not against writing — the soft word limit shapes the panel. max_references (1024) caps the per-reference stat probes of a pathological document. max_chain_depth (16) stops runaway or circular reference chains. max_resource_bytes (64 MiB) bounds one served file and with it the gateway's per-request buffering. Every bound must be positive; the first-version values were 256 KiB / 256 / 8 / 20 MiB.
+# meiva:link base/config/docs/to-user-limits.meiva.okf.md
 from __future__ import annotations
 
 from typing import Any

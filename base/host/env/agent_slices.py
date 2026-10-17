@@ -1,4 +1,6 @@
-# meiva:ref base/host/env/docs/agent-slices.meiva.okf.md#turn-snapshot
+# meiva:note
+# Resolved slices remain fixed for one turn; lists become tuples. Unpinned unsliced reads use the explicit owner live defaults, while pins win without leaking to another agent. ModelOverrides.from_pins reads only supplied pins, so the gateway need not own unrelated config domains. Plugin instances are cached within their own configuration view, not globally.
+# meiva:link base/host/env/docs/agent-slices.meiva.okf.md
 from __future__ import annotations
 
 from collections.abc import Callable, Mapping

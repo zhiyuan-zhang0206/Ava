@@ -142,7 +142,7 @@ def _edit_assignments(changed: dict[str, Any], *, code_changed: bool) -> list[sq
     return assignments
 
 
-# meiva:ref gateway/schedules/docs/router-contracts.meiva.okf.md#sql-returning-contract
+# meiva:link gateway/schedules/docs/router-contracts.meiva.okf.md
 def update_blocking(
     pool: ConnectionPool[Any], schedule_id: int, fields: dict[str, Any], key: str | None = None
 ) -> tuple[tuple[Any, ...], bool]:
@@ -209,7 +209,7 @@ async def list_schedules(request: Request) -> list[ScheduleSummary]:
     return await asyncio.to_thread(_list_blocking, request.app.state.db_pool)
 
 
-# meiva:ref gateway/schedules/docs/router-contracts.meiva.okf.md#sql-returning-contract
+# meiva:link gateway/schedules/docs/router-contracts.meiva.okf.md
 def create_blocking(
     pool: ConnectionPool[Any], body: ScheduleCreate, key: str | None = None
 ) -> tuple[Any, ...]:
@@ -463,7 +463,7 @@ async def guarded_draft_schedule(
     return ScheduleDraftResponse(agent_id=spawned.id)
 
 
-# meiva:ref gateway/schedules/docs/router-contracts.meiva.okf.md#sql-returning-contract
+# meiva:link gateway/schedules/docs/router-contracts.meiva.okf.md
 def fetch_full_blocking(pool: ConnectionPool[Any], schedule_id: int) -> tuple[Any, ...]:
 
     with pool.connection() as conn, conn.cursor() as cur:
@@ -477,7 +477,7 @@ def fetch_full_blocking(pool: ConnectionPool[Any], schedule_id: int) -> tuple[An
     return row
 
 
-# meiva:ref gateway/schedules/docs/router-contracts.meiva.okf.md#sql-returning-contract
+# meiva:link gateway/schedules/docs/router-contracts.meiva.okf.md
 def control_blocking(
     pool: ConnectionPool[Any], schedule_id: int, action: str, key: str | None
 ) -> tuple[tuple[Any, ...], bool]:

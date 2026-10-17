@@ -1,4 +1,6 @@
-# meiva:ref gateway/agents/history/docs/configuration.meiva.okf.md#live-history-owner
+# meiva:note
+# History policies remain independent for two configuration owners, and later reads observe edits to their own owner.
+# meiva:link gateway/agents/history/docs/configuration.meiva.okf.md
 
 from base.agents.history.timeline_inputs import TimelineReadInputs
 from base.clock import SYSTEM_TIMERS, Clock

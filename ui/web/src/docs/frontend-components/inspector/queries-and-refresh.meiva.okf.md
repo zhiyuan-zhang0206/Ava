@@ -65,17 +65,4 @@ window renders the retained snapshot immediately (no cold skeleton) and
 revalidates at most the two live reads, never a third widget read; only the
 selected agent's keys are ever rendered, so retention cannot leak across agents.
 
-```meiva-contract
-id = "cost-activity-controls"
-kind = "invariant"
-statement = "The Cost + Activity section header owns the panel's only manual refresh and its window picker. The refresh re-fires only the windowed statistics read; the picker re-scopes that same read and offers only cumulative-since-spawn (All), the last 5m, and the supported 1h / 24h / 7d windows. Neither control touches the current-state or widget reads, and a retention-clamped selection labels itself with the applied hours."
-code = ["ui/web/src/components/inspector/inspector-panel.tsx:InspectorPanel"]
-tests = [
-  "ui/web/src/components/inspector/inspector-panel.test.tsx::InspectorPanel manual refresh::the Cost + Activity refresh re-fires only the windowed statistics read",
-  "ui/web/src/components/inspector/inspector-panel.test.tsx::InspectorPanel manual refresh::keeps the window picker and refresh control inside the Cost + Activity section",
-  "ui/web/src/components/inspector/inspector-panel.test.tsx::InspectorPanel::window selector re-queries with the chosen hours",
-  "ui/web/src/components/inspector/inspector-panel.test.tsx::InspectorPanel::labels a retention-clamped selected window with the applied hours",
-]
-```
-
 Parent: [[ui/web/src/docs/frontend-components/inspector/inspector.meiva.okf.md]].

@@ -41,13 +41,7 @@ reaches the built-in, plugin and project skill trees at both the root and
 sub-skill level, reporting a path that is reachable through a linked tree once,
 at its real location.
 
-```meiva-contract
-id = "skill-md-size-ceiling"
-kind = "invariant"
-statement = "Every repo-shipped SKILL.md is measured in lines against two repo-wide constants, per file: at or below the transitional floor the lint prints nothing; past the floor and up to the hard ceiling it prints one non-blocking note per file; past the hard ceiling it prints one error per file and exits 1. A path reachable through a linked tree is reported once at its real location, and the constants move only as a deliberate change in the same PR, justified in the commit message."
-code = ["scripts/content_lint/lint_skill_md_size.py:_TRANSITIONAL_FLOOR", "scripts/content_lint/lint_skill_md_size.py:_HARD_CEILING", "scripts/content_lint/lint_skill_md_size.py:_skill_md_files", "scripts/content_lint/lint_skill_md_size.py:main"]
-tests = ["scripts/content_lint/tests/test_lint_skill_md_size.py::test_a_skill_at_or_below_the_floor_is_silent", "scripts/content_lint/tests/test_lint_skill_md_size.py::test_the_transitional_zone_prints_one_note_and_passes", "scripts/content_lint/tests/test_lint_skill_md_size.py::test_the_hard_ceiling_itself_still_only_notes", "scripts/content_lint/tests/test_lint_skill_md_size.py::test_one_line_past_the_hard_ceiling_fails", "scripts/content_lint/tests/test_lint_skill_md_size.py::test_a_three_deep_sub_skill_is_scanned", "scripts/content_lint/tests/test_lint_skill_md_size.py::test_plugin_and_project_skills_are_scanned", "scripts/content_lint/tests/test_lint_skill_md_size.py::test_a_skill_reachable_through_a_linked_tree_is_reported_once"]
-```
+Every repo-shipped SKILL.md is measured in lines against two repo-wide constants, per file: at or below the transitional floor the lint prints nothing; past the floor and up to the hard ceiling it prints one non-blocking note per file; past the hard ceiling it prints one error per file and exits 1. A path reachable through a linked tree is reported once at its real location, and the constants move only as a deliberate change in the same PR, justified in the commit message.
 
 ## CLI contract
 

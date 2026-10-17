@@ -21,13 +21,7 @@ its effect. Client labels are asserted display data; the authenticated credentia
 binding supplies provenance. The disabled endpoint does not construct an MCP server or session manager. The manager's public app builder initializes its session manager;
 the gateway uses the resulting bare ASGI transport under its own authentication.
 
-```meiva-contract
-id = "lazy-sdk-types"
-kind = "invariant"
-statement = "A disabled endpoint answers 404 without constructing a server or session manager; the enabled manager exposes the seven guarded control tools. The builders import their concrete SDK return classes locally, so those type names are unavailable in the module signature namespace and their return annotations remain omitted. This does not imply that the SDK module itself is unloaded."
-code = ["gateway/mcp_server/endpoint.py:_build_server", "gateway/mcp_server/endpoint.py:build_manager"]
-tests = ["gateway/tests/extensions/test_mcp_endpoint.py::test_disabled_endpoint_answers_404", "gateway/tests/extensions/test_mcp_endpoint.py::test_initialize_negotiates_and_lists_guarded_creation_tool"]
-```
+A disabled endpoint answers 404 without constructing a server or session manager; the enabled manager exposes the seven guarded control tools. The builders import their concrete SDK return classes locally, so those type names are unavailable in the module signature namespace and their return annotations remain omitted. This does not imply that the SDK module itself is unloaded.
 
 ## Relationship to Other Nodes
 

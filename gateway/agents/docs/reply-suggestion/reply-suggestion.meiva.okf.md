@@ -93,18 +93,9 @@ must be complete JSON before its parsed result is accepted; LangChain's parser
 can repair truncated JSON, which must not turn an unfinished reply into success.
 The per-call timeouts bound an enhancement whose late result is no longer useful.
 
-
 Code: `gateway/agents/reply_suggestion/` (`router.py`, `service.py`, `excerpt.py`,
 `configuration.py`).
 
 ## Verification scope
 
 What the unit, factory and live-probe evidence covers — and the boundaries it does not establish — is owned by [[gateway/agents/docs/reply-suggestion/verification.meiva.okf.md|Reply suggestion verification]].
-
-```meiva-contract
-id = "excerpt-budget-priority"
-kind = "invariant"
-statement = "The excerpt fits the user's latest message before the agent's last-turn text: the message survives whole whenever it fits the budget, a longer agent turn keeps its newest words instead of evicting it, and whichever part must be cut keeps its tail."
-code = ["gateway/agents/reply_suggestion/excerpt.py:<module>"]
-tests = ["gateway/agents/reply_suggestion/tests/test_excerpt.py::test_an_oversized_reply_still_keeps_the_user_message", "gateway/agents/reply_suggestion/tests/test_excerpt.py::test_an_oversized_user_message_keeps_its_newest_words_and_displaces_the_reply"]
-```

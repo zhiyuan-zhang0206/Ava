@@ -44,20 +44,8 @@ shape: `test_collector_artifact_retry.py` drives a real local drip server
 `cli/commands/observability/tests/converge_otel_collector/` pin the byte stream
 and the per-read timeout reaching the opener.
 
-```meiva-contract
-id = "bounded-download-attempt"
-kind = "invariant"
-statement = "The collector download bounds one attempt by an absolute wall-clock cap checked before and after every socket read, including the empty read that ends the body; reads use read1 (one socket read per call) and the residual overshoot is one in-flight read, bounded by DOWNLOAD_SOCKET_TIMEOUT_S."
-code = ["base/deploy/release/collector_artifact.py:stream_download", "base/deploy/release/tests/test_collector_artifact_retry.py:<module>"]
-tests = ["base/deploy/release/tests/test_collector_artifact_retry.py::test_trickling_body_cannot_stretch_the_wall_clock_cap", "base/deploy/release/tests/test_collector_artifact_retry.py::test_empty_read_that_ends_the_body_is_checked", "cli/commands/observability/tests/converge_otel_collector/test_session_filelog_receivers_are_disjoint_and_bound.py::test_stream_download_writes_all_chunks", "cli/commands/observability/tests/converge_otel_collector/test_session_filelog_receivers_are_disjoint_and_bound.py::test_stream_download_honors_socket_timeout"]
-```
+The collector download bounds one attempt by an absolute wall-clock cap checked before and after every socket read, including the empty read that ends the body; reads use read1 (one socket read per call) and the residual overshoot is one in-flight read, bounded by DOWNLOAD_SOCKET_TIMEOUT_S.
 
-```meiva-contract
-id = "download-wait-closure"
-kind = "invariant"
-statement = "The collector download waits its retry backoff through the caller's timers (retry(policy, sleep=timers.sleep)); reported elapsed times use the same clock, a ManualTimers records the waits instead of blocking, and the retry loop stays in base/host/net/resilience.py."
-code = ["base/deploy/release/collector_artifact.py:download_with_retry", "base/deploy/release/tests/test_collector_artifact_retry.py:test_download_with_retry_preserves_contract"]
-tests = ["base/deploy/release/tests/test_collector_artifact_retry.py::test_download_with_retry_preserves_contract", "base/host/net/tests/test_resilience.py::TestWaitHooks::test_retry_uses_the_callers_own_wait"]
-```
+The collector download waits its retry backoff through the caller's timers (retry(policy, sleep=timers.sleep)); reported elapsed times use the same clock, a ManualTimers records the waits instead of blocking, and the retry loop stays in base/host/net/resilience.py.
 
 Parent: [[base/deploy/docs/deploy.meiva.okf.md|Deployment primitives]].

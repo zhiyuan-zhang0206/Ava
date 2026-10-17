@@ -16,14 +16,6 @@ compares both artifacts. Neither generated artifact is edited by hand.
 
 ## Type projection
 
-```meiva-contract
-id = "generated-types"
-kind = "invariant"
-statement = "The TypeScript projection preserves openapi-typescript's type declarations and omits generated prose while preserving exact machine-readable deprecation markers. The OpenAPI input retains descriptions, examples, defaults and deprecation metadata."
-code = ["scripts/codegen/typescript-types.mjs:generateTypes"]
-tests = ["scripts/codegen/tests/typescript-types.test.mjs::preserves the upstream type structure and schema while omitting prose", "scripts/codegen/tests/typescript-types.test.mjs::matches the checked-in projection of the complete API schema"]
-```
-
 The installed `openapi-typescript` API owns schema-to-type conversion; its
 TypeScript AST owns the output. The generator removes synthesized comments and
 retains only compiler-recognized deprecation as `/** @deprecated */`.

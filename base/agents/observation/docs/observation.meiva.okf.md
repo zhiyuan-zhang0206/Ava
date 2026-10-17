@@ -71,13 +71,7 @@ database failures and lifecycle/observation enum validation still propagate.
 Unknown capability does not change agent status, ownership evidence, pagination,
 or the live roster's ancestor closure. A missing agent is still missing.
 
-```meiva-contract
-id = "agent-capability-projection"
-kind = "invariant"
-statement = "Agent cards and snapshots share overlay > birth > live model resolution. A missing catalog makes only the required supports_vision field null; it cannot hide malformed stored model pins, database errors or invalid agent enums."
-code = ["base/agents/observation/snapshot.py:agent_supports_vision", "base/agents/observation/roster.py:AgentCard", "base/agents/observation/snapshot.py:AgentSnapshot"]
-tests = ["base/agents/observation/tests/test_catalog_unavailable.py::test_catalog_failure_does_not_hide_damaged_model_pins", "base/agents/observation/tests/test_catalog_unavailable.py::test_nullable_capability_is_required_and_does_not_relax_agent_enums", "gateway/tests/bootstrap/catalog/test_model_failure_routes.py::test_normal_birth_pin_keeps_list_and_detail_capabilities_consistent"]
-```
+Agent cards and snapshots share overlay > birth > live model resolution. A missing catalog makes only the required supports_vision field null; it cannot hide malformed stored model pins, database errors or invalid agent enums.
 
 Database read failure in `agent_model_target` retains its separate historical
 contract: it logs the error and returns the caller's explicit fallback. That

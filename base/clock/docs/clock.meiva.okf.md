@@ -44,13 +44,7 @@ ambiguous across DST or regions. `base.config.apply_cluster_timezone()` and
 `host_tz_name()` remain configuration/process concerns; they change or inspect
 the process and host rather than a Clock handle.
 
-```meiva-contract
-id = "configuration-free-capabilities"
-kind = "invariant"
-statement = "Importing and using Clock, ClockConfig, Timers and SYSTEM_TIMERS does not load configuration; invoking the settings factory is the boundary that requests it."
-code = ["base/clock/__init__.py:<module>", "base/clock/tests/test_cold_import.py:test_clock_capabilities_stay_cold_until_the_settings_factory_runs"]
-tests = ["base/clock/tests/test_cold_import.py::test_clock_capabilities_stay_cold_until_the_settings_factory_runs", "base/clock/tests/test_clock.py::test_from_settings_reads_the_live_settings"]
-```
+Importing and using Clock, ClockConfig, Timers and SYSTEM_TIMERS does not load configuration; invoking the settings factory is the boundary that requests it.
 
 The cold test launches a fresh isolated interpreter with an uncreated home. Its
 stdlib-only child installs an import blocker before importing any Clock symbol,
@@ -61,14 +55,6 @@ erase loaded modules to simulate cold startup.
 The subprocess uses the running test interpreter and a repository-owned child
 path with no shell or caller-supplied executable. A subprocess is essential here:
 the pytest worker has already imported application configuration.
-
-```meiva-contract
-id = "boot-clock-snapshot"
-kind = "invariant"
-statement = "A boot ClockConfig captures only its supplied owner's timezone authority and timestamp policy, independently of older Clock handles and other owners."
-code = ["base/clock/configuration.py:<module>"]
-tests = ["base/clock/tests/test_clock.py::test_boot_clock_reads_keep_two_owners_and_previous_handles_separate", "base/clock/tests/test_clock.py::test_the_explicit_zone_follows_the_field_even_when_it_is_the_default", "base/clock/tests/test_clock.py::test_an_unparseable_authoritative_name_degrades_to_the_host_zone_signal"]
-```
 
 ## Elapsed time and waiting
 

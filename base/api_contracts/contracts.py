@@ -1,4 +1,6 @@
-# meiva:ref base/api_contracts/docs/routes.meiva.okf.md#route-policy
+# meiva:note
+# Route contracts are the common retry and pause policy owner. Unknown routes are non-idempotent. Keyed receipts establish acceptance, not downstream delivery or execution. Pause exemptions match both method and path: alert webhook writes remain available while ordinary alert reads pause. Bootstrap and control-plane routes remain available so operators can inspect or recover a paused cluster.
+# meiva:link base/api_contracts/docs/routes.meiva.okf.md
 from __future__ import annotations
 
 import re

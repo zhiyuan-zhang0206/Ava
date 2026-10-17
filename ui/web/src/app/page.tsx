@@ -110,7 +110,7 @@ function HomeShell({ showError }: HomeShellProps) {
   const activeNotices = [...noticeFeed.awaiting, ...noticeFeed.open]
     .filter((notice) => notice.agent_id === activeId)
     .sort((a, b) => PRIORITY_RANK[a.priority] - PRIORITY_RANK[b.priority] || b.created_at.localeCompare(a.created_at));
-  // meiva:ref ui/web/src/docs/frontend-state/shared-context.meiva.okf.md#panel-composition
+  // meiva:link ui/web/src/docs/frontend-state/shared-context.meiva.okf.md
   const showContext = isLarge ? activeId != null : mobileContextOpen || inspectorOpen;
 
   const handleSpawn = useCallback(

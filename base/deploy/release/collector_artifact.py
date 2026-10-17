@@ -89,7 +89,7 @@ def binary_name() -> str:
     return "otelcol-contrib"
 
 
-# meiva:ref base/deploy/release/docs/collector-artifact.meiva.okf.md#bounded-download-attempt
+# meiva:link base/deploy/release/docs/collector-artifact.meiva.okf.md
 def stream_download(
     url: str,
     dest: Path,
@@ -134,7 +134,7 @@ def stream_download(
     )
 
 
-# meiva:ref base/deploy/release/docs/collector-artifact.meiva.okf.md#download-wait-closure
+# meiva:link base/deploy/release/docs/collector-artifact.meiva.okf.md
 def download_with_retry(url: str, tarball: Path, *, open_url: UrlOpener, timers: Timers) -> None:
     started = timers.monotonic()
     attempt = 0

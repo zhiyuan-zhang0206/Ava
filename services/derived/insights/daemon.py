@@ -1,5 +1,7 @@
-# meiva:ref services/derived/insights/docs/insights.meiva.okf.md#insights-service-ownership
-# meiva:ref services/derived/insights/docs/insights.meiva.okf.md#daemon-live-clock-owner
+# meiva:link services/derived/insights/docs/insights.meiva.okf.md
+# meiva:note
+# The daemon retains its supplied configuration owner: later model, timestamp and timezone edits are visible through that app's readers, while the owned pool and socket close at exit.
+# meiva:link services/derived/insights/docs/insights.meiva.okf.md
 from __future__ import annotations
 
 import asyncio

@@ -261,7 +261,7 @@ class Policy:
     on_final_failure: Callable[[Exception], None] | None = None
 
 
-# meiva:ref base/host/docs/host.meiva.okf.md#retry-caller-wait
+# meiva:link base/host/docs/host.meiva.okf.md
 def retry(
     policy: Policy, *, sleep: Callable[[float], None] | None = None
 ) -> Callable[[Callable[[], T]], T]:

@@ -22,38 +22,6 @@ at 1000 per query, and a day of the fleet can exceed that, so sub-windows keep
 every run reachable. All GitHub reads are best-effort: a failed or timed-out
 `gh` call yields an empty result rather than an error.
 
-```meiva-contract
-id = "attribution-fallback-chain"
-kind = "invariant"
-statement = """A run's PR and task identity resolves in order: the real PR of a synthetic `trunk-merge/pr-<n>/<uuid>` branch (or the run's PR payload) by PR title; then a push-to-main merge run's merged PR via its merge commit; then the head commit subject for `(task #<id>)`. Agent prefix/branch matching is not performed."""
-code = ["scripts/ci/pull_requests/accounting.py:_run_identity"]
-tests = ["scripts/ci/pull_requests/tests/test_ci_accounting.py::test_push_run_attributes_from_commit_subject", "scripts/ci/pull_requests/tests/test_ci_accounting.py::test_branch_name_attributes_nonprefix_subject", "scripts/ci/pull_requests/tests/test_ci_accounting.py::test_trunk_branch_without_pr_payload_attributes_by_branch"]
-```
-
-```meiva-contract
-id = "minute-billing"
-kind = "invariant"
-statement = """A job's billable minutes are the ceiling of its wall duration. The jobs API reports null started/completed for in-progress and cancelled-before-start jobs; those pass through as absent and bill 0 minutes rather than crashing the timestamp parse."""
-code = ["scripts/ci/pull_requests/accounting.py:job_minutes"]
-tests = ["scripts/ci/pull_requests/tests/test_ci_accounting.py::test_job_minutes_null_contract", "scripts/ci/pull_requests/tests/test_ci_accounting.py::test_cancelled_before_start_jobs_bill_zero"]
-```
-
-```meiva-contract
-id = "ledger-idempotence"
-kind = "invariant"
-statement = """append_ledger keys rows by run id: entries already present are skipped, so re-running a window that overlaps the ledger appends only new runs and returns the appended count (a re-fire over the same window appends 0)."""
-code = ["scripts/ci/pull_requests/accounting.py:append_ledger"]
-tests = ["scripts/ci/pull_requests/tests/test_ci_accounting.py::test_append_ledger_is_idempotent"]
-```
-
-```meiva-contract
-id = "overage-equivalent-cost"
-kind = "invariant"
-statement = """report_rows rolls up the last `days` per agent (runs and linux/macos minutes) and prices them at the GitHub-hosted private-repo overage rates (Linux $0.006/min, macOS $0.062/min; corrected 2026-09-06 per GitHub's published pricing). The repo is currently public, so est_usd is a private-repo overage equivalent — phase-2 quotas must gate on MINUTES, not dollars; the account's 3,000 included minutes/month are account-wide across all repos."""
-code = ["scripts/ci/pull_requests/accounting.py:report_rows"]
-tests = ["scripts/ci/pull_requests/tests/test_ci_accounting.py::test_report_rollup_days_and_cost"]
-```
-
 **Usage.** `accounting.py --since <iso> --until <iso> [--repo owner/repo] [--json]`
 prints one attribution entry per CI run in the window; `--append-ledger PATH`
 appends idempotently (the daily reconciliation step); `--report [--days N]

@@ -423,7 +423,7 @@ class OtlpBackend:
 
     def shutdown(self, timeout: float = 2.0) -> DrainResult:
         """Close admission and observe this exporter within one local deadline."""
-        # meiva:ref base/telemetry/otlp/docs/telemetry-otlp/exit-flush.meiva.okf.md#two-wait-classes-one-deadline
+        # meiva:link base/telemetry/otlp/docs/telemetry-otlp/exit-flush.meiva.okf.md
         if not math.isfinite(timeout) or timeout < 0:
             raise ValueError("OTLP timeout must be finite and non-negative")
         deadline = time.monotonic() + timeout

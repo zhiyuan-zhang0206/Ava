@@ -46,18 +46,6 @@ retry authority. Reader failures and empty model answers still raise `FetchError
 ## Structure
 `meiva/web/__init__.py` is the namespace module: `search` and `fetch` validate through `plans.py` (no ambient reads) and each builds only its own operation's deps in `wiring.py` — `search_deps()` reads the four Brave settings and the network; `fetch_deps()` reads the Jina and fetch-model settings, the model catalog, the model overrides, the provider factory, the network and the injection check — then runs the batch in `runner.py`. `brave.py` searches one query from `SearchDeps`; `reader.py` reads one page and answers a prompt from `FetchDeps`; `deps.py` declares both values and their config records (`BraveConfig`, `JinaConfig`, `FetchModel`). A non-model SDK installation therefore searches without a model catalog, while fetch still refuses one before any request. Tests hand them a fake network and the values they want instead of patching settings. The implementation modules load at the first call, not at `import meiva`.
 
-```meiva-contract
-id = "webdeps-split"
-kind = "invariant"
-statement = "SearchDeps carries the Brave provider, the URL opener and the content scan; FetchDeps carries the Jina reader, the fetch model with its provider factory, the URL opener, the content scan and the injection check. The search path must never read the model catalog or the model overrides."
-code = ["meiva/web/deps.py:<module>", "meiva/web/deps.py:SearchDeps", "meiva/web/deps.py:FetchDeps", "meiva/web/wiring.py:search_deps_for"]
-tests = ["meiva/tests/namespaces/web/test_web_search.py::test_search_deps_read_only_brave_fields", "meiva/tests/namespaces/web/test_web_search_owner.py::test_search_runs_without_a_model_catalog"]
-```
+SearchDeps carries the Brave provider, the URL opener and the content scan; FetchDeps carries the Jina reader, the fetch model with its provider factory, the URL opener, the content scan and the injection check. The search path must never read the model catalog or the model overrides.
 
-```meiva-contract
-id = "webdeps-fetch-model-boundary"
-kind = "invariant"
-statement = "fetch_deps is the only web dependency constructor that reads the installation's model configuration, and a missing model catalog surfaces as FetchError naming that missing configuration before any network request."
-code = ["meiva/web/wiring.py:<module>", "meiva/web/wiring.py:fetch_deps"]
-tests = ["meiva/tests/namespaces/web/test_web_search_owner.py::test_fetch_reports_a_missing_model_configuration"]
-```
+fetch_deps is the only web dependency constructor that reads the installation's model configuration, and a missing model catalog surfaces as FetchError naming that missing configuration before any network request.

@@ -20,11 +20,3 @@ Historical calibration: the original coefficients were least-squares fitted on
 6.6% held-out median error versus 34% for chars/4, on one largely Chinese agent
 and one provider. This is calibration provenance, not a current accuracy claim;
 refit on new data instead of hand-tuning coefficients.
-
-```meiva-contract
-id = "unicode-token-weight"
-kind = "invariant"
-statement = "Native whitespace scanning preserves CJK and other character weights for all Unicode characters and large text runs."
-code = ["base/agents/messages/token_estimate.py:<module>"]
-tests = ["base/agents/messages/tests/test_token_estimate.py::test_character_weights_cover_unicode_and_keep_whitespace_free", "base/agents/messages/tests/test_token_estimate.py::test_large_code_and_multilingual_runs_preserve_weight"]
-```
