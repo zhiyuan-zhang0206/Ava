@@ -141,6 +141,17 @@ _API_STUBS: dict[str, object] = {
         "shells": {"shells": []},
     },
     "/api/system": {"cpu_percent": 0, "mem_percent": 0, "disk_percent": 0},
+    # meiva:ref tests/e2e/visual/docs/visual-regression-gate.meiva.okf.md#visual-fixture-renders-the-real-ui
+    "/api/host/permissions": {
+        "state": "not_applicable",
+        "headline": "This host needs no macOS permissions.",
+        "checked_at": "2026-10-17T12:00:00+00:00",
+        "diagnostic": "There are no macOS authorizations to check on this host.",
+        "helper_reachable": True,
+        "required_total": 0,
+        "required_missing": 0,
+        "items": [],
+    },
 }
 
 _INERT_EVENT_SOURCE = """
