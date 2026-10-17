@@ -102,9 +102,9 @@ def _restart_note(item: PermissionItem) -> str:
     if not item.helper_restart:
         return ""
     return (
-        "Restart the permissions helper (`meiva permissions restart-helper`): macOS only"
-        " re-reads this grant at process start. On a machine that runs other agents,"
-        " coordinate it first -- the restart ends their desktop sessions."
+        "macOS re-reads this grant only at process start. Recreate the helper under"
+        " custody -- `meiva stop`, then `meiva start`; never `launchctl kickstart -k`,"
+        " which replaces it under the running root and takes every agent down."
     )
 
 

@@ -16,7 +16,7 @@ const row = (over: Partial<PermissionItemRow>): PermissionItemRow => ({
   why: "Take screenshots and window captures.",
   jump: "x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture",
   verify: "Meiva is listed and ticked in Screen & System Audio Recording.",
-  restart: "Restart the permissions helper after granting it.",
+  restart: "Recreate the helper under custody: `meiva stop`, then `meiva start`.",
   required: true,
   blocking: true,
   detail: "",
@@ -96,7 +96,7 @@ describe("PermissionChecklist", () => {
     expect(
       screen.getByText("Meiva is listed and ticked in Screen & System Audio Recording."),
     ).toBeTruthy();
-    expect(screen.getByText("Restart the permissions helper after granting it.")).toBeTruthy();
+    expect(screen.getByText(/meiva stop/)).toBeTruthy();
     expect(screen.getByText("Open System Settings").closest("a")?.getAttribute("href")).toBe(
       "x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture",
     );
@@ -110,7 +110,7 @@ describe("PermissionChecklist", () => {
           row({
             state: "stale",
             state_label: "granted in macOS; the helper has not read it yet",
-            restart: "Restart the permissions helper (`meiva permissions restart-helper`).",
+            restart: "Recreate the helper under custody: `meiva stop`, then `meiva start`.",
           }),
         ],
       }),
@@ -119,7 +119,7 @@ describe("PermissionChecklist", () => {
     expect(
       await screen.findByText("granted in macOS; the helper has not read it yet"),
     ).toBeTruthy();
-    expect(screen.getByText(/Restart the permissions helper/)).toBeTruthy();
+    expect(screen.getByText(/meiva stop/)).toBeTruthy();
     expect(screen.queryByText("Open System Settings")).toBeNull();
   });
 

@@ -37,3 +37,13 @@ statement = "After requesting, the gate re-probes and reports what the system sa
 code = ["services/desktop/permissions_helper/onboarding.py:check"]
 tests = ["services/desktop/permissions_helper/tests/test_onboarding.py::test_the_request_outcome_is_not_its_own_evidence"]
 ```
+
+## A restart is custody, not a button
+
+```meiva-contract
+id = "restart-runs-outside-the-tree"
+kind = "invariant"
+statement = "The helper is the ancestor of this home's root, so nothing inside that tree may replace it: `install_and_load` refuses a loaded helper that differs from the requested artifact ('stop and unregister ... from outside its process tree'), and the restart verb prints the custody path instead of running `launchctl kickstart -k`. The symptom of the alternative, measured on 2026-10-17: a kickstart replaced the helper under the running root, every agent host exited with os._exit(70) -- 26 agents offline for six minutes -- and the host only recovered when the old root was shut down by hand. A grant macOS holds but the running helper has not read is fixed by `meiva stop`, then `meiva start`, which retires and recreates the helper under custody."
+code = ["services/desktop/permissions_helper/onboarding.py:restart_helper", "services/desktop/permissions_helper/lifecycle.py:install_and_load"]
+tests = ["services/desktop/permissions_helper/tests/test_onboarding.py::test_the_restart_verb_prints_the_custody_path", "base/host/permissions_helper/grants/tests/test_checklist.py::test_a_stale_row_points_at_the_custody_path_not_at_a_kickstart"]
+```

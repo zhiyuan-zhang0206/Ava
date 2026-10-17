@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import subprocess
 import sys
 import time
 import uuid
@@ -12,7 +11,7 @@ from pathlib import Path
 from base.host.permissions_helper.grants import gate, probe, triggers
 from base.host.permissions_helper.grants.catalog import Grant, PermissionItem
 from base.host.permissions_helper.grants.gate import GateReport, GateState
-from base.host.permissions_helper.grants.probe import HelperChannel
+from base.host.permissions_helper.grants.probe import HelperChannel, PermissionsProbeError
 from base.paths import meiva_home
 
 REQUEST_TIMEOUT_S = 90.0
@@ -94,7 +93,10 @@ def _ask_process_grants(
         )
     if echo is not None:
         echo("Asking the system for: " + ", ".join(item.id for item in items))
-    probe.request_process_grants(seat.client)
+    try:
+        probe.request_process_grants(seat.client)
+    except PermissionsProbeError as exc:
+        return f"Asking the system for a grant failed: {exc}"
     return ""
 
 
@@ -150,8 +152,10 @@ def onboard(
         seat, pending, timeout_s=timeout_s, sleep=sleep, echo=echo, request_item=request_item
     )
     report = check(host=seat, now=now)
-    if unsupported:
-        report = replace(report, diagnostic=unsupported)
+    if unsupported and not report.complete:
+        report = replace(
+            report, diagnostic=" ".join(part for part in (report.diagnostic, unsupported) if part)
+        )
     return report
 
 
@@ -170,20 +174,14 @@ def defer(*, now: datetime | None = None, host: GateHost | None = None) -> None:
     gate.mark_deferred(now=now, path=seat.record_path)
 
 
-def restart_helper(
-    *, run: Callable[..., subprocess.CompletedProcess[bytes]] = subprocess.run
-) -> str:
-    from services.desktop.permissions_helper.launchd_job import (
-        helper_job_domain,
-        helper_job_label,
+# meiva:ref services/desktop/permissions_helper/docs/onboarding.meiva.okf.md#restart-runs-outside-the-tree
+def restart_helper() -> str:
+    return (
+        "The permissions helper re-reads a grant only at process start, and it is the"
+        " ancestor of this home's root -- replacing it from inside the tree takes the"
+        " agent plane down with it. Retire and recreate it under custody instead:"
+        " `meiva stop`, then `meiva start`. Never `launchctl kickstart -k`."
     )
-
-    target = f"{helper_job_domain()}/{helper_job_label()}"
-    done = run(["launchctl", "kickstart", "-k", target], capture_output=True)
-    if done.returncode != 0:
-        detail = (done.stderr or b"").decode("utf-8", "replace").strip()
-        return f"could not restart the permissions helper ({target}): {detail or done.returncode}"
-    return f"restarted the permissions helper ({target}); its grants were re-read."
 
 
 def missing_summary(report: GateReport) -> str:

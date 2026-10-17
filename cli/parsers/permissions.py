@@ -25,7 +25,9 @@ def add_permissions_parser(sub: argparse._SubParsersAction[argparse.ArgumentPars
 
     onboard_p = permissions_sub.add_parser(
         "onboard",
-        help="request every missing grant a dialog can still resolve, then re-read",
+        help=(
+            "request every grant a dialog can still resolve (including denied ones), then re-read"
+        ),
     )
     onboard_p.add_argument("--timeout", type=float, default=None, help="seconds per request")
     onboard_p.add_argument("--json", action="store_true", help="machine-readable payload")
@@ -39,6 +41,9 @@ def add_permissions_parser(sub: argparse._SubParsersAction[argparse.ArgumentPars
 
     restart_p = permissions_sub.add_parser(
         "restart-helper",
-        help="restart the permissions helper so a freshly granted screen/accessibility sticks",
+        help=(
+            "print how to recreate the helper so a freshly granted screen/accessibility"
+            " sticks; it runs no process control of its own"
+        ),
     )
     restart_p.set_defaults(func=_h_permissions)

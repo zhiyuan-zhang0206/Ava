@@ -5,7 +5,7 @@ import json
 import subprocess
 import sys
 from collections.abc import Callable
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -19,27 +19,40 @@ GRANT_SERVICES = ("kTCCServiceScreenCapture", "kTCCServiceAccessibility")
 
 DESCRIPTION = (
     "Ask the permissions helper to raise its Screen Recording and Accessibility dialogs, then"
-    " record tccd's own answer as evidence. Exit 0 = tccd logged a decision for one of the two"
-    " grants; 1 = the request ran but no tccd record matched (check the log window); 2 = setup"
-    " problem (not macOS, helper unreachable, helper build without request_grants_v1)."
+    " record tccd's own decision as evidence. Only lines from the request window and marked"
+    " preflight=no count: a preflight produces tccd lines too, and those prove nothing about a"
+    " request. Exit 0 = a decision line matched; 1 = the request ran but no decision line"
+    " matched (check the window, or the dialog is still pending); 2 = setup problem (not macOS,"
+    " helper unreachable, helper build without request_grants_v1)."
 )
 
 
-def grant_log_lines(output: str) -> list[str]:
-    return [
-        line for line in output.splitlines() if any(service in line for service in GRANT_SERVICES)
-    ]
+def decision_lines(output: str) -> list[str]:
+    rows: list[str] = []
+    for line in output.splitlines():
+        if "preflight=no" not in line:
+            continue
+        if any(service in line for service in GRANT_SERVICES):
+            rows.append(line)
+    return rows
 
 
 def tccd_log(
-    seconds: int, run: Callable[..., subprocess.CompletedProcess[str]] = subprocess.run
+    start: datetime,
+    window: int,
+    run: Callable[..., subprocess.CompletedProcess[str]] = subprocess.run,
 ) -> str:
+    local = start.astimezone()
+    end = local + timedelta(seconds=window)
+    fmt = "%Y-%m-%d %H:%M:%S"
     done = run(
         [
             "log",
             "show",
-            "--last",
-            f"{seconds}s",
+            "--start",
+            local.strftime(fmt),
+            "--end",
+            end.strftime(fmt),
             "--predicate",
             'process == "tccd"',
             "--style",
@@ -57,11 +70,16 @@ def main(
     *,
     client: HelperChannel | None = None,
     platform: str | None = None,
-    log_reader: Callable[[int], str] = tccd_log,
+    log_reader: Callable[[datetime, int], str] = tccd_log,
 ) -> int:
     parser = argparse.ArgumentParser(description=DESCRIPTION)
-    parser.add_argument("--out")
-    parser.add_argument("--window", type=int, default=120)
+    parser.add_argument("--out", help="evidence directory (default: $MEIVA_HOME/tcc-evidence)")
+    parser.add_argument("--window", type=int, default=120, help="seconds after the request")
+    parser.add_argument(
+        "--require",
+        choices=GRANT_SERVICES,
+        help="also require a decision line for this service (Screen Recording acceptance)",
+    )
     args = parser.parse_args(argv)
     if (platform or sys.platform) != "darwin":
         print("this evidence run needs macOS", file=sys.stderr)
@@ -84,7 +102,7 @@ def main(
     started = datetime.now(UTC)
     requested = dict(client.request_grants())
     after = dict(client.ping())
-    lines = grant_log_lines(log_reader(args.window))
+    lines = decision_lines(log_reader(started, args.window))
     from base.paths import meiva_home
 
     out = Path(args.out) if args.out else meiva_home() / "tcc-evidence"
@@ -98,6 +116,7 @@ def main(
                 "before": before,
                 "requested": requested,
                 "after": after,
+                "required_service": args.require,
                 "tccd_lines": lines,
             },
             indent=2,
@@ -106,9 +125,13 @@ def main(
     print(f"evidence: {target}")
     for line in lines:
         print(f"  tccd: {line}")
+    if args.require and not any(args.require in line for line in lines):
+        print(f"no tccd decision line for {args.require}", file=sys.stderr)
+        return 1
     if not lines:
         print(
-            "no tccd decision line matched; the dialog may still be pending -- widen --window",
+            "no tccd decision line in the window; the dialog may still be pending -- widen"
+            " --window and run again",
             file=sys.stderr,
         )
         return 1
