@@ -12,16 +12,22 @@ on:
       - 'tests/ui/**'
       - 'scripts/codegen/tests/test_build_app_update_manifest.py'
       - 'scripts/codegen/build_app_update_manifest.py'
+      - 'scripts/codegen/tests/test_build_android_release.py'
+      - 'scripts/codegen/build_android_release.py'
       - '.github/workflows/ci-app.yml'
       - '.github/workflows/release-app.yml'
+      - '.github/workflows/release-android.yml'
   pull_request:
     paths:
       - 'ui/app/**'
       - 'tests/ui/**'
       - 'scripts/codegen/tests/test_build_app_update_manifest.py'
       - 'scripts/codegen/build_app_update_manifest.py'
+      - 'scripts/codegen/tests/test_build_android_release.py'
+      - 'scripts/codegen/build_android_release.py'
       - '.github/workflows/ci-app.yml'
       - '.github/workflows/release-app.yml'
+      - '.github/workflows/release-android.yml'
   workflow_dispatch:
 
 permissions:
@@ -168,4 +174,5 @@ jobs:
           python3 -m pytest --noconftest tests/ui/test_android_overlay.py \
             tests/ui/test_android_update_check.py \
             tests/ui/test_app_release_workflow.py \
-            scripts/codegen/tests/test_build_app_update_manifest.py -q
+            scripts/codegen/tests/test_build_app_update_manifest.py \
+            scripts/codegen/tests/test_build_android_release.py -q
