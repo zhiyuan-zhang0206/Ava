@@ -35,6 +35,8 @@ drops `.claude/skills/` into the scan with no user action).
 from __future__ import annotations
 
 import hashlib
+import os
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -134,13 +136,22 @@ def _read_index_md(index_md: Path) -> str | None:
         return None
 
 
-def _skill_file(folder: Path, root: Path) -> SkillFile | None:
+def _stat_or_none(path: Path) -> os.stat_result | None:
+    try:
+        return path.stat()
+    except OSError:
+        return None
+
+
+def _skill_file(
+    folder: Path, root: Path, stat_of: Callable[[Path], os.stat_result | None]
+) -> SkillFile | None:
     """Parse one folder's SKILL.md / INDEX.md; None when it holds neither."""
     rel = folder.relative_to(root).parts
     skill_md = folder / "SKILL.md"
     index_md = folder / "INDEX.md"
-    s_stat = skill_md.stat() if skill_md.is_file() else None
-    i_stat = index_md.stat() if index_md.is_file() else None
+    s_stat = stat_of(skill_md) if skill_md.is_file() else None
+    i_stat = stat_of(index_md) if index_md.is_file() else None
     if s_stat is None and i_stat is None:
         return None
     name = description = content_hash = error = index_text = None
@@ -169,7 +180,9 @@ def _skill_file(folder: Path, root: Path) -> SkillFile | None:
     )
 
 
-def _scan_root(root: Path) -> tuple[tuple[SkillFile, ...], tuple[tuple[tuple[str, ...], int], ...]]:
+def _scan_root(
+    root: Path, stat_of: Callable[[Path], os.stat_result | None] = _stat_or_none
+) -> tuple[tuple[SkillFile, ...], tuple[tuple[tuple[str, ...], int], ...]]:
     """Walk one root: parse every SKILL.md/INDEX.md, stat every folder.
 
     Returns (entries, folder_stats) — folder_stats covers ALL folders (not
@@ -179,11 +192,18 @@ def _scan_root(root: Path) -> tuple[tuple[SkillFile, ...], tuple[tuple[tuple[str
     if not root.is_dir():
         return (), ()
     folders = [root, *(p for p in root.rglob("*") if p.is_dir())]
-    folder_stats = tuple((f.relative_to(root).parts, f.stat().st_mtime_ns) for f in sorted(folders))
+    folder_stats: list[tuple[tuple[str, ...], int]] = []
+    for folder in sorted(folders):
+        stat = stat_of(folder)
+        if stat is None:
+            continue
+        folder_stats.append((folder.relative_to(root).parts, stat.st_mtime_ns))
     entries = [
-        entry for folder in sorted(folders) if (entry := _skill_file(folder, root)) is not None
+        entry
+        for folder in sorted(folders)
+        if (entry := _skill_file(folder, root, stat_of)) is not None
     ]
-    return tuple(entries), folder_stats
+    return tuple(entries), tuple(folder_stats)
 
 
 class SkillIndex:
@@ -211,7 +231,12 @@ class SkillIndex:
                 self._by_key.setdefault(k, e)
 
     @classmethod
-    def build(cls, roots: list[Path] | tuple[Path, ...]) -> SkillIndex:
+    def build(
+        cls,
+        roots: list[Path] | tuple[Path, ...],
+        *,
+        stat_of: Callable[[Path], os.stat_result | None] = _stat_or_none,
+    ) -> SkillIndex:
         """Pure builder: walk every root, read and parse every SKILL.md /
         INDEX.md. Tolerant (errors land on entries); never raises on a bad
         skill."""
@@ -219,7 +244,7 @@ class SkillIndex:
         entries: list[SkillFile] = []
         root_folders: list[tuple[tuple[tuple[str, ...], int], ...]] = []
         for root in roots:
-            root_entries, folders = _scan_root(root)
+            root_entries, folders = _scan_root(root, stat_of)
             entries.extend(root_entries)
             root_folders.append(folders)
         return cls(roots, tuple(root_folders), tuple(entries))
@@ -253,10 +278,13 @@ class SkillIndex:
             if not root.is_dir():
                 return False
             folders = [root, *(p for p in root.rglob("*") if p.is_dir())]
-            stats = tuple(
-                (f.relative_to(root).parts, f.stat().st_mtime_ns) for f in sorted(folders)
-            )
-            if stats != saved:
+            stats: list[tuple[tuple[str, ...], int]] = []
+            for folder in sorted(folders):
+                stat = _stat_or_none(folder)
+                if stat is None:
+                    return False
+                stats.append((folder.relative_to(root).parts, stat.st_mtime_ns))
+            if tuple(stats) != saved:
                 return False
         for e in self.entries:
             for path, mtime, size in (

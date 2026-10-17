@@ -706,6 +706,15 @@ class AgentHost:
         """Renew healthy leases before reporting and reaping crash corpses."""
         await hosted.renew_hosted_owner(self._control_pool, self._machine, self._owner)
         try:
+            await hosted.settle_stale_running_rows(
+                self._control_pool, self._machine, exclude_owner=self._owner
+            )
+        except Exception:
+            logger.exception(
+                "stale-running settle failed — retrying next beat",
+                event="host_stale_running_settle_failed",
+            )
+        try:
             await reap_crash_corpses(
                 self._control_pool,
                 self._machine,

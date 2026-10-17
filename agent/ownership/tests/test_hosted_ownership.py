@@ -16,6 +16,7 @@ from agent.ownership.hosted import (
     release_hosted_owner,
     renew_hosted_owner,
     settle_hosted_runtime,
+    settle_stale_running_rows,
     stamp_turn_fatal,
 )
 from base.agents.incarnation.resources import (
@@ -486,3 +487,53 @@ async def test_renew_hosted_owner_skips_crash_marked_rows(
     assert db_conn.execute(
         "SELECT lease_expires_at > now() FROM agents_meta WHERE id = %s", (live,)
     ).fetchone() == (True,)
+
+
+async def test_settle_stale_running_rows_skips_the_callers_own_owner(
+    db_conn: psycopg.Connection, aops_pool: AsyncConnectionPool
+) -> None:
+    mine, theirs, live = _agent(db_conn), _agent(db_conn), _agent(db_conn)
+    my_owner, their_owner = uuid4(), uuid4()
+    db_conn.execute(
+        "UPDATE agents_meta SET status = 'running', runtime_kind = 'hosted', runtime_generation = %s, "
+        "runtime_owner = %s, lease_expires_at = now() - interval '1 minute' WHERE id = %s",
+        (uuid4(), my_owner, mine),
+    )
+    db_conn.execute(
+        "UPDATE agents_meta SET status = 'running', runtime_kind = 'hosted', runtime_generation = %s, "
+        "runtime_owner = %s, lease_expires_at = now() - interval '1 minute' WHERE id = %s",
+        (uuid4(), their_owner, theirs),
+    )
+    db_conn.execute(
+        "UPDATE agents_meta SET status = 'running', runtime_kind = 'hosted', runtime_generation = %s, "
+        "runtime_owner = %s, lease_expires_at = now() + interval '5 minutes' WHERE id = %s",
+        (uuid4(), their_owner, live),
+    )
+    db_conn.commit()
+
+    settled = await settle_stale_running_rows(aops_pool, "host-test", exclude_owner=my_owner)
+
+    assert settled == [theirs]
+    statuses = dict(
+        db_conn.execute(
+            "SELECT id, status FROM agents_meta WHERE id = ANY(%s)", ([mine, theirs, live],)
+        ).fetchall()
+    )
+    assert statuses == {mine: "running", theirs: "idling", live: "running"}
+
+
+async def test_settle_stale_running_rows_without_owner_filter_keeps_boot_semantics(
+    db_conn: psycopg.Connection, aops_pool: AsyncConnectionPool
+) -> None:
+    expired = _agent(db_conn)
+    db_conn.execute(
+        "UPDATE agents_meta SET status = 'running', runtime_kind = 'hosted', runtime_generation = %s, "
+        "runtime_owner = %s, lease_expires_at = now() - interval '1 minute' WHERE id = %s",
+        (uuid4(), uuid4(), expired),
+    )
+    db_conn.commit()
+
+    assert await settle_stale_running_rows(aops_pool, "host-test") == [expired]
+    assert db_conn.execute(
+        "SELECT status FROM agents_meta WHERE id = %s", (expired,)
+    ).fetchone() == ("idling",)
