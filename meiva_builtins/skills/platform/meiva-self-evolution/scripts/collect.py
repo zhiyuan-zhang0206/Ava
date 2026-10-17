@@ -43,7 +43,7 @@ from base.db import Database
 # __file__-derived, within-skill shape as the endorsed guard.
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from record import LeakPaths, build_record
+from record import HUMAN_SOURCES, LeakPaths, build_record
 
 # re-exported below (tests reach these through collect.* to patch the
 # collection pipeline's transcript/plugin-count internals): `as` self-aliases
@@ -56,11 +56,6 @@ from base.cluster.machine.ambient import gateway_access_from_settings
 from base.config import settings
 from base.host.net.resilience import ExponentialBackoff, Policy, http_classifier, retry
 from base.paths import meiva_home
-
-# Task-origin inbound sources — capture every real task prompt, whether from
-# the user ("user") or a spawner / peer agent ("agent:<id>"). System and
-# watcher messages are deliberately excluded (nudges, heartbeats, wake-ups).
-TASK_SOURCES = ["user"]  # plus "agent:%" matched via LIKE in the query
 
 _BUILTIN_HELP_CALL_RE = re.compile(r"(?<![a-zA-Z0-9_.])help\s*\(")
 _BUILTIN_HELP_ON_MEIVA_RE = re.compile(r"(?<![a-zA-Z0-9_.])help\s*\(\s*meiva\.")
@@ -310,95 +305,74 @@ _EVENTS_RETRY_POLICY = Policy(
 )
 
 
+# meiva:ref meiva_builtins/skills/platform/meiva-self-evolution/docs/collection.meiva.okf.md#inbound-scoping
 def _inbounds_by_agent(
-    cur: psycopg.Cursor, agent_ids: list[int], window: str
+    cur: psycopg.Cursor, agent_ids: list[int], window_from: datetime, window_to: datetime
 ) -> dict[int, list[dict[str, Any]]]:
-    """Fetch window-scoped inbound messages (user + agent sources) for the
-    given agent_ids, plus each agent's first-ever chat message (the task
-    prompt, which may predate the window for long-running agents).
-
-    2026-08-13 fix: the previous no-window query loaded every inbound
-    message an agent ever received, so `corrections` / `peer_feedback`
-    accumulated lifetime history into each day's record — the daily scan
-    flagged the whole fleet as fumbled every day (1336 "peer feedback"
-    messages across 70 runs on a day when agents were fine).
-
-    Returns dict[agent_id, list[{"source", "content", "is_broadcast",
-    "is_first_ever", "is_in_collection_window"}]].
-    A broadcast is one source/content pair delivered to multiple agents in the
-    collection window. It remains visible in the record but does not count as
-    a correction or re-prompt for each recipient.
-    """
-    # Task prompts: the first-ever chat message per agent, regardless of age.
     cur.execute(
-        "SELECT DISTINCT ON (agent_id) id, agent_id, source, content, claimed_at IS NOT NULL "
-        "FROM inbound_messages "
-        "WHERE agent_id = ANY(%s) AND kind = 'chat' "
-        "AND (source = ANY(%s) OR source LIKE 'agent:%%' OR source = 'system') "
-        "ORDER BY agent_id, created_at",
-        [agent_ids, TASK_SOURCES],
+        "SELECT DISTINCT ON (inbound.agent_id, inbound.source) "
+        "inbound.id, inbound.agent_id, inbound.source, inbound.content, "
+        "inbound.claimed_at IS NOT NULL AS claimed, inbound.created_at "
+        "FROM inbound_messages inbound "
+        "LEFT JOIN agents_meta meta ON meta.id = inbound.agent_id "
+        "WHERE inbound.agent_id = ANY(%s) AND inbound.kind = 'chat' "
+        "AND (inbound.source = meta.spawner OR inbound.source = ANY(%s) "
+        "OR inbound.source LIKE 'schedule:%%') "
+        "ORDER BY inbound.agent_id, inbound.source, inbound.created_at",
+        [agent_ids, sorted(HUMAN_SOURCES)],
     )
-    first_ids: dict[int, int] = {}
-    first_rows: dict[int, dict[str, Any]] = {}
-    for msg_id, agent_id, source, content, claimed in cur.fetchall():
-        first_ids[agent_id] = msg_id
-        first_rows[agent_id] = {
-            "source": source,
-            "content": content,
-            "is_broadcast": False,
-            "is_first_ever": True,
-            "is_in_collection_window": False,
-            "claimed": claimed,
-        }
-    # Everything the agent actually received during this collection window.
+    task_rows = cur.fetchall()
+    task_ids = {row[0] for row in task_rows}
     cur.execute(
         "WITH window_inbounds AS ("
         "SELECT id, agent_id, source, content, claimed_at IS NOT NULL AS claimed, created_at "
         "FROM inbound_messages "
         "WHERE agent_id = ANY(%s) AND kind = 'chat' "
-        "AND (source = ANY(%s) OR source LIKE 'agent:%%' OR source = 'system') "
-        "AND created_at > now() - %s::interval"
+        "AND (source = ANY(%s) OR source LIKE 'agent:%%') "
+        "AND created_at >= %s AND created_at < %s"
         "), broadcasts AS ("
         "SELECT source, content FROM window_inbounds "
         "GROUP BY source, content HAVING count(DISTINCT agent_id) > 1"
         ") "
         "SELECT inbound.id, inbound.agent_id, inbound.source, inbound.content, "
-        "broadcasts.source IS NOT NULL AS is_broadcast, inbound.claimed "
+        "inbound.claimed, inbound.created_at, broadcasts.source IS NOT NULL AS is_broadcast "
         "FROM window_inbounds inbound "
         "LEFT JOIN broadcasts ON broadcasts.source = inbound.source "
         "AND broadcasts.content = inbound.content "
         "ORDER BY inbound.agent_id, inbound.created_at",
-        [agent_ids, TASK_SOURCES, window],
+        [agent_ids, sorted(HUMAN_SOURCES), window_from, window_to],
     )
-    out: dict[int, list[dict[str, Any]]] = defaultdict(list)
-    for msg_id, agent_id, source, content, is_broadcast, claimed in cur.fetchall():
-        if msg_id == first_ids.get(agent_id):
-            first_rows[agent_id]["is_in_collection_window"] = True
-            continue  # the task prompt — already first via prepend below
-        out[agent_id].append(
-            {
-                "source": source,
-                "content": content,
-                "is_broadcast": is_broadcast,
-                "is_first_ever": False,
-                "is_in_collection_window": True,
-                "claimed": claimed,
-            }
+    rows: dict[int, list[tuple[datetime, dict[str, Any]]]] = defaultdict(list)
+    for _msg_id, agent_id, source, content, claimed, created_at in task_rows:
+        rows[agent_id].append(
+            (
+                created_at,
+                {
+                    "source": source,
+                    "content": content,
+                    "is_broadcast": False,
+                    "claimed": claimed,
+                },
+            )
         )
-    # Prepend the first-ever message so build_record still finds the initial
-    # user task prompt first, while its window marker distinguishes old and
-    # fresh spawner briefs.
-    for agent_id, row in first_rows.items():
-        out[agent_id].insert(0, row)
-    return out
-
-
-def _meta_by_agent(cur: psycopg.Cursor, ids: list[int]) -> dict[int, tuple]:
-    cur.execute(
-        "SELECT id, spawner, status, last_message_text FROM agents_meta WHERE id = ANY(%s)",
-        [ids],
-    )
-    return {r[0]: (r[1], r[2], r[3]) for r in cur.fetchall()}
+    for msg_id, agent_id, source, content, claimed, created_at, is_broadcast in cur.fetchall():
+        if msg_id in task_ids:
+            continue
+        rows[agent_id].append(
+            (
+                created_at,
+                {
+                    "source": source,
+                    "content": content,
+                    "is_broadcast": is_broadcast,
+                    "claimed": claimed,
+                },
+            )
+        )
+    return {
+        agent_id: [message for _, message in sorted(entries, key=lambda entry: entry[0])]
+        for agent_id, entries in rows.items()
+    }
 
 
 def _task_receipts_by_agent(cur: psycopg.Cursor, ids: list[int]) -> dict[int, dict[str, int]]:
@@ -432,6 +406,14 @@ def _task_receipts_by_agent(cur: psycopg.Cursor, ids: list[int]) -> dict[int, di
         row[0]: {"note": row[1], "status": row[2], "results": row[3], "state_changes": row[4]}
         for row in cur.fetchall()
     }
+
+
+def _meta_by_agent(cur: psycopg.Cursor, ids: list[int]) -> dict[int, tuple]:
+    cur.execute(
+        "SELECT id, spawner, status, last_message_text FROM agents_meta WHERE id = ANY(%s)",
+        [ids],
+    )
+    return {r[0]: (r[1], r[2], r[3]) for r in cur.fetchall()}
 
 
 def _test_label_ids(cur: psycopg.Cursor, ids: list[int]) -> set[int]:
@@ -488,9 +470,8 @@ def collect_with_counts(
     events = _group_by_agent(telemetry)
     logs = _group_by_agent(audit)
     ids = sorted(events)
-    window = f"{days} days"
     with database.connect() as conn, conn.cursor() as cur:
-        inbounds = _inbounds_by_agent(cur, ids, window)
+        inbounds = _inbounds_by_agent(cur, ids, window_from, window_to)
         meta = _meta_by_agent(cur, ids)
         receipts = _task_receipts_by_agent(cur, ids)
         test_ids = set() if include_test else _test_label_ids(cur, ids)
@@ -563,12 +544,7 @@ def collect_one(
     *,
     database: Database,
 ) -> dict[str, Any]:
-    """Build a trace record for a single agent by id — its rows from the last
-    7 days (Loki retention; eval agents live minutes, so this captures their
-    full lifetime). Used to score a freshly-spawned evaluation agent right
-    after it finishes. Unlike the weekly collect, inbounds are not filtered
-    to user sources — an eval agent's task prompt arrives from its spawner
-    (`agent:N`), so every chat inbound counts."""
+    # meiva:ref meiva_builtins/skills/platform/meiva-self-evolution/docs/collection.meiva.okf.md#inbound-scoping
     week = week or default_week()
     now = datetime.now(UTC)
     window_from = now - timedelta(days=7)
@@ -583,26 +559,7 @@ def collect_one(
         (r["event_name"], r.get("attributes") or {}) for r in audit if r.get("agent_id") == agent_id
     ]
     with database.connect() as conn, conn.cursor() as cur:
-        cur.execute(
-            "SELECT source, content, created_at > %s AS is_in_collection_window, "
-            "claimed_at IS NOT NULL AS claimed "
-            "FROM inbound_messages WHERE agent_id = %s AND kind = 'chat' "
-            "ORDER BY created_at",
-            [window_from, agent_id],
-        )
-        inbounds: list[dict[str, Any]] = [
-            {
-                "source": source,
-                "content": content,
-                "is_broadcast": False,
-                "is_first_ever": index == 0,
-                "is_in_collection_window": is_in_collection_window,
-                "claimed": claimed,
-            }
-            for index, (source, content, is_in_collection_window, claimed) in enumerate(
-                cur.fetchall()
-            )
-        ]
+        inbounds = _inbounds_by_agent(cur, [agent_id], window_from, now).get(agent_id, [])
         cur.execute(
             "SELECT spawner, status, last_message_text FROM agents_meta WHERE id = %s", [agent_id]
         )

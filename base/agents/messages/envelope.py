@@ -56,6 +56,7 @@ _AGENT_PREFIX = "agent:"
 _PAGE_PREFIX = "ui:page:"
 _SCHEDULE_PREFIX = "schedule:"
 _SHELL_PREFIX = "shell:"
+SYSTEM_MARKER = "[system]"
 _SYSTEM_PREFIX = "system:"
 _WATCHER_PREFIX = "watcher:"
 
@@ -148,7 +149,7 @@ def inbound_head(
     callers / system messages), the current time is used as before.
     """
     if source == "system" or source.startswith(_SYSTEM_PREFIX):
-        return "[system] "
+        return f"{SYSTEM_MARKER} "
     formatted, ts = _timestamp(created_at, inputs)
     if is_caller_source(source):
         caller = CallerIdentity.from_source(source)
