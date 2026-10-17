@@ -203,7 +203,7 @@ def workspace_dir_readonly(agent_id: int) -> Path:
     inherited-memory note scans an ancestor's `memory/`). `workspace_dir`
     deliberately ensures its target; a reader must not manufacture a
     workspace that does not exist."""
-    return meiva_home() / "workspaces" / str(agent_id)
+    return workspaces_root() / str(agent_id)
 
 
 def exec_run_dir(home: Path) -> Path:

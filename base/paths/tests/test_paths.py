@@ -46,6 +46,13 @@ def test_plugins_dir_auto_mkdirs(tmp_path: Path):
     assert target.is_dir()
 
 
+def test_workspace_paths_derive_from_the_workspaces_root(tmp_path: Path):
+    root = paths.workspaces_root()
+    assert root == tmp_path / "meiva" / "workspaces"
+    assert paths.workspace_dir_readonly(7) == root / "7"
+    assert paths.workspace_dir(7) == root / "7"
+
+
 def test_default_home_is_bare_meiva():
     assert default_home() == Path("~/.meiva").expanduser()
 

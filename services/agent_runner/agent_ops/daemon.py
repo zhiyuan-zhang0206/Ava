@@ -574,9 +574,7 @@ async def serve_ops_daemon(
         _, bus = boot.ops_handles(database=database, authority=authority)
         try:
             async with server, asyncio.TaskGroup() as background:
-                watcher = background.create_task(
-                    watch_to_user(paths.meiva_home() / "workspaces", bus)
-                )
+                watcher = background.create_task(watch_to_user(paths.workspaces_root(), bus))
                 try:
                     await server.serve_forever()
                 finally:
