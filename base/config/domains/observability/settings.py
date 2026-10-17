@@ -614,3 +614,102 @@ class ObservabilitySettings(EnvSettings):
             "remote_writable": False,
         },
     )
+
+    lgtm_native_download_budget_s: float = Field(
+        default=900.0,
+        gt=0,
+        alias="MEIVA_LGTM_NATIVE_DOWNLOAD_BUDGET_S",
+        description=(
+            "Wall-clock budget for ONE native LGTM backend archive at `meiva start` (Loki, "
+            "Prometheus and Grafana each get their own budget, not a shared step budget), "
+            "spent by every attempt and by the waits between them; there is no per-attempt "
+            "cap. Measured on a 5.8-8.7 MB/s link (2026-10-17): Loki 46 MB in 8 s, "
+            "Prometheus 105 MB in 14 s, Grafana 461 MB in 53 s — so 900 s downloads the "
+            "461 MB Grafana tarball at >=512 KB/s. Raise it for slow links, lower it for "
+            "fast ones; the collector's separate budget is "
+            "MEIVA_OTELCOL_DOWNLOAD_BUDGET_S."
+        ),
+        json_schema_extra={
+            "restart_required": "",
+            "writable": True,
+            "sensitive": False,
+            "scope": "host",
+            "remote_writable": False,
+        },
+    )
+
+    lgtm_native_download_socket_timeout_s: float = Field(
+        default=30.0,
+        gt=0,
+        alias="MEIVA_LGTM_NATIVE_DOWNLOAD_SOCKET_TIMEOUT_S",
+        description=(
+            "Socket timeout of one native LGTM archive request: the per-read guard that "
+            "catches a half-dead connection (no data, no close). A request opens with "
+            "min(this, budget remaining), so a download outlives its budget by at most one "
+            "in-flight read. 30 s is long enough for a slow mirror to deliver a chunk and "
+            "short enough that a wedged connection cannot hide for a whole budget."
+        ),
+        json_schema_extra={
+            "restart_required": "",
+            "writable": True,
+            "sensitive": False,
+            "scope": "host",
+            "remote_writable": False,
+        },
+    )
+
+    lgtm_native_download_attempts: int = Field(
+        default=3,
+        ge=1,
+        alias="MEIVA_LGTM_NATIVE_DOWNLOAD_ATTEMPTS",
+        description=(
+            "Total native LGTM archive download executions (initial + retries) inside the "
+            "one budget. Rides out a transient blip; a mirror that fails every time still "
+            "ends by the budget, never by the attempt count alone."
+        ),
+        json_schema_extra={
+            "restart_required": "",
+            "writable": True,
+            "sensitive": False,
+            "scope": "host",
+            "remote_writable": False,
+        },
+    )
+
+    lgtm_native_download_retry_backoff_s: float = Field(
+        default=5.0,
+        ge=0,
+        alias="MEIVA_LGTM_NATIVE_DOWNLOAD_RETRY_BACKOFF_S",
+        description=(
+            "Base retry wait of a native LGTM archive download: attempt N waits N x this "
+            "value (5 s, 10 s for three attempts), clamped to the budget that remains so a "
+            "backoff is never spent past the deadline. Spaced retries let a brief upstream "
+            "hiccup clear without paying a stalled mirror's time."
+        ),
+        json_schema_extra={
+            "restart_required": "",
+            "writable": True,
+            "sensitive": False,
+            "scope": "host",
+            "remote_writable": False,
+        },
+    )
+
+    lgtm_native_download_progress_interval_s: float = Field(
+        default=15.0,
+        gt=0,
+        alias="MEIVA_LGTM_NATIVE_DOWNLOAD_PROGRESS_INTERVAL_S",
+        description=(
+            "Minimum delay between two progress heartbeats of a native LGTM archive "
+            "download. Byte counts on the converge log are what separates a slow mirror "
+            "from a dead one; frequent enough to see movement, rare enough not to flood "
+            "the log."
+        ),
+        json_schema_extra={
+            "restart_required": "",
+            "writable": True,
+            "sensitive": False,
+            "scope": "host",
+            "remote_writable": False,
+        },
+    )

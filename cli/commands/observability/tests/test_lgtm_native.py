@@ -118,7 +118,13 @@ def test_ensure_skips_download_when_markers_match(
     _mark_current(home)
 
     def fail_download(
-        _name: str, _version: str, _asset: dict[str, str], _native_dir: Path, *, tag: str
+        _name: str,
+        _version: str,
+        _asset: dict[str, str],
+        _native_dir: Path,
+        *,
+        tag: str,
+        **_: object,
     ) -> None:
         pytest.fail("current marker must skip the download")
 
@@ -156,7 +162,13 @@ def test_ensure_downloads_when_a_marker_is_stale(
     downloads: list[str] = []
 
     def record_download(
-        name: str, _version: str, _asset: dict[str, str], _native_dir: Path, *, tag: str
+        name: str,
+        _version: str,
+        _asset: dict[str, str],
+        _native_dir: Path,
+        *,
+        tag: str,
+        **_: object,
     ) -> None:
         downloads.append(name)
 
@@ -657,7 +669,13 @@ def test_matching_versions_from_another_platform_are_downloaded_again(
     downloads: list[str] = []
 
     def download(
-        name: str, _version: str, asset: dict[str, str], _native: Path, *, tag: str
+        name: str,
+        _version: str,
+        asset: dict[str, str],
+        _native: Path,
+        *,
+        tag: str,
+        **_: object,
     ) -> None:
         assert tag == "linux_amd64"
         assert "linux" in asset["url"]
@@ -693,7 +711,13 @@ def test_native_preparation_downloads_only_selected_backend(
         return {name: {"version": "test"} for name in lgtm_native.BACKENDS}
 
     def download(
-        name: str, _version: str, _asset: dict[str, str], _native: Path, *, tag: str
+        name: str,
+        _version: str,
+        _asset: dict[str, str],
+        _native: Path,
+        *,
+        tag: str,
+        **_: object,
     ) -> None:
         downloads.append(name)
 
