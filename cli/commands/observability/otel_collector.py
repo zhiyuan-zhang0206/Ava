@@ -59,6 +59,19 @@ def _otlp_ingress_port() -> int:
     return settings.observability.telemetry_otlp_port
 
 
+def _download_limits() -> collector_artifact.DownloadLimits:
+    from base.config import settings
+
+    observability = settings.observability
+    return collector_artifact.DownloadLimits(
+        total_budget_s=observability.otel_collector_download_budget_s,
+        socket_timeout_s=observability.otel_collector_download_socket_timeout_s,
+        attempts=observability.otel_collector_download_attempts,
+        retry_backoff_s=observability.otel_collector_download_retry_backoff_s,
+        progress_interval_s=observability.otel_collector_download_progress_interval_s,
+    )
+
+
 def _config_template(repo: Path) -> str:
     return (repo / "deploy/otel-collector/otel-collector.yaml").read_text(encoding="utf-8")
 
@@ -532,7 +545,11 @@ def ensure_otel_collector(
         and marker.read_text(encoding="utf-8").strip() == collector_artifact.OTELCOL_CONTRIB_VERSION
     ):
         collector_artifact.download_and_verify(
-            tag, dest_dir, open_url=SYSTEM_URL_OPENER, timers=SYSTEM_TIMERS
+            tag,
+            dest_dir,
+            open_url=SYSTEM_URL_OPENER,
+            timers=SYSTEM_TIMERS,
+            limits=_download_limits(),
         )
         print(
             f"  · otel-collector: installed otelcol-contrib {collector_artifact.OTELCOL_CONTRIB_VERSION} ({tag})"
