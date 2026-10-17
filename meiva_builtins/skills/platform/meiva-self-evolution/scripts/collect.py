@@ -661,7 +661,8 @@ def main() -> None:
     stamp = datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
     print(
         f"[{stamp}] collected {len(records)} runs "
-        f"(ok {counts['ok']} / fumbled {counts['fumbled']} / failed {counts['failed']}) "
+        f"(ok {counts['ok']} / fumbled {counts['fumbled']} / failed {counts['failed']}"
+        f" / unknown {counts['unknown']}) "
         f"-> {path}"
     )
 

@@ -176,6 +176,9 @@ Events come from the gateway `/api/events` endpoint — telemetry and log rows f
 `telemetry_events` and audit rows from `audit_events`, both in Postgres and permanent;
 `collect.py` is the read path, and a 0-run dataset is an ALERT (exit 2), never
 "nothing to act on" — except a TEST- only window (QA review of PR #698), which exits 0.
+A window whose judgeable share falls below `self_evolution_coverage_alert_floor`
+exits 2 as `data-quality: low-coverage` instead of reading as healthy — see
+`docs/coverage-sentinel.meiva.okf.md`.
 
 **Transcript completeness.** Each record's `transcript` is the checkpoint's
 complete read path (`load_checkpoint_messages_full`, `base/agents/history/checkpoint.py`):
@@ -191,8 +194,9 @@ The supervisor's daily scan (`self-evolution-daily`, 00:00 deployment timezone)
 checks the runs accumulated since the last batch. At roughly 100 runs, it wakes
 this agent to run the batch flow above; daily traffic of ~100-270 runs makes
 that roughly daily. The batch command collects one day; Monday's summary
-collects seven. Failed/fumbled runs, an unexplained empty window, a missing
-scan, or a hard failure also wake this agent so a broken data source cannot hide.
+collects seven. Failed/fumbled runs, an unexplained empty window, a window
+mostly made of unjudgeable traces, a missing scan, or a hard failure also wake
+this agent so a broken data source cannot hide.
 
 ## Cron integration
 
