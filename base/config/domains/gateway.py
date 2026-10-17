@@ -191,6 +191,13 @@ class GatewaySettings(EnvSettings):
         json_schema_extra=_SCHEDULE_RESTART_METADATA,
     )
 
+    schedule_recovery_gate_alert_seconds: float = Field(
+        default=300.0,
+        alias="MEIVA_SCHEDULE_RECOVERY_GATE_ALERT_SECONDS",
+        description="How long the schedule manager may stay refused by the serving-receipt gate before it reports schedule_recovery_gated. The gate refuses relaunches whenever the published receipt does not name the live root (a helper-reseeded root publishes none); the alert names that condition instead of leaving dead schedules silent.",
+        json_schema_extra=_SCHEDULE_RESTART_METADATA,
+    )
+
     gateway_reload: bool = Field(
         default=False,
         alias="MEIVA_GATEWAY_RELOAD",

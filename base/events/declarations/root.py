@@ -91,6 +91,15 @@ class HelperChainBroken(TypedDict):
     detail: str
 
 
+class ScheduleRecoveryGated(TypedDict):
+    held_for_s: float
+
+
+class ScheduleLaunchRefused(TypedDict):
+    schedule_id: int
+    reason: str
+
+
 class ScheduleStalled(TypedDict):
     """`schedule_stalled` payload — services/wake/schedule_manager/manager.py.
 
@@ -319,6 +328,20 @@ EVENTS: dict[str, EventSpec] = {
         "permissions_helper_unhealthy",
         "permissions helper failed its healthcheck (ping plus launchd job classification) — one alert per episode, held until a ping-alive round",
         tier="anomaly",
+    ),
+    "schedule_recovery_gated": telemetry_event(
+        "schedule_recovery_gated",
+        "the serving-receipt gate has refused schedule relaunches for longer than the configured window — the published receipt does not name the live root (a helper-reseeded root publishes none) and `meiva start` is needed; one event per episode",
+        payload=ScheduleRecoveryGated,
+        tier="anomaly",
+        site="services/wake/schedule_manager/manager.py:_emit_gate_held",
+    ),
+    "schedule_launch_refused": telemetry_event(
+        "schedule_launch_refused",
+        "a schedule needed a (re)launch and was refused or did not take — once per schedule per gate episode, carrying the reason",
+        payload=ScheduleLaunchRefused,
+        tier="anomaly",
+        site="services/wake/schedule_manager/manager.py:_emit_launch_refused",
     ),
     "schedule_stalled": telemetry_event(
         "schedule_stalled",

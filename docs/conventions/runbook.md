@@ -991,3 +991,28 @@ container, the commit cloned to `~/.meiva/source`, `meiva init` and the first `m
 [verification boundaries](../../future/infra/engineering/verification-boundaries.md)); what only macOS can show
 (the signed helper chain, the desktop grants) runs in a throwaway Tart VM cloned from the golden
 image (`python3 scripts/verify/tart_run.py --ref <ref>`, same flow, plus the helper chain check).
+
+### Replacing a root, and the serving-receipt posture
+
+- **Never `launchctl kickstart -k` the permissions helper.** Replacing it strands
+  the root it spawned: the new helper neither adopts a foreign root nor seeds
+  another while that root holds the instance lock, every agent host below it
+  observes the broken chain and exits for a respawn that cannot come, and
+  `meiva start` refuses with `root is outside this home's signed-helper custody`.
+  On 2026-10-17 this cost macmini six minutes with 26 agents and no host. A root
+  from the release carrying `HELPER_CHAIN_BROKEN_EXIT_CODE` retires itself after
+  two broken ancestry readings so the keeper reseeds it; until that release is
+  deployed the recovery is manual: shut the stranded root down through its own
+  control socket, let the keeper reseed, then `meiva start`.
+- **After any root the keeper reseeds (not a `meiva start`), run `meiva start`.**
+  A keeper-seeded root publishes no serving receipt, so the host stays in the
+  `startup` posture: `meiva cluster status` shows `paused yes` while every agent
+  keeps working, `start_serving.is_serving()` is false, and schedule relaunches
+  are refused (`schedule_recovery_gated` after the configured window; each refusal
+  is a `schedule_launch_refused` event). `meiva start` is idempotent — it skips
+  every running unit and takes seconds.
+- **`paused yes` in the roster is not always an operator pause.** It is the first
+  true clause of `no_state` / `business_pause` / `maintenance` / `startup`; the
+  operator latch that fences spawns is `machines.paused_at` (see
+  `meiva cluster pause`), and a `startup` verdict leaves it empty. Read
+  `paused_reason` from `GET /api/cluster/status` before treating it as a pause.
