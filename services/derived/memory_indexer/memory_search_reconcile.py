@@ -105,9 +105,7 @@ def _reconcile_database(boot: ConfigBoot, *, machine: MachineIdentity) -> Databa
     return Database(
         db_config_from_boot(boot),
         gate=gate,
-        direct_url=ClusterDirectUrl(
-            machine.host, gateway_url_reader=lambda: boot.view.gateway.gateway_url
-        ),
+        direct_url=ClusterDirectUrl(machine.host),
     )
 
 

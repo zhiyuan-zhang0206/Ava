@@ -17,12 +17,12 @@ from base.host.env.dotenv_boot import PLACEHOLDER_DB_URL
 _PROCESS = "db-test"
 
 
-def _direct_url_x(_config: object = None, **_kwargs: object) -> str:
-    return "postgresql://u:p@db:5432/x"
+def _direct_url_x(_config: object = None, **_kwargs: object) -> connections.DirectResolution:
+    return connections.DirectResolution(url="postgresql://u:p@db:5432/x", is_direct=True)
 
 
-def _direct_url_test(_config: object = None, **_kwargs: object) -> str:
-    return "postgresql://direct-test"
+def _direct_url_test(_config: object = None, **_kwargs: object) -> connections.DirectResolution:
+    return connections.DirectResolution(url="postgresql://direct-test", is_direct=True)
 
 
 def test_connect_refuses_placeholder_url(

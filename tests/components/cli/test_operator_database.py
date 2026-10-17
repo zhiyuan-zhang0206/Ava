@@ -27,7 +27,6 @@ def _factory(command: CommandRuntime, open_database: Callable[..., Any]) -> Oper
     return operator_database_factory(
         local_host=command.machine.host,
         open_database=open_database,
-        gateway_url_reader=lambda: command.config.view.gateway.gateway_url,
     )
 
 
@@ -56,13 +55,13 @@ def test_operator_handles_share_the_command_gate_without_git(
     assert service.application_name() == "meiva:service:v12"
 
 
-def test_operator_factory_binds_gateway_reader_without_reading_it() -> None:
+def test_operator_factory_binds_the_host_reader_without_reading_it() -> None:
     resolvers: list[ClusterDirectUrl] = []
     reads: list[str] = []
 
-    def gateway_url() -> str:
-        reads.append("gateway")
-        return "http://db.example:8000"
+    def local_host() -> str:
+        reads.append("host")
+        return "owned-host"
 
     def open_database(
         config: DbConfig, gate: ProcessDbGate, direct_url: ClusterDirectUrl
@@ -70,17 +69,15 @@ def test_operator_factory_binds_gateway_reader_without_reading_it() -> None:
         resolvers.append(direct_url)
         return open_operator_database(config, gate, direct_url)
 
-    factory = operator_database_factory(
-        local_host=lambda: "owned-host", gateway_url_reader=gateway_url, open_database=open_database
-    )
+    factory = operator_database_factory(local_host=local_host, open_database=open_database)
     assert reads == []
     factory()
     factory.for_url("postgresql://meiva:pw@db.example:6433/meiva")
     assert reads == []
     assert len(resolvers) == 2
-    assert all(resolver.gateway_url_reader is gateway_url for resolver in resolvers)
-    assert resolvers[0].gateway_url_reader() == "http://db.example:8000"
-    assert reads == ["gateway"]
+    assert all(resolver.local_host is local_host for resolver in resolvers)
+    assert resolvers[0].local_host() == "owned-host"
+    assert reads == ["host"]
 
 
 def test_separate_commands_own_separate_exempt_gates(

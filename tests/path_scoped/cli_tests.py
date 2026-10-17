@@ -49,7 +49,6 @@ def operator_database(command_runtime: CommandRuntime) -> OperatorDatabaseFactor
     return operator_database_factory(
         local_host=command_runtime.machine.host,
         open_database=open_operator_database,
-        gateway_url_reader=lambda: command_runtime.config.view.gateway.gateway_url,
     )
 
 

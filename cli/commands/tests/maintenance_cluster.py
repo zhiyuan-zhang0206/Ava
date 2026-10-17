@@ -16,7 +16,7 @@ def start_cluster_through_ready_gate(
     monkeypatch: pytest.MonkeyPatch, *, machine: MachineIdentity
 ) -> None:
     database_factory = operator_database_factory(
-        local_host=machine.host, open_database=open_operator_database, gateway_url_reader=lambda: ""
+        local_host=machine.host, open_database=open_operator_database
     )
     from base.deploy.lifecycle import start_serving
     from cli.commands.lifecycle._pause_resume import resume_after_start

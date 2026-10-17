@@ -20,9 +20,9 @@ import getpass
 import os
 import socket
 import subprocess
-from collections.abc import Callable, Iterator
+from collections.abc import Iterator
 from pathlib import Path
-from typing import Any, cast
+from typing import cast
 
 import psycopg
 import pytest
@@ -49,6 +49,7 @@ from cli.commands.data_plane.bringup import prepare_memory_vectors
 from cli.commands.data_plane.config import DataPlaneConfig
 from cli.commands.data_plane.tests.data_plane_records import data_plane_config as data_plane_config
 from cli.commands.lifecycle.migrations import cmd_migrations_apply
+from cli.database import OperatorDatabaseFactory
 from cli.database.runtime import CommandRuntime
 from cli.database.tests.command_inputs import command_runtime as command_runtime
 from services.derived.memory_indexer.backends.pgvector import prepare_table
@@ -280,7 +281,7 @@ def _provision_by_authority(
     pg_port: int,
     identity: str,
     *,
-    operator_database: Callable[[], Any],
+    operator_database: OperatorDatabaseFactory,
     command_runtime: CommandRuntime,
 ) -> bool:
     """Today's start order through the admin authority; returns database creation."""
@@ -303,7 +304,7 @@ def _prepare_by_authority(
     identity: str,
     *,
     database_created: bool,
-    operator_database: Callable[[], Any],
+    operator_database: OperatorDatabaseFactory,
     command_runtime: CommandRuntime,
 ) -> None:
     admin = ci.pg_admin_url(pg_port)
@@ -330,7 +331,7 @@ def _prepare_by_authority(
 def test_authority_matches_owner_login_privileges_and_is_idempotent(
     owned_pg: int,
     monkeypatch: pytest.MonkeyPatch,
-    operator_database: Callable[[], Any],
+    operator_database: OperatorDatabaseFactory,
     *,
     command_runtime: CommandRuntime,
     data_plane_config: DataPlaneConfig,
@@ -387,7 +388,7 @@ def test_owner_without_login_keeps_every_admin_path(
     owned_pg: int,
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
-    operator_database: Callable[[], Any],
+    operator_database: OperatorDatabaseFactory,
     *,
     command_runtime: CommandRuntime,
     data_plane_config: DataPlaneConfig,
