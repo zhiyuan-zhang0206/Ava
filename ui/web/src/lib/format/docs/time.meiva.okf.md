@@ -43,7 +43,10 @@ distinguishing anything.
 calendar year, so a target twelve months out cannot repeat the same ambiguity.
 The clock is 12-hour (`3:21 PM`) and replaces ICU's narrow no-break space before
 the day period with a plain space, so the string is identical across Node/ICU
-versions and copies cleanly.
+versions and copies cleanly. That normalization is its own helper
+(`normalizeDayPeriodSpace`) tested directly: today's ICU already emits a plain
+space, so asserting it through a rendered clock would pass with the
+normalization deleted.
 
 ```meiva-contract
 id = "day-context"
