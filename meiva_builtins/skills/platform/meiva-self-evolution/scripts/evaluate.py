@@ -51,6 +51,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from audit import LeakPaths
 from collect import collect_one
+from record import task_prompt_of
 from rubric import scores
 
 from base.paths import meiva_home, workspace_dir
@@ -75,7 +76,7 @@ UNSAFE_PREFIXES = (
 def is_replay_safe(rec: dict[str, Any]) -> tuple[bool, str]:
     """Return (safe, reason). A run is safe to re-run only if every tool it
     called is pure read/compute and it actually carries a task prompt."""
-    if not rec["task_prompt"].strip():
+    if not task_prompt_of(rec).strip():
         return False, "no task prompt"
     hits = sorted({tool for tool in rec["tools_called"] if tool.startswith(UNSAFE_PREFIXES)})
     if hits:
@@ -136,14 +137,15 @@ def launch(skill: str, tasks: list[dict[str, Any]], *, model: str | None = None)
         overlay: dict[str, object] = {"eval_isolation": True}
         if model:
             overlay["llm_model"] = model
+        prompt = task_prompt_of(task)
         eval_id = meiva.agents.spawn(
-            prompt=task["task_prompt"], config_overlay=overlay, idempotency_key=str(uuid4())
+            prompt=prompt, config_overlay=overlay, idempotency_key=str(uuid4())
         )
         runs.append(
             {
                 "eval_agent_id": eval_id,
                 "source_agent_id": task["agent_id"],
-                "prompt": task["task_prompt"],
+                "prompt": prompt,
                 "original_tools_called": task.get("tools_called", {}),
             }
         )
