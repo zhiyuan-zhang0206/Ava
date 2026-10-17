@@ -104,7 +104,11 @@ a deliberately inverted assertion alone does not demonstrate that property.
 ## Checks and evidence
 
 Commit hooks check changed files; pre-push hooks also check the branch diff,
-imports, types and generated-artifact freshness. CI independently runs the
+imports, types and generated-artifact freshness. The branch-diff re-run executes
+in a throwaway checkout of HEAD, so a fixing hook never rewrites your working
+tree and only failures that survive against HEAD's own text count (see
+[the decision](../decisions/engineering/tooling/2026-10-17-branch-diff-scratch-checkout.md)).
+CI independently runs the
 corresponding checks, including migration smoke and full test coverage. The
 frontend pre-push selector checks the branch contribution, using changed
 tests, related source paths and known filesystem consumers. It reports global
