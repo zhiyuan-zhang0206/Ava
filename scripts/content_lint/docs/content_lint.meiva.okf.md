@@ -30,6 +30,7 @@ lints: [[scripts/lint/docs/lint.meiva.okf.md]].
 - `check_doc_references.py` — validates every CLI flag in the docs against the argparse tree and `scripts/*.sh` case branches, plus relative markdown links and OKF wikilink targets (including label aliases) (must resolve to an OKF node); runs on pre-commit commits that touch docs or its inputs (`pass_filenames: false`, the whole doc set), again at pre-push via `lint-prepush-artifact-freshness` when the branch only deleted such inputs (a purely deleted doc/link target never reaches a `files:`-filtered hook, on any range), and in the always-on `doc-lints` CI job (the classify-independent doc-lint family, so docs-only PRs are covered). `docs/decisions/` is exempt entirely; `future/` only skips flag checks.
 - `check_narrative_facts.py` — narrative-facts verifier: skill catalog / IM commands / IM channels mentioned in docs match the live code.
 
+- `lint_panel_jargon.py` — user-facing panel gate (`to_user.md`): reports internal identifiers, repository paths, batch codewords and unglossed acronyms in the body, with the evidence area exempt; rules and budgets live in `panel_jargon_rules.toml`. Read-only; non-zero exit on a hard finding or an over-budget body. Rules, contract and self-test: [[scripts/content_lint/docs/panel-jargon.meiva.okf.md]].
 ## `lint_skill_md_size.py`
 
 SKILL.md files are loaded into agent context; a file that grows too large spends
