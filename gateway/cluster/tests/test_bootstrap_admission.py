@@ -14,7 +14,7 @@ import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from base import config, paths
+from base import config
 from base.config.service_read import ConfigAuthority
 from base.host.db_authority.api import AcceptanceCache
 from base.host.env import bootstrap
@@ -47,22 +47,29 @@ def gateway_snapshot(
 
 
 @pytest.fixture
-def runner_token(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, seed_write_generation: Callable[[Path], Any]
-) -> str:
-    """The gateway's active write generation (a private home) and this runner
-    process's delivered runner API token: a runner never holds the human secret."""
+def gateway_home(tmp_path: Path) -> Path:
+    """The root the gateway process serves: its generation ledger lives here."""
     home = (tmp_path / "gateway-home").resolve()
     home.mkdir(mode=0o700)
-    token = seed_write_generation(home).api.runner
-    monkeypatch.setattr(paths, "meiva_home", lambda: home)
+    return home
+
+
+@pytest.fixture
+def runner_token(
+    gateway_home: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    seed_write_generation: Callable[[Path], Any],
+) -> str:
+    """The gateway's active write generation and this runner process's delivered
+    runner API token: a runner never holds the human secret."""
+    token = seed_write_generation(gateway_home).api.runner
     monkeypatch.setitem(os.environ, "MEIVA_API_TOKEN", token)
     return token
 
 
 @pytest.fixture
 def gateway_client(
-    config_authority: ConfigAuthority, model_catalog: ModelCatalog
+    config_authority: ConfigAuthority, model_catalog: ModelCatalog, gateway_home: Path
 ) -> Iterator[TestClient]:
     """Own the isolated router's admission cache without a full Gateway lifespan."""
     app = FastAPI()
@@ -70,6 +77,7 @@ def gateway_client(
     app.state.machine_token_acceptance = machine_token_acceptance
     app.state.config_authority = config_authority
     app.state.catalog = model_catalog
+    app.state.gateway_process = SimpleNamespace(home=gateway_home)
     app.include_router(router)
     with TestClient(app) as client:
         yield client

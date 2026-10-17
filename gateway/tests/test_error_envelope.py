@@ -6,6 +6,7 @@ import asyncio
 import json
 import logging
 from collections.abc import Iterator
+from types import SimpleNamespace
 
 import httpx
 import httpx2
@@ -16,7 +17,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from starlette.exceptions import HTTPException as StarletteHTTPException
 from starlette.responses import Response
 
-from base import config
+from base import config, paths
 from base.api_contracts.agent_contract import AgentNotFound, ErrorReason, MeivaAgentError
 from base.config.tests.configuration import snapshot_process_config
 from base.host.db_authority.api import AcceptanceCache
@@ -201,10 +202,11 @@ def _request(
 
 @pytest.fixture(autouse=True)
 def _auth401_state() -> None:
-    """Each middleware test gets its own gateway-lifetime counters."""
+    """Each middleware test gets its own gateway-lifetime counters and served root."""
     _middleware_app.state.auth401_log = rejection_log.AuthRejectionLog()
     machine_token_acceptance: AcceptanceCache = {}
     _middleware_app.state.machine_token_acceptance = machine_token_acceptance
+    _middleware_app.state.gateway_process = SimpleNamespace(home=paths.meiva_home())
 
 
 def _enable_cluster_auth(monkeypatch: pytest.MonkeyPatch) -> None:

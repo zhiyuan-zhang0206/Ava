@@ -111,9 +111,13 @@ def test_no_ledger_or_no_active_generation_accepts_no_machine_token(
 
 def test_cluster_credential_names_the_verifying_credential(gateway: Path) -> None:
     tokens = _tokens(gateway).api
-    assert cluster_credential(_bearer(_HUMAN), _HUMAN) == "cluster_bearer"
-    assert cluster_credential(_bearer(tokens.gateway), _HUMAN) == "machine_token:gateway"
-    assert cluster_credential(_bearer(tokens.runner), _HUMAN) == "machine_token:runner"
+    assert cluster_credential(_bearer(_HUMAN), _HUMAN, home=gateway) == "cluster_bearer"
+    assert (
+        cluster_credential(_bearer(tokens.gateway), _HUMAN, home=gateway) == "machine_token:gateway"
+    )
+    assert (
+        cluster_credential(_bearer(tokens.runner), _HUMAN, home=gateway) == "machine_token:runner"
+    )
     for refused in (
         None,
         "",
@@ -122,12 +126,12 @@ def test_cluster_credential_names_the_verifying_credential(gateway: Path) -> Non
         _bearer(api.token_digest(tokens.runner)),  # a digest is not a bearer
         _bearer(""),
     ):
-        assert cluster_credential(refused, _HUMAN) is None
+        assert cluster_credential(refused, _HUMAN, home=gateway) is None
     _unadmit(gateway)
-    assert cluster_credential(_bearer(tokens.gateway), _HUMAN) is None
-    assert cluster_credential(_bearer(tokens.runner), _HUMAN) is None
+    assert cluster_credential(_bearer(tokens.gateway), _HUMAN, home=gateway) is None
+    assert cluster_credential(_bearer(tokens.runner), _HUMAN, home=gateway) is None
     # A blank human secret never verifies as a bearer.
-    assert cluster_credential(_bearer(""), "") is None
+    assert cluster_credential(_bearer(""), "", home=gateway) is None
 
 
 # ── the gateway app: middleware, bootstrap, login ───────────────────────────
@@ -275,10 +279,11 @@ def test_a_session_records_which_credential_minted_it(
         sessions = client.app.state.sessions
         keys: request_principal.SessionKeys = client.app.state.session_keys
         assert (
-            request_principal.current_session_fact(sessions, keys, human, _HUMAN) == "user_session"
+            request_principal.current_session_fact(sessions, keys, human, _HUMAN, home=gateway)
+            == "user_session"
         )
         assert (
-            request_principal.current_session_fact(sessions, keys, machine, _HUMAN)
+            request_principal.current_session_fact(sessions, keys, machine, _HUMAN, home=gateway)
             == "machine_session:runner"
         )
 

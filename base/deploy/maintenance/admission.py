@@ -13,6 +13,7 @@ from collections.abc import Callable
 # without giving child service processes permission to clear the durable hold.
 from dataclasses import replace
 from datetime import datetime
+from pathlib import Path
 
 from base.deploy.maintenance import pause_owner
 from base.deploy.maintenance.state import CERTIFIED_PHASES, MaintenanceHold, MaintenancePhase
@@ -31,7 +32,7 @@ def held() -> bool:
     return snapshot() is not None
 
 
-def business_paused() -> bool:
+def business_paused(home: Path) -> bool:
     """Fence HTTP only after fleet drain reaches this unit's stop window.
 
     The same durable journal that releases agent admission controls HTTP. A
@@ -41,7 +42,7 @@ def business_paused() -> bool:
     Unknown or incomplete pause records keep them closed until the journal is removed by hand.
     """
     try:
-        current = pause_owner.read()
+        current = pause_owner.read_for_home(home)
     except OSError:
         return True
     if current.status == "invalid":

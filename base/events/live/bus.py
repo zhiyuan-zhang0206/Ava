@@ -15,8 +15,9 @@ from __future__ import annotations
 
 import asyncio
 from dataclasses import dataclass, field
+from typing import Any
 
-from base.config import settings
+from base.config import ConfigBoot, settings
 from base.events.live.redis_client import (
     AuthRetryAsyncRedis,
     AuthRetrySyncRedis,
@@ -48,9 +49,17 @@ class EventBusConfig:
 
 def event_bus_config_from_settings() -> EventBusConfig:
     """Build the slice from the live settings (read at each call, like `db_config_from_settings`)."""
+    return _from_view(settings)
+
+
+def event_bus_config_from_config(boot: ConfigBoot) -> EventBusConfig:
+    return _from_view(boot.view)
+
+
+def _from_view(view: Any) -> EventBusConfig:
     return EventBusConfig(
-        redis_url=settings.data_plane.redis_url,
-        events_channel=settings.data_plane.events_channel,
+        redis_url=view.data_plane.redis_url,
+        events_channel=view.data_plane.events_channel,
     )
 
 
