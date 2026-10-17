@@ -34,6 +34,12 @@ export interface ControlSectionDef {
 // "ask Meiva to run the cluster" — then the config/policy surfaces, then the
 // per-host extension inventories (Plugins / MCP / Skills) and Schedules.
 // Status + Ops are NOT here; they live on Insights (INSIGHTS_SECTIONS).
+export const APP_SETTINGS_SECTION: ControlSectionDef = {
+  id: "app",
+  label: "App",
+  labelKey: "app",
+};
+
 export const CONTROL_SECTIONS: ControlSectionDef[] = [
   { id: "guide", label: "Guide", labelKey: "guide" },
   {
