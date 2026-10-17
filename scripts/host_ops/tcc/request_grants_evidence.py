@@ -33,6 +33,10 @@ DESCRIPTION = (
 MSG_ID = re.compile(r"msgID=([0-9.]+)")
 
 
+def _carries_exact_msg_id(line: str, message_id: str) -> bool:
+    return re.search(rf"msgID={re.escape(message_id)}(?![0-9.])", line) is not None
+
+
 def _requested_services(lines: list[str]) -> dict[str, set[str]]:
     services: dict[str, set[str]] = {}
     for line in lines:
@@ -52,12 +56,18 @@ def decision_evidence(output: str) -> tuple[list[str], set[str]]:
     verdicts = {
         message_id
         for message_id in services
-        if any(f"msgID={message_id}" in line and "AUTHREQ_RESULT" in line for line in lines)
+        if any(
+            "AUTHREQ_RESULT" in line and _carries_exact_msg_id(line, message_id) for line in lines
+        )
     }
     decided: set[str] = set()
     for message_id in verdicts:
         decided.update(services[message_id])
-    rows = [line for line in lines if any(f"msgID={message_id}" in line for message_id in verdicts)]
+    rows = [
+        line
+        for line in lines
+        if any(_carries_exact_msg_id(line, message_id) for message_id in verdicts)
+    ]
     return list(dict.fromkeys(rows)), decided
 
 

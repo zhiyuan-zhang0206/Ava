@@ -91,6 +91,34 @@ def test_a_preflight_never_counts_even_though_it_also_has_a_verdict() -> None:
     assert decided == set()
 
 
+def test_a_shorter_msg_id_is_not_answered_by_a_longer_one() -> None:
+    request = (
+        "2026-10-17 18:00:00.000001+0800 tccd[120]: AUTHREQ_CTX: msgID=74954.1,"
+        " function=TCCAccessRequest, service=kTCCServiceScreenCapture, preflight=no, query=1"
+    )
+    longer_verdict = (
+        "2026-10-17 18:00:01.123456+0800 tccd[120]: AUTHREQ_RESULT: msgID=74954.10,"
+        " authValue=2, authReason=4"
+    )
+    lines, decided = module.decision_evidence("\n".join([request, longer_verdict]))
+    assert lines == []
+    assert decided == set()
+
+
+def test_a_composite_msg_id_does_not_answer_a_shorter_request() -> None:
+    request = (
+        "2026-10-17 18:00:00.000001+0800 tccd[120]: AUTHREQ_CTX: msgID=74954.1,"
+        " function=TCCAccessRequest, service=kTCCServiceScreenCapture, preflight=no, query=1"
+    )
+    composite_verdict = (
+        "2026-10-17 18:00:01.123456+0800 tccd[120]: AUTHREQ_RESULT: msgID=74954.1.2,"
+        " authValue=2, authReason=4"
+    )
+    lines, decided = module.decision_evidence("\n".join([request, composite_verdict]))
+    assert lines == []
+    assert decided == set()
+
+
 def test_a_request_without_a_verdict_is_not_evidence_yet() -> None:
     lines, decided = module.decision_evidence(REQUEST)
     assert lines == []
