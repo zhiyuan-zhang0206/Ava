@@ -131,6 +131,10 @@ ALLOWED: dict[str, tuple[Category, str]] = {
         "contract",
         "keeps .github/actions/install-pg-redis and scripts/provision/database.sh on one PgBouncer pin",
     ),
+    "tests/ci/test_prepush_branch_diff.py": (
+        "contract",
+        "runs scripts/hooks/prepush-branch-lint.sh and its scratch-checkout runner in throwaway repositories",
+    ),
     "tests/ci/test_prepush_hooks.py": (
         "contract",
         "runs .pre-commit-config.yaml and the scripts/prepush-*.sh hooks as processes",
