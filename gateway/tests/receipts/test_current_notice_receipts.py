@@ -129,7 +129,7 @@ def test_lost_post_commit_response_replays_without_old_hint(
     notice = insert_notice(db_conn, agent, "A")
     calls: list[tuple[object, ...]] = []
 
-    async def fail(*args: object) -> None:
+    async def fail(*args: object, **kwargs: object) -> None:
         calls.append(args)
         raise RuntimeError("response lost after durable commit")
 

@@ -339,11 +339,14 @@ async def post_notice_resolve(
     action = body.action
     reply = body.reply
 
+    resolution: _ops.NoticeResolutionFacts | None = None
+
     def _resolve(conn: psycopg.Connection) -> str | None:
+        nonlocal resolution
         with conn.cursor() as cur:
             cur.execute(
-                "SELECT title, require_response, resolved_at, question, expire_at FROM agent_notices "
-                "WHERE id = %s AND agent_id = %s FOR UPDATE",
+                "SELECT title, require_response, resolved_at, question, expire_at, created_at "
+                "FROM agent_notices WHERE id = %s AND agent_id = %s FOR UPDATE",
                 (notice_id, agent_id),
             )
             row = cur.fetchone()
@@ -352,11 +355,17 @@ async def post_notice_resolve(
                     status_code=409,
                     detail=f"notice {notice_id} does not exist for agent {agent_id}",
                 )
-            title, require_response, resolved_at, raw_question, expire_at = row
+            title, require_response, resolved_at, raw_question, expire_at, created_at = row
             if raw_question is not None and expire_at <= datetime.now(UTC):
                 raise HTTPException(status_code=409, detail="this question has expired")
             resolved_answer = resolution_answer(body, raw_question)
             reply = resolved_answer.reply
+            resolution = _ops.notice_resolution_facts(
+                _ACTION_RESOLUTION[action],
+                require_response=bool(require_response),
+                created_at=created_at,
+                replied=reply is not None or resolved_answer.answer is not None,
+            )
             if resolved_at is not None:
                 # Idempotent close: a bare 'read' on an already-resolved notice
                 # silently succeeds (user ruling 2026-08-28) — the already-read
@@ -452,7 +461,7 @@ async def post_notice_resolve(
         )
     else:
         status = await asyncio.to_thread(get_agent_status, request.app.state.db, agent_id)
-    await _ops.publish_notice_resolved(request.app.state.bus, agent_id, notice_id)
+    await _ops.publish_notice_resolved(request.app.state.bus, agent_id, notice_id, facts=resolution)
     return AgentMessageEnqueued(status=status, inbound_id=inbound_id)
 
 
@@ -497,7 +506,15 @@ async def post_notice_create(
 
     def _create(
         pool: ConnectionPool,
-    ) -> tuple[int, int, list[int], list[int], list[dict[str, object]], bool]:
+    ) -> tuple[
+        int,
+        int,
+        list[int],
+        list[int],
+        list[dict[str, object]],
+        list[_ops.NoticeResolutionFacts],
+        bool,
+    ]:
         with write_transaction(pool) as conn, conn.cursor() as cur:
             previous = existing_receipt(conn, request.url.path, idempotency_key, request_body)
             if previous is not None:
@@ -507,6 +524,7 @@ async def post_notice_create(
                     cast(list[int], previous["superseded_global"]),
                     cast(list[int], previous["superseded"]),
                     cast(list[dict[str, object]], previous["pending_notices"]),
+                    [],
                     True,
                 )
             validate_creation_state(conn, body)
@@ -515,15 +533,23 @@ async def post_notice_create(
             cur.execute("SELECT id FROM agents WHERE id = %s FOR UPDATE", (agent_id,))
             # Auto-resolve any existing open notice (supersede).
             cur.execute(
-                "SELECT id, local_id, require_response FROM agent_notices "
-                "WHERE agent_id = %s AND resolved_at IS NULL FOR UPDATE",
+                "SELECT id, local_id, require_response, created_at, reply, answer "
+                "FROM agent_notices WHERE agent_id = %s AND resolved_at IS NULL FOR UPDATE",
                 (agent_id,),
             )
             existing = cur.fetchall()
             superseded_local: list[int] = []
             superseded_global: list[int] = []
+            superseded_details: list[_ops.NoticeResolutionFacts] = []
             superseded_response_required = False
-            for global_id, local_id, require_response in existing:
+            for (
+                global_id,
+                local_id,
+                require_response,
+                superseded_created_at,
+                old_reply,
+                old_answer,
+            ) in existing:
                 cur.execute(
                     "UPDATE agent_notices SET resolved_at = now(), resolution = 'superseded' "
                     "WHERE id = %s",
@@ -539,6 +565,14 @@ async def post_notice_create(
                 superseded_global.append(int(global_id))
                 superseded_response_required = superseded_response_required or bool(
                     require_response
+                )
+                superseded_details.append(
+                    _ops.notice_resolution_facts(
+                        "superseded",
+                        require_response=bool(require_response),
+                        created_at=superseded_created_at,
+                        replied=old_reply is not None or old_answer is not None,
+                    )
                 )
             now = datetime.now(UTC)
             max_expire = now + timedelta(seconds=settings.daemon.notice_ttl_limit_seconds)
@@ -610,6 +644,7 @@ async def post_notice_create(
                 superseded_global,
                 superseded_local,
                 pending,
+                superseded_details,
                 False,
             )
 
@@ -620,14 +655,21 @@ async def post_notice_create(
         superseded_global,
         superseded_local,
         pending,
+        superseded_details,
         replayed,
     ) = await asyncio.to_thread(_create, pool)
     # Events after the commit: superseded notices first (the feed drops them),
     # then the new posted notice. Best-effort, never raises. Events publish by
     # GLOBAL id; the SDK's return value carries LOCAL ids.
     if not replayed:
-        for _gid in superseded_global:
-            await _ops.publish_notice_resolved(request.app.state.bus, agent_id, _gid)
+        for _gid, _details in zip(superseded_global, superseded_details, strict=True):
+            await _ops.publish_notice_resolved(
+                request.app.state.bus,
+                agent_id,
+                _gid,
+                facts=_details,
+                superseded_by=notice_global_id,
+            )
         await _ops.publish_notice_posted(
             request.app.state.bus,
             agent_id,

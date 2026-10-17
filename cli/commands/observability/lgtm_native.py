@@ -13,10 +13,9 @@ import shutil
 import sys
 import tarfile
 import tempfile
-import time
-import urllib.request
 import zipfile
 from collections.abc import Callable
+from dataclasses import dataclass
 from pathlib import Path
 from typing import cast
 from urllib.parse import urlparse
@@ -25,7 +24,9 @@ import yaml
 from dotenv import dotenv_values
 
 from base.agents.context.clients import DatabaseFactory
+from base.clock import SYSTEM_TIMERS, Timers
 from base.cluster.machine import MachineIdentity
+from base.host.net.ports import SYSTEM_URL_OPENER, UrlOpener
 from base.host.net.resilience import Policy, retry
 from base.host.system.hostport import Host
 from base.native_process.os_platform import Platform
@@ -43,29 +44,6 @@ from cli.commands.observability.observatory_urls import (
 )
 
 SUPPORTED_TAGS = {"darwin_arm64", "linux_amd64"}
-
-_DOWNLOAD_SOCKET_TIMEOUT_S = 30.0
-_DOWNLOAD_ATTEMPT_TIMEOUT_S = 600.0
-_DOWNLOAD_ATTEMPTS = 3
-_DOWNLOAD_RETRY_BACKOFF_S = 5.0
-_DOWNLOAD_PROGRESS_INTERVAL_S = 15.0
-
-
-def _download_backoff(attempt: int) -> float:
-    return _DOWNLOAD_RETRY_BACKOFF_S * (attempt + 1)
-
-
-# Pinned archive download retries every failure on the original 5s, 10s schedule.
-_DOWNLOAD_POLICY = Policy(
-    max_attempts=_DOWNLOAD_ATTEMPTS,
-    backoff=_download_backoff,
-    jitter="none",
-    jitter_span=1.0,
-    classify=lambda _exc: True,
-    idempotent=True,
-    respect_retry_after=False,
-    on_final_failure=None,
-)
 
 
 def platform_tag(platform: Platform) -> str | None:
@@ -90,62 +68,143 @@ def _binary_path(name: str, native_dir: Path) -> Path:
     return native_dir / NATIVE_CONSTANTS[name].binary_path
 
 
-def stream_download(url: str, destination: Path) -> None:
-    """Download one archive with bounded time and periodic progress reporting."""
-    started = time.monotonic()
-    last_progress = started
-    received = 0
+@dataclass(frozen=True)
+class DownloadLimits:
+    total_budget_s: float
+    socket_timeout_s: float
+    attempts: int
+    retry_backoff_s: float
+    progress_interval_s: float
+
+
+@dataclass
+class DownloadProgress:
+    received: int = 0
+
+
+# meiva:ref cli/commands/observability/docs/lgtm.meiva.okf.md#lgtm-native-download-deadline
+def stream_download(
+    url: str,
+    destination: Path,
+    *,
+    open_url: UrlOpener,
+    timers: Timers,
+    limits: DownloadLimits,
+    deadline: float,
+    progress: DownloadProgress,
+) -> None:
+    def _remaining() -> float:
+        return deadline - timers.monotonic()
+
+    def _elapsed() -> float:
+        return limits.total_budget_s - _remaining()
+
+    def _require_budget() -> float:
+        remaining = _remaining()
+        if remaining <= 0:
+            raise TimeoutError(
+                f"lgtm native download exceeded its {limits.total_budget_s:.0f}s budget "
+                f"({progress.received} bytes received, "
+                f"{max(-remaining, 0.0):.1f}s past the deadline)"
+            )
+        return remaining
+
+    last_progress = 0.0
     total: int | None = None
     with (
-        urllib.request.urlopen(url, timeout=_DOWNLOAD_SOCKET_TIMEOUT_S) as response,  # noqa: S310 - pinned upstream asset
+        open_url(url, min(limits.socket_timeout_s, _require_budget())) as response,
         destination.open("wb") as output,
     ):
         try:
             total = int(response.headers.get("Content-Length") or 0)
         except (TypeError, ValueError):
             total = None
-        while chunk := response.read(1 << 16):
+        while True:
+            _require_budget()
+            chunk = response.read1(1 << 16)
+            _require_budget()
+            if not chunk:
+                break
             output.write(chunk)
-            received += len(chunk)
-            now = time.monotonic()
-            if now - last_progress >= _DOWNLOAD_PROGRESS_INTERVAL_S:
-                percent = f" ({received * 100 // total}%)" if total else ""
-                print(f"  · lgtm native: {received / 1e6:.1f} MB{percent} in {now - started:.0f}s")
-                last_progress = now
-            if now - started > _DOWNLOAD_ATTEMPT_TIMEOUT_S:
-                raise TimeoutError(
-                    f"download exceeded {_DOWNLOAD_ATTEMPT_TIMEOUT_S:.0f}s wall-clock cap"
+            progress.received += len(chunk)
+            elapsed = _elapsed()
+            if elapsed - last_progress >= limits.progress_interval_s:
+                percent = f" ({progress.received * 100 // total}%)" if total else ""
+                print(
+                    f"  · lgtm native: {progress.received / 1e6:.1f} MB{percent} in {elapsed:.0f}s"
                 )
-    print(
-        f"  · lgtm native: downloaded {received / 1e6:.1f} MB in {time.monotonic() - started:.0f}s"
+                last_progress = elapsed
+    print(f"  · lgtm native: downloaded {progress.received / 1e6:.1f} MB in {_elapsed():.0f}s")
+
+
+def _download_policy(limits: DownloadLimits) -> Policy:
+    def _backoff(attempt: int) -> float:
+        return limits.retry_backoff_s * (attempt + 1)
+
+    return Policy(
+        max_attempts=limits.attempts,
+        backoff=_backoff,
+        jitter="none",
+        jitter_span=1.0,
+        classify=lambda _exc: True,
+        idempotent=True,
+        respect_retry_after=False,
+        on_final_failure=None,
     )
 
 
-def download_with_retry(url: str, archive: Path) -> None:
-    """Retry a pinned archive download a bounded number of times."""
-    started = time.monotonic()
+# meiva:ref cli/commands/observability/docs/lgtm.meiva.okf.md#lgtm-native-download-deadline
+def download_with_retry(
+    url: str, archive: Path, *, open_url: UrlOpener, timers: Timers, limits: DownloadLimits
+) -> None:
+    started = timers.monotonic()
+    deadline = started + limits.total_budget_s
     attempt = 0
+    progress = DownloadProgress()
+
+    def _used() -> float:
+        return timers.monotonic() - started
+
+    def _remaining() -> float:
+        return deadline - timers.monotonic()
+
+    def _wait(seconds: float) -> None:
+        remaining = _remaining()
+        if remaining > 0:
+            timers.sleep(min(seconds, remaining))
 
     def _download_once() -> None:
-        nonlocal attempt
+        nonlocal attempt, progress
         attempt += 1
+        progress = DownloadProgress()
         try:
-            stream_download(url, archive)
+            stream_download(
+                url,
+                archive,
+                open_url=open_url,
+                timers=timers,
+                limits=limits,
+                deadline=deadline,
+                progress=progress,
+            )
         except Exception as exc:  # network and filesystem failures are all retriable here
-            elapsed = time.monotonic() - started
             print(
-                f"  ! lgtm native: download attempt {attempt}/{_DOWNLOAD_ATTEMPTS} failed "
-                f"after {elapsed:.0f}s: {exc}",
+                f"  ! lgtm native: download attempt {attempt}/{limits.attempts} failed after "
+                f"{_used():.0f}s ({max(_remaining(), 0.0):.0f}s of the "
+                f"{limits.total_budget_s:.0f}s budget left, {progress.received} bytes "
+                f"received): {exc}",
                 file=sys.stderr,
             )
             raise
 
     try:
-        retry(_DOWNLOAD_POLICY)(_download_once)
+        retry(_download_policy(limits), sleep=_wait)(_download_once)
     except Exception as exc:
         raise RuntimeError(
-            f"failed to download native LGTM backend from {url} after {_DOWNLOAD_ATTEMPTS} "
-            f"attempts ({time.monotonic() - started:.0f}s total): {exc}"
+            f"failed to download native LGTM backend from {url} after {attempt} attempt(s) "
+            f"({_used():.0f}s used of the {limits.total_budget_s:.0f}s budget, "
+            f"{max(_remaining(), 0.0):.0f}s left, {progress.received} bytes received by the "
+            f"last attempt): {exc}"
         ) from exc
 
 
@@ -192,13 +251,21 @@ def _extract_tree(name: str, archive: Path, destination: Path) -> None:
 
 
 def download_and_verify(
-    name: str, version: str, asset: dict[str, str], native_dir: Path, *, tag: str
+    name: str,
+    version: str,
+    asset: dict[str, str],
+    native_dir: Path,
+    *,
+    tag: str,
+    open_url: UrlOpener,
+    timers: Timers,
+    limits: DownloadLimits,
 ) -> None:
     """Download, hash-verify, and install one pinned native backend binary."""
     with tempfile.TemporaryDirectory() as temporary_dir:
         archive = Path(temporary_dir) / Path(asset["url"]).name
         print(f"  · lgtm native: downloading {name} {version} from {asset['url']}")
-        download_with_retry(asset["url"], archive)
+        download_with_retry(asset["url"], archive, open_url=open_url, timers=timers, limits=limits)
         actual = hashlib.sha256(archive.read_bytes()).hexdigest()
         if actual != asset["sha256"]:
             raise RuntimeError(
@@ -475,6 +542,19 @@ def _render_grafana_telegram_env(native_dir: Path) -> None:
     write_if_changed(env_file, content, mode=0o600)
 
 
+def _download_limits() -> DownloadLimits:
+    from base.config import settings
+
+    observability = settings.observability
+    return DownloadLimits(
+        total_budget_s=observability.lgtm_native_download_budget_s,
+        socket_timeout_s=observability.lgtm_native_download_socket_timeout_s,
+        attempts=observability.lgtm_native_download_attempts,
+        retry_backoff_s=observability.lgtm_native_download_retry_backoff_s,
+        progress_interval_s=observability.lgtm_native_download_progress_interval_s,
+    )
+
+
 def ensure_lgtm_native(
     repo: Path,
     meiva_home: Path,
@@ -510,7 +590,16 @@ def ensure_lgtm_native(
         if matching_platform and marker.exists() and marker.read_text().strip() == asset["version"]:
             print(f"  · lgtm native: {name} {asset['version']} present")
             continue
-        download_and_verify(name, asset["version"], asset, native_dir, tag=tag)
+        download_and_verify(
+            name,
+            asset["version"],
+            asset,
+            native_dir,
+            tag=tag,
+            open_url=SYSTEM_URL_OPENER,
+            timers=SYSTEM_TIMERS,
+            limits=_download_limits(),
+        )
         print(f"  · lgtm native: installed {name} {asset['version']} ({tag})")
     render_configs(
         repo,
