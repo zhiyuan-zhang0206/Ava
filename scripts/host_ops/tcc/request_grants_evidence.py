@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 import subprocess
 import sys
 from collections.abc import Callable
@@ -19,22 +20,45 @@ GRANT_SERVICES = ("kTCCServiceScreenCapture", "kTCCServiceAccessibility")
 
 DESCRIPTION = (
     "Ask the permissions helper to raise its Screen Recording and Accessibility dialogs, then"
-    " record tccd's own decision as evidence. Only lines from the request window and marked"
-    " preflight=no count: a preflight produces tccd lines too, and those prove nothing about a"
-    " request. Exit 0 = a decision line matched; 1 = the request ran but no decision line"
-    " matched (check the window, or the dialog is still pending); 2 = setup problem (not macOS,"
-    " helper unreachable, helper build without request_grants_v1)."
+    " record tccd's own verdict as evidence. tccd splits the two: the AUTHREQ_CTX line names"
+    " the service and carries preflight=no for a real request, the AUTHREQ_RESULT line carries"
+    " the verdict but only a msgID. The run therefore pairs them -- a preflight line can never"
+    " pass as evidence of a request. Exit 0 = a verdict matched; 1 = the request ran but no"
+    " verdict matched (check the window, or the dialog is still pending); 2 = setup problem"
+    " (not macOS, helper unreachable, helper build without request_grants_v1). An Accessibility"
+    " request may leave no tccd trace at all; Screen Recording is the service the acceptance run"
+    " requires."
 )
 
+MSG_ID = re.compile(r"msgID=([0-9.]+)")
 
-def decision_lines(output: str) -> list[str]:
-    rows: list[str] = []
-    for line in output.splitlines():
+
+def _requested_services(lines: list[str]) -> dict[str, set[str]]:
+    services: dict[str, set[str]] = {}
+    for line in lines:
         if "preflight=no" not in line:
             continue
-        if any(service in line for service in GRANT_SERVICES):
-            rows.append(line)
-    return rows
+        matched = {service for service in GRANT_SERVICES if service in line}
+        if not matched:
+            continue
+        for message_id in MSG_ID.findall(line):
+            services.setdefault(message_id, set()).update(matched)
+    return services
+
+
+def decision_evidence(output: str) -> tuple[list[str], set[str]]:
+    lines = output.splitlines()
+    services = _requested_services(lines)
+    verdicts = {
+        message_id
+        for message_id in services
+        if any(f"msgID={message_id}" in line and "AUTHREQ_RESULT" in line for line in lines)
+    }
+    decided: set[str] = set()
+    for message_id in verdicts:
+        decided.update(services[message_id])
+    rows = [line for line in lines if any(f"msgID={message_id}" in line for message_id in verdicts)]
+    return list(dict.fromkeys(rows)), decided
 
 
 def tccd_log(
@@ -102,7 +126,7 @@ def main(
     started = datetime.now(UTC)
     requested = dict(client.request_grants())
     after = dict(client.ping())
-    lines = decision_lines(log_reader(started, args.window))
+    lines, decided = decision_evidence(log_reader(started, args.window))
     from base.paths import meiva_home
 
     out = Path(args.out) if args.out else meiva_home() / "tcc-evidence"
@@ -117,6 +141,7 @@ def main(
                 "requested": requested,
                 "after": after,
                 "required_service": args.require,
+                "decided_services": sorted(decided),
                 "tccd_lines": lines,
             },
             indent=2,
@@ -125,13 +150,13 @@ def main(
     print(f"evidence: {target}")
     for line in lines:
         print(f"  tccd: {line}")
-    if args.require and not any(args.require in line for line in lines):
-        print(f"no tccd decision line for {args.require}", file=sys.stderr)
+    if args.require and args.require not in decided:
+        print(f"tccd recorded no verdict for {args.require}", file=sys.stderr)
         return 1
     if not lines:
         print(
-            "no tccd decision line in the window; the dialog may still be pending -- widen"
-            " --window and run again",
+            "no tccd verdict in the window; the dialog may still be pending -- widen --window"
+            " and run again",
             file=sys.stderr,
         )
         return 1
