@@ -333,14 +333,19 @@ class _RecordingAuthority(ConfigAuthority):
         return ConfigAuthority.service_field_value(self, name)
 
 
-def test_search_deps_read_only_brave_fields(web_harness: WebHarness) -> None:
+def test_search_deps_reads_only_search_fields(web_harness: WebHarness) -> None:
     base = config_authority()
     authority = _RecordingAuthority(base.runtime, base.all_domains, base.env_path)
     wiring.search_deps_for(authority)
     assert sorted(authority.reads) == [
         "brave_api_key",
+        "deepseek_api_key",
         "web_brave_search_endpoint",
+        "web_deepseek_max_results",
+        "web_deepseek_qps",
+        "web_deepseek_search_endpoint",
         "web_max_search_results",
+        "web_search_provider",
         "web_search_timeout_seconds",
     ]
 
