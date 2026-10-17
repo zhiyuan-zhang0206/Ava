@@ -30,8 +30,11 @@ server reads `to_user.md`; there is no format setting, HTML frame, publication
 registry or database content copy. `ChatMarkdown` owns typography, GFM, CJK
 behavior and safe links for both conversation and document surfaces. The document
 explicitly skips raw HTML. External links open in a new tab; linked Markdown
-opens in the panel with back/home controls. Other files open or download through
-the authenticated gateway resource endpoint.
+opens in the panel and is pushed into browser history (`?agent_id=…&reference=…`),
+so Back and Forward walk the same chain and a reload or a shared link restores
+it; [panel navigation history](navigation-history.meiva.okf.md)
+owns that contract. Other files open or download through the authenticated gateway resource
+endpoint.
 
 The document response maps Markdown link/image destinations to resource IDs.
 The backend parses Markdown with markdown-it-py, including reference-style links;
