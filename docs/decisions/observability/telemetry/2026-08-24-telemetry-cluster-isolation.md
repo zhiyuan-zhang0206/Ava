@@ -2,7 +2,7 @@
 
 ## Context
 
-Multiple Ava homes can share one host, but the observability defaults are
+Multiple Meiva homes can share one host, but the observability defaults are
 host-loopback endpoints. An unmarked worktree gateway could therefore export
 to, or read from, the LGTM stack owned by the marked production home. Port
 allocation isolated each cluster's data plane but did not isolate these
@@ -10,7 +10,7 @@ host-singleton telemetry ports.
 
 ## Decision
 
-The existing `$AVA_HOME/lgtm-host` marker is now the authority for gateway
+The existing `$MEIVA_HOME/lgtm-host` marker is now the authority for gateway
 observability. A gateway without the marker neither starts a local collector
 nor exports to or reads from the implicit loopback stack. Explicit OTLP and
 Loki endpoint environment variables remain deliberate operator escape hatches.

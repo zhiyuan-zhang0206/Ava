@@ -3,7 +3,7 @@
 ## Context
 
 The pty-sessions service holds no database client on purpose
-([2026-10-03-pty-sessions-service](../../runtime/processes/sessions/2026-10-03-pty-sessions-service.md)), so only `ava stop` wrote
+([2026-10-03-pty-sessions-service](../../runtime/processes/sessions/2026-10-03-pty-sessions-service.md)), so only `meiva stop` wrote
 closure notices. A service crash, a SIGKILL of the service and a reboot ended every session without a
 word to its owner: the master closes, the shells are hung up, and the agent finds a dead session on its
 next call with no reason attached. The ledger sweep at the next start already knew which busy sessions
@@ -19,13 +19,13 @@ it closed and only logged them.
 2. The service gives the sweep's busy sessions to a one-shot child, `python -m ops.pty_close_notices`,
    from a task beside the serving loop, with a thirty-second limit. The child reads them on stdin,
    writes the notices over one pooled connection and exits. The service stays database-free; the
-   child has no process profile, so it dials as an operator process does, the way `ava stop` does.
+   child has no process profile, so it dials as an operator process does, the way `meiva stop` does.
 3. A database that cannot be reached costs a log line and nothing else. The service starts and serves
    either way; nothing retries, because the sweep already cleared the sessions from the ledger.
 4. One reason, `CRASH_REASON`, covers a crash, a forced stop of the service and a reboot, because the
-   sweep cannot tell them apart. It carries no operation and no hold time. A `ava stop` that finds no
+   sweep cannot tell them apart. It carries no operation and no hold time. A `meiva stop` that finds no
    service and closes from the ledger uses the same reason, since the service died before that stop.
-5. Delivery stays idempotent on (machine, agent, session, shell birth), the same key `ava stop` uses,
+5. Delivery stays idempotent on (machine, agent, session, shell birth), the same key `meiva stop` uses,
    so a shell birth is told once whichever path reaches it first, and an owner that is terminated or
    unknown is dropped, never resurrected.
 
@@ -39,7 +39,7 @@ it closed and only logged them.
 - **Retry until the database is back.** It needs a persisted queue next to the ledger. A lost notice
   after a crash that already lost the session is the smaller harm; the idempotency key would make a
   retry safe if that ever changes.
-- **Notices for `ava stop --force` with the service up.** Force is usable offline by definition and
+- **Notices for `meiva stop --force` with the service up.** Force is usable offline by definition and
   skips the drain guarantees; it stays without notices. Only the sweep paths, where the service died
   uncleanly, notify.
 

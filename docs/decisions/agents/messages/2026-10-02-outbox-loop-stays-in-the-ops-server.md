@@ -5,7 +5,7 @@
 The audit proposed a `runner-maintenance` unit per agent-runner machine to collect three
 disk-log or due-row replay duties that lived inside other processes: the delivery outbox
 redelivery (a free-floating task in the ops server), the shell-closure notice delivery and
-the impersonation event replay. The last two no longer exist: `ava stop` writes the closure
+the impersonation event replay. The last two no longer exist: `meiva stop` writes the closure
 notices to the database itself in its terminals phase, and the replay consumer was deleted
 with the impersonation lease log. One duty is left.
 
@@ -37,5 +37,5 @@ interval per connection, and a pass is bounded by the record cap.
   inside the pass and do not. An unreadable live config at a round start also ends the loop,
   where the old loop logged and kept its previous wait.
 - A gateway-only unit runs no ops server, so it has no outbox consumer, yet the recorder's
-  fields are not capability-filtered: a failed `ava agents send` there leaves a record nothing
+  fields are not capability-filtered: a failed `meiva agents send` there leaves a record nothing
   redelivers. Not closed here.

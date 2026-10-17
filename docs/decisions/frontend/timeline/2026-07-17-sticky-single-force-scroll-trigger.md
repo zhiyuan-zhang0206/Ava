@@ -10,7 +10,7 @@ ResizeObserver-driven pinning are untouched.
 After the single-writer controller shipped, agent switch still misbehaved
 intermittently: switching to another agent sometimes did not land at the
 bottom, or auto-scroll stopped following the new agent's stream. The task that
-prompted this (`ava-1957`) proposed a full **event-driven rewrite** — drive the
+prompted this (`meiva-1957`) proposed a full **event-driven rewrite** — drive the
 scroll off SSE items ("new item arrives → if sticky, scroll") and delete the
 ResizeObserver + witness machinery.
 

@@ -22,7 +22,7 @@ tuple.
 Publication requires the exact ordered all-unit readback set and atomically
 replaces pending with current. Exact retries return the original publication
 identifier, while conflicting observations refuse instead of overwriting the
-journal. The infrastructure `ava-agent-host` service is allowed, but numeric
+journal. The infrastructure `meiva-agent-host` service is allowed, but numeric
 agent and attempt sessions remain outside this service-only authority. Runtime
 admission and updater callsite integration remain separate changes.
 

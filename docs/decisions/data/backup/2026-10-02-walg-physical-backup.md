@@ -16,8 +16,8 @@ verified and watched.
 
 ## Decision
 
-- **One key, WAL-G's own file.** `AVA_WALG_CONFIG_FILE` names a 0600 JSON in WAL-G's
-  native format. Ava validates it and passes it through (`wal-g --config <file>`); it
+- **One key, WAL-G's own file.** `MEIVA_WALG_CONFIG_FILE` names a 0600 JSON in WAL-G's
+  native format. Meiva validates it and passes it through (`wal-g --config <file>`); it
   does not translate it into typed settings. Unset means every WAL-G path is a no-op.
   The key is host-scoped and writable so it can always be removed (the retired
   PITR settings were mostly read-only and could not be).
@@ -27,14 +27,14 @@ verified and watched.
   carries no archive setting, a restored instance cannot archive into the live chain
   by accident, and switching off is "unset the key, restart". The cost is that
   `archive_mode` is read only at launch, and an update retains the postmaster: enabling
-  or disabling is an explicit `ava stop` + `ava start`, start warns when the running
+  or disabling is an explicit `meiva stop` + `meiva start`, start warns when the running
   Postgres differs, and the health probe reports it.
 - **No wrapper script.** The archive command is the pinned binary, `--config` and
   `wal-push %p`; the secrets stay in the 0600 file WAL-G reads on every call, never in
   argv, `postgresql.conf` or the environment. `pg_stat_archiver` and the Postgres log
   already give every call's result and time.
 - **A pinned binary at a version-free path.** A SHA-256-pinned release asset is run
-  once before it replaces anything and installed at `$AVA_HOME/runtime/walg/wal-g`.
+  once before it replaces anything and installed at `$MEIVA_HOME/runtime/walg/wal-g`.
   An upgrade is an atomic file replacement that needs no Postgres restart. Only Linux
   x86_64 is pinned, because upstream builds only Linux; enabling anywhere else fails at
   converge.
@@ -59,7 +59,7 @@ verified and watched.
 
 ## Alternatives rejected
 
-- **Typed Ava settings for prefix, endpoint, region and credential path.** A translation
+- **Typed Meiva settings for prefix, endpoint, region and credential path.** A translation
   layer, two sources of truth for one credential, and a field to keep in step with every
   WAL-G option; the native file has none of that.
 - **`ALTER SYSTEM` or `postgresql.conf` for the archive settings.** The setting would live

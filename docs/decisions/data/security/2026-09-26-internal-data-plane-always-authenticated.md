@@ -10,7 +10,7 @@ local host. Its code may be exactly the defective version being replaced, so
 the fence cannot depend on the old code noticing that it is stale.
 
 Two existing rules left no database-level fence. Data-plane credentials never
-rotate after install. With an empty `AVA_CLUSTER_SECRET` (the single-box
+rotate after install. With an empty `MEIVA_CLUSTER_SECRET` (the single-box
 default), every credential is empty and PostgreSQL/PgBouncer accept
 unauthenticated loopback connections, so there is no credential to revoke.
 

@@ -29,7 +29,7 @@ shipped (dark) worker made that unsafe to switch on:
    overlay-over-birth map — a pinned reasoning effort or thinking budget is the agent's) and no
    worker-side effort override. Rejected: keeping the cheaper
    summarizer effort — a reasoning-parameter mismatch costs the cache hit the shape exists for.
-3. `AVA_HIERARCHY_WORKER_AGENTS` (empty = everyone) is a rollout allowlist beside the
+3. `MEIVA_HIERARCHY_WORKER_AGENTS` (empty = everyone) is a rollout allowlist beside the
    cluster-wide master switch, so one or two agents can be canaries. Rejected: a per-agent
    overlay switch — the worker is a gateway-side loop that reads cluster config, not a turn.
 4. First builds are paced by their own 24h budget by deferral (the claim parks them, they

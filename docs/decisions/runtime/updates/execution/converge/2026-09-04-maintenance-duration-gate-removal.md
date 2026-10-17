@@ -9,7 +9,7 @@ what was believed then; this decision replaces only its duration-based
 admission rule.
 
 Cluster rollout stage durations are observations, not an admission-control
-boundary. `ava cluster update` no longer refuses to enter Phase A because the
+boundary. `meiva cluster update` no longer refuses to enter Phase A because the
 predicted maintenance duration crosses a fixed threshold. Its dry-run likewise
 does not derive PASS or FAIL from that prediction. Both paths still run the
 prepare checks, and candidate failures such as runner reachability, target
@@ -49,7 +49,7 @@ The live history demonstrated the loop repeatedly:
   readiness 0.3, and Phase B 77.4 seconds. The admitted-stage sum was 122.1
   seconds, and real updates were refused at 18:49 and 18:51. For the explicitly
   authorized temporary bypass, the file was moved recoverably to
-  `$AVA_HOME/update-baseline.json.bak-20260904-215650` before this permanent
+  `$MEIVA_HOME/update-baseline.json.bak-20260904-215650` before this permanent
   code change was prepared.
 
 ## Rationale

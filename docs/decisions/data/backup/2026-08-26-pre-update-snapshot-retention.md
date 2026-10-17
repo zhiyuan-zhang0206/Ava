@@ -2,7 +2,7 @@
 
 ## Context
 
-`ava cluster update` writes a verified `<db>-<ts>.dump.gz.enc` data snapshot
+`meiva cluster update` writes a verified `<db>-<ts>.dump.gz.enc` data snapshot
 before applying migrations whenever the target's migration set differs from the
 applied set (b14074efa). Snapshots land in the same pool as the daily dumps and
 share their name pattern, so prune's `BACKUP_KEEP = 7` counted them as dumps:

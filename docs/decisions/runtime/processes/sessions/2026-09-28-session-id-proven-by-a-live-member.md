@@ -7,9 +7,9 @@ shell, its descendants, and every process in the shell's POSIX session. #3521
 scanned by session id only while the verified shell was alive. Once the shell
 has died, a later session could in principle carry the same id.
 
-`ava stop` then gained a SIGKILL leg after a bounded grace (PR #3558,
+`meiva stop` then gained a SIGKILL leg after a bounded grace (PR #3558,
 decisions/2026-09-28-stop-escalates-to-sigkill.md). The adversarial review of
-#3558 (https://github.com/zhiyuan-zhang0206/Ava/pull/3558#issuecomment-5858247325)
+#3558 (https://github.com/zhiyuan-zhang0206/Meiva/pull/3558#issuecomment-5858247325)
 found an escape that happens every time, not by a race. A foreground job's
 TERM handler forks a helper and exits at once:
 
@@ -147,7 +147,7 @@ session, and whatever outlived the SIGKILL is out of its reach too.
   was not recycled onto one of the session's own descendants, which then led
   its own session and has itself already exited. That requires the whole
   original session to end, and the pid space to wrap, inside the kill.
-- **The host's kill op.** The TTL reaper, `ava.shell.sessions.kill` and every
+- **The host's kill op.** The TTL reaper, `meiva.shell.sessions.kill` and every
   other production caller reach it in its forced mode (`kill_session` and
   `kill_session_with_verdict` default to `graceful=False`, which runs the PTY
   CLI's plain `kill`). That mode freezes the live shell first, so the shell

@@ -8,7 +8,7 @@ state.
 
 The gateway reconciles against Grafana's Alertmanager active-alert API on
 startup and every five minutes. The API exposes the exact
-`(fingerprint, startsAt)` identity carried by the webhook and stored in Ava, so
+`(fingerprint, startsAt)` identity carried by the webhook and stored in Meiva, so
 the comparison distinguishes separate episodes of the same rule. Rows absent
 from a complete snapshot are resolved with an explicit reconciliation note;
 direct health and machine probes remain outside the sweep because Grafana does

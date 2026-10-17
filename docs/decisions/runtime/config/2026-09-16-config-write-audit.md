@@ -3,7 +3,7 @@
 ## Context
 
 Config writes all went through audited paths, but the record answered only "which keys landed, from
-which site/process". The `AVA_HOST_MAX_CONCURRENT_TURNS=50` change of 2026-09-11 (audit record #18)
+which site/process". The `MEIVA_HOST_MAX_CONCURRENT_TURNS=50` change of 2026-09-11 (audit record #18)
 could not be attributed or reconstructed afterwards: pid and site name the machinery, not the
 initiator, and nothing carried the old→new. Task #3588 requires every write to leave a queryable
 record (who / when / key / old→new) or an explicit won't-do.
@@ -18,7 +18,7 @@ Constraints that shaped the sink:
 
 ## Decision
 
-Extend the existing per-home JSONL (`$AVA_HOME/.env.audit.jsonl`, 0600) additively — record v2:
+Extend the existing per-home JSONL (`$MEIVA_HOME/.env.audit.jsonl`, 0600) additively — record v2:
 
 - `actor: str | null` — the initiating credential fact: `user_session:<subject>`,
   `cluster_bearer:<subject>`, or `cli:<os-user>`; null where no identity exists (converge, scripts).
@@ -32,7 +32,7 @@ Extend the existing per-home JSONL (`$AVA_HOME/.env.audit.jsonl`, 0600) additive
 Identity is server-stamped on the existing hop: `PUT /api/config` reads request state, passes
 `actor`/`trace_id` to `write_fields` and into the `config_write` op payload (optional fields, so the
 daemon stamps nothing itself); the CLI local write records `cli:<os-user>`. This PR is record +
-identity; the query surface (CLI `ava config audit`, `GET /api/config/audit`, `config_audit_read`
+identity; the query surface (CLI `meiva config audit`, `GET /api/config/audit`, `config_audit_read`
 op) is the separate second PR. Additive-only: no config value or write semantics change.
 
 ## Alternatives rejected

@@ -92,11 +92,11 @@ SELECT public.ensure_telemetry_event_partitions(3);
 -- role-existence gate).
 DO $$
 BEGIN
-    IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'ava_runner') THEN
-        GRANT SELECT, INSERT ON telemetry_events TO ava_runner;
-        GRANT EXECUTE ON FUNCTION public.ensure_telemetry_event_partitions(INT, INT) TO ava_runner;
+    IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'meiva_runner') THEN
+        GRANT SELECT, INSERT ON telemetry_events TO meiva_runner;
+        GRANT EXECUTE ON FUNCTION public.ensure_telemetry_event_partitions(INT, INT) TO meiva_runner;
     END IF;
-    IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'ava_gateway') THEN
-        REVOKE UPDATE, DELETE ON telemetry_events FROM ava_gateway;
+    IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'meiva_gateway') THEN
+        REVOKE UPDATE, DELETE ON telemetry_events FROM meiva_gateway;
     END IF;
 END $$;

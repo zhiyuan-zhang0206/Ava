@@ -2,7 +2,7 @@
 
 ## Context
 
-Startup cost of the config chain dominated clean `import ava` and every hosted
+Startup cost of the config chain dominated clean `import meiva` and every hosted
 exec child. `import shared.config` built the full 391-field registry and
 constructed the `Settings` singleton before any caller read a field, pulling in
 15 sub-modules, `pydantic_settings`, and the pydantic_core/TypeAdapter tails —
@@ -13,7 +13,7 @@ a small boot-path subset of the fields; exec children are the extreme case.
 Constraints set by the 405 ruling (2026-09-16): the default applies to all
 process classes (not a per-class whitelist); the boot-path field index must be
 generated and guarded by drift assertions; the settings-lite
-`AVA_CONFIG_FETCH=skip` path stays out of scope and unchanged. An adversarial
+`MEIVA_CONFIG_FETCH=skip` path stays out of scope and unchanged. An adversarial
 review (#6303) of design v1.1 found and the implementation fixed two blockers
 before merge: the hosted child's *real* pin map (10 keys, 7 off-index) must not
 force an upgrade, and two direct-submodule import edges had to be cut for the
@@ -44,7 +44,7 @@ access the lite layer cannot serve.
   never forces the upgrade; `sdk_disable`, read at child boot, is in the index.
 - Full-validation processes opt in explicitly: `ensure_eager()` (the gateway,
   ops daemons and agent host call it) and the operator escape hatch
-  `AVA_CONFIG_BOOT=eager` (process env only; `skip` wins over it, so the
+  `MEIVA_CONFIG_BOOT=eager` (process env only; `skip` wins over it, so the
   settings-lite repair verbs stay usable even under a global eager flag).
 - Startup validation shrinks to the boot-path fields; a field a process never
   touches is no longer validated at import. Local-source units keep their
@@ -86,7 +86,7 @@ access the lite layer cannot serve.
   surfaces, each gated: `--check` for the index, old-name parity plus pickle
   tests for the latch, and escape-hatch combination tests for `eager`/`skip`.
 - Measured in-context retest (2026-09-16, spike recipe, clean env x3): clean
-  `import ava` -4.5MiB (75.5->71.0), crafted child start -4.8MiB
+  `import meiva` -4.5MiB (75.5->71.0), crafted child start -4.8MiB
   (109.3->104.5); child `pydantic_settings` absent, shared.config modules
   29->6. L1 (the child-batch startup change) squash-landed on main as
 `0a17312f6`; measured against that L1-inclusive baseline (main@66fc357df:
@@ -94,7 +94,7 @@ access the lite layer cannot serve.
 combined result - 63.3MiB clean / 101.9MiB child (-4.2 / -6.2MiB on the
 same baseline). The spike's isolated-marginal projections (-10.7 child / -13.2
   clean) are void: they double-counted the pydantic base that seven non-config
-  consumers keep resident (`ava.security`, `ava._mcp_oauth`,
+  consumers keep resident (`meiva.security`, `meiva._mcp_oauth`,
   `shared.live_events`, `shared.agent_snapshot`, `shared.audit_events`,
   `shared.install_registry`, `shared.agent_observation`). The <=58/<=98 series
   targets are repositioned onto the lazy total-account trajectory (gap ~5MiB;
@@ -105,7 +105,7 @@ same baseline). The spike's isolated-marginal projections (-10.7 child / -13.2
   settings-free re-exports, a call-time `refresh_data_plane_settings` shim,
   and registry/metadata-backed field faces (`_FIELDS`, `FIELD_INFOS`,
   `CONFIG_UNCHANGED_SENTINEL`, `ConfigFieldMeta`) serve without the upgrade,
-  so settings-lite verbs (`ava config set`) keep repairing a broken `.env`;
+  so settings-lite verbs (`meiva config set`) keep repairing a broken `.env`;
   enforced end-to-end by the suite (`tests/cli/test_config_cmd.py`).
 
 <!-- Refined by: decisions/2026-09-19-config-build-inflight-bounded-wait.md (cross-thread window reads now bounded-wait instead of raising). -->

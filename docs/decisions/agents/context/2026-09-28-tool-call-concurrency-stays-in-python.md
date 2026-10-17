@@ -10,7 +10,7 @@ Running these calls concurrently would also introduce an implicit concurrency
 API outside Python. Calls can update shared plugin state and trigger cancellation,
 restart, termination or compaction. A parallel dispatcher would have to define
 snapshot isolation, conflicting writes, partial completion and lifecycle ordering.
-Those responsibilities do not belong in Ava's minimal execution core.
+Those responsibilities do not belong in Meiva's minimal execution core.
 
 ## Decision
 

@@ -78,18 +78,18 @@ Why, against the other candidates:
 - Deployment lives in `deploy/lgtm/` (README there is authoritative):
   Loki 3.7.6, Prometheus 3.13.2, Grafana 13.1.3 run as **native launchd
   services on the LGTM host** (macmini, pinned in
-  `deploy/lgtm/native/versions.yml`), lifecycle-owned by `ava lgtm on/off`
+  `deploy/lgtm/native/versions.yml`), lifecycle-owned by `meiva lgtm on/off`
   and `deploy/lgtm/start.sh` / `stop.sh`; backend listeners bind loopback
   only; Grafana :3003 is the anonymous read-only surface.
 - **Tempo has no macOS binary**, so it runs on the linux host
   (zzy-lenovo-1, WSL, linux/amd64) selected by
-  `AVA_TELEMETRY_TEMPO_ENDPOINT` (OTLP intake) and
-  `AVA_TELEMETRY_TEMPO_QUERY_URL` (Grafana/Prometheus queries); Tempo 3.0.2
+  `MEIVA_TELEMETRY_TEMPO_ENDPOINT` (OTLP intake) and
+  `MEIVA_TELEMETRY_TEMPO_QUERY_URL` (Grafana/Prometheus queries); Tempo 3.0.2
   verified live. The compose copy in `deploy/lgtm/` remains the rollback
   asset.
 - Every machine runs a native `otelcol-contrib` sidecar (0.155.0) as the one
   local OTLP entry; the same config also mirrors traces to a grep-friendly
-  JSONL file (`$AVA_HOME/traces/spans.jsonl`), and `ava trace ship` replays
+  JSONL file (`$MEIVA_HOME/traces/spans.jsonl`), and `meiva trace ship` replays
   mirror gaps straight to Tempo, bypassing the collector.
 - Viewer start/stop does not disturb recording: write side and read side are
   independent.

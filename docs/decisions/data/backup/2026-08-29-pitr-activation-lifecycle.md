@@ -2,9 +2,9 @@
 
 ## Decision
 
-Physical backup activation is entered only through `ava cluster pitr activate`.
+Physical backup activation is entered only through `meiva cluster pitr activate`.
 The command owns a versioned operation record under
-`$AVA_HOME/physical-backup/activation/operation.json`; its persisted
+`$MEIVA_HOME/physical-backup/activation/operation.json`; its persisted
 `started_at` is the clock source across process and page refreshes. Operators do
 not edit PostgreSQL configuration, signal Postgres, or start backup daemons by
 hand.
@@ -42,7 +42,7 @@ rechecks the same database/system identifier after publication.
 
 The privileged continuation is a separate delivery. It must add a real
 least-privilege GCS write/read/delete smoke boundary, atomically configure WAL
-archiving, dispatch the existing Ava cluster restart, and resume from the same
+archiving, dispatch the existing Meiva cluster restart, and resume from the same
 operation record. Local spool publication is not remote durability. Base
 candidates remain disabled until a generation-pinned WAL ACK is observed, and
 `protected=true` remains impossible until a real isolated restore proof passes.

@@ -2,7 +2,7 @@
 
 ## Context
 
-[`cli/release_fleet/coordinator.ava.okf.md`](../cli/release_fleet/coordinator.ava.okf.md)
+[`cli/release_fleet/coordinator.meiva.okf.md`](../cli/release_fleet/coordinator.meiva.okf.md)
 carried three items still awaiting a ruling after the 2026-09-27 fleet-core
 release choices: whether the coordinator's phase names should track the
 plan's older names or the code's, whether a unit's barrier deadline is

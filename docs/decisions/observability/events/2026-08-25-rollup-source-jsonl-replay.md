@@ -15,7 +15,7 @@ disproportionate to the ledger data being protected.
 Every emitter keeps the full mirror at seven days and additionally appends only
 `llm_usage`, `turn_end`, and exec-family events to a rollup-source mirror. That
 filtered file defaults to 90-day retention, configurable with
-`AVA_EVENTS_JSONL_ROLLUP_RETENTION_DAYS`.
+`MEIVA_EVENTS_JSONL_ROLLUP_RETENTION_DAYS`.
 
 After each Loki rollup, events maintenance reconciles the last ledger day below
 the current Loki floor and overwrite-upserts available filtered mirror days.

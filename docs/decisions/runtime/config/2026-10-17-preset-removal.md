@@ -3,8 +3,8 @@
 ## Context
 
 User ruling, 2026-10-17 (direct, task #5236): delete the preset mechanism at
-every layer — gateway routes and the spawn/creation chain, the `ava presets`
-CLI, the SDK surface (`ava.agents.presets`, the `spawn(preset=...)`
+every layer — gateway routes and the spawn/creation chain, the `meiva presets`
+CLI, the SDK surface (`meiva.agents.presets`, the `spawn(preset=...)`
 parameter), the Web UI (spawn picker, console Presets page, inspector diff),
 the IM bridge spawn menu, the database objects, documentation and tests.
 
@@ -37,7 +37,7 @@ supersedes in part two earlier records:
 - **IM bridge spawn menu.** The `/spawn` menu becomes two layers
   (model → effort) with the same summary [Spawn] button and receipt shape;
   the preset layer and its copy strings are removed.
-- **Guide.** The `ava-guide` presets sub-skill is deleted; onboarding and
+- **Guide.** The `meiva-guide` presets sub-skill is deleted; onboarding and
   migration documents point at the model skill and `config_overlay` instead.
 
 ## Consequences

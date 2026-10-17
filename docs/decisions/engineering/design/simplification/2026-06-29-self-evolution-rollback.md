@@ -16,7 +16,7 @@ Today's safety net covers only the update *crash* path:
 - Layer 1: orchestration auto-unpause (`cluster/resume`)
 - Layer 2: gateway rollback-to-last-known-good (`_recover_gateway_local`)
 
-Both fire only during `ava update`. Outside an update, there is no health
+Both fire only during `meiva update`. Outside an update, there is no health
 monitoring and no rollback path. A cluster that is *running* but *broken*
 (e.g. all agents crash-looping after a bad prompt change) stays broken until a
 human notices.
@@ -27,7 +27,7 @@ check. So the watchdog cannot detect this class of failure.
 
 ## Decision
 
-1. **OS cron health probe** (`ava cluster health-probe`): runs periodically
+1. **OS cron health probe** (`meiva cluster health-probe`): runs periodically
    (default every 5 min via launchd/crontab), checks gateway liveness, agent
    population, crash-loop patterns, and schema health. Exits 0 (healthy) or 1
    (unhealthy).
@@ -36,13 +36,13 @@ check. So the watchdog cannot detect this class of failure.
    the *previous* `target_sha` on each successful backend rollout. This is the
    automatic rollback anchor.
 
-3. **`ava cluster rollback`**: operator verb that reuses the existing recovery
-   sequence (quiesce agents → rollback schema → git reset → `ava start`) but
+3. **`meiva cluster rollback`**: operator verb that reuses the existing recovery
+   sequence (quiesce agents → rollback schema → git reset → `meiva start`) but
    targets an arbitrary commit (default: `last_known_good_sha`). Works both
    manually (`--to <tag|sha>`) and automatically (cron wrapper after N
    consecutive probe failures).
 
-4. **Cron registration on `ava start`**: the converge step registers the OS
+4. **Cron registration on `meiva start`**: the converge step registers the OS
    cron job when the cluster comes up, so the health probe is always present.
 
 ## Alternatives considered
@@ -65,6 +65,6 @@ Split-deployment rollback builds on the same primitives and is a follow-up.
 ## Impact
 
 - New migration (0063): `last_known_good_sha` + `last_known_good_at` on `cluster_pin`
-- New CLI commands: `ava cluster {health-probe,rollback,cron-register,cron-unregister}`
-- `ava start` now registers the OS cron job automatically (via converge)
+- New CLI commands: `meiva cluster {health-probe,rollback,cron-register,cron-unregister}`
+- `meiva start` now registers the OS cron job automatically (via converge)
 - Backend updates now atomically advance `last_known_good_sha` (via `advance_pin`)

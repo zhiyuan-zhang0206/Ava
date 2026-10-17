@@ -24,7 +24,7 @@ and forces the eligible set empty.
 The canonical plan is written atomically as a private 0600 local file with file
 and directory fsync. Identical evidence produces identical bytes and digest.
 The existing scheduler may refresh it behind a new default-off flag; health and
-`ava pitr retention inspect` expose the result. No module in this slice has a
+`meiva pitr retention inspect` expose the result. No module in this slice has a
 remote-delete method, credential or production enable.
 
 ## Consequences

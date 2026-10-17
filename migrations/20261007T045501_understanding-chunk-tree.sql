@@ -1,6 +1,6 @@
 -- The understanding tree's chunk-triggered pipeline: the job queue, the raw record of every
 -- provider call, and the upper-level grouping cursor and call record. All idempotent (IF NOT
--- EXISTS): db/schema.sql already holds these for a fresh database, and the ava_runner grants are
+-- EXISTS): db/schema.sql already holds these for a fresh database, and the meiva_runner grants are
 -- gated on the role's existence so the fresh-bootstrap replay stays green (base/cluster/authority/
 -- groups.py grants the same surface at birth and on every start).
 --
@@ -38,9 +38,9 @@ COMMENT ON TABLE understanding_chunk_jobs IS
 
 DO $$
 BEGIN
-    IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'ava_runner') THEN
-        GRANT SELECT, INSERT, UPDATE ON understanding_chunk_jobs TO ava_runner;
-        GRANT USAGE, SELECT ON SEQUENCE understanding_chunk_jobs_id_seq TO ava_runner;
+    IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'meiva_runner') THEN
+        GRANT SELECT, INSERT, UPDATE ON understanding_chunk_jobs TO meiva_runner;
+        GRANT USAGE, SELECT ON SEQUENCE understanding_chunk_jobs_id_seq TO meiva_runner;
     END IF;
 END $$;
 
@@ -75,9 +75,9 @@ COMMENT ON TABLE understanding_chunk_calls IS
 
 DO $$
 BEGIN
-    IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'ava_runner') THEN
-        GRANT INSERT ON understanding_chunk_calls TO ava_runner;
-        GRANT USAGE, SELECT ON SEQUENCE understanding_chunk_calls_id_seq TO ava_runner;
+    IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'meiva_runner') THEN
+        GRANT INSERT ON understanding_chunk_calls TO meiva_runner;
+        GRANT USAGE, SELECT ON SEQUENCE understanding_chunk_calls_id_seq TO meiva_runner;
     END IF;
 END $$;
 
@@ -122,10 +122,10 @@ COMMENT ON TABLE understanding_group_calls IS
 
 DO $$
 BEGIN
-    IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'ava_runner') THEN
-        GRANT SELECT, INSERT, UPDATE ON understanding_group_state TO ava_runner;
-        GRANT INSERT ON understanding_group_calls TO ava_runner;
-        GRANT USAGE, SELECT ON SEQUENCE understanding_group_calls_id_seq TO ava_runner;
+    IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'meiva_runner') THEN
+        GRANT SELECT, INSERT, UPDATE ON understanding_group_state TO meiva_runner;
+        GRANT INSERT ON understanding_group_calls TO meiva_runner;
+        GRANT USAGE, SELECT ON SEQUENCE understanding_group_calls_id_seq TO meiva_runner;
     END IF;
 END $$;
 

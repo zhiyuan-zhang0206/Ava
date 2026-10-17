@@ -1,9 +1,9 @@
-# `ava-root` stays self-written: the five-question record
+# `meiva-root` stays self-written: the five-question record
 
 ## Context
 
 [`2026-09-12-process-lifecycle-final-state`](2026-09-12-process-lifecycle-final-state.md)
-chose a self-written supervisor, `ava-root`, under the signed permissions helper on macOS.
+chose a self-written supervisor, `meiva-root`, under the signed permissions helper on macOS.
 It was decided before [`conventions/technology-selection.md`](../../../../conventions/technology-selection.md)
 existed, so it carries no five-question record, and the retrospective of 2026-10-02 found no
 comparison with a mature supervisor anywhere in `decisions/`, `future/`, `conventions/`,
@@ -12,9 +12,9 @@ entry only writes the answers down.
 
 ## Decision
 
-Keep `ava-root`. No change of design or code. The five questions:
+Keep `meiva-root`. No change of design or code. The five questions:
 
-1. **Boundary.** `ava-root` owns one full process tree per home: services, the agent host and
+1. **Boundary.** `meiva-root` owns one full process tree per home: services, the agent host and
    PTY hosts, with custody recorded before a spawn, bounded stop with proof, single instance,
    in-place exec for its own upgrade, a sealed manifest checked before every native birth,
    and a tree self-check. It owns no permission content (a lint blocks any permission-domain
@@ -22,7 +22,7 @@ Keep `ava-root`. No change of design or code. The five questions:
    application shutdown can keep the database.
 2. **Prior art.** Process supervision is a solved problem: systemd, launchd, and portable
    supervisors (supervisord, s6, runit, circus). Platform supervisors are rung 1; a portable
-   supervisor under the helper is rung 3; `ava-root` is rung 4. The primary reason `ava-root`
+   supervisor under the helper is rung 3; `meiva-root` is rung 4. The primary reason `meiva-root`
    exists, as the owner stated on 2026-10-02: **on macOS the supervised processes must inherit
    the helper's permissions.** TCC attributes a permission to the responsible process fixed at
    spawn, so every process that needs one must descend from the one authorized, signed helper,
@@ -35,8 +35,8 @@ Keep `ava-root`. No change of design or code. The five questions:
    the secondary reason for the self-written form.
 3. **Simplest option.** Linux alone: one systemd unit per service. macOS plus Linux with one
    OS-pure root: a portable supervisor under the helper, plus whatever custody and sealing
-   Ava adds on top. The first is simpler per platform but gives two lifecycle models; the
-   second removes the supervision loop but not the semantics Ava needs.
+   Meiva adds on top. The first is simpler per platform but gives two lifecycle models; the
+   second removes the supervision loop but not the semantics Meiva needs.
 4. **Failure prevented, and what we now own.** Prevented: four or five stacked ad-hoc layers
    (launchd as attribution root, keepalive and scheduler at once; nursery, watchdog, restarter,
    session server) with a chain that truncates and an owner that is conceptually dangling.
@@ -75,12 +75,12 @@ Qualitative triggers, none a number:
 - **Upkeep costs more than replacing it**, or a second consumer appears that needs the same
   machinery outside this tree.
 - The **platform constraint changes**: a mature supervisor or the platform itself can carry
-  the helper's attribution chain, so the layer's reason shrinks to the Ava-specific semantics.
+  the helper's attribution chain, so the layer's reason shrinks to the Meiva-specific semantics.
 - **Attribution loss is observed in practice** (a process losing its permission after a
   restart), which the CI smoke alone would not have caught: then F12 stops being a debt and
   becomes the first thing to measure.
 
-Exit: a portable supervisor under the helper, keeping only the Ava-specific semantics
+Exit: a portable supervisor under the helper, keeping only the Meiva-specific semantics
 (custody, sealing, stop proof) as a thin layer, or per-service systemd on Linux where the
 platform covers it.
 

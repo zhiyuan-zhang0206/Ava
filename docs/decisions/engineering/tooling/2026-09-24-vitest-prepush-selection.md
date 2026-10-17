@@ -48,7 +48,7 @@ projection; a guard can wait up to 120s or visibly skip. Two observations are
 not a latency distribution or an SLA.
 
 CI data came from `gh api` on
-`repos/zhiyuan-zhang0206/Ava/actions/workflows/ci.yml/runs?status=completed&per_page=30`,
+`repos/zhiyuan-zhang0206/Meiva/actions/workflows/ci.yml/runs?status=completed&per_page=30`,
 then `actions/runs/<id>/jobs?per_page=100`. The snapshot ended at run 35924109833.
 These are the latest ten completed runs with an executed frontend Vitest step,
 including runs failing elsewhere. Durations are `completed_at - started_at`,
@@ -56,16 +56,16 @@ with integer-second API precision; CI Vitest includes `--coverage`.
 
 | Run | Typegen s | tsc s | ESLint s | Vitest + coverage s |
 | --- | ---: | ---: | ---: | ---: |
-| [35924109833](https://github.com/zhiyuan-zhang0206/Ava/actions/runs/35924109833) | 0 | 14 | 38 | 60 |
-| [35923906756](https://github.com/zhiyuan-zhang0206/Ava/actions/runs/35923906756) | 1 | 19 | 56 | 91 |
-| [35923001138](https://github.com/zhiyuan-zhang0206/Ava/actions/runs/35923001138) | 1 | 18 | 51 | 79 |
-| [35922553156](https://github.com/zhiyuan-zhang0206/Ava/actions/runs/35922553156) | 1 | 18 | 51 | 79 |
-| [35921642851](https://github.com/zhiyuan-zhang0206/Ava/actions/runs/35921642851) | 0 | 12 | 33 | 58 |
-| [35918606255](https://github.com/zhiyuan-zhang0206/Ava/actions/runs/35918606255) | 1 | 14 | 41 | 61 |
-| [35917548853](https://github.com/zhiyuan-zhang0206/Ava/actions/runs/35917548853) | 0 | 20 | 54 | 90 |
-| [35915071875](https://github.com/zhiyuan-zhang0206/Ava/actions/runs/35915071875) | 0 | 20 | 54 | 90 |
-| [35912039116](https://github.com/zhiyuan-zhang0206/Ava/actions/runs/35912039116) | 1 | 21 | 58 | 92 |
-| [35910953223](https://github.com/zhiyuan-zhang0206/Ava/actions/runs/35910953223) | 0 | 21 | 55 | 91 |
+| [35924109833](https://github.com/zhiyuan-zhang0206/Meiva/actions/runs/35924109833) | 0 | 14 | 38 | 60 |
+| [35923906756](https://github.com/zhiyuan-zhang0206/Meiva/actions/runs/35923906756) | 1 | 19 | 56 | 91 |
+| [35923001138](https://github.com/zhiyuan-zhang0206/Meiva/actions/runs/35923001138) | 1 | 18 | 51 | 79 |
+| [35922553156](https://github.com/zhiyuan-zhang0206/Meiva/actions/runs/35922553156) | 1 | 18 | 51 | 79 |
+| [35921642851](https://github.com/zhiyuan-zhang0206/Meiva/actions/runs/35921642851) | 0 | 12 | 33 | 58 |
+| [35918606255](https://github.com/zhiyuan-zhang0206/Meiva/actions/runs/35918606255) | 1 | 14 | 41 | 61 |
+| [35917548853](https://github.com/zhiyuan-zhang0206/Meiva/actions/runs/35917548853) | 0 | 20 | 54 | 90 |
+| [35915071875](https://github.com/zhiyuan-zhang0206/Meiva/actions/runs/35915071875) | 0 | 20 | 54 | 90 |
+| [35912039116](https://github.com/zhiyuan-zhang0206/Meiva/actions/runs/35912039116) | 1 | 21 | 58 | 92 |
+| [35910953223](https://github.com/zhiyuan-zhang0206/Meiva/actions/runs/35910953223) | 0 | 21 | 55 | 91 |
 
 Excluded skipped frontend jobs: 35923927185, 35922200221, 35920744976, 35919414731, 35917836996, 35914421734, 35912515446. They are absent observations, not zero-duration tests.
 

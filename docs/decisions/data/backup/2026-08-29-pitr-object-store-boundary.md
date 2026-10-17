@@ -23,7 +23,7 @@ Calling `gcloud` would make a daemon depend on mutable host login and binary
 state, while placing credential paths and command details at a subprocess
 boundary. Direct REST would reimplement Google authentication, resumable upload,
 checksum, precondition, and retry behavior. The official SDK already owns these
-mechanics; Ava owns only the durability and collision policy specific to PITR.
+mechanics; Meiva owns only the durability and collision policy specific to PITR.
 
 This first adapter method is intentionally WAL-only. It stages at most one
 seekable ciphertext for the single uploader worker and rejects source files

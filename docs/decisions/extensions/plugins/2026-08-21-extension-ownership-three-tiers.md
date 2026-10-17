@@ -3,8 +3,8 @@
 ## Context
 
 Plugins, MCP servers and installed skills are owned by the **machine**:
-`~/.ava/plugins/<name>/`, `~/.ava/plugins_config.json`, `~/.ava/mcp_enabled.json`,
-and per-machine `$AVA_HOME/skills/` installs tracked in `$AVA_HOME/installed.json`.
+`~/.meiva/plugins/<name>/`, `~/.meiva/plugins_config.json`, `~/.meiva/mcp_enabled.json`,
+and per-machine `$MEIVA_HOME/skills/` installs tracked in `$MEIVA_HOME/installed.json`.
 Three consequences follow, and all three are ambiguity rather than policy:
 
 - two agents on two machines of one cluster can silently behave differently,
@@ -123,7 +123,7 @@ not bought by this design and should not be assumed from it.
 ## The plugin-spec-v2 S5 revision this slice carries
 
 `conventions/plugin-spec-v2.md`'s context model is
-`Context = {ava_home, db_role, cluster_scope, machine, enabled_set}`. Two of
+`Context = {meiva_home, db_role, cluster_scope, machine, enabled_set}`. Two of
 those five dimensions meant something that this decision changes, and one
 manifest field splits:
 

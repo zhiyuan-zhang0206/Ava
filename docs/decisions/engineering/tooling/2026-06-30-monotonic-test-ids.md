@@ -30,7 +30,7 @@ Make serial ids **monotonic and never reused** within a worker-session:
 `_clean_state` truncates *without* `RESTART IDENTITY`. A straggler write then lands
 on a dead id, never a live one. The SDK self-identity, previously implicit ("the
 first spawn is id 1, which equals the session-global `AGENT_ID = 1`"), becomes
-explicit capture-and-pin: `ava._boot._agent_id = spawn_agent()`.
+explicit capture-and-pin: `meiva._boot._agent_id = spawn_agent()`.
 
 This is defense-in-depth against axis 2, not a fix that requires naming the exact
 leaked writer — and it doubles as the experiment (if the flake dies, the
@@ -61,10 +61,10 @@ reused-id-collision theory is confirmed).
 
 - Tests may no longer assume a concrete id (`== 1`, `== (1, 2, 3)`). Self-identity
   tests capture-and-pin; sequential-allocation tests assert deltas. The migration
-  touched ~35 `spawn_agent()  # placeholder` sites in `tests/ava` (matching the pattern
-  already used in `tests/ava/test_ui.py`) plus one absolute-id assertion in
+  touched ~35 `spawn_agent()  # placeholder` sites in `tests/meiva` (matching the pattern
+  already used in `tests/meiva/test_ui.py`) plus one absolute-id assertion in
   `tests/agent/test_db.py`.
-- The `900_000`-band (`tests/ava` sessions) and e2e PID-offset schemes stay — they are
+- The `900_000`-band (`tests/meiva` sessions) and e2e PID-offset schemes stay — they are
   disjoint-and-non-recycling by design, not the reuse anti-pattern.
 - The full contract lives in
   `docs/current/test-isolation.md` (since removed).

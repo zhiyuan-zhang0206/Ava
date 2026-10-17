@@ -11,7 +11,7 @@ the navigation structure, and a window is its only cursor.
 
 Rejected: keeping the session route as a second axis (two cursors for one
 tree); capping each level at N nodes and serving the finest level that fits
-(the `AVA_RUN_TIMELINE_LAYERS_MAX_NODES` setting is removed). Cost accepted:
+(the `MEIVA_RUN_TIMELINE_LAYERS_MAX_NODES` setting is removed). Cost accepted:
 the response carries every node in the window, so a long-lived agent's
 full-lifetime read is the largest one; narrowing the window is the relief.
 

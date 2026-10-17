@@ -31,7 +31,7 @@ selects content, while the recomputed rank only orders the response for display.
 An unknown, non-boundary, damaged, or depth-ineligible checkpoint id returns a
 terminal empty window instead of guessing another segment.
 
-The backend enforces `AVA_TIMELINE_COMPACT_HISTORY`: `0` keeps compact history
+The backend enforces `MEIVA_TIMELINE_COMPACT_HISTORY`: `0` keeps compact history
 disabled, positive `N` exposes the newest `N` boundaries, and `-1` exposes all
 retained boundaries. At a segment head, paging moves to the next older
 checkpoint only after the caller already holds the segment's re-attached prompt

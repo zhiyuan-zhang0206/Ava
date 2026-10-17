@@ -30,7 +30,7 @@ Three things made that shape a problem beyond the direction decision's general a
 ## Decision
 
 **A turn's configuration is an `AgentSlices` value, resolved once per turn and carried on
-`AvaContext.agent`** (`base/host/env/agent_slices.py`). The host resolves the agent's pins
+`MeivaContext.agent`** (`base/host/env/agent_slices.py`). The host resolves the agent's pins
 (`config_overlay > birth_config`) and plugin pins and builds the slices at the start of each
 turn; nodes and hooks read `runtime.context.require_agent().<slice>.<field>` and pass the slice
 they need to the functions they call. An unpinned field falls through to the live cluster default
@@ -48,7 +48,7 @@ context notes are (`(slices: AgentSlices) -> ...`). A setting no slice names is 
 
 **Code that is not a turn node does not get a different mechanism, only a different root.**
 The exec child and the SDK run one agent per process, so their settings carry that agent's
-overlay (boot applies it); `ava/_settings.py` is their composition root and reads one field at a
+overlay (boot applies it); `meiva/_settings.py` is their composition root and reads one field at a
 time (`agent_setting`) because the child boots on the lite config index and a field outside it
 upgrades the whole config. A process attached to an agent's native state reads the pins its
 attachment holds. The checkpoint saver, shared by all agents, reads the interval the turn names in
@@ -90,8 +90,8 @@ checked differentially over 864 policy-level and 68 real-node scenarios with no 
 - **Resolve slices lazily per field instead of once per turn.** It would let a long turn observe a
   configuration change between two reads of the same field. One resolution per turn gives one value
   per field throughout and one place to test.
-- **Import `AgentSlices` from `base.agents.context`, where `AvaContext` lives.** That package pulls
-  psycopg, redis and the live-events stack, which the exec child and `import ava` keep out of
+- **Import `AgentSlices` from `base.agents.context`, where `MeivaContext` lives.** That package pulls
+  psycopg, redis and the live-events stack, which the exec child and `import meiva` keep out of
   their start on purpose. The module sits beside the config index (`base/host/env`), whose import
   pulls nothing heavy.
 - **Build the full slices in the exec child.** Reading every slice field upgrades the lite config
@@ -132,4 +132,4 @@ checked differentially over 864 policy-level and 68 real-node scenarios with no 
 - One difference from the old retry: LangGraph annotated a failing exception with a note naming the
   task, and the loop does not.
 
-- Forward: `decisions/2026-10-04-ava-state-and-context.md` makes `base.agents.context` light to import (handle types annotation-only), because the exec child now builds an `AvaContext`; the rejected-alternative note that its package pulls psycopg, redis and the live-events stack no longer holds.
+- Forward: `decisions/2026-10-04-meiva-state-and-context.md` makes `base.agents.context` light to import (handle types annotation-only), because the exec child now builds an `MeivaContext`; the rejected-alternative note that its package pulls psycopg, redis and the live-events stack no longer holds.

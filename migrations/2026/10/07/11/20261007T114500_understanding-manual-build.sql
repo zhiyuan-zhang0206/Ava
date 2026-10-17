@@ -1,6 +1,6 @@
 -- Manual build of the understanding tree, session by session (gateway `POST
 -- /api/agents/{id}/understanding/build`). All idempotent (IF NOT EXISTS): db/schema.sql already
--- holds these for a fresh database, and the ava_runner grants are gated on the role's existence
+-- holds these for a fresh database, and the meiva_runner grants are gated on the role's existence
 -- (base/cluster/authority/groups.py grants the same surface at birth and on every start).
 --
 -- understanding_rebuilds: the queue of upper-level rebuilds. A build enqueues one per agent (builds
@@ -46,8 +46,8 @@ COMMENT ON TABLE understanding_builds IS
 
 DO $$
 BEGIN
-    IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'ava_runner') THEN
-        GRANT SELECT, UPDATE ON understanding_rebuilds TO ava_runner;
-        GRANT DELETE ON understanding_group_state TO ava_runner;
+    IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'meiva_runner') THEN
+        GRANT SELECT, UPDATE ON understanding_rebuilds TO meiva_runner;
+        GRANT DELETE ON understanding_group_state TO meiva_runner;
     END IF;
 END $$;

@@ -14,7 +14,7 @@ Bind each client installation to a private ledger under the prod cluster home,
 outside the user-owned client directory. The ledger carries a random
 installation identity, the installed generation and digest, the active
 transaction, and exact cleanup records. The in-target marker is supporting
-evidence only; both records must agree before Ava changes or removes a target.
+evidence only; both records must agree before Meiva changes or removes a target.
 
 Serialize each client's target with a cross-process lock beside its ledger.
 Updates first stage a no-follow copy, then atomically move the current target to
@@ -33,11 +33,11 @@ does not depend on symlink support on Windows.
 External client integration remains optional. A client path conflict, lock
 timeout, permission failure, or rename failure produces a client-labelled
 warning and does not abort core converge. A repository source-integrity failure
-remains fatal because it indicates Ava cannot prove what it is publishing.
+remains fatal because it indicates Meiva cannot prove what it is publishing.
 
 ## Consequences
 
-- A copied or fabricated marker cannot grant Ava authority without the private
+- A copied or fabricated marker cannot grant Meiva authority without the private
   ledger and its matching installation identity.
 - Permission-only changes are user modifications and are preserved.
 - Transaction residue is removed only when its generation marker and complete
@@ -45,7 +45,7 @@ remains fatal because it indicates Ava cannot prove what it is publishing.
 - Routine output names the client and relative skill target, not the user's
   absolute home path.
 - The scope remains exactly Codex, Claude Code, and
-  `operating-ava-cluster` in prod host-global converge.
+  `operating-meiva-cluster` in prod host-global converge.
 
 Supersedes the ownership and replacement protocol in
 [`2026-09-04-project-one-operator-skill-to-external-agents.md`](2026-09-04-project-one-operator-skill-to-external-agents.md),
@@ -67,7 +67,7 @@ rejects multi-link regular files and never changes regular-file modes; only
 directory permissions needed for unlink are widened.
 
 Update 2026-09-04: stage publication and prior-target claim now have durable
-write-ahead phases. Stage content is prepared under Ava's private ledger root;
+write-ahead phases. Stage content is prepared under Meiva's private ledger root;
 publication is one no-replace rename, and recovery requires the prepared/stage
 outcome plus the transaction marker and manifest. Claim recovery similarly
 requires the canonical/prior outcome plus the installed marker and digest.
@@ -86,6 +86,6 @@ POSIX does not provide a portable unlink-by-open-handle primitive. Cleanup now
 moves the residue under the private ledger root, records every file's source
 and quarantine paths plus write-ahead `claiming` state, and terminally retains
 the isolated tree. Restart reconciliation never treats a deterministic
-quarantine name or matching bytes as proof that Ava completed the file claim.
+quarantine name or matching bytes as proof that Meiva completed the file claim.
 An ambiguous or verified file is preserved without chmod, pathname unlink, or
 retry, while the newly activated external skill target remains unblocked.

@@ -2,18 +2,18 @@
 
 ## Context
 
-Ava needs to grow into a general agent via two capability-extension channels:
+Meiva needs to grow into a general agent via two capability-extension channels:
 authored skills (reusable task workflows) and an MCP consumer (connecting to
 external MCP servers). The constraint is the single-tool philosophy: the agent
 has exactly one `execute_code` tool, and all capability is exposed through the
-`ava.*` Python namespace. Any extension mechanism must not reintroduce
+`meiva.*` Python namespace. Any extension mechanism must not reintroduce
 per-capability tool dispatch or per-capability JSON schema maintenance. The
 sandbox model is also fixed: one subprocess per turn, spawned and killed each
-turn, with `ava` imported inside it.
+turn, with `meiva` imported inside it.
 
 ## Decision
 
-Both channels expose through `ava.*` and stay code-as-action.
+Both channels expose through `meiva.*` and stay code-as-action.
 
 **Skills** are discoverable prompt context, not a dispatch path. A skill is a
 `SKILL.md` (frontmatter `name` + `description`, free-form body) plus arbitrary
@@ -36,7 +36,7 @@ config is a Claude-Code-compatible `mcp.json` subset.
   Markdown context lets the agent read, plan, and write the code itself,
   preserving code-as-action. Rejected.
 
-- **MCP via dynamic attribute (`ava.mcp.fs.read_file(...)`).** Looks ergonomic
+- **MCP via dynamic attribute (`meiva.mcp.fs.read_file(...)`).** Looks ergonomic
   but requires lazy module magic and produces vague errors — a server- or
   tool-name typo surfaces as `AttributeError` rather than a precise class. The
   generic `call()` gives clean error layering (`MCPServerNotFound` vs
@@ -62,7 +62,7 @@ config is a Claude-Code-compatible `mcp.json` subset.
 
 - Adding a capability is authoring a `SKILL.md` or pointing `mcp.json` at a
   server — no SDK code, no tool schema, no system-prompt edit. Both surfaces
-  appear automatically in `ava.help()`.
+  appear automatically in `meiva.help()`.
 - The agent owns the decision of which skill applies and how to act on it; skills
   are advisory context, never a forced control path.
 - Errors are explicitly layered into named classes (`SkillNotFound` /

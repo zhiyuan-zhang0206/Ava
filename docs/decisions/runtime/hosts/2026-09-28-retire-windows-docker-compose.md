@@ -12,25 +12,25 @@ that WSL2 gateway.
 
 It no longer describes a data plane the gateway can own:
 
-- It seeds the container superuser from `AVA_DB_ADMIN_PASSWORD` and relies on
+- It seeds the container superuser from `MEIVA_DB_ADMIN_PASSWORD` and relies on
   a start-time `_docker_rekey_superuser`. Neither exists any more: the schema
   owner is NOLOGIN, the administrator is the OS user over `peer` on an
   owner-only socket, and application processes receive only a write
   generation's logins in their launch environment
   ([`2026-09-26-internal-data-plane-always-authenticated.md`](../../data/security/2026-09-26-internal-data-plane-always-authenticated.md)).
 - The gateway's custody of its data plane is native: per-cluster instances
-  under `$AVA_HOME` on the cluster's own ports, `pg_hba` written before the
+  under `$MEIVA_HOME` on the cluster's own ports, `pg_hba` written before the
   postmaster starts and proven behaviourally, PgBouncer owned beside it, and
   every administrative session (release fencing and PITR included)
   custody-checked against the home's own postmaster data directory
-  (`$AVA_HOME/pg`). A container publishing a TCP superuser on fixed ports
+  (`$MEIVA_HOME/pg`). A container publishing a TCP superuser on fixed ports
   satisfies none of that.
 
 ## Decision
 
 User ruling (2026-09-28): delete `docker-compose.windows.yml`. A Windows machine
 runs `agent-runner` only. A gateway on Windows hardware runs inside WSL2
-through the ordinary native Linux path (`ava start --serve-gateway
+through the ordinary native Linux path (`meiva start --serve-gateway
 --serve-agent-runner` with native Postgres, Redis and PgBouncer). Live
 references are removed: `gateway/windows-gateway.md` and the `windows` branch
 of `scripts/provision/database.sh`, which now reports that a Windows unit has

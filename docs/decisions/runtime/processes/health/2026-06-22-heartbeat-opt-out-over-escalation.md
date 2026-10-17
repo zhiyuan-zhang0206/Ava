@@ -24,7 +24,7 @@ Ship the smallest thing that makes "don't disturb me" an **active agent choice**
 - One gateway daemon (`services/heartbeat/`) polls idle agents on a **fixed**
   interval (default 15 min) and sends a plain `chat` inbound nudge to any that
   have been idle past a threshold (default 5 min).
-- The agent opts out with `ava.self.pause_heartbeat(duration)`, which stamps
+- The agent opts out with `meiva.self.pause_heartbeat(duration)`, which stamps
   `agents_meta.heartbeat_paused_until`; the daemon's SELECT skips paused agents.
 - The nudge text itself tells the agent its three honest options: still working
   (do nothing), waiting (pause), or done (terminate). No ack token, no miss

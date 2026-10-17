@@ -24,21 +24,21 @@ limit was upload bandwidth, not the tool.
 Delete the stack and everything that only served it, and build point-in-time
 recovery on WAL-G as separate work:
 
-- `services/pitr/**`, `ava pitr ...`, the two roster entries and their flag
+- `services/pitr/**`, `meiva pitr ...`, the two roster entries and their flag
   gates, the converge step that published the archive shim, the `replication`
   rows `pg_hba.conf` carried for the PITR role, the one-shot GCS-to-Baidu
   migration and speed-test scripts, and every test of them.
 - The physical-backup settings domain (33 keys). The daily dump's off-site
-  destination, the one live part, is now `AVA_BACKUP_OFFSITE_ENDPOINT`,
-  `AVA_BACKUP_OFFSITE_BUCKET` and `AVA_BACKUP_OFFSITE_CREDENTIALS_FILE` in the
-  services domain, beside `AVA_BACKUP_HOUR` and `AVA_BACKUP_KEEP`; the backend
+  destination, the one live part, is now `MEIVA_BACKUP_OFFSITE_ENDPOINT`,
+  `MEIVA_BACKUP_OFFSITE_BUCKET` and `MEIVA_BACKUP_OFFSITE_CREDENTIALS_FILE` in the
+  services domain, beside `MEIVA_BACKUP_HOUR` and `MEIVA_BACKUP_KEEP`; the backend
   switch is gone because OSS is the only backend.
 - The `pitr_remote_inventory` event and its storage-growth alert, the two health
   port slots and pidfile settings, the `google-cloud-storage` and `zstandard`
   direct dependencies, and the base helpers only the stack used
   (`strict_decode`, `read_health_payload`, `init_restricted_process`,
   `restricted_process_env`, `forwarded_proxy_env`, `replace_env_bytes_cas`).
-- The rollback-snapshot archive (`ava pitr snapshot`): a `*_backfill_*` table is
+- The rollback-snapshot archive (`meiva pitr snapshot`): a `*_backfill_*` table is
   dumped by hand with `pg_dump --table` before its retirement.
 
 The last commit on `main` that still contains the stack is the tag
@@ -57,11 +57,11 @@ The last commit on `main` that still contains the stack is the tag
 - **Move it to a plugin or another repository.** No consumer exists.
 - **Keep the Baidu, COS and GCS adapters.** The migration they served is over and
   only OSS is in use.
-- **Keep `ava pitr snapshot`.** It needed the stack's encryption key and store
+- **Keep `meiva pitr snapshot`.** It needed the stack's encryption key and store
   roles to preserve a table the migration lint already requires to be retired.
 - **Rename the off-site keys later.** The keys are official config on both sides
   of the rename (writable, cluster-pinned or host), so the rename is an
-  unset-before, set-after step on `ava config`, and keeping a PITR prefix on the
+  unset-before, set-after step on `meiva config`, and keeping a PITR prefix on the
   one live key would be the leftover that outlives the stack.
 
 ## Consequences
@@ -71,7 +71,7 @@ The last commit on `main` that still contains the stack is the tag
   says so.
 - The physical chain already in object storage has no reader in this repository
   any more. The tag keeps the code that wrote it, and the key file its
-  `AVA_PITR_BACKUP_KEY_FILE` named must not be deleted while anyone may still need
+  `MEIVA_PITR_BACKUP_KEY_FILE` named must not be deleted while anyone may still need
   those objects.
 - The rollout has three manual steps that the upgrade cannot do itself (reset any
   archive settings a home carries, unset the writable retired keys while the old

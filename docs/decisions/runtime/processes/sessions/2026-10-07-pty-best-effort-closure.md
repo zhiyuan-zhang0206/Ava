@@ -14,7 +14,7 @@ periodic member snapshots to manufacture that guarantee. Preserve shell birth
 checks, allocation fencing, isolated development homes and deployment authority.
 Signal-operation failures raise; a surviving known shell remains a failed
 closure. Known job leftovers are diagnostics and do not themselves gate
-`ava stop`. `Outcome.closed` and `Outcome.survivors` retain their wire shapes;
+`meiva stop`. `Outcome.closed` and `Outcome.survivors` retain their wire shapes;
 `survivors` describes only known identities observed alive, not a complete
 inventory of the host.
 

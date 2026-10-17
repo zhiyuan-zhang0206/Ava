@@ -2,7 +2,7 @@
 
 ## Context
 
-`AVA_CLUSTER_SECRET` is the human bearer: the API login, the frontend login, the root of the
+`MEIVA_CLUSTER_SECRET` is the human bearer: the API login, the frontend login, the root of the
 telemetry token. Machine callers already present per-generation machine API tokens
 (`base/host/db_authority/api.py`), and the gateway accepts them on every API route. A read-only
 audit (2026-10-02) found three non-gateway components still holding the secret itself:
@@ -22,7 +22,7 @@ Outside the gateway, the CLI and the root, no component holds the secret.
   input.
 - **Callers of `/send`** send `gateway_auth_headers()`.
 - **The telemetry token** is derived by the root that holds the secret (the gateway home's start)
-  and written to a private file (`$AVA_HOME/db-authority/telemetry-token`, 0600); the heartbeat's
+  and written to a private file (`$MEIVA_HOME/db-authority/telemetry-token`, 0600); the heartbeat's
   station probe reads that file. It does not travel in an environment variable.
 - **Exception: a remote-managed data plane** (`settings.data_plane.is_remote`) keeps no write
   generations and issues no token, so there its gateway-local services present, and its daemons

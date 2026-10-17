@@ -226,7 +226,7 @@ class ShellSessions:
         # The session is the agent's own: the owner's id rides the environment so a script run
         # in it builds a full MeivaContext (`meiva.boot.launched_context`,
         # `owns_loop=False`) and `meiva.DB` / `meiva.REDIS` / the gateway-backed calls work as in
-        # the exec child (ruling 2026-10-04, docs/decisions/agents/context/2026-10-04-ava-state-and-context.md,
+        # the exec child (ruling 2026-10-04, docs/decisions/agents/context/2026-10-04-meiva-state-and-context.md,
         # source 2). Per-creation, from this session's owner — not the creating process's
         # copied value, which the allowlist drops (a frozen pane's stale id).
         session_env["MEIVA_AGENT_ID"] = str(self._agent_id)

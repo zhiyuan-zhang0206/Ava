@@ -97,7 +97,7 @@ spaced.
 `last_resurrect_at` is the per-agent backoff clock — the persistent, per-agent analog
 of the pin-heal backoff (which uses an on-disk file per host). The claim is a single
 atomic UPDATE that stamps `last_resurrect_at = now()` on exactly the rows it selects,
-so a corpse is skipped until `AVA_AUTO_RESURRECT_BACKOFF_SECONDS` (default 5 min) has passed
+so a corpse is skipped until `MEIVA_AUTO_RESURRECT_BACKOFF_SECONDS` (default 5 min) has passed
 — whether the last resurrect failed to launch or launched-then-recrashed. Both churn
 modes are covered by one mechanism.
 
@@ -126,7 +126,7 @@ agents), and the restarter is a separate process from the gateway, so the
 
 Gated on gateway health (a resurrected agent self-fetches config from the gateway at
 boot; resurrecting while the gateway is down would crash-loop it), checked *before* the
-claim so an outage does not burn the backoff clock; and on `AVA_AUTO_RESURRECT_ENABLED`
+claim so an outage does not burn the backoff clock; and on `MEIVA_AUTO_RESURRECT_ENABLED`
 (a cluster-wide kill switch, defaulting on).
 
 ## Boundaries / known limitations

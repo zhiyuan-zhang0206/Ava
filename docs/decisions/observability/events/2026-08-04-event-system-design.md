@@ -1,13 +1,13 @@
 ---
 type: decision
-title: Ava event system — unified event model (Event Stream)
-description: Design ruling 2026-08-04: Ava's event system designed from scratch (target 1000 agents); every signal is one event (unified schema + trace_id); the four legacy mechanisms are four faces of the same event stream; storage scales by tier (Postgres → ClickHouse).
+title: Meiva event system — unified event model (Event Stream)
+description: Design ruling 2026-08-04: Meiva's event system designed from scratch (target 1000 agents); every signal is one event (unified schema + trace_id); the four legacy mechanisms are four faces of the same event stream; storage scales by tier (Postgres → ClickHouse).
 tags: [events, observability, telemetry, audit, architecture, o11y]
 date: 2026-08-04
 status: accepted
 ---
 
-# Ava event system — unified event model (Event Stream)
+# Meiva event system — unified event model (Event Stream)
 
 > Design source: an agent workspace design note (built on a research task +
 > the user's ruling "ignore migration cost, design for the best").
@@ -18,13 +18,13 @@ status: accepted
 
 ## Context
 
-Ava's "events" were four coexisting, unrelated mechanisms (measured 2026-08-04):
+Meiva's "events" were four coexisting, unrelated mechanisms (measured 2026-08-04):
 
 | # | Mechanism | What it is | Stored in | Scale (measured) |
 |---|-----------|------------|-----------|------------------|
 | 1 | `event_log` table | Structured **operation audit**: who did what to whom | Postgres, no partitioning | 138k rows / 48 days |
 | 2 | `agent_events` table | loguru **telemetry sink**: runtime observation (token/turn/exec/log lines) | Postgres, monthly partitions | 5.877M rows / 73 days, 2.14GB |
-| 3 | OTel trace | LLM call **traces** (spans), OpenLLMetry-instrumented → JSONL mirror → Langfuse | Files `$AVA_HOME/traces/` | daily files, 7-day prune |
+| 3 | OTel trace | LLM call **traces** (spans), OpenLLMetry-instrumented → JSONL mirror → Langfuse | Files `$MEIVA_HOME/traces/` | daily files, 7-day prune |
 | 4 | SSE live stream | **non-persisted** live view: Redis pub/sub → gateway SSE → frontend | Redis (transient) | queue 2048, drops when full |
 
 Pain points: three "event" notions mixed in docs and conversation; no registry,
@@ -36,7 +36,7 @@ the status quo does not scale.
 
 ## Decision
 
-**Ava has one event stream. Every behavior — what an agent did, how the system
+**Meiva has one event stream. Every behavior — what an agent did, how the system
 is healthy, what happened inside one LLM call — is a drop in the stream
 (Event), sharing one shape (schema) and one bottle number (trace_id). Three
 tools take water from the stream: the log bucket (ask "what happened"), the
@@ -74,7 +74,7 @@ LogRecord + event.name):
 | Event | LogRecord | every event = a named LogRecord (OTel 2026: events are logs with names) |
 | kind | event.name | the event name = the LogRecord name field; code/DB field uniformly named `event_name` (`kind` is the old name, renamed) |
 | SSE | live projection | SSE is a real-time projection of the stream's latest drops — not persisted, unlike durable events |
-| category | Ava extension | OTel LogRecord has no such field; Ava uses it to drive retention (audit 365d+ / telemetry 90d / log 30d), query permissions, and alerting |
+| category | Meiva extension | OTel LogRecord has no such field; Meiva uses it to drive retention (audit 365d+ / telemetry 90d / log 30d), query permissions, and alerting |
 
 Three key points:
 
@@ -115,7 +115,7 @@ thing; the unified model states their relationship.**
 |--------|---------|
 | Keep the four mechanisms and unify terminology at the doc level | solves naming ambiguity only, not the missing trace join, the missing registry, the missing retention policy, or bare-log noise — storage and queries do not scale to 1000 agents |
 | Physically merge the four into one table now | the "ignore migration cost" ruling bought design freedom, not an immediate migration; physical storage tiers (L1 Postgres / L2 ClickHouse), conceptual unification first |
-| Hierarchical event_name namespaces (e.g. `ava.agent.turn_end`) | incompatible with the existing flat `llm_usage`/`turn_end` names, and OTel already has span hierarchy; flat + registry is enough |
+| Hierarchical event_name namespaces (e.g. `meiva.agent.turn_end`) | incompatible with the existing flat `llm_usage`/`turn_end` names, and OTel already has span hierarchy; flat + registry is enough |
 | Fold `event_log` into `agent_events` (audit and telemetry in one table) | category already drives retention/permission differences — audit immutable 365d+ vs log 30d; one table would mix TTL and permission granularity; the two tables stay as audit / telemetry+log physical partitions |
 
 ## Consequences

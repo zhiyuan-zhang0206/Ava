@@ -44,7 +44,7 @@ Deleted: `OperationAuthority`, `BirthAuthority` (a single-valued token), `begin_
 generation" check, the runbook's manual-rotation section and their tests.
 
 Three things stay shaped like the removed design because production's files carry them. The role names
-`ava_g0_*`, `generations/0.json` and the bundle's generation number stay, since renaming them is
+`meiva_g0_*`, `generations/0.json` and the bundle's generation number stay, since renaming them is
 itself a credential change. A ledger written before this decision, with `counter: 0`, `revoked: []` and
 null `operation`/`direction` in its origin, still loads and is rewritten without them; a ledger that
 records a rotation refuses as corrupt. The origin `cutover` stays readable.
@@ -67,11 +67,11 @@ records a rotation refuses as corrupt. The origin `cutover` stays readable.
 ## Consequences
 
 - No command or procedure replaces the write generation. A credential that did reach the public
-  internet is handled by re-birthing the home (`ava cluster destroy`, `ava init`), not by a rotation
+  internet is handled by re-birthing the home (`meiva cluster destroy`, `meiva init`), not by a rotation
   here. The human secret (`rotate_cluster_secret.py`) and the Redis passwords
   (`rotate_data_plane_secrets.py`) still rotate on their own.
 - A start no longer repairs a catalog that drifted: it refuses and names the role.
-- `ava cluster db-authority install-unit` stays for a fresher bundle (an expiry, a rotated telemetry
+- `meiva cluster db-authority install-unit` stays for a fresher bundle (an expiry, a rotated telemetry
   token); a bundle must carry the installed generation's credential digest.
 - Gateway session binding to the active machine token is unchanged; it simply has nothing that revokes
   the token while a gateway runs.

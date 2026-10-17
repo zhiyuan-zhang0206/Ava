@@ -181,7 +181,7 @@ def test_tests_roots_are_the_outermost_tests_directory_of_a_package_module() -> 
             "base/packages/mod.py",
         ],
         pytest_test_hosts(_SYNTHETIC_PYPROJECT),
-    ) == ["meiva_builtins/skills/integrations/gmail/scripts/tests", "base/packages/tests"]
+    ) == ["base/packages/tests", "meiva_builtins/skills/integrations/gmail/scripts/tests"]
 
 
 def test_an_entry_is_written_only_where_the_package_rules_differ_from_the_standard() -> None:
@@ -193,9 +193,9 @@ def test_an_entry_is_written_only_where_the_package_rules_differ_from_the_standa
     ]
     text = gen.generate(_SYNTHETIC_PYPROJECT, tracked)
     assert _generated_roots(text) == [
+        "base/x/tests",
         "meiva/z/tests",
         "meiva_builtins/skills/integrations/web-ai/scripts/tests",
-        "base/x/tests",
     ]
     region = text[text.index(gen.BEGIN) : text.index(gen.END)]
     assert (
@@ -209,7 +209,7 @@ def test_an_entry_is_written_only_where_the_package_rules_differ_from_the_standa
     for root in [*_generated_roots(text), "cli/y/tests"]:
         assert effective_rules(config, root) == TESTS_STANDARD, root
     assert set(effective_rules(config, "base/x").values()) == {"error"}
-    assert config["executionEnvironments"][1]["root"] == "meiva/z/tests"  # above `base`
+    assert config["executionEnvironments"][1]["root"] == "base/x/tests"  # above `base`
 
 
 def test_generating_twice_changes_nothing_and_the_output_is_sorted() -> None:

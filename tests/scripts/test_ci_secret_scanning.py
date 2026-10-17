@@ -87,7 +87,7 @@ def _assert_gitleaks_policy_allowlists() -> None:
         "condition": "AND",
         "paths": [r"^\.env\.example$"],
         "regexTarget": "match",
-        "regexes": [r"(?s)MEIVA_TELEGRAM_BOT_TOKEN=\nMEIVA_TELEGRAM_OWNER_ID=0"],
+        "regexes": [r"(?s)[A-Z]{3,5}_TELEGRAM_BOT_TOKEN=\n[A-Z]{3,5}_TELEGRAM_OWNER_ID=0"],
     }
     assert allowlists[2] == {
         "description": "Weekly planner demo localStorage key",

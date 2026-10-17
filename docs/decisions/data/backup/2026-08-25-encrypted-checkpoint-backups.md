@@ -2,7 +2,7 @@
 
 ## Context
 
-LangGraph checkpoint tables are the only copy of Ava conversation history.
+LangGraph checkpoint tables are the only copy of Meiva conversation history.
 Their previous exclusion from the daily dump made a database restore lose every
 conversation. The backup command also exposed its full database URL, including
 the password, in process argv for as long as an hour.

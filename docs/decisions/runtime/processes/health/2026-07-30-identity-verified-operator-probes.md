@@ -2,7 +2,7 @@
 
 ## Context
 
-Ava had two answers to "is this service up", and they disagreed.
+Meiva had two answers to "is this service up", and they disagreed.
 
 The **watchdog** stopped believing a bare HTTP 200 after the 2026-07-24 outage,
 where a pytest-leaked restarter daemon fell back to prod's default 8102 and
@@ -12,11 +12,11 @@ answered 200 for 98 minutes while prod's own restarter was dead. Since then
 `decisions/2026-07-29-identity-mismatch-is-terminal.md` a mismatch is a
 terminal verdict rather than a respawn trigger.
 
-The **operator surfaces** — `ava status`, `ava cluster health-probe`'s
-per-service check, `ava start`'s readiness gate — still decided on a plain 2xx
+The **operator surfaces** — `meiva status`, `meiva cluster health-probe`'s
+per-service check, `meiva start`'s readiness gate — still decided on a plain 2xx
 (`cli/commands/_probe.py:_probe_service`). So on 2026-07-26, when both of the
 `win` unit's monitored daemons were dead and its watchdog had correctly stopped
-retrying, `ava status` would have read **green**: the WSL2 unit's daemons were
+retrying, `meiva status` would have read **green**: the WSL2 unit's daemons were
 answering those ports through the localhost relay. The only signal was one ERROR
 line among 402, inside a 53 MB watchdog log on a Windows box.
 
@@ -48,7 +48,7 @@ watchdog's pidfile — and the consumers **print which of the two a row got**
 (`✓ (identity)` vs `✓ (http)`), so "liveness only" is a stated property rather
 than something that looks like an oversight. A failing row carries the probe's
 `detail`, and the health probe's owner alert carries it too: "answering, but its
-home is `/home/ava/.ava`" is actionable where "not responding" is not.
+home is `/home/meiva/.meiva`" is actionable where "not responding" is not.
 
 The surfaces report `alive` only. **`terminal` stays the watchdog's business** —
 "can a respawn win" is a question only the thing that would respawn needs.
@@ -68,7 +68,7 @@ rejected for the usual reason: it trades a crash for a mystery, and "this probe
 is broken" and "this daemon is down" need different actions.
 
 **The browser is identified by its profile plus the listening socket.** A Chrome
-whose argv carries this cluster's `--user-data-dir=$AVA_HOME/chrome-profile` (the
+whose argv carries this cluster's `--user-data-dir=$MEIVA_HOME/chrome-profile` (the
 strictly positive token `services/browser/orphan.py` already established) **and**
 which holds the LISTEN socket on the CDP port being dialled. Both halves are
 load-bearing: the profile half rejects another unit's browser, and the socket
@@ -96,7 +96,7 @@ same profile token the process table gives for free.
 the one the issue leaned toward: put the identity check where identity lives.
 Rejected for now because on POSIX the daemon `os.execvp`s into Chrome — the session
 pane's process *is* Chrome, which is what makes "kill the pane, kill the browser"
-true and what `ava stop` depends on. Serving a `/healthz` requires keeping a
+true and what `meiva stop` depends on. Serving a `/healthz` requires keeping a
 Python supervisor alive there, changing the teardown contract, the
 `SingletonLock` handoff reasoning and the Windows/POSIX split all at once. That
 is a browser-architecture change, not a probe change, and it should not ride
@@ -121,8 +121,8 @@ identification there would give this cluster's Chrome two definitions, so
 - Every operator surface now performs real identity work per probed service. That
   is one loopback HTTP call plus, for the browser, one process-table pass — the
   same cost the watchdog already pays every 60s.
-- An occupant on a unit's port now reads ✗ on `ava status` and fails
-  `ava cluster health-probe`'s check 5 (alert-only, so it still cannot trigger an
+- An occupant on a unit's port now reads ✗ on `meiva status` and fails
+  `meiva cluster health-probe`'s check 5 (alert-only, so it still cannot trigger an
   auto-rollback). Anyone who was reading green through such a condition will start
   seeing red; that is the point.
 - The browser healthcheck gained a terminal branch: another unit's Chrome on the

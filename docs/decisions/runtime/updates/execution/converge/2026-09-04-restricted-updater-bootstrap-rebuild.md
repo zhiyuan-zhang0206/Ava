@@ -2,7 +2,7 @@
 
 PR #1536 was reconstructed on top of the merged native-launcher observation and
 transport-encryption work instead of rebasing its inherited historical stack.
-The retained scope is the restricted immutable `ava-ops` A-to-B updater hop and
+The retained scope is the restricted immutable `meiva-ops` A-to-B updater hop and
 its native-reader bridge. Plugin discovery, PTY lifecycle, and unrelated branch
 changes are deliberately excluded.
 
@@ -10,7 +10,7 @@ The reconstruction closes five review blockers before the hop can be considered
 a trustworthy bootstrap primitive:
 
 - resume recollects the real unit inventory and permits only the independently
-  verified single `ava-ops` A/B process identity to change;
+  verified single `meiva-ops` A/B process identity to change;
 - first ownership transfer CAS-checks the exact dead predecessor handoff rather
   than replacing whatever stale marker happens to be present;
 - compensation evidence uses a bounded version-1 sidecar whose malformed bytes
@@ -27,7 +27,7 @@ not permission for normal service activation or deployment.
 
 Update: the Linux source-absent proof exposed two recovery-boundary mismatches.
 Journal phases now stay a strict tuple until JSON serialization, and a dead-owner
-resume can recollect the deliberately empty Ava launcher set after exact cron
+resume can recollect the deliberately empty Meiva launcher set after exact cron
 quiesce. The latter does not loosen compensation: raw crontab bytes must still
 match the journaled original or its exact restricted-entry removal.
 

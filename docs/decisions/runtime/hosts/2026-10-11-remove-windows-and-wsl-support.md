@@ -2,7 +2,7 @@
 
 ## Context
 
-Windows reached Ava in three steps. [`2026-06-18-windows-wsl2-docker-path.md`](2026-06-18-windows-wsl2-docker-path.md)
+Windows reached Meiva in three steps. [`2026-06-18-windows-wsl2-docker-path.md`](2026-06-18-windows-wsl2-docker-path.md)
 chose WSL2 plus a Docker Compose data plane. [`2026-07-28-windows-agent-runner-only.md`](2026-07-28-windows-agent-runner-only.md)
 scoped a native Windows unit to `agent-runner`, and
 [`2026-09-28-retire-windows-docker-compose.md`](2026-09-28-retire-windows-docker-compose.md)
@@ -10,7 +10,7 @@ retired the compose file, leaving a gateway on Windows hardware inside WSL2.
 Native Windows service startup was retired before this record; what stayed was
 the code that served it: platform branches (`is_windows`, `SIGBREAK`, the
 EDB Postgres path, the Windows venv layout, `CREATE_NO_WINDOW`), AF_UNIX
-capability gates that only a Windows host could fail, the `ava boot` retry loop
+capability gates that only a Windows host could fail, the `meiva boot` retry loop
 for schedulers that cannot retry, the WSL boot-task renderer, and the setup
 guides for both shapes. The desktop app also built and signed a Windows
 installer.
@@ -20,7 +20,7 @@ a deployment that is not supported.
 
 ## Decision
 
-User ruling (2026-10-11): Ava supports macOS and Linux only. Windows and WSL
+User ruling (2026-10-11): Meiva supports macOS and Linux only. Windows and WSL
 are removed, not parked.
 
 - Runtime code: the platform predicates and constants, the Windows branches in
@@ -28,7 +28,7 @@ are removed, not parked.
   EDB Postgres path, the Windows OpenSSH and collector artifacts.
 - Capability gates that existed only for a host without `AF_UNIX`: the
   `unix_socket` MCP requirement and the roster gates behind it.
-- `ava boot` and `cli/boot_retry.py`: macOS delegates retry to launchd and
+- `meiva boot` and `cli/boot_retry.py`: macOS delegates retry to launchd and
   Linux to the systemd boot unit, and nothing registered the command.
 - The WSL boot-task renderer, the WSL and Windows setup guides, the Windows
   gateway stub, and the Google Drive `/mnt/<letter>` candidates.

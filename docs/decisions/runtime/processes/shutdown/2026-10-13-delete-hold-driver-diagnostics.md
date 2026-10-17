@@ -3,25 +3,25 @@
 ## Context
 
 A maintenance hold (`deploy-pause-owner.json`) used to carry a `driver`: the pid, birth time and
-argv of the process tree that ran the `ava stop` which took it, re-stamped at every ladder step
+argv of the process tree that ran the `meiva stop` which took it, re-stamped at every ladder step
 (`hold_driver`, `pause_owner.refresh_driver`, the `driver=` plumbing through `cohort.prepare` and
 `pause_agents`). Its only reader was a probe, `liveness()`, shown as `driver=alive/dead/missing`
-by `ava status` and as `hold.driver` by `ava status --json`. Nothing acted on a `dead` reading.
+by `meiva status` and as `hold.driver` by `meiva status --json`. Nothing acted on a `dead` reading.
 The controller that once released a stranded hold on it (`stranded_pause`) was deleted on
 2026-09-29, and the multi-command ladder that needed a shepherd across commands went with
 [the manual maintenance verbs](../../updates/execution/converge/2026-10-03-delete-manual-maintenance-verbs.md).
-Today a hold is taken by `ava stop` or `ava restart` and released by `ava start`, and nothing
+Today a hold is taken by `meiva stop` or `meiva restart` and released by `meiva start`, and nothing
 runs the steps one at a time.
 
 The question the probe answered ("is another stop still running?") already has a stronger
-answer. `ava stop`, `ava restart` and `ava start` run under one exclusive OS lock on the home
+answer. `meiva stop`, `meiva restart` and `meiva start` run under one exclusive OS lock on the home
 whose holder record names the last holder's pid; the lock dies with its process. The status
 journal `run/lifecycle-op.json` records the pid, the phase timeline and the completion of the
 running or last stop. Neither can be stale in the way a recorded argv and birth time can.
 
 `scripts/host_ops/oob_triage.py` was the only consumer of `hold.driver`: an offline script that
-classified a held host from `ava status --json` (falling back to the raw journal) and rendered an
-`ava start` command. Its main read path took `payload["driver"]` and, on a missing key, fell back
+classified a held host from `meiva status --json` (falling back to the raw journal) and rendered an
+`meiva start` command. Its main read path took `payload["driver"]` and, on a missing key, fell back
 silently to the raw journal and classified every active hold `undetermined`. Its `stranded` class
 read a `failures` field that holds no longer carry.
 
@@ -29,17 +29,17 @@ read a `failures` field that holds no longer carry.
 
 1. **Delete the driver.** `hold_driver` and its test helpers, `PauseOwnerSnapshot.driver`,
    `refresh_driver`, the `driver` / `refresh_driver` parameters of `begin_maintenance`,
-   `change_maintenance`, `cohort.prepare` and `pause_agents`, the stamp `ava stop` minted, and the
+   `change_maintenance`, `cohort.prepare` and `pause_agents`, the stamp `meiva stop` minted, and the
    now unused `create_time_matches` primitive.
-2. **Shrink the hold report, keep it.** `ava status` and `ava status --json` still print the
+2. **Shrink the hold report, keep it.** `meiva status` and `meiva status --json` still print the
    hold's status, operation, acquired-at, maintenance payload and scope, offline and without
    probing anything. `status` and `maintenance.phase` are what the fleet update's start-of-work
    refusal reads; they are unchanged. A test pins the exact key set of the `hold` object.
 3. **Delete `oob_triage`, script and tests, in the same change.** Splitting them would leave the
    script silently degraded to `undetermined`. Its remaining content (read the hold, print
-   `ava start`) is what `ava status` already shows.
+   `meiva start`) is what `meiva status` already shows.
 4. **Document the replacement.** The operations guide now says how to tell whether a stop is
-   still running: `lifecycle-op.json`, or `ava start`, which names the lock holder when it cannot
+   still running: `lifecycle-op.json`, or `meiva start`, which names the lock holder when it cannot
    take the lock.
 5. **Old journals.** The journal decoder reads only the keys it knows, so a journal written with a
    `driver` key reads whole (the key is ignored, never parsed, so a malformed value cannot make a
@@ -61,11 +61,11 @@ read a `failures` field that holds no longer carry.
 
 ## Consequences
 
-- `ava status` no longer says whether the process that took the hold is alive. An operator reads
+- `meiva status` no longer says whether the process that took the hold is alive. An operator reads
   the hold's age from `acquired_at` and the process state from `lifecycle-op.json`.
-- `ava status --json` loses its `hold.driver` object. The repository has no other reader.
+- `meiva status --json` loses its `hold.driver` object. The repository has no other reader.
   Anything outside it that parsed `driver` must stop.
-- No hold exit changes: `ava start`, a rerun of `ava stop`, and a failed restart releasing the hold
+- No hold exit changes: `meiva start`, a rerun of `meiva stop`, and a failed restart releasing the hold
   its own process took never read the driver, and the compare-and-set on `(holder, acquired_at,
   maintenance)` never included it.
 - The process-identity primitives that kill or adopt processes (`stable_create_time`,

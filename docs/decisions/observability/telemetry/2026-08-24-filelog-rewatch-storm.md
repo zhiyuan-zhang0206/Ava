@@ -2,7 +2,7 @@
 
 Collector 0.155.0 fingerprints files from their leading content. Agent main
 stdout files shared the same telemetry banner prefix, so a broad
-`$AVA_HOME/logs/*.out.log` receiver repeatedly treated collision peers as new
+`$MEIVA_HOME/logs/*.out.log` receiver repeatedly treated collision peers as new
 files. With archive metadata disabled and no local transcript retention, the
 collision set produced a sustained watch storm and unbounded disk growth.
 

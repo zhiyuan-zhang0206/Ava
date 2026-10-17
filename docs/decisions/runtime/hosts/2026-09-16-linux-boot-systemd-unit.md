@@ -4,7 +4,7 @@
 
 The Linux boot path was a user-crontab `@reboot` entry
 (`shared/os_autostart`): cron fires the line exactly once, so the retry loop
-lives inside a child process (`cli/boot_retry.py`, `ava boot`) that nothing
+lives inside a child process (`cli/boot_retry.py`, `meiva boot`) that nothing
 supervises — nothing restarts it if it dies or wedges, and a single convergence
 attempt that hangs blocks the next one. macOS gets this property from launchd
 (`KeepAlive`); on Linux the supervisor of record is systemd, which the cron
@@ -19,11 +19,11 @@ platform must state is in `shared/boot_policy.py`: retry every
 ## Decision
 
 On a host whose service manager is systemd, the boot path is a **system**
-(distribution-level) unit `ava-boot.<home-slug>.service`, installed by
-`ava cluster boot-unit install` (`shared/os_boot_unit.py`):
+(distribution-level) unit `meiva-boot.<home-slug>.service`, installed by
+`meiva cluster boot-unit install` (`shared/os_boot_unit.py`):
 
-- `ExecStart` is `$AVA_HOME/bin/ava-boot-converge.sh`, a one-attempt
-  convergence script (`ava start --no-readiness-gate`); exit 0 means converged,
+- `ExecStart` is `$MEIVA_HOME/bin/meiva-boot-converge.sh`, a one-attempt
+  convergence script (`meiva start --no-readiness-gate`); exit 0 means converged,
   non-zero means the unit retries — the exit code IS the retry contract.
 - The retry is systemd's: `Restart=on-failure`, `RestartSec=60`,
   `StartLimitIntervalSec=0` (no attempt cap; amended 2026-10-12 to
@@ -36,7 +36,7 @@ On a host whose service manager is systemd, the boot path is a **system**
   `_register_linux` leaves the crontab entry out and removes a stale one; the
   enable step itself removes it in the same call. A staged install
   (`--no-enable`) keeps the crontab entry live until the switch.
-- Hosts whose service manager is not systemd keep the crontab + `ava boot`
+- Hosts whose service manager is not systemd keep the crontab + `meiva boot`
   path unchanged.
 
 ## Alternatives rejected
@@ -56,8 +56,8 @@ On a host whose service manager is systemd, the boot path is a **system**
 
 - Privileged steps (`/etc/systemd/system`, enable/start) go through `sudo -n`,
   same no-prompt stance as `shared.macos_firewall`; failures raise actionably.
-- The unit's enable state is per-home state; `ava cluster boot-unit status`
-  reports it (unit/script/state/cron-entry), and `ava cluster destroy` removes
+- The unit's enable state is per-home state; `meiva cluster boot-unit status`
+  reports it (unit/script/state/cron-entry), and `meiva cluster destroy` removes
   the unit with the other OS jobs.
 - Drills and reviewed rollouts can stage the files (`--no-enable`) without
   switching the live boot path.

@@ -20,7 +20,7 @@ can grant access.
 `pyproject.toml` declares responsibility prefixes and exact entry modules:
 
 ```toml
-[[tool.ava.public_contracts.components]]
+[[tool.meiva.public_contracts.components]]
 module = "base.db"
 entry_modules = ["base.db.handle", "base.db.transaction"]
 ```
@@ -61,15 +61,15 @@ launder a known private key into a public member.
 
 ## Agent-facing SDK surface
 
-The existing `ava.*` metadata, Installation and namespace generators own the
+The existing `meiva.*` metadata, Installation and namespace generators own the
 agent-facing surface. The generic checker consumes exact static provenance from
 the SDK declaration owner instead of introducing a second member list.
-Canonical `__all_for_ava__` markers and supported built-in contribution syntax
+Canonical `__all_for_meiva__` markers and supported built-in contribution syntax
 prove exposure and retain the actual definition owner, including its private
 implementation spelling. This grants only the declared SDK exposure, never
 direct private access or a general Python component entry.
 
-The root namespace needs its real canonical marker. Binding `ava` does not
+The root namespace needs its real canonical marker. Binding `meiva` does not
 certify a member or a namespace call. Every subsequent SDK access needs an exact
 proof; missing, opaque, conflicting and runtime-generated declarations retain
 explicit failing `Unknown` diagnostics. Static and conditional plugin

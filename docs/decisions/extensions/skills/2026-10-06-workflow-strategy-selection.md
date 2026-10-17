@@ -18,4 +18,4 @@ introduces no new agent type, workflow registry, scheduler, or budget controller
 Budget and authority commitments continue to govern every selected method.
 
 The current procedure is owned by
-[Workflow](../../../../ava_builtins/skills/practice/ava-workflow/SKILL.md).
+[Workflow](../../../../meiva_builtins/skills/practice/meiva-workflow/SKILL.md).

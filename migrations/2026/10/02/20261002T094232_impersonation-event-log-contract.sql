@@ -247,8 +247,8 @@ REVOKE ALL ON FUNCTION public.close_impersonation_event_admission(UUID) FROM PUB
 REVOKE ALL ON FUNCTION public.seal_impersonation_event_participant(UUID,TEXT,TEXT,TEXT,BIGINT) FROM PUBLIC;
 DO $$
 BEGIN
-    IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname='ava_runner') THEN
-        GRANT EXECUTE ON FUNCTION public.close_impersonation_event_admission(UUID) TO ava_runner;
-        GRANT EXECUTE ON FUNCTION public.seal_impersonation_event_participant(UUID,TEXT,TEXT,TEXT,BIGINT) TO ava_runner;
+    IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname='meiva_runner') THEN
+        GRANT EXECUTE ON FUNCTION public.close_impersonation_event_admission(UUID) TO meiva_runner;
+        GRANT EXECUTE ON FUNCTION public.seal_impersonation_event_participant(UUID,TEXT,TEXT,TEXT,BIGINT) TO meiva_runner;
     END IF;
 END $$;

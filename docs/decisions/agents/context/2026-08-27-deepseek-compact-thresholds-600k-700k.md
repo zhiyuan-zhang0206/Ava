@@ -9,7 +9,7 @@
 The deepseek entries pinned at soft 374k / hard 512k (task #581,
 [`2026-08-01-deepseek-compact-thresholds.md`](2026-08-01-deepseek-compact-thresholds.md))
 were measured against the flat 30/40 rule and DeepSeek's published trigger, not
-against Ava's own production traffic. A 2026-08-27 fleet analysis (200 recently
+against Meiva's own production traffic. A 2026-08-27 fleet analysis (200 recently
 active workers, per-call `llm_usage` accounting) closed that gap:
 
 - Observed per-call input tops out at **513,831** tokens in the sample: one
@@ -60,7 +60,7 @@ The ceiling knob stays unused roster-wide.
   (e.g. Anthropic entries) whose cached-read pricing is 9–23× DeepSeek's and
   whose cache TTL makes large prefixes strictly more expensive; their economics
   point the other way. Only the deepseek entries move.
-- **Env-level `AVA_COMPACT_REMINDER_FRACTION` / `AVA_AUTO_COMPACT_FRACTION`**:
+- **Env-level `MEIVA_COMPACT_REMINDER_FRACTION` / `MEIVA_AUTO_COMPACT_FRACTION`**:
   cluster-wide, would hit every model — conflicts with the per-model scope above.
 
 ## Consequences
@@ -78,5 +78,5 @@ The ceiling knob stays unused roster-wide.
   same evidence base.
 
 <!-- Evidence: 2026-08-27 fleet analysis, agent #1289 — codeact-bench/ dataset in
-     ~/.ava/workspaces/1289/codeact-bench/ (q6_limit_counterfactual.py,
+     ~/.meiva/workspaces/1289/codeact-bench/ (q6_limit_counterfactual.py,
      q5_pull_durations.py). -->

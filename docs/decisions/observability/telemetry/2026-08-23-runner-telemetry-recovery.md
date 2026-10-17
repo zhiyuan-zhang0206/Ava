@@ -13,7 +13,7 @@ advances independently of agent activity and identifies the exporter that was
 blind during the 2026-08-23 incident. Prometheus and Loki samples older than
 five minutes make the fleet graph visibly stale and prevent both cache writes.
 
-The Prometheus-native `ava-ops-gateway-metrics-silent` rule watches the same
+The Prometheus-native `meiva-ops-gateway-metrics-silent` rule watches the same
 heartbeat without depending on gateway events reaching Loki. The existing R6
 rule remains the broader whole-event-stream silence detector. The OTLP switch
 is documented as JSONL-only when off; the retired Postgres events copy is a

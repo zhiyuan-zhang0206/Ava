@@ -8,7 +8,7 @@
 ## Summary
 
 A worktree command inherited the prod `VIRTUAL_ENV`, so `uv pip install -e .`
-rewrote prod's `_editable_impl_ava.pth` to name the disposable worktree. Deleting
+rewrote prod's `_editable_impl_meiva.pth` to name the disposable worktree. Deleting
 that worktree left every prod interpreter importing through a dangling pointer;
 all agents lost `execute_code` for 12 minutes. The lasting rule is that an
 editable install belongs to whichever virtualenv is active, not whichever tree
@@ -19,7 +19,7 @@ and worktree operations must clear `VIRTUAL_ENV` explicitly.
 
 - A development command ran from a worktree while its process environment still
   carried the prod virtualenv.
-- `uv pip install -e .` updated prod's `_editable_impl_ava.pth` to the worktree
+- `uv pip install -e .` updated prod's `_editable_impl_meiva.pth` to the worktree
   path. The worktree still existed, so imports continued and the corruption was
   latent.
 - Routine worktree cleanup deleted that path. Prod imports then failed with
@@ -58,7 +58,7 @@ The safety nets missed it independently:
 - `shared/editable_install.py` finds both POSIX/WSL and Windows virtualenv
   layouts, accepts only exact stable roots, repairs poisoned prod pointers, and
   emits the warning-level `editable_pth_repaired` event.
-- The guard is a host-global converge step. `ava start` runs the same step;
+- The guard is a host-global converge step. `meiva start` runs the same step;
   worktree converge skips it before it can touch the worktree's legal pointer.
 - Every Python update/recovery/rollback sync uses one permission window, and the
   Windows native update chain reaches the same seam. The exact original mode is
