@@ -34,7 +34,15 @@ def test_contexts_keep_live_deadlines_and_rebuild_inputs_without_an_sdk_installa
             reads.append(label)
             return values["deadline"]
 
-        return MeivaContext(clients=ClientSet(factories={GatewayTransportInputs: build}))
+        return MeivaContext(
+            clients=ClientSet(
+                gateway_url="http://host.test",
+                gateway=lambda url: httpx.Client(
+                    base_url=url, transport=httpx.MockTransport(answer)
+                ),
+                factories={GatewayTransportInputs: build},
+            )
+        )
 
     def answer(request: httpx.Request) -> httpx.Response:
         seen.append(request.extensions["timeout"]["read"])
@@ -42,19 +50,15 @@ def test_contexts_keep_live_deadlines_and_rebuild_inputs_without_an_sdk_installa
 
     first, second = context("first", first_values), context("second", second_values)
     assert reads == builds == []
-    with httpx.Client(base_url="http://host.test", transport=httpx.MockTransport(answer)) as client:
-        for owner in (first, second):
-            with owner.clients.using_gateway(client):
-                assert memory_search("query", 3, purpose="search", context=owner) == []
-        first_values["deadline"] = 12.0
-        for owner in (first, second):
-            with owner.clients.using_gateway(client):
-                assert memory_search("query", 3, purpose="search", context=owner) == []
-        previous = first.clients.get(GatewayTransportInputs)
-        first.clients.close()
-        with first.clients.using_gateway(client):
-            assert memory_search("query", 3, purpose="search", timeout=4.0, context=first) == []
-        assert first.clients.get(GatewayTransportInputs) is not previous
+    for owner in (first, second):
+        assert memory_search("query", 3, purpose="search", context=owner) == []
+    first_values["deadline"] = 12.0
+    for owner in (first, second):
+        assert memory_search("query", 3, purpose="search", context=owner) == []
+    previous = first.clients.get(GatewayTransportInputs)
+    first.clients.close()
+    assert memory_search("query", 3, purpose="search", timeout=4.0, context=first) == []
+    assert first.clients.get(GatewayTransportInputs) is not previous
     assert seen == [11.0, 24.0, 15.0, 24.0, 7.0]
     assert reads == ["first", "second", "first", "second"]
     assert builds == ["first", "second", "first"]
@@ -98,7 +102,13 @@ def test_attempt_count_is_read_once_and_each_backoff_reads_the_current_delay(
         retry_delay_reader=delay,
         memory_deadline_reader=lambda: 15.0,
     )
-    context = MeivaContext(clients=ClientSet(factories={GatewayTransportInputs: lambda: inputs}))
+    context = MeivaContext(
+        clients=ClientSet(
+            gateway_url="http://host.test",
+            gateway=lambda url: httpx.Client(base_url=url, transport=httpx.MockTransport(answer)),
+            factories={GatewayTransportInputs: lambda: inputs},
+        )
+    )
     sends = 0
 
     def answer(request: httpx.Request) -> httpx.Response:
@@ -111,11 +121,10 @@ def test_attempt_count_is_read_once_and_each_backoff_reads_the_current_delay(
             raise httpx.ConnectError("retry this attempt", request=request)
         return httpx.Response(200)
 
-    with (
-        httpx.Client(base_url="http://host.test", transport=httpx.MockTransport(answer)) as client,
-        context.clients.using_gateway(client),
-    ):
+    try:
         assert post("/api/x", context=context).status_code == 200
+    finally:
+        context.clients.close()
     assert sends == 3
     assert retry_waits == [2.0, 8.0]
     assert trace == ["attempts", "send", "delay", "send", "delay", "send"]

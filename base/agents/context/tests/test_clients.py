@@ -107,22 +107,49 @@ def test_close_closes_the_connections_it_made_and_keeps_going_past_a_failure(
     assert redis.closed  # closed despite the SQL close failing
 
 
-def test_using_gateway_routes_and_restores_without_closing_the_provided_client() -> None:
+def test_close_releases_the_gateway_client_the_set_built_and_the_next_use_rebuilds() -> None:
     clients = ClientSet(
         gateway_url="http://own.test", gateway=lambda url: httpx.Client(base_url=url)
     )
     own = clients.gateway
-    provided = httpx.Client(base_url="http://provided.test")
-
-    with clients.using_gateway(provided) as active:
-        assert active is provided
-        assert clients.gateway is provided
-    assert clients.gateway is own
 
     clients.close()
     assert own.is_closed
-    assert not provided.is_closed  # never the set's to close
-    provided.close()
+    rebuilt = clients.gateway
+    assert rebuilt is not own
+    assert not rebuilt.is_closed
+    clients.close()
+    assert rebuilt.is_closed
+
+
+def test_a_derived_gateway_never_reaches_the_owner_it_came_from() -> None:
+    parent = ClientSet(
+        gateway_url="http://own.test", gateway=lambda url: httpx.Client(base_url=url)
+    )
+    handed = httpx.Client(base_url="http://derived.test")
+    derived = parent.with_gateway(lambda _url: handed)
+    seen: dict[str, httpx.Client] = {}
+    barrier = threading.Barrier(2)
+
+    def read(name: str, clients: ClientSet) -> None:
+        barrier.wait(timeout=5)
+        seen[name] = clients.gateway
+
+    threads = [
+        threading.Thread(target=read, args=(name, clients))
+        for name, clients in (("derived", derived), ("parent", parent))
+    ]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join(timeout=5)
+
+    assert seen["derived"] is handed
+    assert seen["parent"] is not handed
+    assert seen["parent"].base_url.host == "own.test"
+    parent.close()
+    assert not handed.is_closed
+    handed.close()
 
 
 def test_a_client_that_cannot_be_built_raises_at_the_call() -> None:

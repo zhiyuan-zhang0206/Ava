@@ -189,24 +189,20 @@ async def test_gateway_error_leaves_the_turn_running(
     hook = _loaded.passive_memory_recall_before_llm
     state = _state([AIMessage(content="prev", id="a0"), _inbound("user")])
     clients = ClientSet(
+        gateway_url="http://gateway.test",
+        gateway=lambda url: httpx.Client(base_url=url, transport=httpx.MockTransport(respond)),
         factories={
             GatewayTransportInputs: lambda: GatewayTransportInputs(
                 max_retries_reader=lambda: 1,
                 retry_delay_reader=lambda: 0.0,
                 memory_deadline_reader=lambda: 15.0,
             )
-        }
+        },
     )
     original = _runtime(model_catalog, database_gate=database_gate)
     runtime = Runtime(context=replace(original.context, clients=clients))
     try:
-        with (
-            httpx.Client(
-                base_url="http://gateway.test", transport=httpx.MockTransport(respond)
-            ) as client,
-            clients.using_gateway(client),
-        ):
-            assert await hook(state, runtime, _config()) is None
+        assert await hook(state, runtime, _config()) is None
         assert len(requests) == 1
     finally:
         clients.close()

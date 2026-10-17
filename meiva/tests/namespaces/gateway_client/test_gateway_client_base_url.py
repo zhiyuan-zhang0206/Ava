@@ -181,23 +181,22 @@ def test_explicit_host_context_routes_calls_without_a_local_sdk_binding() -> Non
     from base.agents.context.clients import ClientSet
     from base.agents.context.gateway_client.transport import GatewayTransportInputs
 
-    context = MeivaContext(
-        identity=AgentIdentity(44, True),
-        clients=ClientSet(
-            factories={
-                GatewayTransportInputs: lambda: GatewayTransportInputs(
-                    max_retries_reader=lambda: 3,
-                    retry_delay_reader=lambda: 1.0,
-                    memory_deadline_reader=lambda: 15.0,
-                )
-            }
-        ),
-    )
     pin_no_identity()
-    with (
-        httpx.Client(base_url="http://host.test", transport=httpx.MockTransport(answer)) as client,
-        context.clients.using_gateway(client),
-    ):
+    with httpx.Client(base_url="http://host.test", transport=httpx.MockTransport(answer)) as client:
+        context = MeivaContext(
+            identity=AgentIdentity(44, True),
+            clients=ClientSet(
+                gateway_url="http://host.test",
+                gateway=lambda _url: client,
+                factories={
+                    GatewayTransportInputs: lambda: GatewayTransportInputs(
+                        max_retries_reader=lambda: 3,
+                        retry_delay_reader=lambda: 1.0,
+                        memory_deadline_reader=lambda: 15.0,
+                    )
+                },
+            ),
+        )
         assert memory_search("query", 3, purpose="search", context=context) == []
         assert get_born_chain(44, context=context) == []
         assert agent_jitter_seconds(context) == 0.22
@@ -218,13 +217,16 @@ def test_explicit_host_transport_failure_keeps_its_own_client_and_error() -> Non
     def fail(request: httpx.Request) -> httpx.Response:
         raise httpx.ConnectError("expected outage", request=request)
 
-    context = MeivaContext()
+    from base.agents.context.clients import ClientSet
+
     pin_no_identity()
     with (
         httpx.Client(base_url="http://host.test", transport=httpx.MockTransport(fail)) as client,
-        context.clients.using_gateway(client),
         pytest.raises(GatewayUnavailable, match=r"host\.test.*expected outage"),
     ):
+        context = MeivaContext(
+            clients=ClientSet(gateway_url="http://host.test", gateway=lambda _url: client)
+        )
         get("/api/check", max_retries=1, context=context)
     assert getattr(meiva, "context", None) is None
 
@@ -242,34 +244,35 @@ def test_get_adapter_keeps_explicit_context_ahead_of_the_sdk_binding() -> None:
         seen.append(request)
         return httpx.Response(200, json={"host": request.url.host})
 
-    explicit = MeivaContext(
-        clients=ClientSet(
-            factories={
-                GatewayTransportInputs: lambda: GatewayTransportInputs(
-                    max_retries_reader=lambda: 1,
-                    retry_delay_reader=lambda: 0.0,
-                    memory_deadline_reader=lambda: 1.0,
-                )
-            }
+    with (
+        httpx.Client(
+            base_url="http://bound", timeout=5, transport=httpx.MockTransport(answer)
+        ) as bound,
+        httpx.Client(
+            base_url="http://explicit", timeout=8, transport=httpx.MockTransport(answer)
+        ) as supplied,
+        use_client(bound),
+    ):
+        explicit = MeivaContext(
+            clients=ClientSet(
+                gateway_url="http://explicit",
+                gateway=lambda _url: supplied,
+                factories={
+                    GatewayTransportInputs: lambda: GatewayTransportInputs(
+                        max_retries_reader=lambda: 1,
+                        retry_delay_reader=lambda: 0.0,
+                        memory_deadline_reader=lambda: 1.0,
+                    )
+                },
+            )
         )
-    )
-    try:
-        with (
-            httpx.Client(
-                base_url="http://bound", timeout=5, transport=httpx.MockTransport(answer)
-            ) as bound,
-            httpx.Client(
-                base_url="http://explicit", timeout=8, transport=httpx.MockTransport(answer)
-            ) as supplied,
-            use_client(bound),
-            explicit.clients.using_gateway(supplied),
-        ):
+        try:
             assert get("/api/read", params={"q": "bound"}).json() == {"host": "bound"}
             assert get(
                 "/api/read", params={"q": "supplied"}, timeout=httpx.Timeout(13), context=explicit
             ).json() == {"host": "explicit"}
-    finally:
-        explicit.clients.close()
+        finally:
+            explicit.clients.close()
     assert [str(request.url) for request in seen] == [
         "http://bound/api/read?q=bound",
         "http://explicit/api/read?q=supplied",

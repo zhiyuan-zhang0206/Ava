@@ -10,7 +10,7 @@ import httpx
 import psycopg
 import pytest
 
-import meiva
+from meiva.gateway_client import use_client
 from meiva.tests.fixtures.pin_agent import pin_agent
 
 
@@ -127,7 +127,7 @@ class TestNoticeEntries:
         }
         with (
             httpx.Client(base_url="http://gateway", transport=httpx.MockTransport(answer)) as http,
-            meiva.context.clients.using_gateway(http),
+            use_client(http),
         ):
             notice = fleet_plugin.notify(**inputs)
         [request] = requests

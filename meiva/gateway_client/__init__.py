@@ -9,6 +9,7 @@ from __future__ import annotations
 import uuid
 from collections.abc import Generator
 from contextlib import contextmanager
+from dataclasses import replace
 from typing import Any, Literal
 from uuid import UUID
 
@@ -47,8 +48,13 @@ def get(
 def use_client(client: Any) -> Generator[Any]:
     """Route every SDK call in the block through *client* — a FastAPI `TestClient` for an
     in-process gateway, or any `httpx.Client` — then put back whichever client was there before."""
-    with process_context.current_context().clients.using_gateway(client):
+    bound = process_context.current_context()
+    derived = replace(bound, clients=bound.clients.with_gateway(lambda _url: client))
+    process_context.bind_context(derived)
+    try:
         yield client
+    finally:
+        process_context.bind_context(bound)
 
 
 def get_launch_attempt(agent_id: int) -> UUID:
