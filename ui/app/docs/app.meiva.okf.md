@@ -91,10 +91,8 @@ natively. The bridge starts from a fresh prelude or waits once for its
 `meiva-app-config` event. All Android plugin calls leave the main looper before waiting for
 their JNI response; direct synchronous mobile-plugin calls would deadlock it.
 
-Android's network-security XML cannot express IP prefixes, so it permits
-cleartext transport while Rust refuses to persist an HTTP endpoint unless all
-resolved addresses are loopback, link-local, RFC1918, or `100.64.0.0/10`.
-HTTPS is unrestricted.
+System bars and what the console may show are their own node:
+[[ui/app/docs/android-shell-chrome.meiva.okf.md|Android shell chrome]].
 
 ## Android updates
 
