@@ -10,6 +10,7 @@ GET  /api/auth/check               — report whether the current session is val
 from __future__ import annotations
 
 import asyncio
+from pathlib import Path
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Request
@@ -121,6 +122,7 @@ async def login(body: LoginRequest, request: Request) -> JSONResponse:
         request.app.state.session_keys,
         password,
         secret,
+        home=request.app.state.gateway_process.home,
         cache=request.app.state.machine_token_acceptance,
     )
     if mint is None:
@@ -181,6 +183,7 @@ async def issue_login_ticket(request: Request) -> JSONResponse:
         request.app.state.session_keys,
         secret,
         secret,
+        home=request.app.state.gateway_process.home,
         cache=request.app.state.machine_token_acceptance,
     )
     if mint is None:
@@ -215,6 +218,7 @@ async def _consume_login_ticket(request: Request, ticket: str) -> str | None:
         session_mints,
         request.app.state.session_keys,
         config.cluster_secret,
+        home=request.app.state.gateway_process.home,
         cache=request.app.state.machine_token_acceptance,
     )
     return mint if mint in admitted else None
@@ -287,18 +291,24 @@ async def check(request: Request) -> JSONResponse:
         request.app.state.session_keys,
         token,
         config.cluster_secret,
+        home=request.app.state.gateway_process.home,
         cache=request.app.state.machine_token_acceptance,
     )
     return JSONResponse(content={"authenticated": fact is not None})
 
 
 def _sessions_that_authenticate(
-    pool: Any, keys: SessionKeys, secret: str, *, cache: AcceptanceCache | None = None
+    pool: Any,
+    keys: SessionKeys,
+    secret: str,
+    *,
+    home: Path,
+    cache: AcceptanceCache | None = None,
 ) -> list[dict[str, Any]]:
     """Unrevoked, unexpired sessions whose mint is still admitted: the rows
     `current_session_fact` would accept. A rotated secret's sessions and ids without
     a mint are dead and omitted."""
-    admitted = session_mints(keys, secret, cache=cache)
+    admitted = session_mints(keys, secret, home=home, cache=cache)
     return [row for row in list_sessions(pool) if session_mint(row["id"]) in admitted]
 
 
@@ -322,6 +332,7 @@ async def sessions(request: Request) -> list[dict[str, Any]]:
         request.app.state.db_pool,
         request.app.state.session_keys,
         config.cluster_secret,
+        home=request.app.state.gateway_process.home,
         cache=request.app.state.machine_token_acceptance,
     )
     result: list[dict[str, Any]] = []

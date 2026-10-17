@@ -25,6 +25,7 @@ from base.deploy.schema.migrations import assert_schema_current
 from base.host.net.auth import require_cluster_secret
 from base.host.system.hostport import Host
 from base.native_process.os_platform import raise_fd_limit
+from base.paths import meiva_home
 from base.telemetry.process_logging import init_gateway_process
 from gateway.cluster.process_boot import LOADED_IMAGE, GatewayProcess
 from gateway.http.middleware import stopping
@@ -104,7 +105,9 @@ def main(*, build_app: Callable[[GatewayProcess], FastAPI]) -> None:
     # inherit the raised ceiling.
     raise_fd_limit(65536)
 
-    process = GatewayProcess(config=config, image=LOADED_IMAGE, machine=machine, host=Host.system())
+    process = GatewayProcess(
+        home=meiva_home(), config=config, image=LOADED_IMAGE, machine=machine, host=Host.system()
+    )
     with process.lifetime():
         _serve_process(process, build_app)
 

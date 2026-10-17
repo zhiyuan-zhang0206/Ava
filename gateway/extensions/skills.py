@@ -16,7 +16,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Request
 
 from base import paths
 from base.packages.extensions import install_registry
@@ -64,7 +64,7 @@ def _build_skill_view(
 
 
 @router.get("/api/skills")
-def get_skills() -> SkillsView:
+def get_skills(request: Request) -> SkillsView:
     """List the skills in this host's load dir, correlated with the registry.
 
     Each top-level directory under `$MEIVA_HOME/skills/` becomes a row: its source
@@ -77,7 +77,7 @@ def get_skills() -> SkillsView:
     # `meiva-code` and a directory still spelled `meiva_code/` are one skill —
     # correlate through the fold, not the raw spelling (audit 02 #4).
     by_name = {match_key(p.name): p for p in registry.packages}
-    skills_root = paths.skills_dir(paths.meiva_home())
+    skills_root = paths.skills_dir(request.app.state.gateway_process.home)
 
     rows: list[SkillView] = []
     if skills_root.is_dir():
@@ -92,7 +92,7 @@ def get_skills() -> SkillsView:
 
 
 @router.put("/api/skills")
-def update_skill_enabled(body: SkillEnableUpdate) -> SkillView:
+def update_skill_enabled(body: SkillEnableUpdate, request: Request) -> SkillView:
     """Toggle one skill's enabled flag in the install registry.
 
     The change is persisted to `installed.json` immediately; the skill scanner
@@ -118,5 +118,5 @@ def update_skill_enabled(body: SkillEnableUpdate) -> SkillView:
         pkg.enabled = body.enabled
 
     # Build the updated SkillView from the on-disk directory
-    dir_path = paths.skills_dir(paths.meiva_home()) / pkg.name
+    dir_path = paths.skills_dir(request.app.state.gateway_process.home) / pkg.name
     return _build_skill_view(pkg.name, pkg, dir_path)

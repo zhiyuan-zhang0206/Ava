@@ -46,12 +46,16 @@ class MaintenanceAdmission:
     created_here: bool
 
 
+def state_path_for(home: Path) -> Path:
+    return home / "run" / "deploy-pause-owner.json"
+
+
 def state_path() -> Path:
     import base.paths
 
     # Admission/status reads must not create a home before setup validation.
     # Writers create the parent through lock_path() and write_atomic().
-    return base.paths.meiva_home() / "run" / "deploy-pause-owner.json"
+    return state_path_for(base.paths.meiva_home())
 
 
 def lock_path() -> Path:
@@ -94,7 +98,7 @@ def _read_unlocked(path: Path) -> PauseOwnerSnapshot:
 
 def read_for_home(home: Path) -> PauseOwnerSnapshot:
     """Read the journal before configuration bootstrap, without creating the home."""
-    return _read_unlocked(home / "run" / "deploy-pause-owner.json")
+    return _read_unlocked(state_path_for(home))
 
 
 def read() -> PauseOwnerSnapshot:

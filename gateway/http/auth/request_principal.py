@@ -38,7 +38,11 @@ class PrincipalScopeError(ValueError):
 
 
 def cluster_credential(
-    authorization: str | None, secret: str, *, cache: AcceptanceCache | None = None
+    authorization: str | None,
+    secret: str,
+    *,
+    home: Path,
+    cache: AcceptanceCache | None = None,
 ) -> str | None:
     """The credential fact of a cluster bearer, or None when it presents none.
 
@@ -50,11 +54,10 @@ def cluster_credential(
     """
     from base.host.db_authority.api import acceptance, bearer_class
     from base.host.net.auth import verify_bearer
-    from base.paths import meiva_home
 
     if verify_bearer(authorization, secret):
         return "cluster_bearer"
-    cls = bearer_class(authorization, acceptance(meiva_home().resolve(), cache=cache))
+    cls = bearer_class(authorization, acceptance(home.resolve(), cache=cache))
     return None if cls is None else f"machine_token:{cls}"
 
 
@@ -130,7 +133,12 @@ def _mint(key: bytes, kind: str, credential_digest: str) -> str:
 
 
 def login_mint(
-    keys: SessionKeys, password: str, secret: str, *, cache: AcceptanceCache | None = None
+    keys: SessionKeys,
+    password: str,
+    secret: str,
+    *,
+    home: Path,
+    cache: AcceptanceCache | None = None,
 ) -> str | None:
     """The mint of the credential a login `password` presents, else None.
 
@@ -139,24 +147,23 @@ def login_mint(
     a browser in. Mints this gateway's session key on first use.
     """
     from base.host.db_authority.api import acceptance, bearer_class, token_digest
-    from base.paths import meiva_home
 
-    home = meiva_home().resolve()
+    root = home.resolve()
     if secret and hmac.compare_digest(password, secret):
         kind, digest = "human", token_digest(secret)
     else:
-        accepted = acceptance(home, cache=cache)
+        accepted = acceptance(root, cache=cache)
         if bearer_class(f"Bearer {password}", accepted) != "runner":
             return None
         kind, digest = "runner", accepted["runner"]
-    key = keys.key(home, create=True)
+    key = keys.key(root, create=True)
     if key is None:
-        raise RuntimeError(f"{session_key_path(home)} vanished while minting a session")
+        raise RuntimeError(f"{session_key_path(root)} vanished while minting a session")
     return _mint(key, kind, digest)
 
 
 def session_mints(
-    keys: SessionKeys, secret: str, *, cache: AcceptanceCache | None = None
+    keys: SessionKeys, secret: str, *, home: Path, cache: AcceptanceCache | None = None
 ) -> dict[str, str]:
     """{mint: credential fact} of the credentials that may back a session now.
 
@@ -165,16 +172,15 @@ def session_mints(
     exists; the runner mint is absent while no generation is active (a fence).
     """
     from base.host.db_authority.api import acceptance, token_digest
-    from base.paths import meiva_home
 
-    home = meiva_home().resolve()
-    key = keys.key(home, create=False)
+    root = home.resolve()
+    key = keys.key(root, create=False)
     if key is None:
         return {}
     mints: dict[str, str] = {}
     if secret:
         mints[_mint(key, "human", token_digest(secret))] = _MINT_FACTS["human"]
-    runner = acceptance(home, cache=cache).get("runner")
+    runner = acceptance(root, cache=cache).get("runner")
     if runner is not None:
         mints[_mint(key, "runner", runner)] = _MINT_FACTS["runner"]
     return mints
@@ -209,6 +215,7 @@ def current_session_fact(
     session_id: str | None,
     secret: str,
     *,
+    home: Path,
     cache: AcceptanceCache | None = None,
 ) -> str | None:
     """The credential fact of a valid session whose minting credential is
@@ -219,7 +226,7 @@ def current_session_fact(
     mint = None if session_id is None else session_mint(session_id)
     if mint is None:
         return None
-    mints = session_mints(keys, secret, cache=cache)
+    mints = session_mints(keys, secret, home=home, cache=cache)
     if not sessions.is_valid(session_id, admitted=mints):
         return None
     return mints[mint]

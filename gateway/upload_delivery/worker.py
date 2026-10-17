@@ -9,6 +9,7 @@ import logging
 from collections.abc import Callable
 from contextlib import suppress
 from functools import partial
+from pathlib import Path
 from typing import Any
 
 from psycopg_pool import ConnectionPool
@@ -55,10 +56,17 @@ class UploadRecovery:
     """A source domain round and its actual native futures; never time-based leases."""
 
     def __init__(
-        self, pool: ConnectionPool, db: Database, bus: EventBus, *, machine: MachineIdentity
+        self,
+        pool: ConnectionPool,
+        db: Database,
+        bus: EventBus,
+        *,
+        machine: MachineIdentity,
+        home: Path,
     ) -> None:
         self.pool, self.db, self.bus = pool, db, bus
         self.machine = machine
+        self.home = home
         self.stopped = asyncio.Event()
         self.calls: set[asyncio.Future[Any]] = set()
         self.task: asyncio.Task[None] | None = None
@@ -101,7 +109,7 @@ class UploadRecovery:
             try:
                 if (
                     not is_stopping()
-                    and not await self.native(business_paused)
+                    and not await self.native(business_paused, self.home)
                     and not await self.native(quiesced)
                 ):
                     await self.round()
@@ -143,7 +151,7 @@ class UploadRecovery:
             )
 
     async def copy(self, request: ReceiveRequest) -> None:
-        if self.stopped.is_set() or await self.native(business_paused):
+        if self.stopped.is_set() or await self.native(business_paused, self.home):
             return
         try:
             if not await self.native(source.validate_pending, self.pool, request):
@@ -153,7 +161,7 @@ class UploadRecovery:
             # while stop is certified. Retained pending intent retries after resume.
             if (
                 self.stopped.is_set()
-                or await self.native(business_paused)
+                or await self.native(business_paused, self.home)
                 or await self.native(quiesced)
             ):
                 return

@@ -19,7 +19,7 @@ from base.cluster.machine.boot import machine_from_boot
 from base.cluster.rate_limit import LoginRateLimitConfig, LoginRateLimiter
 from base.config import ConfigBoot, Settings
 from base.config.service_read import ConfigAuthority
-from base.events.live.bus import EventBus
+from base.events.live.bus import EventBus, event_bus_config_from_config
 from base.host.db_authority.api import AcceptanceCache
 from base.host.net.auth import cookie_name
 from base.host.system.cron import register_os_cron
@@ -148,8 +148,11 @@ async def _startup_releases() -> AsyncGenerator[AsyncExitStack]:
     await releases.aclose()
 
 
-def _build_request_resources(app: FastAPI, config: ConfigBoot, releases: AsyncExitStack) -> None:
+def _build_request_resources(
+    app: FastAPI, process: GatewayProcess, releases: AsyncExitStack
+) -> None:
 
+    config = process.config
     machine_token_acceptance: AcceptanceCache = {}
     app.state.machine_token_acceptance = machine_token_acceptance
     app.state.telemetry_staleness = TelemetryStaleness()
@@ -194,7 +197,7 @@ def _build_request_resources(app: FastAPI, config: ConfigBoot, releases: AsyncEx
         config=LoginRateLimitConfig(),
     )
 
-    insights_client: Any = insights_router.build_client()
+    insights_client: Any = insights_router.build_client(process.home)
     app.state.insights_client = insights_client
     releases.push_async_callback(_closer(insights_client, "aclose"))
 
@@ -225,12 +228,12 @@ async def lifespan(
             app.state.config_authority = ConfigAuthority(
                 runtime=config.view,
                 all_domains=config.view if config.view.profile is None else Settings(profile=None),
-                env_path=paths.meiva_home() / ".env",
+                env_path=process.home / ".env",
             )
 
             app.state.started_at = time.time()
             app.state.db = process.database()
-            app.state.bus = EventBus.from_settings()
+            app.state.bus = EventBus(event_bus_config_from_config(process.config))
             db_pool: Any = app.state.db.pool(max_size=8)
             app.state.db_pool = db_pool
             releases.callback(_closer(db_pool, "close"))
@@ -244,7 +247,7 @@ async def lifespan(
             app.state.control_db_pool = control_db_pool
             releases.callback(_closer(control_db_pool, "close"))
 
-            _build_request_resources(app, config, releases)
+            _build_request_resources(app, process, releases)
 
             grafana_client: Any = grafana_router.build_proxy_client()
             app.state.grafana_client = grafana_client
@@ -264,7 +267,11 @@ async def lifespan(
             releases.callback(_closer(monitor, "stop"))
 
             upload_recovery = UploadRecovery(
-                app.state.db_pool, app.state.db, app.state.bus, machine=process.machine
+                app.state.db_pool,
+                app.state.db,
+                app.state.bus,
+                machine=process.machine,
+                home=process.home,
             )
             app.state.upload_recovery = upload_recovery
 
@@ -312,11 +319,11 @@ async def _background_lifetime(
         app.state.mcp_manager = None
 
 
-async def cluster_is_paused(_request: Request) -> bool:
+async def cluster_is_paused(request: Request) -> bool:
 
     from base.deploy.maintenance.admission import business_paused
 
-    return await asyncio.to_thread(business_paused)
+    return await asyncio.to_thread(business_paused, request.app.state.gateway_process.home)
 
 
 async def cluster_pause_middleware(
@@ -370,6 +377,7 @@ async def _cookie_session(request: Request, secret: str) -> tuple[str, str] | No
         request.app.state.session_keys,
         cookie_token,
         secret,
+        home=request.app.state.gateway_process.home,
         cache=request.app.state.machine_token_acceptance,
     )
     return None if fact is None else (cookie_token, fact)
@@ -429,6 +437,7 @@ async def cluster_auth_middleware(
     verified_by = cluster_credential(
         request.headers.get("Authorization"),
         secret,
+        home=request.app.state.gateway_process.home,
         cache=request.app.state.machine_token_acceptance,
     )
     if verified_by is not None:
@@ -552,6 +561,7 @@ def create_app_from_environment() -> FastAPI:
     config.boot()
     config.ensure_eager()
     process = GatewayProcess(
+        home=paths.meiva_home(),
         config=config,
         image=LOADED_IMAGE,
         machine=machine_from_boot(config),
@@ -566,7 +576,11 @@ def openapi_schema() -> dict[str, Any]:
 
     config = ConfigBoot()
     process = GatewayProcess(
-        config=config, image=LOADED_IMAGE, machine=machine_from_boot(config), host=Host.system()
+        home=paths.resolve_meiva_home(),
+        config=config,
+        image=LOADED_IMAGE,
+        machine=machine_from_boot(config),
+        host=Host.system(),
     )
     schema_config = GatewayConfig(
         cluster_secret="",

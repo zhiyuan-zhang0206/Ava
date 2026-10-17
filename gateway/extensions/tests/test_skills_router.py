@@ -1,11 +1,24 @@
 from __future__ import annotations
 
 from pathlib import Path
+from types import SimpleNamespace
+from typing import cast
+
+from fastapi import Request
 
 from base import paths
 from base.packages.extensions import install_registry
 from base.packages.extensions.install_registry import InstalledPackage, PackageOrigin, tree_hash
 from gateway.extensions.skills import get_skills
+
+
+def _request(home: Path) -> Request:
+    return cast(
+        Request,
+        SimpleNamespace(
+            app=SimpleNamespace(state=SimpleNamespace(gateway_process=SimpleNamespace(home=home)))
+        ),
+    )
 
 
 def _mk_skill(name: str, body: str = "# skill\n") -> Path:
@@ -45,7 +58,7 @@ def test_maps_layers_enabled_and_drift(unit_home: Path) -> None:
     delta = _mk_skill("delta")
     _register("delta", origin="repo", content_hash=tree_hash(delta), enabled=False)
 
-    rows = {s.name: s for s in get_skills().skills}
+    rows = {s.name: s for s in get_skills(_request(unit_home)).skills}
     assert set(rows) == {"alpha", "beta", "gamma", "delta"}
 
     assert rows["alpha"].layer == "core"
@@ -63,7 +76,7 @@ def test_maps_layers_enabled_and_drift(unit_home: Path) -> None:
 
 def test_untracked_dir_surfaced_not_loaded(unit_home: Path) -> None:
     _mk_skill("stray")
-    (row,) = get_skills().skills
+    (row,) = get_skills(_request(unit_home)).skills
     assert row.name == "stray"
     assert row.layer == "untracked"
     assert row.enabled is False
@@ -73,12 +86,12 @@ def test_untracked_dir_surfaced_not_loaded(unit_home: Path) -> None:
 def test_non_skill_rows_and_missing_dir_excluded(unit_home: Path) -> None:
     _register("some-mcp", origin="user", content_hash=None, type="mcp")
     _register("bare-plugin", origin="plugin", content_hash=None, type="plugin")
-    assert get_skills().skills == []
+    assert get_skills(_request(unit_home)).skills == []
 
 
 def test_empty_when_no_load_dir(unit_home: Path) -> None:
     assert not paths.skills_dir(paths.meiva_home()).exists()
-    assert get_skills().skills == []
+    assert get_skills(_request(unit_home)).skills == []
 
 
 def test_put_toggles_enabled(unit_home: Path) -> None:
@@ -88,14 +101,18 @@ def test_put_toggles_enabled(unit_home: Path) -> None:
     delta = _mk_skill("delta")
     _register("delta", origin="repo", content_hash=tree_hash(delta), enabled=True)
 
-    result = update_skill_enabled(SkillEnableUpdate(name="delta", enabled=False))
+    result = update_skill_enabled(
+        SkillEnableUpdate(name="delta", enabled=False), _request(unit_home)
+    )
     assert result.enabled is False
 
     pkg = install_registry.get("delta")
     assert pkg is not None
     assert pkg.enabled is False
 
-    result = update_skill_enabled(SkillEnableUpdate(name="delta", enabled=True))
+    result = update_skill_enabled(
+        SkillEnableUpdate(name="delta", enabled=True), _request(unit_home)
+    )
     assert result.enabled is True
 
     pkg = install_registry.get("delta")
@@ -110,7 +127,9 @@ def test_put_accepts_the_canonical_dash_spelling_of_a_legacy_row(unit_home: Path
     legacy = _mk_skill("page_ocr")
     _register("page_ocr", origin="user", content_hash=tree_hash(legacy), enabled=True)
 
-    result = update_skill_enabled(SkillEnableUpdate(name="page-ocr", enabled=False))
+    result = update_skill_enabled(
+        SkillEnableUpdate(name="page-ocr", enabled=False), _request(unit_home)
+    )
     assert result.name == "page-ocr"
     assert result.enabled is False
     assert result.layer == "machine"
@@ -123,7 +142,7 @@ def test_put_accepts_the_canonical_dash_spelling_of_a_legacy_row(unit_home: Path
 def test_get_renders_legacy_underscore_dirs_in_canonical_spelling(unit_home: Path) -> None:
     _mk_skill("meiva_code")
     _mk_skill("auto_review.old")
-    rows = {r.name: r for r in get_skills().skills}
+    rows = {r.name: r for r in get_skills(_request(unit_home)).skills}
     assert "meiva-code" in rows
     assert "auto-review.old" in rows
     assert "meiva_code" not in rows
@@ -141,7 +160,7 @@ def test_preserved_subtree_not_reported_as_drift(unit_home: Path) -> None:
         "---\nname: people\ndescription: local\n---\n", encoding="utf-8"
     )
     (ws / "people" / ".preserved").touch()
-    rows = {r.name: r for r in get_skills().skills}
+    rows = {r.name: r for r in get_skills(_request(unit_home)).skills}
     assert rows["web-sources"].modified_locally is False
 
 
@@ -155,7 +174,7 @@ def test_put_rejects_untracked_skill(unit_home: Path) -> None:
     _mk_skill("stray")
 
     with pytest.raises(HTTPException) as exc:
-        update_skill_enabled(SkillEnableUpdate(name="stray", enabled=True))
+        update_skill_enabled(SkillEnableUpdate(name="stray", enabled=True), _request(unit_home))
     assert exc.value.status_code == 404
     assert "not found in registry" in exc.value.detail
 
@@ -163,7 +182,7 @@ def test_put_rejects_untracked_skill(unit_home: Path) -> None:
 def test_dot_dirs_not_panel_rows(unit_home: Path) -> None:
     _mk_skill(".goal.new")
     _mk_skill(".web-sources.trash")
-    assert get_skills().skills == []
+    assert get_skills(_request(unit_home)).skills == []
 
 
 def test_registry_row_correlates_across_the_dash_underscore_fold(
@@ -171,7 +190,7 @@ def test_registry_row_correlates_across_the_dash_underscore_fold(
 ) -> None:
     d = _mk_skill("meiva_code")
     _register("meiva-code", origin="repo", content_hash=tree_hash(d))
-    (row,) = get_skills().skills
+    (row,) = get_skills(_request(unit_home)).skills
     assert row.name == "meiva-code"
     assert row.layer == "core"
     assert row.modified_locally is False

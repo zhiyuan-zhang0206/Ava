@@ -16,7 +16,6 @@ from base.db.config import db_config_from_boot
 from base.host.system.hostport import Host
 from base.native_process.code_version import CodeVersion
 from base.native_process.loaded_commit import LoadedCommit
-from base.paths import meiva_home
 from base.telemetry import EventPipeline, build_pipeline
 
 __all__ = ["LOADED_IMAGE", "GatewayProcess"]
@@ -31,8 +30,15 @@ class GatewayProcess:
     """The configuration, admission and writer owned by one Gateway entry."""
 
     def __init__(
-        self, *, config: ConfigBoot, image: LoadedCommit, machine: MachineIdentity, host: Host
+        self,
+        *,
+        home: Path,
+        config: ConfigBoot,
+        image: LoadedCommit,
+        machine: MachineIdentity,
+        host: Host,
     ) -> None:
+        self.home = home
         self.config = config
         self.machine = machine
         self.host = host
@@ -42,7 +48,7 @@ class GatewayProcess:
         self.clients = ClientSet(
             database=self.database,
             pipeline_factory=lambda: build_pipeline(
-                database=self.database, machine=self.machine, home=meiva_home().resolve()
+                database=self.database, machine=self.machine, home=self.home.resolve()
             ),
         )
 

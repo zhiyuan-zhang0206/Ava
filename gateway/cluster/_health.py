@@ -10,7 +10,6 @@ from fastapi.responses import JSONResponse
 from psycopg_pool import PoolTimeout
 
 from base.daemon.health_schema import DEGRADED, OK, component, render
-from base.paths import meiva_home
 
 
 def get_health(request: Request) -> dict[str, object] | JSONResponse:
@@ -40,7 +39,7 @@ def get_health(request: Request) -> dict[str, object] | JSONResponse:
     identity: dict[str, object] = {
         "status": "ok",
         "name": "gateway",
-        "home": str(meiva_home()),
+        "home": str(request.app.state.gateway_process.home),
         "machine": request.app.state.machine.name(),
         "started_at": request.app.state.started_at,
         "sha": request.app.state.process_image.sha,
