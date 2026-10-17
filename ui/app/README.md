@@ -127,5 +127,6 @@ Android builds from `.github/workflows/release-android.yml` inject
 `versionCode = 1_000_000 + run_number` (rule and manifest:
 `scripts/codegen/build_android_release.py`), read it back out of the APK, and
 publish `android-latest.json` beside the APK in the mutable `android-latest`
-prerelease. `workflow_dispatch` takes a `dry_run` input that builds without
-touching that channel.
+prerelease. `workflow_dispatch` defaults to `dry_run=true` (build only); set it
+to false to replace the channel, and a publish fails unless its versionCode
+exceeds the one the channel already advertises.

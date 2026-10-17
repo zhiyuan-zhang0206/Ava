@@ -11,7 +11,10 @@
 # An `android-v*` tag publishes one immutable release. Every other run replaces
 # the APK and `android-latest.json` in the mutable `android-latest` prerelease;
 # the manifest's fields (versionCode, versionName, apkUrl, sha256, commit,
-# builtAt) are the client update contract.
+# builtAt) are the client update contract. Only a push or a dispatch with
+# dry_run=false publishes, and a publish refuses to move the channel backwards:
+# the upload guard compares the new versionCode with the manifest already
+# advertised, so a late re-run of an older run cannot roll phones back.
 #
 # This workflow is deliberately independent of release-app.yml: Android signing
 # is sufficient for an APK release and must not depend on desktop credentials.
@@ -38,9 +41,11 @@ on:
   workflow_dispatch:
     inputs:
       dry_run:
-        description: 'Build the APK without publishing to the android-latest channel'
+        # Default true: a manual dispatch is a build, not a release. Pass
+        # dry_run=false to replace the android-latest channel deliberately.
+        description: 'Build only; set to false to publish to the android-latest channel'
         type: boolean
-        default: false
+        default: true
 
 permissions:
   contents: read
@@ -289,6 +294,23 @@ jobs:
             --commit "$GITHUB_SHA" \
             --repo "$GITHUB_REPOSITORY" \
             --out release-assets/android-latest.json
+
+      - name: Refuse to move the channel backwards
+        if: github.ref_type != 'tag'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          BUILD_NUMBER: ${{ needs.prepare.outputs.build_number }}
+        run: |
+          previous="$RUNNER_TEMP/previous-android-latest"
+          mkdir -p "$previous"
+          if gh release download android-latest --pattern android-latest.json \
+              --dir "$previous" 2>/dev/null; then
+            python3 scripts/codegen/build_android_release.py assert-advances \
+              --current "$previous/android-latest.json" \
+              --version-code "$BUILD_NUMBER"
+          else
+            echo "android-latest carries no manifest yet; this run publishes the first one"
+          fi
 
       - name: Create the release and upload its assets
         env:

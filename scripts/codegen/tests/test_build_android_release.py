@@ -141,6 +141,37 @@ def test_manifest_requires_a_built_at_offset(tmp_path: Path) -> None:
         )
 
 
+def _previous_manifest(directory: Path, version_code: int) -> Path:
+    path = directory / "android-latest.json"
+    path.write_text(json.dumps({"versionCode": version_code}), encoding="utf-8")
+    return path
+
+
+def test_guard_accepts_a_newer_code(tmp_path: Path) -> None:
+    release.assert_version_code_advances(
+        current=_previous_manifest(tmp_path, 1_000_016), version_code=1_000_017
+    )
+
+
+@pytest.mark.parametrize("previous", [1_000_017, 1_000_018])
+def test_guard_refuses_a_code_that_does_not_advance(tmp_path: Path, previous: int) -> None:
+    with pytest.raises(ValueError, match="already advertises"):
+        release.assert_version_code_advances(
+            current=_previous_manifest(tmp_path, previous), version_code=1_000_017
+        )
+
+
+@pytest.mark.parametrize("body", [{}, {"versionCode": "1000017"}, {"versionCode": True}])
+def test_guard_rejects_a_manifest_without_an_integer_code(
+    tmp_path: Path, body: dict[str, object]
+) -> None:
+    current = tmp_path / "android-latest.json"
+    current.write_text(json.dumps(body), encoding="utf-8")
+
+    with pytest.raises(TypeError, match="no integer versionCode"):
+        release.assert_version_code_advances(current=current, version_code=1_000_017)
+
+
 def test_cli_writes_the_manifest(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
     apk = _apk(tmp_path)
     out = tmp_path / "android-latest.json"
