@@ -1,7 +1,7 @@
 import { cleanup, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { mockSetSettingCalls, resetMockSettings, setMockSetting } from "@/test-support/user-settings-mock";
+import { mockSetSettingCalls, resetMockSettings, setMockLoading, setMockSetting } from "@/test-support/user-settings-mock";
 
 import { ContentToggle } from "./content-toggle";
 
@@ -29,6 +29,12 @@ describe("ContentToggle", () => {
     setMockSetting("display.expand_runs_mode", "last");
     render(<ContentToggle />);
     expect(screen.getByTestId("details-summary-mode").textContent).toBe("Last");
+  });
+
+  it("renders nothing while the stored mode is still unknown", () => {
+    setMockLoading(true);
+    render(<ContentToggle />);
+    expect(screen.queryByTestId("details-summary")).toBeNull();
   });
 
   it("offers no selector of its own in the composer", () => {

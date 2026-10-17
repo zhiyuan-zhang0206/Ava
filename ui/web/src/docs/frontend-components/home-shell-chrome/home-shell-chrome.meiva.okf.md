@@ -35,13 +35,16 @@ The composer's Details chip is a summary, not a control: it renders the mode the
 `display.expand_runs_mode` setting currently holds and links to the row that
 writes it in Display settings. The three modes (All / Last / None) all live on
 that row, which also re-applies the current mode when it is picked again (the
-manual-expansion reset). The composer never writes the setting, so the timeline
-has one writer for what its blocks expand to.
+manual-expansion reset). Because the picker's page unmounts the timeline, the
+reset is recorded as a pending flag in the store and consumed by whichever
+timeline mounts next — the token alone could not survive that gap. The composer
+never writes the setting, so the timeline has one writer for what its blocks
+expand to.
 
 ```meiva-contract
 id = "details-mode-owner"
 kind = "invariant"
-statement = "The Details mode has one writer: the Display settings row bound to display.expand_runs_mode, which keeps all three modes (All / Last / None) reachable and re-applies the current mode when it is picked again. The composer shows the current value read-only and links to that row; it never writes the setting."
-code = ["ui/web/src/components/content/content-toggle.tsx:ContentToggle", "ui/web/src/app/control/display/page.tsx:resetManualExpansions"]
-tests = ["ui/web/src/components/content/content-toggle.test.tsx::ContentToggle::offers no selector of its own in the composer", "ui/web/src/app/control/display/page.test.tsx::DisplaySettingsPage::writes the details mode picked in settings", "ui/web/src/app/control/display/page.test.tsx::DisplaySettingsPage::re-applies the current mode when it is picked again"]
+statement = "The Details mode has one writer: the Display settings row bound to display.expand_runs_mode, which keeps all three modes (All / Last / None) reachable. A pick leaves a pending reset that the next mounted timeline consumes, so re-picking the current mode still collapses manual expansions even though the picker's page had unmounted the timeline. The composer shows the current value read-only — nothing while the stored value is unknown — and links to that row; it never writes the setting."
+code = ["ui/web/src/components/content/content-toggle.tsx:ContentToggle", "ui/web/src/app/control/display/page.tsx:resetManualExpansions", "ui/web/src/lib/layout/content-toggle-store.ts:<module>", "ui/web/src/components/timeline/index.tsx:TimelineView"]
+tests = ["ui/web/src/components/content/content-toggle.test.tsx::ContentToggle::offers no selector of its own in the composer", "ui/web/src/components/content/content-toggle.test.tsx::ContentToggle::renders nothing while the stored mode is still unknown", "ui/web/src/app/control/display/page.test.tsx::DisplaySettingsPage::writes the details mode picked in settings", "ui/web/src/app/control/display/page.test.tsx::DisplaySettingsPage::re-applies the current mode when it is picked again", "ui/web/src/lib/layout/content-toggle-store.test.ts::useContentToggleReset::a re-pick leaves a pending reset for the next mounted timeline", "ui/web/src/components/timeline/timeline.test.tsx::Details mode re-pick made while the timeline was unmounted::collapses the manual expansions on the next mount"]
 ```
