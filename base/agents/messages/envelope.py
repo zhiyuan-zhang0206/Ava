@@ -41,13 +41,16 @@ from __future__ import annotations
 from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime
+from typing import Literal
 
 from base.api_contracts.caller_identity import CallerIdentity, is_caller_source
 from base.clock import Clock
 
 __all__ = [
     "EnvelopeReadInputs",
+    "InboundSender",
     "inbound_head",
+    "sender_class",
     "validate_source",
     "wrap_inbound",
 ]
@@ -104,6 +107,21 @@ def validate_source(source: str) -> None:
         "must be 'system' / 'system:<subtype>' / 'agent:N' / 'external_agent:<subject>[:<instance>]' / "
         "'user' / 'ui:page:<name>' / 'watcher:N' / 'shell:N' / 'schedule:N'"
     )
+
+
+InboundSender = Literal["user", "agent", "automation", "system"]
+
+
+def sender_class(source: str | None) -> InboundSender:
+    if source is None:
+        return "system"
+    if source == "user" or source.startswith(_PAGE_PREFIX):
+        return "user"
+    if source.startswith(_AGENT_PREFIX) or is_caller_source(source):
+        return "agent"
+    if source.startswith((_WATCHER_PREFIX, _SHELL_PREFIX, _SCHEDULE_PREFIX)):
+        return "automation"
+    return "system"
 
 
 _ID_SOURCE_LABELS = (
