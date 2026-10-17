@@ -1,4 +1,4 @@
-"""`ava schedules verify` — the dry-import, undefined-name and call-signature sweep over every
+"""`meiva schedules verify` — the dry-import, undefined-name and call-signature sweep over every
 in-store schedule script."""
 
 from __future__ import annotations
@@ -40,7 +40,7 @@ def check_script(script: str) -> str | None:
     `undefined-name:<l> <name>` / `call-signature:<l> <call>: <why>`).
 
     Runs the check child (`schedule_verify_child`) with this CLI's interpreter from the repo
-    root: every sanctioned `ava` invocation is the checkout's own venv — the same
+    root: every sanctioned `meiva` invocation is the checkout's own venv — the same
     `.venv/bin/python` the ScheduleManager launches the runner with.
     """
     from base.paths import repo_root
@@ -157,7 +157,7 @@ def cmd_schedules_verify(
     database_factory: DatabaseFactory,
     producer: Callable[[], EventPipeline],
 ) -> int:
-    """`ava schedules verify [--check-file PATH | --rows-file PATH] [--no-notify]` — the dry-import and call-signature sweep.
+    """`meiva schedules verify [--check-file PATH | --rows-file PATH] [--no-notify]` — the dry-import and call-signature sweep.
 
     Read-only one-shot check of every in-store script (stopped rows included):
     py_compile, a top-level-imports-only execution in this checkout's runner

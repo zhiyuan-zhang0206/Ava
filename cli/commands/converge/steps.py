@@ -23,20 +23,20 @@ def _ensure_symlink(link: Path, target: Path) -> None:
     link.symlink_to(target)
 
 
-def ensure_ava_on_path(ctx: ConvergeCtx) -> None:
-    """The host's bare `ava` -> this checkout's `.venv/bin/ava`.
+def ensure_meiva_on_path(ctx: ConvergeCtx) -> None:
+    """The host's bare `meiva` -> this checkout's `.venv/bin/meiva`.
 
     A plain symlink: the host runs one cluster, so the CLI needs no routing. Which
-    home it acts on is `AVA_HOME`, else `~/.ava`, like every CLI, and the checkout
+    home it acts on is `MEIVA_HOME`, else `~/.meiva`, like every CLI, and the checkout
     guard (`cli.preflight.require_own_checkout`) refuses every command from a
     checkout that is not the home's own. An existing link to anything else is
     repointed.
     """
-    _ensure_symlink(Path.home() / ".local" / "bin" / "ava", ctx.repo / ".venv" / "bin" / "ava")
+    _ensure_symlink(Path.home() / ".local" / "bin" / "meiva", ctx.repo / ".venv" / "bin" / "meiva")
 
 
-PATH_BEGIN = "# >>> ava path >>>"
-PATH_END = "# <<< ava path <<<"
+PATH_BEGIN = "# >>> meiva path >>>"
+PATH_END = "# <<< meiva path <<<"
 
 
 def shell_rc_path() -> Path:
@@ -59,12 +59,12 @@ def ensure_local_bin_on_path(ctx: ConvergeCtx) -> None:  # noqa: ARG001
         rc.write_text(new)
 
 
-def ensure_ava_home_dirs(ctx: ConvergeCtx) -> None:
+def ensure_meiva_home_dirs(ctx: ConvergeCtx) -> None:
     for sub in ("configs", "secrets"):
-        (ctx.ava_home / sub).mkdir(parents=True, exist_ok=True)
+        (ctx.meiva_home / sub).mkdir(parents=True, exist_ok=True)
     for sub in ("logs", "workspaces", "memory"):
-        converge_private_tree(ctx.ava_home / sub)
-    marker = ctx.ava_home / "logs" / ".metadata_never_index"
+        converge_private_tree(ctx.meiva_home / sub)
+    marker = ctx.meiva_home / "logs" / ".metadata_never_index"
     marker.touch(exist_ok=True)
     ensure_private_file(marker)
 

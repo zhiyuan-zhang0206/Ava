@@ -3,7 +3,7 @@
 The real downloadable artifact is covered by ``scripts/ci/pgvector_runtime_smoke.py``
 in the ``backend-pgvector-smoke`` CI job. This unit suite stays offline while
 covering the checksum, extraction, executable, and idempotence contracts that
-``ava start`` depends on for a brew-free machine.
+``meiva start`` depends on for a brew-free machine.
 """
 
 from __future__ import annotations
@@ -28,9 +28,9 @@ from base.log.tests.log_records import LogRecords
 
 @pytest.fixture()
 def isolated_runtime(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """Point the runtime root (`$AVA_HOME/runtime`) at a tmp home, so a test never
-    touches the real ~/.ava/runtime."""
-    monkeypatch.setenv("AVA_HOME", str(tmp_path / "home"))
+    """Point the runtime root (`$MEIVA_HOME/runtime`) at a tmp home, so a test never
+    touches the real ~/.meiva/runtime."""
+    monkeypatch.setenv("MEIVA_HOME", str(tmp_path / "home"))
 
 
 def test_pg_tool_prefers_vendored_dir(isolated_runtime: None) -> None:

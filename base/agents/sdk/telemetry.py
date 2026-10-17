@@ -22,7 +22,7 @@ if TYPE_CHECKING:
     # (task #3633; `_TYPE_CHECKING_ALLOWED`).
     from langchain_core.messages import BaseMessage
 
-from base.agents.messages.kwargs import AvaMsgType, read_ava_kwargs
+from base.agents.messages.kwargs import MeivaMsgType, read_meiva_kwargs
 from base.agents.sdk.call_policy import SamplingPolicy, SamplingPolicyOwner
 from base.agents.sdk.capture import SdkCaptureOwner
 from base.agents.sdk.tally import SdkCallTally
@@ -186,7 +186,7 @@ async def run_metered_async(
 
 class SdkCall(BaseModel):
     """One SDK method's call count in an agent_code block, e.g.
-    ``SdkCall(method="files.read", count=3)`` for ``ava.files.read(...)`` x3."""
+    ``SdkCall(method="files.read", count=3)`` for ``meiva.files.read(...)`` x3."""
 
     method: str
     count: int
@@ -221,8 +221,8 @@ def sdk_calls_by_tool_call_id(
     for msg in messages[start:]:
         if not isinstance(msg, ToolMessage):
             continue
-        kwargs = read_ava_kwargs(msg)
-        if kwargs.get("ava_msg_type") != AvaMsgType.EXEC_OUTPUT:
+        kwargs = read_meiva_kwargs(msg)
+        if kwargs.get("meiva_msg_type") != MeivaMsgType.EXEC_OUTPUT:
             continue
         calls = kwargs.get("sdk_calls")
         if calls is None:

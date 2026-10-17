@@ -178,8 +178,8 @@ def test_browser_gated_when_disabled(
             frozenset({"agent-runner"}), machine=machine_identity, host=fake_host()
         )
     }
-    assert annotated["browser"] and "AVA_BROWSER_ENABLED" in annotated["browser"]
-    assert annotated["browser-mcp"] and "AVA_BROWSER_ENABLED" in annotated["browser-mcp"]
+    assert annotated["browser"] and "MEIVA_BROWSER_ENABLED" in annotated["browser"]
+    assert annotated["browser-mcp"] and "MEIVA_BROWSER_ENABLED" in annotated["browser-mcp"]
 
 
 def _agent_runner_annotated(
@@ -199,7 +199,7 @@ def test_otel_collector_gated_on_gateway_without_lgtm_marker(
 ) -> None:
     home = tmp_path / "gateway"
     home.mkdir()
-    monkeypatch.delitem(os.environ, "AVA_TELEMETRY_OTLP_ENDPOINT", raising=False)
+    monkeypatch.delitem(os.environ, "MEIVA_TELEMETRY_OTLP_ENDPOINT", raising=False)
 
     def observability_home(machine: MachineIdentity, *, home: Path) -> Path:
         assert machine is machine_identity
@@ -262,7 +262,9 @@ def test_otel_collector_runs_on_gateway_without_marker_when_endpoint_override_ex
 ) -> None:
     home = tmp_path / "gateway"
     home.mkdir()
-    monkeypatch.setitem(os.environ, "AVA_TELEMETRY_OTLP_ENDPOINT", "http://collector.invalid:4318")
+    monkeypatch.setitem(
+        os.environ, "MEIVA_TELEMETRY_OTLP_ENDPOINT", "http://collector.invalid:4318"
+    )
 
     def observability_home(machine: MachineIdentity, *, home: Path) -> Path:
         assert machine is machine_identity
@@ -368,7 +370,7 @@ def test_im_bridge_gated_when_disabled(
         )
     }
     assert "im-bridge" in annotated
-    assert annotated["im-bridge"] == "disabled (AVA_IM_BRIDGE_ENABLED off)"
+    assert annotated["im-bridge"] == "disabled (MEIVA_IM_BRIDGE_ENABLED off)"
 
 
 @pytest.mark.parametrize(
@@ -404,7 +406,7 @@ def test_labeler_is_the_only_service_that_opts_out_of_the_profile_marker() -> No
         assert service_spec.profile_marker(s) is not None or (
             "agent-runner" in s.capabilities and "gateway" in s.capabilities
         ), (
-            f"{sess} must keep its AVA_PROCESS_PROFILE marker (provider keys stay "
+            f"{sess} must keep its MEIVA_PROCESS_PROFILE marker (provider keys stay "
             "out of its process)"
         )
 

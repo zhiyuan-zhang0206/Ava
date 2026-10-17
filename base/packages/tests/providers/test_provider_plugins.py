@@ -711,7 +711,7 @@ def test_stop_spec_registration_reaches_classify_stop(provider_plugin: Callable[
 def test_disabled_plugin_skipped(provider_plugin: Callable[..., None]) -> None:
     provider_plugin(prefix="kept-", model="kept-1", dir_name="enabled_provider")
     provider_plugin(dir_name="disabled_provider")
-    cfg_path = paths.ava_home() / "plugins_config.json"
+    cfg_path = paths.meiva_home() / "plugins_config.json"
     cfg_path.write_text(json.dumps({"plugins": {"disabled_provider": {"enabled": False}}}))
     catalog = build_model_catalog()
     assert "testp-1" not in catalog.models

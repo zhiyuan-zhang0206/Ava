@@ -17,9 +17,9 @@ def inbound(text: str, source: str = "user") -> HumanMessage:
     return HumanMessage(
         content=text,
         additional_kwargs={
-            "ava_msg_type": "inbound",
-            "ava_source": source,
-            "ava_created_at": "2026-10-11T00:00:00+00:00",
+            "meiva_msg_type": "inbound",
+            "meiva_source": source,
+            "meiva_created_at": "2026-10-11T00:00:00+00:00",
         },
     )
 

@@ -3,7 +3,7 @@
 "test_commands_restart_stop.py" = ["restart_inputs.py"]
 
 [debt.env-patch]
-"test_commands_restart_stop.py#monkeypatch.setenv os.environ.AVA_HOME" = 1
+"test_commands_restart_stop.py#monkeypatch.setenv os.environ.MEIVA_HOME" = 1
 
 [debt.first-party-patch]
 "restart_inputs.py#monkeypatch.setattr cli.commands._repo.assert_schema_current_or_die" = 1

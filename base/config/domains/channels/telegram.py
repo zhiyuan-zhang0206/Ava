@@ -8,7 +8,7 @@ from base.config.base import EnvSettings
 class TelegramSettings(EnvSettings):
     telegram_bot_token: str = Field(
         default="",
-        alias="AVA_TELEGRAM_BOT_TOKEN",
+        alias="MEIVA_TELEGRAM_BOT_TOKEN",
         repr=False,
         description="Telegram bot token (from BotFather). Empty = telegram push is unavailable (the skill falls back to a Web UI reply).",
         json_schema_extra={
@@ -21,7 +21,7 @@ class TelegramSettings(EnvSettings):
 
     telegram_owner_id: int = Field(
         default=0,
-        alias="AVA_TELEGRAM_OWNER_ID",
+        alias="MEIVA_TELEGRAM_OWNER_ID",
         description="Telegram owner's private-chat id, where every push is sent. 0 = no owner = telegram push unavailable.",
         json_schema_extra={
             "restart_required": "gateway",
@@ -33,7 +33,7 @@ class TelegramSettings(EnvSettings):
 
     telegram_poll_timeout_seconds: int = Field(
         default=50,
-        alias="AVA_TELEGRAM_POLL_TIMEOUT_SECONDS",
+        alias="MEIVA_TELEGRAM_POLL_TIMEOUT_SECONDS",
         description="getUpdates long-poll window (seconds); Telegram caps it around 50s. The HTTP read timeout rides 10s above it (task #698 G8).",
         json_schema_extra={
             "restart_required": "gateway",
@@ -45,7 +45,7 @@ class TelegramSettings(EnvSettings):
 
     telegram_reconnect_base_delay_seconds: float = Field(
         default=1.0,
-        alias="AVA_TELEGRAM_RECONNECT_BASE_DELAY_SECONDS",
+        alias="MEIVA_TELEGRAM_RECONNECT_BASE_DELAY_SECONDS",
         description="First reconnect delay (seconds) after a failed Telegram poll; the delay doubles per failure (task #698 G8).",
         json_schema_extra={
             "restart_required": "gateway",
@@ -57,7 +57,7 @@ class TelegramSettings(EnvSettings):
 
     telegram_reconnect_max_delay_seconds: float = Field(
         default=60.0,
-        alias="AVA_TELEGRAM_RECONNECT_MAX_DELAY_SECONDS",
+        alias="MEIVA_TELEGRAM_RECONNECT_MAX_DELAY_SECONDS",
         description="Reconnect delay ceiling (seconds) for the Telegram poll loop's exponential backoff (task #698 G8).",
         json_schema_extra={
             "restart_required": "gateway",

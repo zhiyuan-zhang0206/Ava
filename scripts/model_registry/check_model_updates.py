@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
-"""Fail-closed daily comparison of official provider models and Ava's registry.
+"""Fail-closed daily comparison of official provider models and Meiva's registry.
 
 `check_sources` loads the enabled provider plugins in-process first, so
-"already registered" and same-series supersession answer for the roster Ava
+"already registered" and same-series supersession answer for the roster Meiva
 actually runs (see `base/packages/plugin_providers.py`).
 """
 
@@ -31,9 +31,9 @@ from base.host.env.dotenv_file import read_env_aliases
 from base.host.net.resilience import ExponentialBackoff, Policy, http_classifier, retry
 from base.lm.registry import ModelSpec
 from base.packages.plugin_providers import build_model_catalog
-from base.paths import ava_home
+from base.paths import meiva_home
 
-_USER_AGENT = "Ava model-update tracker"
+_USER_AGENT = "Meiva model-update tracker"
 _TIMEOUT_SECONDS, _QWEN_PAGE_SIZE = 30, 100
 _DOH_TIMEOUT_SECONDS = 10
 _DOH_ENDPOINTS = (
@@ -47,7 +47,7 @@ _DATED_SNAPSHOT_SUFFIX = re.compile(r"-\d{4}(?:-\d{2}(?:-\d{2})?)?$|-\d{8}$")
 
 @dataclass(frozen=True)
 class SourceDescriptor:
-    """Official model-list endpoint plus the roster family Ava evaluates."""
+    """Official model-list endpoint plus the roster family Meiva evaluates."""
 
     provider: str
     base_url: str
@@ -525,7 +525,7 @@ def _api_key(source: SourceDescriptor, file_aliases: Mapping[str, str]) -> str |
 
 
 def _state_path(state_dir: Path | None) -> Path:
-    return (state_dir if state_dir is not None else ava_home() / "model-tracker") / "state.json"
+    return (state_dir if state_dir is not None else meiva_home() / "model-tracker") / "state.json"
 
 
 def _valid_status(value: object) -> str:
@@ -752,7 +752,7 @@ def _write_report(directory: Path, markdown: str, payload: dict[str, object]) ->
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
-        description="Check official provider model lists for Ava updates."
+        description="Check official provider model lists for Meiva updates."
     )
     parser.add_argument("--check", action="store_true", help="check only (the default)")
     parser.add_argument("--env-file", type=Path, help="read provider keys from this dotenv file")

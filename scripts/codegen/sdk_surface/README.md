@@ -2,24 +2,24 @@
 
 `contracts.py` owns a read-only query over the existing SDK declarations. It
 consumes the caller's checkout `ModuleSourceLookup`, the shared lexical import
-bindings, module `__all_for_ava__` markers, and canonical `PluginContributions`
+bindings, module `__all_for_meiva__` markers, and canonical `PluginContributions`
 constructors in built-in `plugin.py` files. It does not maintain another member
 list or import application modules.
 
-`query(index, "ava.namespace.member")` returns `MemberProof` or `Unknown`.
-The exact root path `"ava"` returns a namespace proof from the canonical root
+`query(index, "meiva.namespace.member")` returns `MemberProof` or `Unknown`.
+The exact root path `"meiva"` returns a namespace proof from the canonical root
 marker. Its empty definition name identifies a namespace, not a callable;
 binding the root does not prove any of its members.
 Invalid query syntax raises `ValueError`. A proof retains the exact exposed
 path, actual definition module/name, source location, declaring marker or plugin
 contribution location, and availability. Definition names are those of the
-implementing object: for example, the `ava.memory.search` declaration leads to `search_unwrapped`,
+implementing object: for example, the `meiva.memory.search` declaration leads to `search_unwrapped`,
 not to a fictional definition named `search`. A namespace definition has
 an empty `definition_name` and its source begins at line 1.
 `documentation_name` separately identifies the help definition in that source
 file. A proved module property may use its unique annotation-only declaration
 for PEP 224 help while retaining the getter's definition identity; see the
-[documentation-owner contract](docs/provenance.ava.okf.md#property-help-owner).
+[documentation-owner contract](docs/provenance.meiva.okf.md#property-help-owner).
 
 Availability describes declarations, not the live process:
 
@@ -54,11 +54,11 @@ plugin installations, `SimpleNamespace` factories, members hosted by another
 plugin's namespace, class attribute traversal, live skill trees and MCP tools
 are not evaluated. A statically declared module-class property can provide its getter's source
 provenance; its returned object's members remain unknown. Dynamic `__getattr__`
-values such as `ava.memory.PATH` also remain unknown.
+values such as `meiva.memory.PATH` also remain unknown.
 
 The public-contract checker consumes these facts for exact SDK exposures after
 checking file privacy and the ordinary Python component contract. A proof
-for an exact SDK exposure grants no blanket `ava` exemption, direct private
+for an exact SDK exposure grants no blanket `meiva` exemption, direct private
 access, general Python component entry or runtime availability claim. The
 public-contract checker and component manifest remain separate policy owners.
 Unproved SDK paths retain the query's source location and reason in a failing

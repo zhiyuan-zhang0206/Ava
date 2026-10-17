@@ -61,7 +61,7 @@ class SkillInvokedPayload(BaseModel):
 
     The self-evolution collector attributes skills to an agent run by reading
     ``skill`` for rows whose ``invocation_depth`` is ``"loaded"`` (active
-    access). Producer (``ava.skills``) and that consumer share this one shape
+    access). Producer (``meiva.skills``) and that consumer share this one shape
     instead of stringly-typed dict access. See the module docstring for the tiering rule.
     """
 

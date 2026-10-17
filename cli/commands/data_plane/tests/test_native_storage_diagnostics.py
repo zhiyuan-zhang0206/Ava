@@ -17,8 +17,8 @@ from base.deploy.tests.containers import free_port, redis_server
 from base.host.db_authority import delivery
 from cli.commands.data_plane._pooler_stop import OwnedPooler
 from cli.commands.data_plane.tests.test_pooler_stop import native_pooler as native_pooler
-from services.supervision.ava_root.health import ProbeRunner
-from services.supervision.ava_root_glue import diagnostic_probes as probes
+from services.supervision.meiva_root.health import ProbeRunner
+from services.supervision.meiva_root_glue import diagnostic_probes as probes
 
 
 async def test_native_redis_diagnostic_uses_authenticated_ping_without_acl_or_config_writes(
@@ -30,9 +30,9 @@ async def test_native_redis_diagnostic_uses_authenticated_ping_without_acl_or_co
         redis.Redis.from_url(url, decode_responses=True) as client,  # pyright: ignore[reportUnknownMemberType] — redis client stubs
     ):
         client.execute_command(  # pyright: ignore[reportUnknownMemberType] — redis command stubs
-            "ACL", "SETUSER", "ava_probe_fixture", "on", ">fixture-password", "+ping"
+            "ACL", "SETUSER", "meiva_probe_fixture", "on", ">fixture-password", "+ping"
         )
-        runtime_url = url.replace("redis://", "redis://ava_probe_fixture:fixture-password@")
+        runtime_url = url.replace("redis://", "redis://meiva_probe_fixture:fixture-password@")
         monkeypatch.setattr(settings.data_plane, "redis_url", runtime_url)
         configuration = client.config_get("*")  # pyright: ignore[reportUnknownMemberType] — redis command stubs
         acl = client.acl_list()  # pyright: ignore[reportUnknownMemberType] — redis command stubs

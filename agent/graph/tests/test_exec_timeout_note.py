@@ -12,14 +12,14 @@ from __future__ import annotations
 import pytest
 
 from agent.graph.prompt.context_notes import exec_timeout_note
-from ava.tests.fixtures.pin_agent import pin_agent, pin_no_identity
-from base.agents.context import AvaContext
+from base.agents.context import MeivaContext
 from base.agents.context.identity import AgentIdentity
 from base.agents.messages.kwargs import NoteTag
 from base.clock import Clock
 from base.config import settings
 from base.host.env.agent_slices import AgentSlices
 from base.packages.plugin_providers import build_model_catalog
+from meiva.tests.fixtures.pin_agent import pin_agent, pin_no_identity
 
 
 @pytest.fixture(autouse=True)
@@ -29,8 +29,8 @@ def _agent_identity(monkeypatch: pytest.MonkeyPatch) -> None:
     pin_agent(7)
 
 
-def _context(agent_id: int | None = 7) -> AvaContext:
-    return AvaContext(
+def _context(agent_id: int | None = 7) -> MeivaContext:
+    return MeivaContext(
         identity=AgentIdentity(agent_id=agent_id, owns_loop=True) if agent_id is not None else None,
         agent=AgentSlices.resolve(
             default_reader=lambda domain, field: getattr(getattr(settings, domain), field)
@@ -48,13 +48,13 @@ def test_declares_the_configured_timeout(monkeypatch: pytest.MonkeyPatch) -> Non
     content = str(note.content)  # pyright: ignore[reportUnknownArgumentType, reportUnknownMemberType]
     assert "600 seconds (10 minutes)" in content
     assert "it will be killed" in content
-    assert note.additional_kwargs["ava_note_tag"] == NoteTag.EXEC_TIMEOUT  # pyright: ignore[reportUnknownMemberType]
+    assert note.additional_kwargs["meiva_note_tag"] == NoteTag.EXEC_TIMEOUT  # pyright: ignore[reportUnknownMemberType]
 
 
 def test_opts_out_without_an_agent_identity(monkeypatch: pytest.MonkeyPatch) -> None:
     context = _context(None)
     pin_no_identity()
-    monkeypatch.delenv("AVA_AGENT_ID", raising=False)
+    monkeypatch.delenv("MEIVA_AGENT_ID", raising=False)
     assert exec_timeout_note(context) is None
 
 
@@ -62,7 +62,7 @@ def test_renders_under_a_hosted_turn_identity(monkeypatch: pytest.MonkeyPatch) -
     """The explicit host context works without binding the shared SDK."""
     context = _context(29)
     pin_no_identity()
-    monkeypatch.delenv("AVA_AGENT_ID", raising=False)
+    monkeypatch.delenv("MEIVA_AGENT_ID", raising=False)
     note = exec_timeout_note(context)
 
     assert note is not None

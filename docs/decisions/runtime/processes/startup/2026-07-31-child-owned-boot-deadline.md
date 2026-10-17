@@ -26,7 +26,7 @@ process.
 import chain and disarms it after the CAS. The thread watches
 `agent/_boot_timing.py`'s phase marks — now extended across the pre-flip segment
 (`start` → `starting_import` → `schema_check` → `placement_check` →
-`enter_starting`). No new phase within `AVA_AGENT_BOOT_STALL_SECONDS` and it
+`enter_starting`). No new phase within `MEIVA_AGENT_BOOT_STALL_SECONDS` and it
 prints the phase the boot stalled in and `os._exit`s.
 
 That converts the launcher's proxy into a warranted signal: within the pre-flip
@@ -50,7 +50,7 @@ Three properties carry the design:
 - **A second, non-resetting bound makes the total finite.** The stall window on
   its own bounds a boot only at `phases x stall`, arithmetic over a number that
   moves the day someone adds a mark — and at today's 4 pre-flip phases x 30s it
-  already equals the reap grace exactly. `AVA_AGENT_BOOT_BUDGET_SECONDS` (90s)
+  already equals the reap grace exactly. `MEIVA_AGENT_BOOT_BUDGET_SECONDS` (90s)
   caps the whole pre-claim boot below `allocated_reap_grace_seconds`, and the
   child exits on whichever bound trips first, naming which.
 - **The stall window sits below the confirm timeout** (pinned in
@@ -113,13 +113,13 @@ launcher still adjudicates, but it adjudicates a fact rather than a guess.
 
 ## Consequences
 
-- `AVA_AGENT_BOOT_STALL_SECONDS=0` disables the watchdog, and doing so silently
+- `MEIVA_AGENT_BOOT_STALL_SECONDS=0` disables the watchdog, and doing so silently
   reverts `_launched_process_alive` to the proxy it was — the liveness probe keeps
   running and keeps believing a wedged pid. Recorded in that function's docstring
   because the coupling is invisible from the launcher's side.
 - A boot step added before the CAS **must** mark a phase. An unmarked step longer
   than the stall window is indistinguishable from a wedge and will be killed as
-  one. Noted in `agent/_starting.py` and `agent/startup.ava.okf.md`.
+  one. Noted in `agent/_starting.py` and `agent/startup.meiva.okf.md`.
 - The `boot_timing` log line's `phases` keys gained the pre-flip segments, so the
   emitted breakdown is finer than before; `enter_starting` now measures the CAS
   alone rather than everything from process start.

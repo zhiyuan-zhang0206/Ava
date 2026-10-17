@@ -24,14 +24,14 @@ handoff.
 **The env POLICY lives elsewhere** (Task #856 Phase C + R2 design convergence
 point A): which keys a child receives is the `child_env(role)`
 projection of the env registry (`base/host/env/registry.py` — host-scope facts +
-AVA_HOME for daemon/session children, NOT "everything AVA_* minus a drop set"; the old denylist
-forwarded AVA_AGENT_ID and every non-cluster knob into daemon sessions, a
-leak that made a prod gateway carry AVA_AGENT_ID and load the whole
+MEIVA_HOME for daemon/session children, NOT "everything MEIVA_* minus a drop set"; the old denylist
+forwarded MEIVA_AGENT_ID and every non-cluster knob into daemon sessions, a
+leak that made a prod gateway carry MEIVA_AGENT_ID and load the whole
 agent stack, +11MB resident). The builders here stay thin mechanisms over that
 projection — iterate + build the dict, plus the venv activation (VIRTUAL_ENV +
 PATH) a login shell's profile would otherwise drop; the allow/drop decision is
 the data in the registry. The session builders live here because five callers
-across four layers (ava SDK shell sessions, shared
+across four layers (meiva SDK shell sessions, shared
 service respawn, cli start, ops operator shells, gateway schedule runner) need
 identical semantics and layering forbids a lower layer importing a process
 package. The child re-sources cluster-scope values at its own boot (gateway
@@ -116,9 +116,9 @@ def admit_service_path(value: str, *, excluded: tuple[Path, ...] = ()) -> str:
     """Normalize host tools and require exact persistence through the home file."""
     normalized = normalize_service_path(value, excluded=excluded)
     decoded = dotenv_values(
-        stream=io.StringIO(f"AVA_SERVICE_PATH={normalized}\n"), interpolate=False
+        stream=io.StringIO(f"MEIVA_SERVICE_PATH={normalized}\n"), interpolate=False
     )
-    if "${" in normalized or decoded["AVA_SERVICE_PATH"] != normalized:
+    if "${" in normalized or decoded["MEIVA_SERVICE_PATH"] != normalized:
         raise ValueError(
             "managed service PATH must round-trip literally through home configuration"
         )
@@ -132,7 +132,7 @@ def managed_service_env(service_path: str) -> dict[str, str]:
     env = forward_env_dict()
     bindir = runtime_venv() / get_backend().venv_bin_dir_name()
     host_path = normalize_service_path(service_path, excluded=(bindir,))
-    env["AVA_SERVICE_PATH"] = host_path
+    env["MEIVA_SERVICE_PATH"] = host_path
     env["PATH"] = normalize_service_path(
         os.pathsep.join((str(bindir), host_path, frontend_toolchain_path("")))
     )
@@ -144,10 +144,10 @@ def _session_forward_env(extra: dict[str, str] | None = None) -> dict[str, str]:
     registry's session forward view (`child_env`) plus `extra`.
 
     Daemons belong to the gateway/runner process profiles, whose session view
-    is identical (host-scope settings aliases + AVA_HOME, the ambient display
+    is identical (host-scope settings aliases + MEIVA_HOME, the ambient display
     passthroughs and temp-dir vars non-empty only). POSITIVE allowlist, not a
     drop list (Task #856 Phase C, audit F-s3-4): a non-modeled knob
-    (AVA_AGENT_ID, ...) or agent-scope override never rides into a daemon
+    (MEIVA_AGENT_ID, ...) or agent-scope override never rides into a daemon
     session. The allow/drop decision is the DATA in base/host/env/registry.py;
     this function is the mechanism that applies it.
     """
@@ -177,7 +177,7 @@ def forward_env_dict(*, activate_venv: bool = True) -> dict[str, str]:
     """The full child env dict for a daemon/service session.
 
     Each child gets a built dict: the registry's session forward view
-    (`_session_forward_env`) — host-scope AVA_* config + the ambient display
+    (`_session_forward_env`) — host-scope MEIVA_* config + the ambient display
     passthroughs — *and* PATH, which the child genuinely needs. Cluster-scope
     values and agent-scope/non-modeled knobs are not carried (positive
     allowlist, Task #856 Phase C / audit F-s3-4): the child re-sources them at
@@ -188,7 +188,7 @@ def forward_env_dict(*, activate_venv: bool = True) -> dict[str, str]:
     venv interpreter directly (`.venv/bin/python -m …`, no resident `uv run`
     parent per daemon), so this reproduces what `uv run` injected — VIRTUAL_ENV +
     the venv bin dir prepended to PATH — so a daemon that shells out to bare
-    `python` / `ava` still resolves into the venv. The provisioned Node
+    `python` / `meiva` still resolves into the venv. The provisioned Node
     locations follow it, so the frontend's bare `npm` is found even when a
     remote shell starts with only system PATH entries.
 
@@ -229,7 +229,7 @@ def venv_activation_prefix() -> str:
     — macOS `path_helper` especially — rebuilds PATH from scratch, dropping any
     venv prefix the forwarded env carried (VIRTUAL_ENV survives, PATH does not). Re-exporting here, after the
     profile has run, is what makes a daemon that execs a bare binary off PATH
-    work — a daemon that shells out to bare `ava` / `python` resolves them
+    work — a daemon that shells out to bare `meiva` / `python` resolves them
     into the venv. It also
     injects the provisioned Node locations after the venv, because the frontend
     session runs bare `npm` after that profile has had a chance to discard PATH.

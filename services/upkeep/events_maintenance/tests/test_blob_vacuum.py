@@ -2,7 +2,7 @@
 
 Pins (Task #1130): a plain VACUUM (never FULL — FULL's ACCESS EXCLUSIVE lock
 would stall agents, ruled out by the user); only inside the measured
-agent-lowest window (05:00-08:00 cluster time — `AVA_TIMEZONE`); each run logs the
+agent-lowest window (05:00-08:00 cluster time — `MEIVA_TIMEZONE`); each run logs the
 physical size + dead-tuple count so the reclamation trend is observable.
 
 The window boundary is the load-bearing part (the daemon calls this hourly, so
@@ -78,7 +78,7 @@ def _throwaway_db(db_conn: psycopg.Connection) -> Iterator[str]:
     _ = db_conn  # dependency: the session cluster is up
     base_url, _name = settings.data_plane.db_url.rsplit("/", 1)
     admin_url = f"{base_url}/postgres"
-    name = f"ava_test_vacuum_{os.getpid()}_{int(time.time() * 1_000_000)}"
+    name = f"meiva_test_vacuum_{os.getpid()}_{int(time.time() * 1_000_000)}"
     url = f"{base_url}/{name}"
     with psycopg.connect(admin_url, autocommit=True) as admin, admin.cursor() as cur:
         cur.execute(sql.SQL("CREATE DATABASE {}").format(sql.Identifier(name)))

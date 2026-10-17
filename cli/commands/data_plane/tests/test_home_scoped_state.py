@@ -9,7 +9,7 @@ from base.sessions.pty import allocation_freeze
 from cli.commands.data_plane import cluster_instance
 
 
-def test_every_host_state_path_follows_ava_home(unit_home: Path) -> None:
+def test_every_host_state_path_follows_meiva_home(unit_home: Path) -> None:
     assert runtime_binaries.runtime_root() == unit_home / "runtime"
     assert cluster_instance.pg_template_dir() == unit_home / "pg-template-17"
     assert coding_session_owner_record.host_owner_dir() == unit_home / "coding-session-owners"

@@ -40,7 +40,7 @@ from langchain_core.messages import AIMessage, BaseMessage, ToolMessage
 
 from base.agents.history.timeline import TimelineItem, build_timeline_items
 from base.agents.history.timeline_inputs import TimelineReadInputs
-from base.agents.messages.kwargs import AvaMsgType, read_ava_kwargs
+from base.agents.messages.kwargs import MeivaMsgType, read_meiva_kwargs
 from base.lm.content import message_addl_kwargs
 
 UnitKind = Literal["work", "text", "inbound", "note"]
@@ -110,8 +110,8 @@ def read_times(
 ) -> list[datetime | None]:
     """The time each message was read by the model, per message in message order.
 
-    A message's own time is `message_read_time` (`ava_picked_up_at` when it records one, else
-    `ava_created_at`); the timeline items carry it as `created_at`. A message is never read before
+    A message's own time is `message_read_time` (`meiva_picked_up_at` when it records one, else
+    `meiva_created_at`); the timeline items carry it as `created_at`. A message is never read before
     the one before it, so the read time is the running maximum of those times. Data that records
     the pickup is monotone and passes through unchanged; older data, whose inbound messages are
     stamped on arrival (while the agent was still streaming the AIMessage before them), gets its
@@ -234,18 +234,18 @@ def note_label(msg: BaseMessage) -> str:
     """A short label for a framework-injected message, by its type: `(memory)`,
     `(compact summary)`, `(attachment)`, `(system note)`, a note's tag otherwise
     (`(sdk hint)`, `(task)`, ...)."""
-    kwargs = read_ava_kwargs(msg)
-    kind = kwargs.get("ava_msg_type")
-    if kind == AvaMsgType.COMPACT_SUMMARY:
+    kwargs = read_meiva_kwargs(msg)
+    kind = kwargs.get("meiva_msg_type")
+    if kind == MeivaMsgType.COMPACT_SUMMARY:
         return "(compact summary)"
-    if kind == AvaMsgType.COMPACT_REQUEST:
+    if kind == MeivaMsgType.COMPACT_REQUEST:
         return "(compact request)"
-    if kind == AvaMsgType.ATTACH:
+    if kind == MeivaMsgType.ATTACH:
         return "(attachment)"
-    tag = kwargs.get("ava_note_tag")
+    tag = kwargs.get("meiva_note_tag")
     return (
         f"({str(tag).replace('_', ' ')})"
-        if kind == AvaMsgType.SYSTEM_NOTE and tag
+        if kind == MeivaMsgType.SYSTEM_NOTE and tag
         else "(system note)"
     )
 
@@ -267,21 +267,21 @@ def inbound_type(source: str | None) -> str:
 
 def _inbound_content(msg: BaseMessage) -> str:
     """An inbound's content without its envelope header, cut where the writer recorded
-    the content to start (`ava_inbound_body_start`; the sender is the unit's source).
+    the content to start (`meiva_inbound_body_start`; the sender is the unit's source).
     Every inbound records the offset; a message without it raises `ValueError`."""
-    start = read_ava_kwargs(msg).get("ava_inbound_body_start")
+    start = read_meiva_kwargs(msg).get("meiva_inbound_body_start")
     if start is None:
-        raise ValueError("inbound message lacks ava_inbound_body_start")
+        raise ValueError("inbound message lacks meiva_inbound_body_start")
     return msg.text[start:]
 
 
 def _result_body(msg: ToolMessage) -> str:
     """A tool result's output without its envelope header, cut where the writer recorded
-    the body to start (`ava_exec_body_start`). Every exec result records the offset; a
+    the body to start (`meiva_exec_body_start`). Every exec result records the offset; a
     message without it raises `ValueError`."""
-    start = read_ava_kwargs(msg).get("ava_exec_body_start")
+    start = read_meiva_kwargs(msg).get("meiva_exec_body_start")
     if start is None:
-        raise ValueError("exec result lacks ava_exec_body_start")
+        raise ValueError("exec result lacks meiva_exec_body_start")
     return msg.text[start:]
 
 
@@ -347,7 +347,7 @@ def catalog_line(unit: MessageUnit, messages: Sequence[BaseMessage]) -> str:
 # - **call**: the tool call, an instant at the end of the stream;
 # - **output**: the execution, from the end of the stream to the tool result.
 #
-# When the AIMessage also carries text and its reasoning time is recorded (`ava_reasoning_ms_by_block`),
+# When the AIMessage also carries text and its reasoning time is recorded (`meiva_reasoning_ms_by_block`),
 # the thinking block ends after that time and the text block takes
 # the rest of the stream; without the record the text is an instant at the end, like the call. A turn
 # that is only text spans its stream. Inbound messages and notes are their own blocks, as units.
@@ -378,7 +378,7 @@ def _thinking(msg: AIMessage) -> str:
 
 def _reasoning_ms(msg: AIMessage) -> int | None:
     kwargs = message_addl_kwargs(msg)
-    by_block = kwargs.get("ava_reasoning_ms_by_block")
+    by_block = kwargs.get("meiva_reasoning_ms_by_block")
     if isinstance(by_block, dict) and by_block:
         return sum(int(ms) for ms in cast("dict[str, int]", by_block).values())
     return None

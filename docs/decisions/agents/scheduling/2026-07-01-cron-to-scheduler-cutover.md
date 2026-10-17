@@ -2,14 +2,14 @@
 
 > **Decision date 2026-07-01** (`037cb9e1`). **Complete** — the gateway-hosted
 > **schedules** subsystem (`gateway/schedule_manager.py`, `/api/schedules`, the
-> `ava_schedule_writer` skill, `/control/schedules`, `ava schedules …`) is the only
+> `meiva_schedule_writer` skill, `/control/schedules`, `meiva schedules …`) is the only
 > scheduler; `gateway/cron_scheduler.py`, `/api/cron/jobs`, the Cron settings tab,
 > and the `cron_jobs` table are all gone.
 
 ## Decision
 
 Replace `cron_jobs` with `schedules`, and **do not let the table drop ride the
-merge**. `ava update` applies pending migrations automatically, so shipping the
+merge**. `meiva update` applies pending migrations automatically, so shipping the
 removal and the drop together would drop `cron_jobs` the moment the code deployed —
 and the same PR deletes the converter (`gateway/schedule_convert.py`) that reads it.
 A live, unconverted cron job would then silently stop firing with no way to recover
@@ -53,8 +53,8 @@ over, and verified job by job; only then did PR6 land the removal + the drop
 5. **Deploy PR6** — removes `gateway/cron_scheduler.py`, `gateway/routers/cron.py`,
    `gateway/schedule_convert.py` (spent), the `/api/cron/jobs` routes, the Cron
    settings tab, and the CronJob API client + types; applies `0067` and syncs
-   `db/schema.sql`. `skills/ava_guide` repoints at schedules /
-   `ava.skills.ava_schedule_writer` instead of the removed `reference/cron.md`.
+   `db/schema.sql`. `skills/meiva_guide` repoints at schedules /
+   `meiva.skills.meiva_schedule_writer` instead of the removed `reference/cron.md`.
 
 Rollback posture at the time: before step 5 there was nothing to roll back (cron
 intact, just disabled per job); after step 5, a misbehaving schedule is fixed

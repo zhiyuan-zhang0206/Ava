@@ -18,9 +18,9 @@ def test_directory_with_unreadable_member_is_skipped(
     (plugins / "dangling.py").symlink_to(plugins / "missing.py")
     assert gate.main([str(plugins / "bad_utf8.py")]) == 0
     assert gate.main([]) == 0
-    (plugins / "viol.py").write_text("ava.files.read = my_read\n", encoding="utf-8")
+    (plugins / "viol.py").write_text("meiva.files.read = my_read\n", encoding="utf-8")
     assert gate.main([]) == 1
-    assert "ava.files.read" in capsys.readouterr().out
+    assert "meiva.files.read" in capsys.readouterr().out
 
 
 def test_explicit_plugins_directory_argument_enumerates_members(
@@ -31,9 +31,9 @@ def test_explicit_plugins_directory_argument_enumerates_members(
     plugins.mkdir(parents=True)
     (plugins / "ok.py").write_text("value = 1\n", encoding="utf-8")
     assert gate.main([str(plugins)]) == 0
-    (plugins / "viol.py").write_text("ava.files.read = my_read\n", encoding="utf-8")
+    (plugins / "viol.py").write_text("meiva.files.read = my_read\n", encoding="utf-8")
     assert gate.main([str(plugins)]) == 1
-    assert "ava.files.read" in capsys.readouterr().out
+    assert "meiva.files.read" in capsys.readouterr().out
 
 
 def test_explicit_missing_target_is_an_error(
@@ -57,5 +57,5 @@ def test_missing_default_scan_dir_is_an_error(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.setattr(gate, "_REPO_ROOT", tmp_path)
-    with pytest.raises(FileNotFoundError, match="ava_builtins/plugins"):
+    with pytest.raises(FileNotFoundError, match="meiva_builtins/plugins"):
         gate.main([])

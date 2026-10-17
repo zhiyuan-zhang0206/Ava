@@ -1,4 +1,4 @@
-"""`ava config` + `ava presets` + `ava schedules` — gateway-API management verbs.
+"""`meiva config` + `meiva presets` + `meiva schedules` — gateway-API management verbs.
 
 Builders plus their `_h_*` handlers; `_add_script_args` is the shared
 `--script` / `--script-file` pair used by `schedules create` and `update`.
@@ -78,7 +78,7 @@ def _h_schedules_update(args: argparse.Namespace) -> int:
         and not args.disable
     ):
         print(
-            "ava: pass at least one of --name / --script / --script-file / --command / "
+            "meiva: pass at least one of --name / --script / --script-file / --command / "
             "--description / --enable / --disable — a partial update needs at least one field",
             file=sys.stderr,
         )
@@ -135,9 +135,9 @@ def _h_schedules_verify(args: argparse.Namespace) -> int:
 
 
 def add_config_parser(sub: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
-    # `ava config` — read / set / unset cluster + host config via the gateway. The
+    # `meiva config` — read / set / unset cluster + host config via the gateway. The
     # handlers defer the cli.commands.management.config import (which loads Settings) so
-    # `ava --help` builds the parser without a configured .env.
+    # `meiva --help` builds the parser without a configured .env.
     config_p = sub.add_parser(
         "config",
         help="read/set/unset cluster + host config (writes the gateway/host .env via the gateway)",
@@ -178,7 +178,7 @@ def add_config_parser(sub: argparse._SubParsersAction[argparse.ArgumentParser]) 
 
 
 def add_schedules_parser(sub: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
-    # `ava schedules` — manage gateway-supervised schedules (thin client over
+    # `meiva schedules` — manage gateway-supervised schedules (thin client over
     # /api/schedules). Every verb takes a name or a numeric id.
     schedules_p = sub.add_parser(
         "schedules",

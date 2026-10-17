@@ -3,7 +3,7 @@ from __future__ import annotations
 from collections.abc import Collection
 from typing import NamedTuple
 
-from base.agents.context import AvaContext
+from base.agents.context import MeivaContext
 from base.api_contracts.memory_search import MemorySearchPurpose
 
 from . import transport
@@ -14,8 +14,8 @@ MEMORY_SEARCH_MAX_RETRIES = 2
 MEMORY_SEARCH_TIMEOUT_MARGIN_S = 3.0
 
 
-# ava:ref base/agents/context/gateway_client/docs/memory-search.ava.okf.md#default-timeout
-def memory_search_timeout(context: AvaContext) -> transport.TransportTimeout:
+# meiva:ref base/agents/context/gateway_client/docs/memory-search.meiva.okf.md#default-timeout
+def memory_search_timeout(context: MeivaContext) -> transport.TransportTimeout:
 
     import httpx
 
@@ -26,7 +26,7 @@ def memory_search_timeout(context: AvaContext) -> transport.TransportTimeout:
     return httpx.Timeout(budget)
 
 
-# ava:ref base/agents/context/gateway_client/docs/memory-search.ava.okf.md#wire-results
+# meiva:ref base/agents/context/gateway_client/docs/memory-search.meiva.okf.md#wire-results
 class MemorySearchResult(NamedTuple):
     path: str
     description: str
@@ -35,7 +35,7 @@ class MemorySearchResult(NamedTuple):
     chunk: str
 
 
-# ava:ref base/agents/context/gateway_client/docs/memory-search.ava.okf.md#request-budget
+# meiva:ref base/agents/context/gateway_client/docs/memory-search.meiva.okf.md#request-budget
 def memory_search(
     query: str,
     k: int,
@@ -44,7 +44,7 @@ def memory_search(
     exclude: Collection[str] = (),
     timeout: float | None = None,
     attempts: int = MEMORY_SEARCH_MAX_RETRIES,
-    context: AvaContext,
+    context: MeivaContext,
 ) -> list[MemorySearchResult]:
 
     import httpx

@@ -13,7 +13,7 @@ def cold_import_does_not_probe_uname() -> None:
     import platform
     import uuid  # noqa: F401  # pyright: ignore[reportUnusedImport]
 
-    # Linux's stdlib UUID initialization probes the OS independently of Ava.
+    # Linux's stdlib UUID initialization probes the OS independently of Meiva.
     assert "base.native_process" not in sys.modules
     assert "base.native_process.os_platform" not in sys.modules
 

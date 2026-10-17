@@ -37,7 +37,7 @@ class TestResolveUploadPath:
     ) -> None:
         """Upload directories repair a lax mode before files are read or written."""
         monkeypatch.setattr(Path, "home", lambda: tmp_path)
-        directory = tmp_path / "Downloads" / "AvaAgent-7"
+        directory = tmp_path / "Downloads" / "MeivaAgent-7"
         directory.mkdir(parents=True)
         directory.chmod(0o755)
 
@@ -47,7 +47,7 @@ class TestResolveUploadPath:
     def test_resolves_inside_dir(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
         monkeypatch.setattr(Path, "home", lambda: tmp_path)
         p = paths.resolve_upload_path(7, "foo.png")
-        assert p == (tmp_path / "Downloads" / "AvaAgent-7" / "foo.png").resolve()
+        assert p == (tmp_path / "Downloads" / "MeivaAgent-7" / "foo.png").resolve()
 
     def test_rejects_parent_traversal(
         self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path

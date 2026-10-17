@@ -85,7 +85,7 @@ with the same hint.
 
 ## Cookie
 
-`AVA_VISUAL_GATE_COOKIE_FILE` must be mode 0600 and may be Playwright
+`MEIVA_VISUAL_GATE_COOKIE_FILE` must be mode 0600 and may be Playwright
 storage-state JSON, a Netscape cookie jar, or a single `name=value` line.
 The runbook's curl revocation only consumes Netscape and `name=value`
 formats; a storage-state JSON export must be revoked from the logged-in UI.
@@ -93,7 +93,7 @@ formats; a storage-state JSON export must be revoked from the logged-in UI.
 ## Daily schedule
 
 ```
-30 7 * * * AVA_VISUAL_GATE_COOKIE_FILE=/secure/ava-visual-cookies.txt /path/to/Ava/.venv/bin/python /path/to/Ava/scripts/post_deploy_visual/check.py --check --base-url https://gateway.example
+30 7 * * * MEIVA_VISUAL_GATE_COOKIE_FILE=/secure/meiva-visual-cookies.txt /path/to/Meiva/.venv/bin/python /path/to/Meiva/scripts/post_deploy_visual/check.py --check --base-url https://gateway.example
 ```
 
 

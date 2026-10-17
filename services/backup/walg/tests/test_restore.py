@@ -85,14 +85,14 @@ def _scenario(sandbox: Sandbox, pg: PgInstance) -> Scenario:
 
 def _restored_rows(instance: restore.RestoredInstance) -> list[str]:
     with psycopg.connect(
-        host=str(instance.socket_dir), port=instance.port, user="ava", dbname="postgres"
+        host=str(instance.socket_dir), port=instance.port, user="meiva", dbname="postgres"
     ) as conn:
         return [str(row[0]) for row in conn.execute("SELECT k FROM t ORDER BY k").fetchall()]
 
 
 def _assert_scratch_posture(instance: restore.RestoredInstance, *, max_connections: str) -> None:
     with psycopg.connect(
-        host=str(instance.socket_dir), port=instance.port, user="ava", dbname="postgres"
+        host=str(instance.socket_dir), port=instance.port, user="meiva", dbname="postgres"
     ) as conn:
         assert _scalar(conn, "SHOW archive_mode") == "off"
         assert _scalar(conn, "SHOW listen_addresses") == ""
@@ -125,7 +125,7 @@ def test_recovers_to_the_target_lsn_and_never_touches_the_source(
             backup=scenario.backup,
             target=RecoveryTarget(lsn=scenario.target),
             report=reports.append,
-            user="ava",
+            user="meiva",
             keep_data=True,
             path_reader=lambda: settings.walg.walg_config_file,
         ) as instance:
@@ -150,7 +150,7 @@ def test_recovers_to_a_target_time(
             backup=scenario.backup,
             target=RecoveryTarget(time=scenario.target_time),
             report=lambda _line: None,
-            user="ava",
+            user="meiva",
             keep_data=False,
             path_reader=lambda: settings.walg.walg_config_file,
         ) as instance:
@@ -168,7 +168,7 @@ def test_without_a_target_recovery_replays_all_archived_wal(
             backup=scenario.backup,
             target=RecoveryTarget(),
             report=lambda _line: None,
-            user="ava",
+            user="meiva",
             keep_data=False,
             path_reader=lambda: settings.walg.walg_config_file,
         ) as instance:
@@ -194,12 +194,12 @@ def test_a_backup_that_carries_archive_settings_still_cannot_archive(
                 backup=scenario.backup,
                 target=RecoveryTarget(lsn=scenario.target),
                 report=lambda _line: None,
-                user="ava",
+                user="meiva",
                 keep_data=False,
                 path_reader=lambda: settings.walg.walg_config_file,
             ) as instance,
             psycopg.connect(
-                host=str(instance.socket_dir), port=instance.port, user="ava", dbname="postgres"
+                host=str(instance.socket_dir), port=instance.port, user="meiva", dbname="postgres"
             ) as conn,
         ):
             assert _scalar(conn, "SHOW archive_mode") == "off"
@@ -223,7 +223,7 @@ def test_a_missing_segment_between_backup_and_target_fails_recovery(
                 backup=scenario.backup,
                 target=RecoveryTarget(lsn=scenario.target),
                 report=lambda _line: None,
-                user="ava",
+                user="meiva",
                 keep_data=False,
                 path_reader=lambda: settings.walg.walg_config_file,
             ),
@@ -336,7 +336,7 @@ def test_the_postmaster_command_line_holds_every_safety_setting_and_no_secret(
     assert wanted <= set(pg_settings)
     # the home path of the sandbox holds a literal "%p": Postgres must see "%%p"
     assert command.endswith("wal-fetch %f %p")
-    assert "ava home%%p" in command
+    assert "meiva home%%p" in command
     assert sandbox.config_file.name in command
     assert argv[argv.index("-D") + 1] == str(tmp_path / "data")
     joined = " ".join(argv)
@@ -347,7 +347,7 @@ def test_the_postmaster_command_line_holds_every_safety_setting_and_no_secret(
 def test_control_settings_reads_what_the_control_file_records(tmp_path: Path) -> None:
     data = tmp_path / "data"
     subprocess.run(  # noqa: S603 — the resolved initdb with static flags
-        [str(pg_tool("initdb")), "-D", str(data), "-U", "ava", "-A", "trust", "--no-sync"],
+        [str(pg_tool("initdb")), "-D", str(data), "-U", "meiva", "-A", "trust", "--no-sync"],
         check=True,
         capture_output=True,
     )

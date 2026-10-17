@@ -41,7 +41,7 @@ prevent.
    Old-commit hosts answering without the fields read as "cannot tell" — the
    judgment arrives with the rollout after the one that ships it, the same
    one-rollout lag `last_updater_outcome` itself had.
-3. **Formal cancel = SIGINT, never a kill.** `ava cluster cancel`
+3. **Formal cancel = SIGINT, never a kill.** `meiva cluster cancel`
    (`ops.ops_cluster.cluster_cancel_op`) interrupts the orchestration's own pid,
    read from the deploy lease's holder string (`holder_pid_if_local`, the same
    parser the stalled-rollout controller uses). The orchestration's `finally`

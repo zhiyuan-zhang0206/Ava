@@ -4,6 +4,6 @@
     ".",
     "test_daemon_shutdown_bound.py",
 ]
-"ava.tests.fixtures.sdk" = [
+"meiva.tests.fixtures.sdk" = [
     "test_daemon_shutdown_bound.py",
 ]

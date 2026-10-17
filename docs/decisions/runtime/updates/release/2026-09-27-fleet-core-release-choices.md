@@ -23,7 +23,7 @@ authenticated coordinator channel. It left choices open:
 
 User rulings, 2026-09-27:
 
-1. **Units publish their prepared receipt to the gateway.** `ava cluster
+1. **Units publish their prepared receipt to the gateway.** `meiva cluster
    release prepare` on each unit publishes its receipt to the gateway over the
    machine-token API, so the coordinator learns each unit's candidate image;
    the request builder then verifies each receipt through that unit's handoff
@@ -39,13 +39,13 @@ User rulings, 2026-09-27:
    close and stay closed.
 3. **A release moves between two distinct commits.** `FleetRequest` refuses a
    candidate with the previous source commit; rebuilding the same commit is
-   not a release and goes through the single-host `ava cluster release adopt`
+   not a release and goes through the single-host `meiva cluster release adopt`
    path. The request builder runs in the currently admitted image for now; it
    moves behind the release handoff in FC-7b.
 
 ## Alternatives rejected
 
-- **The operator hands every unit's receipt to `ava cluster release
+- **The operator hands every unit's receipt to `meiva cluster release
   request`.** It makes the operator copy files between machines for each
   release, and a stale or wrong receipt is only caught after the fact; a
   published receipt arrives over an authenticated, per-unit channel the
@@ -77,7 +77,7 @@ User rulings, 2026-09-27:
   `require_fleet_of_one`): a release is a fleet of one, the gateway home of a
   single-unit cluster.
 - A failure at `resuming` leaves the cluster held, possibly with admission
-  open, until an operator continues the operation (`ava cluster update
+  open, until an operator continues the operation (`meiva cluster update
   --prepared`) or intervenes.
 - A failed unit start leaves that unit out of the release until it converges.
 - Releasing requires a new commit; a same-commit image rebuild uses `adopt`.

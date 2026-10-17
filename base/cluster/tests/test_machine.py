@@ -2,7 +2,7 @@
 
 MachineIdentity.role is derived from independent capability booleans
 (serve_gateway / serve_agent_runner / serve_observability_station), each the settings
-bool of its `AVA_MACHINE_SERVE_*` key (None = off). The home's `.env` is the only source:
+bool of its `MEIVA_MACHINE_SERVE_*` key (None = off). The home's `.env` is the only source:
 identity files in the home are not read (`test_identity_files_in_the_home_are_not_read`).
 Role injection is exercised through the public MachineIdentity.set/role contract.
 """
@@ -204,7 +204,7 @@ def test_identity_files_in_the_home_are_not_read(
     and `memory_remote` files older homes kept are not read by any resolver."""
     from base.cluster.machine import MachineNameMissing
 
-    monkeypatch.setenv("AVA_HOME", str(tmp_path))
+    monkeypatch.setenv("MEIVA_HOME", str(tmp_path))
     machine_config.set_field("machine_name", "")
     machine_config.set_field("machine_host", "")
     machine_config.set_field("machine_description", "")
@@ -294,7 +294,7 @@ def test_machine_description_none_when_empty(
     ("configured", "resolved"),
     [
         ("http://gw.vpn:8000/", "http://gw.vpn:8000"),
-        ("https://ava.example.com", "https://ava.example.com"),
+        ("https://meiva.example.com", "https://meiva.example.com"),
     ],
 )
 def test_gateway_api_base_resolves_the_configured_url_role_blind(
@@ -390,7 +390,7 @@ def test_owned_identity_set_host_injection(machine_identity: MachineIdentity) ->
 
 
 def test_format_capabilities_labels() -> None:
-    """Capability booleans rendered as a single label — shared by ava status / cluster status."""
+    """Capability booleans rendered as a single label — shared by meiva status / cluster status."""
     assert format_capabilities(True, True) == "gateway + agent-runner"
     assert format_capabilities(True, False) == "gateway"
     assert format_capabilities(False, True) == "agent-runner"
@@ -419,7 +419,7 @@ def test_gateway_auth_headers_present_when_secret_set() -> None:
 
 def test_gateway_auth_headers_raise_when_no_credential(monkeypatch: pytest.MonkeyPatch) -> None:
     """The API always authenticates: no token and no secret is an error, not an empty header."""
-    monkeypatch.delenv("AVA_API_TOKEN", raising=False)
+    monkeypatch.delenv("MEIVA_API_TOKEN", raising=False)
     access = GatewayAccess(gateway_url="http://gw", cluster_secret="", remote_plane=False)
     with pytest.raises(GatewayApiTokenMissing):
         gateway_auth_headers(access)
@@ -430,8 +430,8 @@ def test_gateway_access_from_boot_reads_the_roots_own_configuration(
 ) -> None:
     machine_config.set_field("gateway_url", "http://gw.vpn:8000")
     machine_config.set_field("cluster_secret", _SECRET)
-    machine_config.set_field("db_url", "postgresql://ava:pw@127.0.0.1:5432/ava")
-    machine_config.set_field("redis_url", "redis://ava:pw@127.0.0.1:6379/0")
+    machine_config.set_field("db_url", "postgresql://meiva:pw@127.0.0.1:5432/meiva")
+    machine_config.set_field("redis_url", "redis://meiva:pw@127.0.0.1:6379/0")
 
     access = gateway_access_from_boot(machine_config)
 
@@ -442,7 +442,7 @@ def test_gateway_access_from_boot_reads_the_roots_own_configuration(
 
 
 def test_a_foreign_database_host_makes_the_plane_remote(machine_config: ConfigBoot) -> None:
-    machine_config.set_field("db_url", "postgresql://ava:pw@db.example.net:5432/ava")
+    machine_config.set_field("db_url", "postgresql://meiva:pw@db.example.net:5432/meiva")
 
     assert gateway_access_from_boot(machine_config).remote_plane is True
 

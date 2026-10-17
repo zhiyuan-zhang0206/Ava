@@ -94,13 +94,13 @@ class Settings(BaseModel):
     def __init__(self, *, profile: str | None = PROFILE_UNSET, **data: Any) -> None:
         """Construct the aggregate for `profile`.
 
-        `profile` defaults to the process's AVA_PROCESS_PROFILE env marker; an
+        `profile` defaults to the process's MEIVA_PROCESS_PROFILE env marker; an
         explicit `profile=None` builds every domain (config-service read paths,
         tests, CLI). An unknown profile name fails fast — the marker is set by
         launchers, not by hand.
         """
         if profile == PROFILE_UNSET:
-            profile = os.environ.get("AVA_PROCESS_PROFILE")
+            profile = os.environ.get("MEIVA_PROCESS_PROFILE")
         if profile is not None and profile not in PROCESS_PROFILES:
             raise profile_unknown_error(profile)
         super().__init__(**data)
@@ -254,7 +254,7 @@ def refresh_data_plane_settings(settings: Any) -> None:
     A long-lived process (the rollout orchestrator) builds its Settings
     singleton once at startup. When the work it drives rewrites `.env` — most
     notably a data-plane credential rotation migration run by the local leg's
-    child `ava start` (the 2026-08-25 secret split) — the singleton still
+    child `meiva start` (the 2026-08-25 secret split) — the singleton still
     carries the pre-rotation values and every later data-plane write from this
     process fails with SASL authentication. On 2026-08-25 the pin advance, the
     compensating unpause and the update-lock release all died exactly that way,
@@ -268,9 +268,9 @@ def refresh_data_plane_settings(settings: Any) -> None:
     Other domains are left untouched: the rotation is a data-plane fact, and a
     full singleton swap would surprise subsystems that cache a sub-model.
     """
-    from base.host.env.dotenv_boot import load_ava_env
+    from base.host.env.dotenv_boot import load_meiva_env
 
-    result = load_ava_env()
+    result = load_meiva_env()
     data_plane = DataPlaneSettings()  # pyright: ignore[reportCallIssue]
     settings.data_plane = data_plane
     settings.env_boot = result

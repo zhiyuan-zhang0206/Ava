@@ -29,7 +29,7 @@ class DisplaySettings(EnvSettings):
         default=100,
         ge=1,
         le=10000,
-        alias="AVA_MESSAGES_DEFAULT_LIMIT",
+        alias="MEIVA_MESSAGES_DEFAULT_LIMIT",
         description=(
             "Default tail window (items) of GET /api/agents/{id}/messages when the caller "
             "passes no limit. 100 covers the recent slice an implicit read usually wants "
@@ -48,7 +48,7 @@ class DisplaySettings(EnvSettings):
         default=50,
         ge=1,
         le=1000,
-        alias="AVA_TIMELINE_DEFAULT_LIMIT",
+        alias="MEIVA_TIMELINE_DEFAULT_LIMIT",
         description=(
             "Default timeline tail-window (items) for GET /api/agents/{id}/timeline, the "
             "agent-published timeline snapshot trim, and the CLI timeline command. The unit "
@@ -68,7 +68,7 @@ class DisplaySettings(EnvSettings):
         default=20000,
         ge=1000,
         le=200000,
-        alias="AVA_RUN_TIMELINE_MESSAGE_TEXT_MAX",
+        alias="MEIVA_RUN_TIMELINE_MESSAGE_TEXT_MAX",
         description=(
             "Per-part text budget of one run-timeline raw-message read "
             "(GET /api/agents/{id}/run-timeline/messages), in characters. A longer "
@@ -89,7 +89,7 @@ class DisplaySettings(EnvSettings):
         default=200,
         ge=1,
         le=500,
-        alias="AVA_NOTICES_OPEN_DEFAULT_LIMIT",
+        alias="MEIVA_NOTICES_OPEN_DEFAULT_LIMIT",
         description=(
             "Default cap on one open-notices read (GET /api/notices/open, /api/notices/live, "
             "and the unified feed's open/awaiting slices) when the caller passes no limit. "
@@ -108,7 +108,7 @@ class DisplaySettings(EnvSettings):
         default=30,
         ge=1,
         le=100,
-        alias="AVA_NOTICES_RESOLVED_DEFAULT_PAGE",
+        alias="MEIVA_NOTICES_RESOLVED_DEFAULT_PAGE",
         description=(
             "One resolved-notices history page (the unified feed's resolved_limit) "
             "when the caller passes none. 30 is a screenful of greyed "
@@ -127,11 +127,11 @@ class DisplaySettings(EnvSettings):
         default=200,
         ge=50,
         le=2000,
-        alias="AVA_SHELL_CAPTURE_DEFAULT_LINES",
+        alias="MEIVA_SHELL_CAPTURE_DEFAULT_LINES",
         description=(
             "Default tail window (lines) of a shell capture when the caller passes none: "
             "the shell monitor page's poll (GET /api/agents/{id}/shell/{sid}), the SDK's "
-            "ava.shell.sessions.capture(), and the pty CLI's bare `capture` op. 200 lines "
+            "meiva.shell.sessions.capture(), and the pty CLI's bare `capture` op. 200 lines "
             "is a few screenfuls and matches the monitor page's own default; the valid "
             "range (50..2000 at the API, hard clamp 100000 at the pty-sessions service) stays fixed "
             "(protective constants, task #3696 exception inventory)."
@@ -148,7 +148,7 @@ class DisplaySettings(EnvSettings):
         default=50,
         ge=1,
         le=1000,
-        alias="AVA_TIMELINE_HISTORY_PAGE_BASE",
+        alias="MEIVA_TIMELINE_HISTORY_PAGE_BASE",
         description=(
             "Base page (items) the web UI fetches per timeline scroll-up; each successive "
             "scroll-up doubles it (50, 100, 200, ... up to the endpoint's 1000 le). Read at "
@@ -167,7 +167,7 @@ class DisplaySettings(EnvSettings):
         default=250,
         ge=200,
         le=500,
-        alias="AVA_TIMELINE_RETAINED_ITEMS_MAX",
+        alias="MEIVA_TIMELINE_RETAINED_ITEMS_MAX",
         description=(
             "Maximum selected-thread timeline items retained while following the bottom. "
             "The oldest items are evicted and remain available by scroll-up paging; a "
@@ -188,7 +188,7 @@ class DisplaySettings(EnvSettings):
         default=100,
         ge=2,
         le=5000,
-        alias="AVA_TIMELINE_WINDOW_ACTIVATION_ROWS",
+        alias="MEIVA_TIMELINE_WINDOW_ACTIVATION_ROWS",
         description=(
             "Expanded timeline row count above which the web UI mounts only the viewport "
             "and its buffers. 100 keeps short conversations on their simple render path "
@@ -206,7 +206,7 @@ class DisplaySettings(EnvSettings):
         default=100,
         ge=1,
         le=5000,
-        alias="AVA_TIMELINE_WINDOW_TURN_ROWS",
+        alias="MEIVA_TIMELINE_WINDOW_TURN_ROWS",
         description=(
             "Expanded child-row count above which one turn uses its own bounded DOM window. "
             "100 avoids spacer churn for ordinary turns while releasing remote children "
@@ -224,7 +224,7 @@ class DisplaySettings(EnvSettings):
         default=75,
         ge=1,
         le=4999,
-        alias="AVA_TIMELINE_WINDOW_MEASURE_ROWS",
+        alias="MEIVA_TIMELINE_WINDOW_MEASURE_ROWS",
         description=(
             "Expanded row count where the web UI starts measuring heights before the "
             "bounded window activates. 75 prepares measured anchors ahead of the default "
@@ -240,7 +240,7 @@ class DisplaySettings(EnvSettings):
 
     events_default_limit: int = Field(
         default=100,
-        alias="AVA_EVENTS_DEFAULT_LIMIT",
+        alias="MEIVA_EVENTS_DEFAULT_LIMIT",
         description=(
             "Default page (events) of the agent event-history reads — GET "
             "/api/agents/{id}/events and GET /api/events — when the caller passes no "
@@ -258,7 +258,7 @@ class DisplaySettings(EnvSettings):
 
     alerts_default_limit: int = Field(
         default=100,
-        alias="AVA_ALERTS_DEFAULT_LIMIT",
+        alias="MEIVA_ALERTS_DEFAULT_LIMIT",
         description=(
             "Default page (alerts) of GET /api/alerts when the caller passes no limit. "
             "100 rows covers the unresolved-first view a dashboard read wants without "
@@ -275,7 +275,7 @@ class DisplaySettings(EnvSettings):
     )
     schedules_runs_default_limit: int = Field(
         default=50,
-        alias="AVA_SCHEDULES_RUNS_DEFAULT_LIMIT",
+        alias="MEIVA_SCHEDULES_RUNS_DEFAULT_LIMIT",
         description=(
             "Default page (run rows) of GET /api/schedules/{id}/runs when the caller "
             "passes no limit. 50 rows spans a month of daily runs (a few days of "
@@ -291,7 +291,7 @@ class DisplaySettings(EnvSettings):
     )
     config_audit_default_last: int = Field(
         default=20,
-        alias="AVA_CONFIG_AUDIT_DEFAULT_LAST",
+        alias="MEIVA_CONFIG_AUDIT_DEFAULT_LAST",
         description=(
             "Default `last` (records) of GET /api/config/audit when omitted. 20 recent "
             "config writes is the recent-activity glance the audit view opens with; the "
@@ -307,7 +307,7 @@ class DisplaySettings(EnvSettings):
 
     cluster_events_default_limit: int = Field(
         default=200,
-        alias="AVA_CLUSTER_EVENTS_DEFAULT_LIMIT",
+        alias="MEIVA_CLUSTER_EVENTS_DEFAULT_LIMIT",
         description=(
             "Default page (rows) of GET /api/cluster/admin/events when the caller "
             "passes no limit. 200 rows is the ops-debugging glance over the unified "
@@ -322,7 +322,7 @@ class DisplaySettings(EnvSettings):
     )
     metrics_default_window_days: int = Field(
         default=1,
-        alias="AVA_METRICS_DEFAULT_WINDOW_DAYS",
+        alias="MEIVA_METRICS_DEFAULT_WINDOW_DAYS",
         description=(
             "Default window (days) of GET /api/metrics and /api/metrics/agents when "
             "the caller passes none. 1 day is the settings tab's default read; the "
@@ -338,10 +338,10 @@ class DisplaySettings(EnvSettings):
 
     neighbors_default_depth: int = Field(
         default=1,
-        alias="AVA_NEIGHBORS_DEFAULT_DEPTH",
+        alias="MEIVA_NEIGHBORS_DEFAULT_DEPTH",
         description=(
             "Default tie-walk depth of GET /api/agents/{id}/neighbors and the SDK's "
-            "ava.agents.get_neighbors when the caller passes none. 1 returns direct "
+            "meiva.agents.get_neighbors when the caller passes none. 1 returns direct "
             "ties only - the inspector's default view; each extra hop discounts tie "
             "strength, and the 5-hop ceiling stays a protective constant."
         ),
@@ -354,7 +354,7 @@ class DisplaySettings(EnvSettings):
     )
     neighbors_default_limit: int = Field(
         default=20,
-        alias="AVA_NEIGHBORS_DEFAULT_LIMIT",
+        alias="MEIVA_NEIGHBORS_DEFAULT_LIMIT",
         description=(
             "Default cap on the neighbors returned (strongest first) by the same "
             "reads when the caller passes none. 20 fills the relationship view "
@@ -371,7 +371,7 @@ class DisplaySettings(EnvSettings):
 
     fleet_graph_decay_lambda: float = Field(
         default=0.5,
-        alias="AVA_FLEET_GRAPH_DECAY_LAMBDA",
+        alias="MEIVA_FLEET_GRAPH_DECAY_LAMBDA",
         description=(
             "Default per-day decay constant of the fleet graph's message edge weight "
             "(GET /api/fleet/graph) when the caller passes none: 0.5 halves a message "
@@ -389,7 +389,7 @@ class DisplaySettings(EnvSettings):
     plugin_stats_max_detail_chars: int = Field(
         default=500,
         gt=0,
-        alias="AVA_PLUGIN_STATS_MAX_DETAIL_CHARS",
+        alias="MEIVA_PLUGIN_STATS_MAX_DETAIL_CHARS",
         description=(
             "Character cap on a plugin stat card's `detail` — the free-text line the "
             "console shows under the card's value. 500 is a sidebar-filling sentence "

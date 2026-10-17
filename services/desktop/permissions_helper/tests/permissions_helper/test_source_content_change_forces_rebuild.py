@@ -34,10 +34,10 @@ def test_source_content_change_forces_rebuild(
     write_current_build_state(app, lifecycle.source_content_hash())
     lifecycle.SOURCE.write_text("// changed swift")
 
-    before = (app / "Contents/MacOS/AvaPermissionsHelper").read_bytes()
+    before = (app / "Contents/MacOS/MeivaPermissionsHelper").read_bytes()
     with pytest.raises(RuntimeError, match="still in use"):
         lifecycle.build_and_sign()
-    assert (app / "Contents/MacOS/AvaPermissionsHelper").read_bytes() == before
+    assert (app / "Contents/MacOS/MeivaPermissionsHelper").read_bytes() == before
     assert not any(c[0] == "swiftc" for c in recorded_argvs(recorded))
 
 
@@ -52,10 +52,10 @@ def test_locale_content_change_forces_rebuild(
     locale_file = lifecycle.LOCALES / "en.lproj" / "Localizable.strings"
     locale_file.write_text('"panel.title" = "Changed";')
 
-    before = (app / "Contents/MacOS/AvaPermissionsHelper").read_bytes()
+    before = (app / "Contents/MacOS/MeivaPermissionsHelper").read_bytes()
     with pytest.raises(RuntimeError, match="still in use"):
         lifecycle.build_and_sign()
-    assert (app / "Contents/MacOS/AvaPermissionsHelper").read_bytes() == before
+    assert (app / "Contents/MacOS/MeivaPermissionsHelper").read_bytes() == before
     assert not any(c[0] == "swiftc" for c in recorded_argvs(recorded))
 
 
@@ -69,10 +69,10 @@ def test_entitlements_content_change_forces_rebuild(
     write_current_build_state(app, lifecycle.source_content_hash())
     lifecycle.ENTITLEMENTS.write_bytes(b"<plist><dict/></plist>")
 
-    before = (app / "Contents/MacOS/AvaPermissionsHelper").read_bytes()
+    before = (app / "Contents/MacOS/MeivaPermissionsHelper").read_bytes()
     with pytest.raises(RuntimeError, match="still in use"):
         lifecycle.build_and_sign()
-    assert (app / "Contents/MacOS/AvaPermissionsHelper").read_bytes() == before
+    assert (app / "Contents/MacOS/MeivaPermissionsHelper").read_bytes() == before
     assert not any(c[0] == "swiftc" for c in recorded_argvs(recorded))
 
 
@@ -100,10 +100,10 @@ def test_missing_build_state_forces_rebuild(
     app = stage_bundle(monkeypatch, tmp_path, exe_present=True)
     recorded = fake_tools(monkeypatch, authority=lifecycle.CERT_CN)
 
-    before = (app / "Contents/MacOS/AvaPermissionsHelper").read_bytes()
+    before = (app / "Contents/MacOS/MeivaPermissionsHelper").read_bytes()
     with pytest.raises(RuntimeError, match="still in use"):
         lifecycle.build_and_sign()
-    assert (app / "Contents/MacOS/AvaPermissionsHelper").read_bytes() == before
+    assert (app / "Contents/MacOS/MeivaPermissionsHelper").read_bytes() == before
     assert not any(c[0] == "swiftc" for c in recorded_argvs(recorded))
 
 
@@ -168,10 +168,10 @@ def test_identity_change_warns_and_rebuilds(
     recorded = fake_tools(monkeypatch, authority=lifecycle.CERT_CN)
     write_current_build_state(app, "hash-for-previous-identity", dr='identifier "old"')
 
-    before = (app / "Contents/MacOS/AvaPermissionsHelper").read_bytes()
+    before = (app / "Contents/MacOS/MeivaPermissionsHelper").read_bytes()
     with pytest.raises(RuntimeError, match="still in use"):
         lifecycle.build_and_sign()
-    assert (app / "Contents/MacOS/AvaPermissionsHelper").read_bytes() == before
+    assert (app / "Contents/MacOS/MeivaPermissionsHelper").read_bytes() == before
     assert not any(c[0] == "swiftc" for c in recorded_argvs(recorded))
     assert (
         "code-signing identity changed — macOS permissions may need re-granting"
@@ -187,10 +187,10 @@ def test_ad_hoc_signed_bundle_is_rebuilt_onto_the_stable_certificate(
     app = stage_bundle(monkeypatch, tmp_path, exe_present=True)
     recorded = fake_tools(monkeypatch, authority=None)
 
-    before = (app / "Contents/MacOS/AvaPermissionsHelper").read_bytes()
+    before = (app / "Contents/MacOS/MeivaPermissionsHelper").read_bytes()
     with pytest.raises(RuntimeError, match="still in use"):
         lifecycle.build_and_sign()
-    assert (app / "Contents/MacOS/AvaPermissionsHelper").read_bytes() == before
+    assert (app / "Contents/MacOS/MeivaPermissionsHelper").read_bytes() == before
     assert not any(c[0] == "codesign" and "--force" in c for c in recorded_argvs(recorded))
 
 
@@ -490,7 +490,7 @@ def test_hung_helper_job_is_unknown_while_build_probes_report_failure(
 
     monkeypatch.setattr(lifecycle, "run_bounded", hang)
     monkeypatch.setattr(launchd_job, "run_bounded", hang)
-    monkeypatch.setattr(paths, "ava_home", lambda: Path("/x/.ava-demo"))
+    monkeypatch.setattr(paths, "meiva_home", lambda: Path("/x/.meiva-demo"))
 
     with pytest.raises(subprocess.TimeoutExpired):
         lifecycle.is_loaded()
@@ -577,7 +577,7 @@ def test_unloaded_helper_bootstraps_and_must_answer_ping(
 
     assert ["launchctl", "bootstrap", "gui/501", str(lifecycle.plist_path())] in run_calls
     plist = plistlib.loads(lifecycle.plist_path().read_bytes())
-    assert plist["ProgramArguments"] == [str(app / "Contents" / "MacOS" / "AvaPermissionsHelper")]
+    assert plist["ProgramArguments"] == [str(app / "Contents" / "MacOS" / "MeivaPermissionsHelper")]
     assert plist["KeepAlive"] == {"SuccessfulExit": False}
 
 
@@ -591,7 +591,7 @@ def test_helper_start_clears_shutdown_intent_only_after_native_job_absence(
     helper = serve(
         ScriptedHelper(ping={"pong": True, "root_stop_intent_v1": True, "helper_shutdown_v1": True})
     )
-    marker = tmp_path / "run" / "ava-root" / "helper-stopped"
+    marker = tmp_path / "run" / "meiva-root" / "helper-stopped"
     marker.parent.mkdir(parents=True, exist_ok=True)
     marker.write_bytes(b"stopped\n")
     marker.chmod(0o600)

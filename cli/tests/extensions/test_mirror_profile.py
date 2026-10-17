@@ -1,8 +1,8 @@
 """The mirror profiles and how they load.
 
 An operator exports `scripts/mirrors/NAME.env` into the shell that acquires
-dependencies; a unit's existing `$AVA_HOME/mirror.env` is what
-`base.host.env.dotenv_boot.load_ava_env` loads after `.env`. These tests pin two things
+dependencies; a unit's existing `$MEIVA_HOME/mirror.env` is what
+`base.host.env.dotenv_boot.load_meiva_env` loads after `.env`. These tests pin two things
 the design leans on: the `cn` profile carries the
 package-manager index/registry vars, and a mirror var loaded from the file never
 overrides one already in the real environment (precedence: env > .env > mirror.env).
@@ -97,11 +97,11 @@ def test_unit_boot_preserves_single_index_precedence_across_aliases(
     # This independent boot policy does not participate in package index precedence.
     monkeypatch.setattr(dotenv_boot, "enforce_cluster_env_authority", skip_authority_pass)
     before = unit.read_bytes(), mirror.read_bytes()
-    dotenv_boot.load_ava_env()
+    dotenv_boot.load_meiva_env()
     assert python_index(tmp_path, os.environ) == "https://pypi.org/simple"
     assert (unit.read_bytes(), mirror.read_bytes()) == before
     monkeypatch.setenv("UV_INDEX", "https://additional.example/simple")
-    dotenv_boot.load_ava_env()
+    dotenv_boot.load_meiva_env()
     assert os.environ["UV_INDEX"] == "https://additional.example/simple"
     with pytest.raises(ValueError, match="one default Python index"):
         python_index(tmp_path, os.environ)

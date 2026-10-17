@@ -2,7 +2,7 @@
 
 **Status: Postgres leg landed (pgvector injection included); Redis leg is the only remaining work.**
 `base/cluster/dataplane/runtime_binaries.py` fetches the pinned relocatable zonky distribution into
-`~/.ava/runtime/pg/` and injects the pinned pgvector extension into it (a
+`~/.meiva/runtime/pg/` and injects the pinned pgvector extension into it (a
 `cli/commands/lifecycle/converge_host.py` step), and
 `base/cluster/dataplane/pg_tools.py:pg_tool()` prefers it over brew/apt. So `brew install
 postgresql@17` is no longer a prerequisite. Redis defaults to brew/PATH
@@ -18,10 +18,10 @@ re-describing the bundling).
 
 ## Goal (scope: light)
 
-A clean machine runs Ava without first installing Postgres/Redis through a package
+A clean machine runs Meiva without first installing Postgres/Redis through a package
 manager. Not a consumer `.app`, not distribution-to-others — just a self-contained,
 reproducible install on the operator's own machines. The data plane is already
-Ava-owned and per-cluster; this removes the last host-package dependency under it.
+Meiva-owned and per-cluster; this removes the last host-package dependency under it.
 
 ## Why brew binaries can't just be copied
 
@@ -62,7 +62,7 @@ the PG jar: sha256 pin, fail-fast download, atomic per-file injection. Verified
 layout facts: `$libdir` resolves to `<prefix>/lib/postgresql` and the macOS
 module suffix is `.dylib`.
 
-`ava start` then pre-creates the extension in the cluster DB with the
+`meiva start` then pre-creates the extension in the cluster DB with the
 bootstrap-superuser connection (pgvector's `vector.control` has no
 `trusted = true`, so the NOSUPERUSER runtime roles cannot install it) — the
 memory-indexer preflight turns green on its own once the binaries are present.
@@ -81,12 +81,12 @@ infra this introduces.
 
 ## Where the binaries live + how they're resolved
 
-- **Location:** `~/.ava/runtime/{pg,redis}/` — host-level, **shared across every
+- **Location:** `~/.meiva/runtime/{pg,redis}/` — host-level, **shared across every
   cluster and checkout** (the binaries are read-only; only the *data* is
-  per-cluster). Independent of any `$AVA_HOME`, so one download serves the whole
+  per-cluster). Independent of any `$MEIVA_HOME`, so one download serves the whole
   box. Version-stamped so an upgrade can drop a new tree beside the old. `pg/` is
   live; `redis/` is the remaining leg.
-- **Resolution:** `base/cluster/dataplane/pg_tools.py:pg_tool()` prefers `~/.ava/runtime/pg/` when
+- **Resolution:** `base/cluster/dataplane/pg_tools.py:pg_tool()` prefers `~/.meiva/runtime/pg/` when
   present, else falls back to brew/apt — so existing dev boxes keep working
   unchanged and a clean machine uses the vendored copy. The redis bin resolver
   (`cli/commands/data_plane/cluster_instance.py`) currently uses the unit's explicit
@@ -107,7 +107,7 @@ half-present runtime). The redis leg reuses this step.
 ## Slices
 
 1. **✅ Done — Postgres vendoring + pgvector injection.** zonky download +
-   extract + checksum into `~/.ava/runtime/pg` (`base/cluster/dataplane/runtime_binaries.py`),
+   extract + checksum into `~/.meiva/runtime/pg` (`base/cluster/dataplane/runtime_binaries.py`),
    fetched by the converge step, which then injects the pinned pgvector files
    (see the subsection above); `pg_tool()` prefers the vendored tree, falling
    back to brew/apt when absent. Every cluster instance

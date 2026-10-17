@@ -32,23 +32,23 @@ def _isolate(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     user.mkdir()
     monkeypatch.setattr(paths, "repo_plugins_dir", lambda: repo)
     monkeypatch.setattr(paths, "plugins_dir", lambda: user)
-    # One home, read through the one seam every consumer shares. `paths.ava_home()` is
-    # `AVA_HOME` plus a mkdir, and modules that did `from base.paths import
-    # ava_home` (the service roster `converge_host` consults) hold their own reference that a
-    # patch of `paths.ava_home` never reaches — so the home lives in the variable, not in a patch,
-    # and a second, real `ava_home()` cannot create a sibling directory next to it.
-    home = tmp_path / "ava"
+    # One home, read through the one seam every consumer shares. `paths.meiva_home()` is
+    # `MEIVA_HOME` plus a mkdir, and modules that did `from base.paths import
+    # meiva_home` (the service roster `converge_host` consults) hold their own reference that a
+    # patch of `paths.meiva_home` never reaches — so the home lives in the variable, not in a patch,
+    # and a second, real `meiva_home()` cannot create a sibling directory next to it.
+    home = tmp_path / "meiva"
     home.mkdir()
-    monkeypatch.setenv("AVA_HOME", str(home))
+    monkeypatch.setenv("MEIVA_HOME", str(home))
 
 
 def test_the_isolated_home_is_the_one_every_consumer_resolves(tmp_path: Path) -> None:
-    """`services.supervision.roster` binds `ava_home` by name at import, out of reach of any patch of
-    `paths.ava_home`; `converge_host` reaches it through `_desired_service_names`. A home that
+    """`services.supervision.roster` binds `meiva_home` by name at import, out of reach of any patch of
+    `paths.meiva_home`; `converge_host` reaches it through `_desired_service_names`. A home that
     only a patch pointed at made that real call create a second, unrelated directory."""
     from services.supervision import roster
 
-    assert roster.ava_home() == paths.ava_home() == tmp_path / "ava"
+    assert roster.meiva_home() == paths.meiva_home() == tmp_path / "meiva"
 
 
 def test_scaffold_runs_despite_dangling_config(*, command_runtime: CommandRuntime) -> None:
@@ -182,10 +182,10 @@ def _stub_host_integrations() -> Generator[None]:
 
 
 def _install_memory_plugin() -> Path:
-    source = Path(__file__).parents[2] / "ava_builtins" / "plugins" / "ava_memory"
-    target = paths.repo_plugins_dir() / "ava_memory"
+    source = Path(__file__).parents[2] / "meiva_builtins" / "plugins" / "meiva_memory"
+    target = paths.repo_plugins_dir() / "meiva_memory"
     shutil.copytree(source, target)
-    write_local({"plugins": {"ava_memory": {"enabled": True}}})
+    write_local({"plugins": {"meiva_memory": {"enabled": True}}})
     return target
 
 
@@ -196,9 +196,9 @@ def _make_dirty_memory_repo(pool: Path, branch: str) -> None:
     for key, value in (("maintenance.auto", "false"), ("gc.auto", "0")):
         subprocess.run(["git", "-C", str(pool), "config", key, value], check=True)  # noqa: S603
     subprocess.run(  # noqa: S603
-        ["git", "-C", str(pool), "config", "user.email", "ava@test.invalid"], check=True
+        ["git", "-C", str(pool), "config", "user.email", "meiva@test.invalid"], check=True
     )
-    subprocess.run(["git", "-C", str(pool), "config", "user.name", "Ava Test"], check=True)  # noqa: S603
+    subprocess.run(["git", "-C", str(pool), "config", "user.name", "Meiva Test"], check=True)  # noqa: S603
     tracked = pool / "tracked.md"
     tracked.write_text("committed\n", encoding="utf-8")
     subprocess.run(["git", "-C", str(pool), "add", "tracked.md"], check=True)  # noqa: S603
@@ -250,7 +250,7 @@ def test_converge_ignores_a_dirty_wrong_branch_memory_pool(
         converge_host.converge_host(
             tmp_path / "repo",
             frozenset({"agent-runner"}),
-            ava_home=paths.ava_home(),
+            meiva_home=paths.meiva_home(),
             steps=converge_host.CONVERGE_STEPS,
             database_factory=operator_database,
             producer=operator_pipeline,
@@ -301,7 +301,7 @@ def test_memory_init_seeds_a_dirty_correct_branch_pool(
         ).stdout.strip()
         == ".githooks"
     )
-    assert "scaffolded: ava_memory" in capsys.readouterr().out
+    assert "scaffolded: meiva_memory" in capsys.readouterr().out
 
 
 def test_memory_init_reports_scaffolded_plugins(

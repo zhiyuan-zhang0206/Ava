@@ -1,7 +1,7 @@
 """On-disk session record for the POSIX process supervisor.
 
 `base.sessions.posixproc` persists a launched background session as JSON under
-`$AVA_HOME/run/sessions/<name>.json`.
+`$MEIVA_HOME/run/sessions/<name>.json`.
 
 On Linux, a wall-clock step may move `/proc/stat`'s `btime`, which makes psutil's epoch
 `create_time()` drift for a still-live pid. `starttime` records `/proc/<pid>/stat`
@@ -25,7 +25,7 @@ from base.native_process import pid_starttime_ticks
 
 def record_path(name: str) -> Path:
     """Where the named session's on-disk record lives —
-    ``$AVA_HOME/run/sessions/<name>.json``.
+    ``$MEIVA_HOME/run/sessions/<name>.json``.
 
     Public so a caller can PRE-write a record before the session process
     exists (the update chain lands its session record before it lands its
@@ -33,7 +33,7 @@ def record_path(name: str) -> Path:
     it atomically."""
     import base.paths
 
-    return base.paths.run_dir(base.paths.ava_home()) / "sessions" / f"{name}.json"
+    return base.paths.run_dir(base.paths.meiva_home()) / "sessions" / f"{name}.json"
 
 
 @dataclass(frozen=True)
@@ -116,7 +116,7 @@ class SessionRecord:
         write: `read` treats an unparseable record as absent, and the session
         listings (`list_sessions`) then unlink a record
         whose process is still alive — a live agent silently forgotten by
-        `ava stop`'s no-DB reap (audit 2026-08-08 P1). Same shape
+        `meiva stop`'s no-DB reap (audit 2026-08-08 P1). Same shape
         `base/deploy/lifecycle/launch_failures.py` uses for the same reason."""
         path.parent.mkdir(parents=True, exist_ok=True)
         _fd, tmp = tempfile.mkstemp(dir=path.parent, prefix=f".{path.name}.", suffix=".tmp")

@@ -30,7 +30,7 @@ def pinned(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> list[str]:
 
     Returns the list of URLs the (stubbed) downloader was asked for.
     """
-    monkeypatch.setenv("AVA_HOME", str(tmp_path / "home"))
+    monkeypatch.setenv("MEIVA_HOME", str(tmp_path / "home"))
     monkeypatch.setattr(walg_binary.platform, "system", lambda: "Linux")
     monkeypatch.setattr(walg_binary.platform, "machine", lambda: "x86_64")
     monkeypatch.setitem(

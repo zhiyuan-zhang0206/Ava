@@ -50,13 +50,13 @@ NO_AGENT_SWITCHED = "Not switched to any agent. Run /list to pick one."
 CURRENT_AGENT_GONE = "The current agent no longer exists — cleared."
 NO_COMMANDS_REGISTERED = "No commands registered."
 COMMANDS_HEADER = "/list /spawn /status /help: IM commands"
-COMMANDS_INTRO = "{count} Ava slash commands. Tap one to run, or type /name + instruction:"
+COMMANDS_INTRO = "{count} Meiva slash commands. Tap one to run, or type /name + instruction:"
 
 HELP_TEXT = (
     "/list: live agents (tap one to switch)\n"
     "/spawn: spawn an agent (layered menu)\n"
     "/status: current agent status details\n"
-    "/commands: all Ava slash commands (skills, templates)\n"
+    "/commands: all Meiva slash commands (skills, templates)\n"
     "/help: this list\n"
     "Other text: sent to the current agent"
 )

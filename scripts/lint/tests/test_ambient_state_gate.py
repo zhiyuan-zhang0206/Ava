@@ -154,7 +154,7 @@ def test_tests_skill_scripts_and_main_blocks_are_not_scanned(
     _repo: pathlib.Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
     _write(_repo, "base/tests/test_state.py", "_REGISTRY = {}\n")
-    _write(_repo, "ava_builtins/skills/web/scripts/run.py", "_REGISTRY = {}\nmain()\n")
+    _write(_repo, "meiva_builtins/skills/web/scripts/run.py", "_REGISTRY = {}\nmain()\n")
     _write(_repo, "base/__main__.py", "_REGISTRY = {}\n")
     _write(_repo, "base/cli.py", 'if __name__ == "__main__":\n    run()\n')
 

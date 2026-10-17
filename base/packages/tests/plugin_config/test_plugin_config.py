@@ -6,7 +6,7 @@ Covers:
 - install: a plugin whose config does not bind is refused whole and reported while others install
 - merge_disk_image_schema: new fields fill default, removed fields dropped, unchanged no-op
 - is_per_agent_field: json_schema_extra={"per_agent": True} recognition
-- ava.sdk_surface.settings.plugins.<n> attribute access wrong name raise + list known plugins
+- meiva.sdk_surface.settings.plugins.<n> attribute access wrong name raise + list known plugins
 """
 
 import json
@@ -47,7 +47,7 @@ def test_authority_path_and_reader_do_not_create_a_missing_home(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     home = tmp_path / "uncreated-home"
-    monkeypatch.setenv("AVA_HOME", str(home))
+    monkeypatch.setenv("MEIVA_HOME", str(home))
     image = disk_image_path("fixture")
     assert image == home / "configs" / "fixture" / "config.json"
     assert read_config_image(FixtureConfig, image).flag is True
@@ -194,7 +194,7 @@ def test_merge_disk_image_drops_removed_field(isolated_registry: dict[str, BaseM
 def test_merge_then_bind_resolves_removed_field_drift(
     isolated_registry: dict[str, BaseModel], unit_home
 ):
-    """Regression: after running merge on removed-field drift (= `ava plugins update` / converge's
+    """Regression: after running merge on removed-field drift (= `meiva plugins update` / converge's
     plugin-config-images step), bind_plugin_config does not raise SchemaDriftError.
 
     This is the real production scenario where spawn resulted in terminated on startup (compact_tail_messages
@@ -292,7 +292,7 @@ def test_is_per_agent_field_metadata(isolated_registry: dict[str, BaseModel], un
 def _setup_overlayable_plugin(isolated_registry: dict[str, BaseModel]):
     """Register a frozen Config with per_agent=True fields, run bind_plugin_config.
 
-    Requires the `unit_home` fixture active in the calling test (AVA_HOME
+    Requires the `unit_home` fixture active in the calling test (MEIVA_HOME
     pointing at a per-test tmp dir) so bind_plugin_config writes the disk image there,
     not into the shared session home — callers must declare `unit_home`.
     """

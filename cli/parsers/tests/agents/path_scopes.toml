@@ -8,7 +8,7 @@
     "test_impersonation_usage.py",
     "test_rpc_result_domains.py",
 ]
-"ava.tests.fixtures.sdk" = [
+"meiva.tests.fixtures.sdk" = [
     "test_agents_cmd.py",
     "test_external_caller_cli.py",
     "test_impersonation.py",

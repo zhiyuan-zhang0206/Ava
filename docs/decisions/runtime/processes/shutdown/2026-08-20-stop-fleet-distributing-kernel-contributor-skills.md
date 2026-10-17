@@ -3,16 +3,16 @@
 ## Context
 
 [`2026-08-19-four-layer-modification-model.md`](../../../extensions/skills/2026-08-19-four-layer-modification-model.md)
-moved `ava-self-development` into the kernel-contributor skill family
+moved `meiva-self-development` into the kernel-contributor skill family
 (`.agents/skills/`), marking it L4-only in the skill index, but left open
 whether that family should keep reaching every runtime agent. Converge syncs
-both `ava_builtins/skills/` and the non-symlink entries of `.agents/skills/`
+both `meiva_builtins/skills/` and the non-symlink entries of `.agents/skills/`
 into every runtime agent's skill load directory (the R5 design, task #1013;
 `cli/commands/_converge_skills.py:iter_sources`), so the L4 marking changes how
 an agent routes past the skill, not whether it lands on the machine at all.
 That entry recorded three options without deciding among them: (1) status quo,
 (2) stop converging `.agents/skills/` and rely on the project-local mount
-(`project_skill_roots`, `ava_builtins/plugins/ava_code/_walk.py:70`) so only an
+(`project_skill_roots`, `meiva_builtins/plugins/meiva_code/_walk.py:70`) so only an
 agent working inside the repo checkout sees these skills, (3) a per-skill
 opt-out marker.
 
@@ -46,7 +46,7 @@ marking. The work itself is tracked in issue #146, blocked on S2.
   [`2026-08-19-four-layer-modification-model.md`](../../../extensions/skills/2026-08-19-four-layer-modification-model.md)
   (forward-linked from there); that entry's other content — the four layers,
   the skill restructuring, the known gaps — stands unchanged.
-- `okf/skills/load-directory-sync.ava.okf.md`'s description of `.agents/skills/`
+- `okf/skills/load-directory-sync.meiva.okf.md`'s description of `.agents/skills/`
   fleet convergence remains accurate until S2 lands and this ruling is acted
   on; it is revised in the same change that implements the stop.
 - Issue #146 stays blocked until S2 (`future/infra/extensions/extension-ownership.md`)
@@ -61,14 +61,14 @@ registry this rides), issue #146 (the tracked follow-up work).
 Landed 2026-08-21 in the PR closing issue #146: `iter_sources` no longer
 enumerates `.agents/skills/`, so converge stops landing the family and removes
 the untouched copies it had landed (edited copies are kept with the usual
-warning); `ava skill update` stops treating them as repo-native sources;
-`okf/skills/load-directory-sync.ava.okf.md` and the `.agents/skills/README.md`
+warning); `meiva skill update` stops treating them as repo-native sources;
+`okf/skills/load-directory-sync.meiva.okf.md` and the `.agents/skills/README.md`
 describe the project-local mount as the family's only distribution path. The
 project-local mount itself (`project_skill_roots`) predates this change and
 needed no code work — only the converge source was removed.
 
 Update 2026-08-22: this remains the distribution decision for the real
-repo-development workflow and Ava-cluster-operations skills. The prior
+repo-development workflow and Meiva-cluster-operations skills. The prior
 classification was too broad for five general skills that happened to be in
 `.agents/skills/`; see
 [`2026-08-22-reclassify-general-skills-as-builtins.md`](2026-08-22-reclassify-general-skills-as-builtins.md).

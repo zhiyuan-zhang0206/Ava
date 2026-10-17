@@ -1,8 +1,8 @@
-# Ava alerts — webhook contact point (as code, Task #1224).
+# Meiva alerts — webhook contact point (as code, Task #1224).
 #
 # The webhook URL uses Grafana's native $__env{} expansion (same mechanism as
 # the datasources) — the value comes from the process env, which native converge
-# renders two-state on AVA_OBSERVABILITY_URL:
+# renders two-state on MEIVA_OBSERVABILITY_URL:
 #   - empty (default) -> http://127.0.0.1:8000/api/alerts — native Grafana on
 #     the same host reaches the gateway on loopback (byte-identical default).
 #   - non-empty -> http://<gateway reachable host>:8000/api/alerts — a remote
@@ -14,7 +14,7 @@
 #     no remote observatory is configured. Topology assumption: the non-empty
 #     form presumes a remote observatory Grafana consumes the rendered
 #     contact.yml (delivery mechanism lands with the observatory deployment,
-#     stage B); with a local Grafana consumer, keep AVA_OBSERVABILITY_URL
+#     stage B); with a local Grafana consumer, keep MEIVA_OBSERVABILITY_URL
 #     empty until that mechanism exists.
 #
 # Routes every fired alert to the gateway's alert ingest endpoint
@@ -35,8 +35,8 @@
 #   reference: provisioning expands it, and the schema layer migrates the
 #   value into encrypted secureSettings in the DB, which the notifier DOES
 #   read (verified end-to-end: header on the wire, gateway 200).
-# - The value comes from the Grafana process env (AVA_ALERTS_WEBHOOK_TOKEN).
-#   It must match the gateway's webhook token (AVA_ALERTS_WEBHOOK_TOKEN);
+# - The value comes from the Grafana process env (MEIVA_ALERTS_WEBHOOK_TOKEN).
+#   It must match the gateway's webhook token (MEIVA_ALERTS_WEBHOOK_TOKEN);
 #   the gateway accepts it both as X-Alerts-Token and as a Bearer
 #   credential (the only form the Grafana-13 notifier can send without
 #   plaintext storage).
@@ -44,7 +44,7 @@
 # A second, direct contact point exists for the one outage the webhook cannot
 # report: the gateway itself being down. Grafana's native Telegram notifier posts
 # to the Bot API with the bot token and owner chat id converge renders from the
-# telegram settings (AVA_ALERTS_TELEGRAM_BOT_TOKEN / AVA_ALERTS_TELEGRAM_CHAT_ID;
+# telegram settings (MEIVA_ALERTS_TELEGRAM_BOT_TOKEN / MEIVA_ALERTS_TELEGRAM_CHAT_ID;
 # inert placeholders when the home has no bot). Only `attributes_check="gateway_liveness"`
 # alerts and the health probe's dead-man rule (`metric="health_probe_silent"`) are
 # routed to it, in addition to the webhook.
@@ -55,28 +55,28 @@ apiVersion: 1
 
 contactPoints:
   - orgId: 1
-    name: ava-alerts-webhook
+    name: meiva-alerts-webhook
     receivers:
-      - uid: ava-alerts-webhook
+      - uid: meiva-alerts-webhook
         type: webhook
         disableResolveMessage: false
         settings:
-          url: $__env{AVA_ALERTS_WEBHOOK_URL}
+          url: $__env{MEIVA_ALERTS_WEBHOOK_URL}
           httpMethod: POST
           authorization_scheme: Bearer
-          authorization_credentials: $__env{AVA_ALERTS_WEBHOOK_TOKEN}
+          authorization_credentials: $__env{MEIVA_ALERTS_WEBHOOK_TOKEN}
   - orgId: 1
-    name: ava-alerts-telegram
+    name: meiva-alerts-telegram
     receivers:
-      - uid: ava-alerts-telegram
+      - uid: meiva-alerts-telegram
         type: telegram
         disableResolveMessage: false
         settings:
-          bottoken: $__env{AVA_ALERTS_TELEGRAM_BOT_TOKEN}
-          chatid: $__env{AVA_ALERTS_TELEGRAM_CHAT_ID}
+          bottoken: $__env{MEIVA_ALERTS_TELEGRAM_BOT_TOKEN}
+          chatid: $__env{MEIVA_ALERTS_TELEGRAM_CHAT_ID}
 
 # The notification policy is the one place alert merging and repetition are
-# decided — no code in Ava dedups, throttles or grades a notification.
+# decided — no code in Meiva dedups, throttles or grades a notification.
 #
 # - group_by [alertname]: every instance of one rule (one per machine / vendor /
 #   drill ...) rides one webhook POST, so a burst across a fleet is one batch to
@@ -96,14 +96,14 @@ contactPoints:
 #   `up` completes (cli/commands/observability/alert_silence.py).
 policies:
   - orgId: 1
-    receiver: ava-alerts-webhook
+    receiver: meiva-alerts-webhook
     group_by: [alertname]
     matchers: []
     group_wait: 30s
     group_interval: 5m
     repeat_interval: 4h
     routes:
-      - receiver: ava-alerts-telegram
+      - receiver: meiva-alerts-telegram
         object_matchers:
           - [attributes_check, "=", gateway_liveness]
         continue: true
@@ -113,7 +113,7 @@ policies:
         repeat_interval: 4h
       # The probe going silent usually travels with a gateway problem, so its dead-man
       # rule gets the same direct route.
-      - receiver: ava-alerts-telegram
+      - receiver: meiva-alerts-telegram
         object_matchers:
           - [metric, "=", health_probe_silent]
         continue: true
@@ -121,7 +121,7 @@ policies:
         group_wait: 0s
         group_interval: 5m
         repeat_interval: 4h
-      - receiver: ava-alerts-webhook
+      - receiver: meiva-alerts-webhook
         object_matchers:
           - [severity, "=", critical]
         group_by: [alertname]
@@ -131,7 +131,7 @@ policies:
       # The root receiver only serves alerts no child route matched, and the
       # Telegram route above continues, so every other alert needs its own
       # explicit route to the webhook.
-      - receiver: ava-alerts-webhook
+      - receiver: meiva-alerts-webhook
         object_matchers:
           - [alertname, "=~", ".+"]
         group_by: [alertname]

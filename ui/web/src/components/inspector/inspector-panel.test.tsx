@@ -1546,7 +1546,7 @@ describe("InspectorPanel agent switch (task #1939)", () => {
 
 function widgetFixture(over: Partial<InspectWidget> = {}): InspectWidget {
   return {
-    plugin: "ava_fleet",
+    plugin: "meiva_fleet",
     id: "today-tasks",
     kind: "taskList",
     order: 150,

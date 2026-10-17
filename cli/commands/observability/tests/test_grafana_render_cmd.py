@@ -13,7 +13,7 @@ from tests.path_scoped.cli_tests import operator_database as operator_database
 
 @pytest.fixture()
 def target(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
-    target = tmp_path / "dashboards" / "ava-ops-main.json"
+    target = tmp_path / "dashboards" / "meiva-ops-main.json"
     target.parent.mkdir(parents=True)
 
     def _provisioning_dashboard(_home: Path) -> Path:
@@ -41,7 +41,7 @@ def test_render_cmd_previews_writes_and_refreshes(
         == 0
     )
     written = target.read_text(encoding="utf-8")
-    assert '"uid": "ava-ops-main"' in written
+    assert '"uid": "meiva-ops-main"' in written
 
     assert (
         grafana_render.cmd_grafana_render(
@@ -78,7 +78,7 @@ def test_render_cmd_refuses_a_host_without_the_lgtm_tree(
     capsys: pytest.CaptureFixture[str],
     operator_database: Callable[[], Any],
 ) -> None:
-    target = tmp_path / "missing" / "dashboards" / "ava-ops-main.json"
+    target = tmp_path / "missing" / "dashboards" / "meiva-ops-main.json"
 
     def _provisioning_dashboard(_home: Path) -> Path:
         return target

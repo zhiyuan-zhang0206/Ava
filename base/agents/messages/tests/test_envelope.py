@@ -87,9 +87,9 @@ class TestSystemSource:
         """source='system' is a framework internal insert, gets [system] prefix, no timestamp."""
         assert (
             wrap_inbound(
-                "\u8bf7\u68b3\u7406\u5e76\u8c03 ava.compact", "system", inputs=_ENVELOPE_INPUTS
+                "\u8bf7\u68b3\u7406\u5e76\u8c03 meiva.compact", "system", inputs=_ENVELOPE_INPUTS
             )
-            == "[system] \u8bf7\u68b3\u7406\u5e76\u8c03 ava.compact"
+            == "[system] \u8bf7\u68b3\u7406\u5e76\u8c03 meiva.compact"
         )
 
     @pytest.mark.parametrize(
@@ -174,7 +174,7 @@ class TestWatcherPrefix:
 
     def test_shell_source_is_valid(self) -> None:
         # `shell:N` — the completion notice of a background shell command
-        # (ava.shell.run_background), N is the shell session id.
+        # (meiva.shell.run_background), N is the shell session id.
         validate_source("shell:5")  # no raise
         assert wrap_inbound("build exited with code 0", "shell:5", inputs=_ENVELOPE_INPUTS) == (
             f"Shell session (id 5) {_TS}:\n\nbuild exited with code 0"

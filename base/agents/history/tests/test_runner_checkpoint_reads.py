@@ -1,4 +1,4 @@
-"""The checkpoint readers run as the least-privilege `ava_runner` login.
+"""The checkpoint readers run as the least-privilege `meiva_runner` login.
 
 Split out of `base/agents/incarnation/tests/test_runner_role.py`: it exercises the history
 readers, which sit above incarnation, so it lives with the history tests and reuses the runner
@@ -20,7 +20,7 @@ from base.db.code_version_gate import ProcessDbGate
 def test_checkpoint_reads_need_crud_not_schema_ddl(
     runner_db: str, monkeypatch: pytest.MonkeyPatch, database_gate: ProcessDbGate
 ) -> None:
-    """Both checkpoint readers work as ``ava_runner`` without schema CREATE.
+    """Both checkpoint readers work as ``meiva_runner`` without schema CREATE.
 
     The checkpoint schema is an install / migration concern.  A reader calling
     ``PostgresSaver.setup()`` first issues ``CREATE TABLE IF NOT EXISTS`` and
@@ -64,7 +64,7 @@ def test_checkpoint_reads_need_crud_not_schema_ddl(
     # This legacy checkpoint bypasses Pregel's ID assignment. Reading it
     # records provenance without requiring DDL or rewriting stored data.
     expected = HumanMessage(
-        content="runtime read", additional_kwargs={"ava_ephemeral_message_id": True}
+        content="runtime read", additional_kwargs={"meiva_ephemeral_message_id": True}
     )
     assert current == [expected]
     assert checkpoint_id == saved["configurable"]["checkpoint_id"]  # pyright: ignore[reportTypedDictNotRequiredAccess]

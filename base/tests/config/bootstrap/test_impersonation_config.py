@@ -25,7 +25,7 @@ def test_delivery_policy_is_configurable_and_bootstrapped(
     from base import config
     from base.host.env import dotenv_file
 
-    alias = f"AVA_{name.upper()}"
+    alias = f"MEIVA_{name.upper()}"
     info = cast(FieldInfo, FIELD_INFOS[name])
     assert info.alias == alias
     extra = info.json_schema_extra
@@ -37,8 +37,8 @@ def test_delivery_policy_is_configurable_and_bootstrapped(
     assert getattr(AgentRuntimeSettings(), name) == 17
     monkeypatch.setattr(dotenv_file, "unit_home", lambda: tmp_path)
     (tmp_path / ".env").write_text(
-        f"{alias}=17\nAVA_DB_URL=postgresql://ava@localhost:5433/ava\n"
-        "AVA_RUNNER_DB_PASSWORD=test-only\n"
+        f"{alias}=17\nMEIVA_DB_URL=postgresql://meiva@localhost:5433/meiva\n"
+        "MEIVA_RUNNER_DB_PASSWORD=test-only\n"
     )
     assert name in config.BOOTSTRAP_FIELDS
     authority = ConfigAuthority(config.settings, config.settings, tmp_path / ".env")

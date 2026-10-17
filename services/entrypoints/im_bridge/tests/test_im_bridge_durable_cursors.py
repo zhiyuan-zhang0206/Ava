@@ -28,9 +28,9 @@ _KEY = ("telegram", "12345")
 
 
 @pytest.fixture(autouse=True)
-def _own_ava_home(monkeypatch: pytest.MonkeyPatch, tmp_path: Any) -> None:
-    """The switch state file lives under AVA_HOME: keep it per test."""
-    monkeypatch.setenv("AVA_HOME", str(tmp_path))
+def _own_meiva_home(monkeypatch: pytest.MonkeyPatch, tmp_path: Any) -> None:
+    """The switch state file lives under MEIVA_HOME: keep it per test."""
+    monkeypatch.setenv("MEIVA_HOME", str(tmp_path))
 
 
 @pytest.fixture
@@ -134,7 +134,7 @@ async def test_watermark_survives_restart_so_a_snapshot_pushes_only_what_is_new(
             state = _bound_state(core)
             await core._push_snapshot(_KEY, state, {"items": []})
             await core.outbound_worker.run_once()
-            assert adapter.sent == ["[Ava #405] old"]
+            assert adapter.sent == ["[Meiva #405] old"]
 
             core2, adapter2 = _core(
                 _Gateway([_item("1.0", "old"), _item("2.0", "new")]), pool, tasks=_owned_tasks
@@ -145,7 +145,7 @@ async def test_watermark_survives_restart_so_a_snapshot_pushes_only_what_is_new(
                 _KEY, state2, {"items": [_item("1.0", "old"), _item("2.0", "new")]}
             )
             await core2.outbound_worker.run_once()
-            assert adapter2.sent == ["[Ava #405] new"]
+            assert adapter2.sent == ["[Meiva #405] new"]
 
     await scenario()
 
@@ -171,7 +171,7 @@ async def test_restore_pushes_replies_that_arrived_while_the_bridge_was_down(
             await core2.outbound_worker.run_once()
             await core2.outbound_worker.run_once()
 
-            assert adapter2.sent == ["[Ava #405] missed one", "[Ava #405] missed two"]
+            assert adapter2.sent == ["[Meiva #405] missed one", "[Meiva #405] missed two"]
             for task in core2._subscriptions.values():
                 task.cancel()
 

@@ -51,7 +51,7 @@ def _enabled_ui_declarations() -> list[tuple[str, dict[str, Any]]]:
         except ManifestError as e:
             raise HTTPException(
                 status_code=500,
-                detail=f"plugin {name!r} has an invalid ava-plugin.json: {e}",
+                detail=f"plugin {name!r} has an invalid meiva-plugin.json: {e}",
             ) from e
         ui = manifest.contributions.get("ui")
         if ui is None:

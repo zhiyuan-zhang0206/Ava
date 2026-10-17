@@ -67,8 +67,8 @@ def probe_home(
     The checks after the population one are stubbed quiet: every check now runs
     on every round (task #5064), and the subject here is the population verdict."""
     assert db_conn.execute("SELECT count(*) FROM agents_meta").fetchone() == (0,)
-    monkeypatch.setattr(paths, "ava_home", lambda: tmp_path)
-    monkeypatch.setattr(service_selection, "ava_home", lambda: tmp_path)
+    monkeypatch.setattr(paths, "meiva_home", lambda: tmp_path)
+    monkeypatch.setattr(service_selection, "meiva_home", lambda: tmp_path)
     monkeypatch.setattr(cluster_health, "gateway_liveness_with_retry", lambda: True)
     monkeypatch.setattr(cluster_health, "disk_usage_failure", lambda: None)
     monkeypatch.setattr(cluster_health.telemetry, "init_telemetry", _no_init)

@@ -1,7 +1,7 @@
 """Put the agent identity back after every test.
 
-Hundreds of tests pin the agent they created with `pin_agent(spawn_agent())` (`ava.tests.fixtures.pin_agent`), which binds an
-`AvaContext` carrying that identity in the ordinary `ava.context` module slot, and nothing
+Hundreds of tests pin the agent they created with `pin_agent(spawn_agent())` (`meiva.tests.fixtures.pin_agent`), which binds an
+`MeivaContext` carrying that identity in the ordinary `meiva.context` module slot, and nothing
 puts the previous one back. The next test in the same xdist worker then reads an identity it never
 set, so which tests fail depends on the shard composition, and moving test files changes it. This
 fixture reads the bound context before a test and writes it back after the test's own fixtures are
@@ -10,7 +10,7 @@ torn down, so no test has to undo the convention.
 It is function-scoped autouse. The leak guard does not compare it, so no order against the
 guard matters; it is registered ahead of the other autouse plugins so that its window covers what they do.
 
-`ava.self.AGENT_ID` is not touched: the module `__getattr__` serves it from the bound identity, and
+`meiva.self.AGENT_ID` is not touched: the module `__getattr__` serves it from the bound identity, and
 a name it serves must never be assigned: writing back what was read would store it as a real
 attribute for good (PR #3791).
 """

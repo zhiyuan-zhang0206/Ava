@@ -1,12 +1,12 @@
 # Independent inference service IDs and exact effort
 
 The user approved enabling CodeAct batching by default and exposing Fast as
-an independent Ava LLM ID. The model picker should show vendor reference TPS,
+an independent Meiva LLM ID. The model picker should show vendor reference TPS,
 and unsupported effort grades should fail instead of mapping to nearby grades.
 
 ## Service identity
 
-An Ava ID identifies an inference service with its own price and throughput
+An Meiva ID identifies an inference service with its own price and throughput
 facts. A Fast ID can share a provider's wire model with Standard while its
 builder selects `service_tier=fast` (OpenAI) or `speed=fast` (Anthropic).
 MiMo UltraSpeed already has a separate vendor model ID and keeps it.

@@ -137,7 +137,7 @@ class TestHostnameTargetsStayMonkeypatchable:
 class TestExceptionMapping:
     """Errors from the pinned path must surface as the same httpx exception
     types the stock backend raises — existing callers (base/host/env/bootstrap.py,
-    ava/gateway_client/__init__.py) catch httpx.ConnectError / httpx.ConnectTimeout /
+    meiva/gateway_client/__init__.py) catch httpx.ConnectError / httpx.ConnectTimeout /
     httpx.TransportError specifically, not raw httpcore/socket errors."""
 
     def test_connection_refused_raises_httpx_connect_error(self) -> None:

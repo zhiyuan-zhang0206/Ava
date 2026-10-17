@@ -25,31 +25,31 @@ def _face(plugin: str, *widgets: InspectWidgetSpec) -> DeclaredFace:
 def test_admission_fills_plugin_and_keeps_order() -> None:
     registry, refused = build_data_registry(
         [
-            _face("ava_fleet", _widget(id="one", order=750)),
+            _face("meiva_fleet", _widget(id="one", order=750)),
             _face("other_plugin", _widget(id="two", order=10)),
         ]
     )
 
     widgets = list(registry.inspect_widgets())
     assert refused == []
-    assert [(w.plugin, w.id) for w in widgets] == [("ava_fleet", "one"), ("other_plugin", "two")]
+    assert [(w.plugin, w.id) for w in widgets] == [("meiva_fleet", "one"), ("other_plugin", "two")]
     assert [w.order for w in widgets] == [750, 10]
 
 
 def test_admission_replaces_an_author_supplied_plugin() -> None:
-    registry, _ = build_data_registry([_face("ava_fleet", _widget(plugin="someone_else"))])
-    assert [w.plugin for w in registry.inspect_widgets()] == ["ava_fleet"]
+    registry, _ = build_data_registry([_face("meiva_fleet", _widget(plugin="someone_else"))])
+    assert [w.plugin for w in registry.inspect_widgets()] == ["meiva_fleet"]
 
 
 def test_duplicate_id_within_one_plugin_refused() -> None:
-    registry, refused = build_data_registry([_face("ava_fleet", _widget(), _widget())])
-    assert refused == ["ava_fleet"]
+    registry, refused = build_data_registry([_face("meiva_fleet", _widget(), _widget())])
+    assert refused == ["meiva_fleet"]
     assert list(registry.inspect_widgets()) == []
 
 
 def test_same_id_across_plugins_allowed() -> None:
     registry, refused = build_data_registry(
-        [_face("ava_fleet", _widget()), _face("other_plugin", _widget())]
+        [_face("meiva_fleet", _widget()), _face("other_plugin", _widget())]
     )
     assert refused == []
     assert len(list(registry.inspect_widgets())) == 2

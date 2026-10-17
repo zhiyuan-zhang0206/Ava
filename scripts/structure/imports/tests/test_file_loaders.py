@@ -24,7 +24,7 @@ def test_unexecuted_or_changed_file_loader_remains_unknown(tmp_path: Path, opera
         ast.parse(text),
         "cli/tests/test_probe.py",
         placement.ModuleIndex(root),
-        tops=("base", "ava", "cli"),
+        tops=("base", "meiva", "cli"),
     )
     assert found.unknown
     assert found.file_executions == ()
@@ -44,7 +44,7 @@ def test_loaded_source_unknown_is_not_masked_by_known_execution(tmp_path: Path) 
         ast.parse(text),
         "cli/tests/test_probe.py",
         placement.ModuleIndex(root),
-        tops=("base", "ava", "cli"),
+        tops=("base", "meiva", "cli"),
     )
     assert len(found.file_executions) == 1
     assert any("base/net/probe.py:1" in gap.reason for gap in found.unknown)

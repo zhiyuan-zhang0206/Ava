@@ -3,14 +3,14 @@
 
 The `machines` row (keyed by name) is a COMPOSED read model: it is recomputed
 from the host's per-unit contributions in `machine_units` (keyed by
-(machine_name, home), home = the unit's $AVA_HOME). Each unit UPSERTs only its
-own `machine_units` row via `register_self()` — at the tail of `ava start`, and
+(machine_name, home), home = the unit's $MEIVA_HOME). Each unit UPSERTs only its
+own `machine_units` row via `register_self()` — at the tail of `meiva start`, and
 again when the unit's ops daemon reaches serving state at its own boot — then
 `_recompute_machine_row()` rewrites the `machines` row as the union over the
 machine's non-stopped units. This lets TWO co-located units on one host (a
-gateway-only unit under `~/.ava_gateway` + an agent-runner-only unit under
-`~/.ava`) compose into ONE machine row whose capability set is their union,
-instead of clobbering each other on every `ava start`. Every `machines` reader
+gateway-only unit under `~/.meiva_gateway` + an agent-runner-only unit under
+`~/.meiva`) compose into ONE machine row whose capability set is their union,
+instead of clobbering each other on every `meiva start`. Every `machines` reader
 is unchanged — it reads the composed row.
 
 `gateway_url` is the machine's inbound base URL that the rest of the cluster
@@ -22,7 +22,7 @@ On an agent-runner-capable host the composed `gateway_url` holds the ops URL (th
 dial target spawn/lifecycle forwarding POSTs to), matching the single-box
 behavior before the split.
 
-Local URL source for gateway = `AVA_GATEWAY_URL` > raise GatewayUrlMissing (same
+Local URL source for gateway = `MEIVA_GATEWAY_URL` > raise GatewayUrlMissing (same
 source as [[machine]] / [[memory_repo]]: the home's `.env`).
 """
 
@@ -63,7 +63,7 @@ __all__ = [
 
 
 class GatewayUrlMissing(RuntimeError):  # noqa: N818 — state description; same style as [[MachineNameMissing]] / [[MemoryRemoteMissing]]
-    """`AVA_GATEWAY_URL` is not set — multi-machine setup is incomplete.
+    """`MEIVA_GATEWAY_URL` is not set — multi-machine setup is incomplete.
 
     Local setup error, not on the wire (same style as
     [[MachineNameMissing]] / [[MemoryRemoteMissing]]).
@@ -87,7 +87,7 @@ class LoopbackDialUrlRefused(RuntimeError):  # noqa: N818 — state description;
     under the wrong identity (the 2026-07-18 runner incident; the station variant
     is WP4). This is the central-DB integrity guard that stops such a row from ever
     being written, whichever host runs `register_self`; the operator sets
-    `AVA_MACHINE_HOST` (or `ava init --machine-host` on a new home) to this host's
+    `MEIVA_MACHINE_HOST` (or `meiva init --machine-host` on a new home) to this host's
     reachable address.
     """
 
@@ -102,8 +102,8 @@ def gateway_url(configured: str) -> str:
         return gateway_api_base(configured)
     except GatewayApiBaseMissing as exc:
         raise GatewayUrlMissing(
-            "gateway URL not set — `ava init --gateway-url <url>` records it for a new home; "
-            "for an initialized one set AVA_GATEWAY_URL in its `.env`."
+            "gateway URL not set — `meiva init --gateway-url <url>` records it for a new home; "
+            "for an initialized one set MEIVA_GATEWAY_URL in its `.env`."
         ) from exc
 
 
@@ -152,7 +152,7 @@ def _reject_loopback_dial_url(
     raise LoopbackDialUrlRefused(
         f"{name!r} would register a loopback dial URL ({url}) while its "
         f"gateway is remote ({gateway}); the gateway cannot reach it there — it would dial itself. "
-        "Set AVA_MACHINE_HOST in this unit's configuration to its private-network "
+        "Set MEIVA_MACHINE_HOST in this unit's configuration to its private-network "
         "address, then restart the unit."
     )
 
@@ -205,9 +205,9 @@ def register_self(
     `_recompute_machine_row`.
 
     Two callers, and the second is what makes the record mean what its readers
-    assume. `ava start` registers at the tail of a supervised bring-up; the ops
+    assume. `meiva start` registers at the tail of a supervised bring-up; the ops
     daemon registers at its OWN boot (`services/agent_runner/agent_ops/daemon.py`), once it is
-    actually serving. A host can come back up without completing an `ava start`
+    actually serving. A host can come back up without completing an `meiva start`
     — an OS-scheduled autostart, a watchdog respawn, a rollout's restart leg —
     and before the daemon registered itself such a host kept a `stopped_at` latch
     nothing cleared while it served ops (the 2026-07-28 runner roster read
@@ -276,16 +276,16 @@ def mark_stopping(db: Database, name: str, home: str) -> None:
     """Stamp `stopped_at = NOW()` on the (name, home) UNIT, then recompute.
 
     Called by the `POST /api/cluster/stopping` handler when a unit announces it
-    is shutting down on purpose (just before `ava stop` tears the stack down),
+    is shutting down on purpose (just before `meiva stop` tears the stack down),
     so the cluster view can show "stopped" rather than "offline" (which a live
     probe cannot tell apart from a crash). The retract is per-unit: stamping
     one unit's row and recomputing drops only that unit's caps from the
     composed machines row, so a co-located peer keeps its capability (e.g. the
     agent-runner unit stopping leaves the host still `gateway`). `register_self()`
-    clears the unit's marker on the next `ava start`.
+    clears the unit's marker on the next `meiva start`.
 
-    `home` is the stopping unit's $AVA_HOME, sent on the wire by the announcing
-    unit — it cannot be inferred from this (gateway) process's `ava_home()`,
+    `home` is the stopping unit's $MEIVA_HOME, sent on the wire by the announcing
+    unit — it cannot be inferred from this (gateway) process's `meiva_home()`,
     because a co-located or remote unit announcing its own stop runs under a
     different home than the gateway handling the announce. No-op-safe: a missing
     unit row simply updates zero rows, and recompute leaves the composed machines
@@ -397,7 +397,7 @@ def lookup(db: Database, name: str) -> str:
 
     Raises:
         MachineNotRegistered: no such row in machines (the other
-            host has not yet run `ava start`, or the machine name is
+            host has not yet run `meiva start`, or the machine name is
             misspelled).
         MachineGatewayUrlMissing: row exists but gateway_url is NULL.
     """
@@ -407,7 +407,7 @@ def lookup(db: Database, name: str) -> str:
     if row is None:
         raise MachineNotRegistered(
             f"no machine named {name!r} (it has not registered itself yet, or the name is "
-            f"misspelled); see ava.agents.list_machines() for the valid names."
+            f"misspelled); see meiva.agents.list_machines() for the valid names."
         )
     if row[0] is None:
         raise MachineGatewayUrlMissing(
@@ -423,7 +423,7 @@ def lookup_role(db: Database, name: str) -> list[str]:
     precise 400/404 instead of forwarding into an unreachable ops dial.
 
     Raises:
-        MachineNotRegistered: no such row (the host has not run `ava start`, or
+        MachineNotRegistered: no such row (the host has not run `meiva start`, or
             the name is misspelled).
     """
     with db.connect() as conn, conn.cursor() as cur:
@@ -432,13 +432,13 @@ def lookup_role(db: Database, name: str) -> list[str]:
     if row is None:
         raise MachineNotRegistered(
             f"no machine named {name!r} (it has not registered itself yet, or the name is "
-            f"misspelled); see ava.agents.list_machines() for the valid names."
+            f"misspelled); see meiva.agents.list_machines() for the valid names."
         )
     return row[0]
 
 
 def list_all(db: Database) -> list[tuple[str, str | None]]:
-    """SELECT name, gateway_url FROM machines — for `ava machines list` (future) / debug."""
+    """SELECT name, gateway_url FROM machines — for `meiva machines list` (future) / debug."""
     with db.connect() as conn, conn.cursor() as cur:
         cur.execute("SELECT name, gateway_url FROM machines ORDER BY name")
         return cur.fetchall()
@@ -463,16 +463,16 @@ def list_agent_runners(db: Database) -> list[tuple[str, str | None]]:
     stays in the list and is classified at dial time (unreachable = warn-and-skip
     in the fan-out) — not hidden by query scope.
     `is_staging` rows are excluded the same way: a staging host (operator-set
-    flag, `ava cluster mark-staging`) is registered and roster-visible but never
-    a rollout target — `ava start` on it clears its `stopped_at` like any host,
+    flag, `meiva cluster mark-staging`) is registered and roster-visible but never
+    a rollout target — `meiva start` on it clears its `stopped_at` like any host,
     and the staging flag is what keeps it out of the target set.
     `paused_at IS NOT NULL` rows are excluded the same way — the pause latch
-    (`ava cluster pause`, migration 20260814T182039) is operator-set and NEVER
+    (`meiva cluster pause`, migration 20260814T182039) is operator-set and NEVER
     cleared by `register_self`: a paused host that answers a probe is still not
     a rollout target, and the heartbeat liveness pass (the other caller of this
     query) skips it so an expected absence fires no offline alert. Only
-    `ava cluster resume` clears the latch.
-    `up_since_at` is a boot/announce stamp (`ava start`, and the ops daemon's own
+    `meiva cluster resume` clears the latch.
+    `up_since_at` is a boot/announce stamp (`meiva start`, and the ops daemon's own
     boot), not a heartbeat, so it cannot judge "online"; that determination is
     deferred to the live HTTP call.
     """
@@ -488,7 +488,7 @@ def list_agent_runners(db: Database) -> list[tuple[str, str | None]]:
 def list_roster_agent_runners(db: Database) -> list[tuple[str, str | None]]:
     """SELECT (name, gateway_url) of every agent-runner the roster shows: the
     rollout targets of `list_agent_runners()` plus staging and intentionally stopped
-    hosts. Only the pause latch hides a host (`ava cluster pause`). The heartbeat
+    hosts. Only the pause latch hides a host (`meiva cluster pause`). The heartbeat
     liveness pass snapshots these for the roster read model; it judges and alerts
     on the rollout targets alone."""
     with db.connect() as conn, conn.cursor() as cur:
@@ -508,10 +508,10 @@ def list_stopped_agent_runners(db: Database) -> list[tuple[str, str | None]]:
     rollout state how many of how many KNOWN hosts it is targeting instead of
     printing a bare count of whatever survived the filter. The caller is expected
     to probe these rather than trust the marker: `stopped_at` is a latch — set
-    only by the `ava stop` announce (`mark_stopping`) and cleared only by
+    only by the `meiva stop` announce (`mark_stopping`) and cleared only by
     `register_self()` — with no relation to liveness. The ops daemon's boot
     registration closes the wide version of that gap (a host whose autostart or
-    watchdog brought it back without a completed `ava start` now un-stops itself),
+    watchdog brought it back without a completed `meiva start` now un-stops itself),
     but the latch can still outlive the condition: a peer unit's recompute can
     re-stamp the composed row, and a gateway-only unit runs no ops daemon to
     re-announce itself. Silently dropping a live host from a migration-carrying
@@ -531,9 +531,9 @@ def set_staging(db: Database, name: str, *, is_staging: bool) -> bool:
     """Set or clear the operator staging flag on a machine row; True when a row
     changed.
 
-    The staging latch is operator-only (`ava cluster mark-staging` /
+    The staging latch is operator-only (`meiva cluster mark-staging` /
     `unmark-staging`, backed by this function): `register_self` and the ops
-    daemon never write it, so a staging host that runs `ava start` stays
+    daemon never write it, so a staging host that runs `meiva start` stays
     excluded from `list_agent_runners()` even though its `stopped_at` latch is
     cleared. False when no row matched the name (no such machine).
 
@@ -558,14 +558,14 @@ def pause(db: Database, name: str, reason: str | None = None) -> bool:
     (migration 20260814T182039). The latch is operator-only — the gateway
     pause endpoint calls this AFTER it has terminated the machine's agents and
     drained its tasks; `register_self` and the ops daemon never write it, so a
-    paused machine that runs `ava start` (or re-registers after its reachable
-    address changes) stays paused until an explicit `ava cluster resume`.
+    paused machine that runs `meiva start` (or re-registers after its reachable
+    address changes) stays paused until an explicit `meiva cluster resume`.
 
     Consequences of the latch (each one a separate reader of this column):
     `list_agent_runners()` drops the row, so the heartbeat liveness pass does
     not probe it (no offline alert — an expected absence is not an incident)
     and the rollout fan-out skips it; the roster / cluster panel /
-    `ava.agents.list_machines()` hide it; spawns targeting it are refused.
+    `meiva.agents.list_machines()` hide it; spawns targeting it are refused.
 
     The row itself is never deleted: `gateway_url` / `role` / `description`
     are the registration info `resume` needs, and a paused machine that comes
@@ -598,7 +598,7 @@ def resume(db: Database, name: str) -> bool:
     offline alert), the roster / cluster panel / agents' list_machines serve
     it, the rollout fan-out re-includes it and spawns are accepted again.
     The machine itself needs no action on the gateway side — when it is back
-    online it re-runs `ava start`, whose `register_self()` clears its
+    online it re-runs `meiva start`, whose `register_self()` clears its
     `stopped_at` latch and refreshes `gateway_url` (which may have changed
     with a new reachable address).
 
@@ -636,7 +636,7 @@ def is_paused(db: Database, name: str) -> bool:
     if row is None:
         raise MachineNotRegistered(
             f"no machine named {name!r} (it has not registered itself yet, or the name is "
-            f"misspelled); see ava.agents.list_machines() for the valid names."
+            f"misspelled); see meiva.agents.list_machines() for the valid names."
         )
     return row[0]
 

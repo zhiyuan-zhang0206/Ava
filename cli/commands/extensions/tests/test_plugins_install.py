@@ -1,5 +1,5 @@
-"""`ava plugins install/uninstall/installed/upgrade` — using local file:// git fixture
-Run end-to-end, no network. `unit_home` isolates ~/.ava.
+"""`meiva plugins install/uninstall/installed/upgrade` — using local file:// git fixture
+Run end-to-end, no network. `unit_home` isolates ~/.meiva.
 """
 
 import subprocess
@@ -9,7 +9,7 @@ from typing import Any
 
 import pytest
 
-import ava.skills as skills_mod
+import meiva.skills as skills_mod
 from base.cluster.machine import MachineIdentity
 from base.packages.extensions import install_registry as reg
 from cli.commands.extensions.plugins import (
@@ -148,7 +148,7 @@ def test_install_bare_mcp_package_signposts_mcp_install(
     *,
     command_machine: MachineIdentity,
 ) -> None:
-    """A standalone MCP package (bare .mcp.json) points the user at `ava mcp install`."""
+    """A standalone MCP package (bare .mcp.json) points the user at `meiva mcp install`."""
     repo = tmp_path / "mcp-src"
     repo.mkdir()
     (repo / ".mcp.json").write_text(
@@ -170,7 +170,7 @@ def test_install_bare_mcp_package_signposts_mcp_install(
         )
         == 1
     )
-    assert "ava mcp install" in capsys.readouterr().err  # pyright: ignore[reportUnknownMemberType]
+    assert "meiva mcp install" in capsys.readouterr().err  # pyright: ignore[reportUnknownMemberType]
     assert reg.load().packages == []
 
 
@@ -461,7 +461,7 @@ def test_install_claude_code_plugin_with_bundled_mcp(
     *,
     command_machine: MachineIdentity,
 ) -> None:
-    from ava.mcps.config import load_mcp_config
+    from meiva.mcps.config import load_mcp_config
 
     url = _make_claude_code_plugin_repo(tmp_path, agents=True, mcp=True)
     assert (
@@ -489,7 +489,7 @@ def test_install_claude_code_plugin_mcp_only(
     *,
     command_machine: MachineIdentity,
 ) -> None:
-    from ava.mcps.config import load_mcp_config
+    from meiva.mcps.config import load_mcp_config
 
     url = _make_claude_code_plugin_repo(tmp_path, agents=False, mcp=True)
     assert (
@@ -520,8 +520,8 @@ def test_install_claude_code_plugin_commands_surface(
     *,
     command_machine: MachineIdentity,
 ) -> None:
-    from ava import skills
     from base.packages.composer_commands import CommandCatalog
+    from meiva import skills
 
     # commands-only plugin: no skills/agents/mcp, just commands/
     url = _make_claude_code_plugin_repo(
@@ -587,7 +587,7 @@ def test_upgrade_claude_code_plugin_rematerializes(
     assert (refs / "type-design-analyzer.md").is_file()
 
 
-# --- atomic install (2026-08-28 ava_ledger incident) ------------------------
+# --- atomic install (2026-08-28 meiva_ledger incident) ------------------------
 
 
 def test_install_failure_mid_materialize_leaves_nothing(
@@ -686,7 +686,7 @@ def test_upgrade_failure_keeps_previous_version(
 def test_dot_prefixed_plugin_dirs_are_not_mcp_sources(unit_home: Path) -> None:
     """Atomic-install residue (.name.staging / .name.backup-<pid>) must not
     register ghost MCP servers from a bundled .mcp.json."""
-    from ava.mcps.config import load_mcp_config
+    from meiva.mcps.config import load_mcp_config
 
     ghost = unit_home / "plugins" / ".pr-toolkit.backup-999"
     ghost.mkdir(parents=True)

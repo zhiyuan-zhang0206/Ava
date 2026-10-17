@@ -215,7 +215,7 @@ EVENTS: dict[str, EventSpec] = {
         "host_turn_stall_timeout",
         "the hosted stall guard aborted a graph.ainvoke whose turn clock "
         "(base/agents/observation/turn_progress.py: node enters + completed LLM steps) was "
-        "silent past AVA_HOST_TURN_NO_PROGRESS_TIMEOUT_SECONDS (turn activity = "
+        "silent past MEIVA_HOST_TURN_NO_PROGRESS_TIMEOUT_SECONDS (turn activity = "
         "node enter, completed LLM step, streamed chunk) — the turn-level "
         "injection guard of task #2417. The invocation was cancelled and "
         "unwound; the row settles to idling; the next wake resumes from the "
@@ -328,8 +328,8 @@ EVENTS: dict[str, EventSpec] = {
     "host_admission_wait_exceeded": telemetry_event(
         "host_admission_wait_exceeded",
         "a hosted turn has queued at the host admission gate "
-        "(AVA_HOST_MAX_CONCURRENT_TURNS) for at least "
-        "AVA_HOST_ADMISSION_WAIT_ALERT_SECONDS — carries the agent, its current "
+        "(MEIVA_HOST_MAX_CONCURRENT_TURNS) for at least "
+        "MEIVA_HOST_ADMISSION_WAIT_ALERT_SECONDS — carries the agent, its current "
         "wait, the limit and the queue depth; reported once per wait episode. "
         "Queueing is the configured memory/runtime trade-off working, not an "
         "error; a wait this long means the queue is backing up (raise the limit "

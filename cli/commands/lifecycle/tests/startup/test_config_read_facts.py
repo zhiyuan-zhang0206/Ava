@@ -8,9 +8,9 @@ from cli.commands.lifecycle.tests.startup.config_read_facts import explicit_conf
 @pytest.mark.parametrize(
     "source",
     [
-        "from ava.sdk_surface.settings import config_authority as owner\n"
+        "from meiva.sdk_surface.settings import config_authority as owner\n"
         "owner().service_field_value('web_fetch_model')",
-        "import ava.sdk_surface.settings as module\n"
+        "import meiva.sdk_surface.settings as module\n"
         "module.config_authority().service_field_value(name='web_fetch_model')",
         "from base.config.service_read import ConfigAuthority as Authority\n"
         "def consume(authority: Authority):\n"
@@ -24,12 +24,12 @@ def test_authority_reads_use_the_canonical_field_domain(source: str) -> None:
 @pytest.mark.parametrize(
     "source",
     [
-        "from base.agents.context import AvaContext as Context\n"
+        "from base.agents.context import MeivaContext as Context\n"
         "def consume(context: Context):\n"
         "    context.require_agent().read('display', 'timeline_default_limit')",
         "import base.agents.context as module\n"
         "from langgraph.runtime import Runtime as GraphRuntime\n"
-        "def consume(graph: GraphRuntime[module.AvaContext]):\n"
+        "def consume(graph: GraphRuntime[module.MeivaContext]):\n"
         "    ctx = graph.context\n"
         "    reader = ctx.require_agent()\n"
         "    return lambda: reader.read(domain='display', field='timeline_default_limit')",
@@ -51,29 +51,29 @@ def test_agent_reads_require_a_proven_receiver(source: str) -> None:
         "    config_authority().service_field_value('web_fetch_model')",
         "from unrelated import config_authority\n"
         "config_authority().service_field_value('web_fetch_model')",
-        "from ava.sdk_surface.settings import config_authority\n"
+        "from meiva.sdk_surface.settings import config_authority\n"
         "def consume(config_authority):\n"
         "    config_authority().service_field_value('web_fetch_model')",
-        "from ava.sdk_surface.settings import config_authority\n"
+        "from meiva.sdk_surface.settings import config_authority\n"
         "config_authority = unrelated\n"
         "config_authority().service_field_value('web_fetch_model')",
-        "from base.agents.context import AvaContext\n"
-        "def consume(ctx: AvaContext):\n"
+        "from base.agents.context import MeivaContext\n"
+        "def consume(ctx: MeivaContext):\n"
         "    ctx = unrelated\n"
         "    ctx.require_agent().read('display', 'timeline_default_limit')",
-        "from unrelated import AvaContext\n"
-        "def consume(ctx: AvaContext):\n"
+        "from unrelated import MeivaContext\n"
+        "def consume(ctx: MeivaContext):\n"
         "    ctx.require_agent().read('display', 'timeline_default_limit')",
-        "from base.agents.context import AvaContext\n"
-        "def consume(ctx: AvaContext):\n"
+        "from base.agents.context import MeivaContext\n"
+        "def consume(ctx: MeivaContext):\n"
         "    return lambda ctx: ctx.require_agent().read('display', 'timeline_default_limit')",
-        "from base.agents.context import AvaContext\n"
-        "def consume(ctx: AvaContext):\n"
+        "from base.agents.context import MeivaContext\n"
+        "def consume(ctx: MeivaContext):\n"
         "    ctx.require_agent = unrelated\n"
         "    ctx.require_agent().read('display', 'timeline_default_limit')",
         "from langgraph.runtime import Runtime\n"
-        "from base.agents.context import AvaContext\n"
-        "def consume(graph: Runtime[AvaContext]):\n"
+        "from base.agents.context import MeivaContext\n"
+        "def consume(graph: Runtime[MeivaContext]):\n"
         "    graph.context = unrelated\n"
         "    graph.context.require_agent().read('display', 'timeline_default_limit')",
     ],
@@ -92,9 +92,9 @@ def test_unrelated_or_rebound_readers_do_not_supply_domain_facts(source: str) ->
 )
 def test_proven_readers_reject_invalid_literal_contracts(expression: str) -> None:
     source = (
-        "from ava.sdk_surface.settings import config_authority as authority\n"
-        "from base.agents.context import AvaContext\n"
-        "def consume(ctx: AvaContext, field: str):\n"
+        "from meiva.sdk_surface.settings import config_authority as authority\n"
+        "from base.agents.context import MeivaContext\n"
+        "def consume(ctx: MeivaContext, field: str):\n"
         f"    {expression}\n"
     )
     with pytest.raises(AssertionError, match="undeclared"):
@@ -104,9 +104,9 @@ def test_proven_readers_reject_invalid_literal_contracts(expression: str) -> Non
 def test_real_sdk_and_agent_consumers_supply_display_and_web() -> None:
     root = Path(__file__).resolve().parents[5]
     for path, domain in (
-        ("ava/web/wiring.py", "web"),
-        ("ava/agents/__init__.py", "display"),
-        ("ava/shell/sessions.py", "display"),
+        ("meiva/web/wiring.py", "web"),
+        ("meiva/agents/__init__.py", "display"),
+        ("meiva/shell/sessions.py", "display"),
         ("agent/graph/_init_context.py", "display"),
         ("agent/graph/claim/_present.py", "display"),
         ("agent/graph/claim/node.py", "display"),

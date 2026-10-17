@@ -1,4 +1,4 @@
-"""`ava computer` — operator commands for the computer-use daemon.
+"""`meiva computer` — operator commands for the computer-use daemon.
 
 Today one verb: `release` — the operator's last resort to force-release the
 screen when a session is wedged (a holder that stopped acting but whose lease
@@ -17,9 +17,9 @@ import sys
 def h_computer_release(args: object) -> int:
     """Force-release the screen from its current holder."""
     del args  # no flags today
-    from base.paths import ava_home, computer_mcp_socket
+    from base.paths import computer_mcp_socket, meiva_home
 
-    sock_path = str(computer_mcp_socket(ava_home()))
+    sock_path = str(computer_mcp_socket(meiva_home()))
     try:
         s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
         s.connect(sock_path)

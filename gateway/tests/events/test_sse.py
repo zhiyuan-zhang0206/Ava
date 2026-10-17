@@ -1,4 +1,4 @@
-"""SSE endpoint: Redis `ava:events` → `text/event-stream` transparent forwarding.
+"""SSE endpoint: Redis `meiva:events` → `text/event-stream` transparent forwarding.
 
 **Strategy**: don't use TestClient's `stream()` — httpx sync client's back-pressure
 handling for async generator doesn't mesh well with long-lived Redis pubsub, easy deadlock.
@@ -7,7 +7,7 @@ Directly `asyncio.run` call `event_stream()` async generator, using fake Request
 real parsing, finer granularity.
 
 Redis uses the session's instance; Redis no separate db, channel name isolation (settings.data_plane.events_channel
-won't collide with running dev Ava Server — although test messages may leak into dev UI, dev
+won't collide with running dev Meiva Server — although test messages may leak into dev UI, dev
 tailer filters by agent_id, test agent_ids are all newly created in tests).
 """
 
@@ -415,7 +415,7 @@ def test_busy_channel_still_emits_keepalive_comments(
     """A channel flooded with other agents' events must not go silent.
 
     Regression (2026-08-03): event_stream only emitted ``: hb`` on the msg-None path, so a continuously busy
-    ``ava:events`` channel (in a live cluster, a message every ~0.1s) made the stream yield nothing at all — read-
+    ``meiva:events`` channel (in a live cluster, a message every ~0.1s) made the stream yield nothing at all — read-
     timeout clients (httpx, curl) disconnected every 30s and the im_bridge subscription reconnected in a loop.
     """
     tid = create_agent(db_conn)  # this subscriber's agent

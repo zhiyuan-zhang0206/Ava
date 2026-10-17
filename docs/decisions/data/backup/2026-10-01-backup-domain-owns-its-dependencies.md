@@ -2,12 +2,12 @@
 
 ## Context
 
-The daily logical backup (`ava-pg-backup`: `pg_dump`, encrypt, off-site publish,
+The daily logical backup (`meiva-pg-backup`: `pg_dump`, encrypt, off-site publish,
 prune) reached into the physical PITR stack (`services/pitr`) for five things:
 the managed-name grammar, the operation custody core that runs each scheduled
 dump in an owned worker group, the off-site publish through a four-backend store
 factory, the activation record that pinned a snapshot from pruning, and the
-only operator verb that releases a blocked operation (`ava pitr operations`).
+only operator verb that releases a blocked operation (`meiva pitr operations`).
 The stack is being replaced, and the daily backup is the one recovery path that
 has to keep working through that replacement.
 
@@ -28,8 +28,8 @@ The backup domain owns what it uses, and the stack no longer sits under it:
   `services/backup_scheduler/operation/`, the bootstrap names that package, and
   its on-disk state (control and quarantine roots, kind names, record files,
   `.operation-*` directories) is unchanged, so a control directory a stopped
-  controller left behind is read as before; `ava backup operations status|retire`
-  replaces `ava pitr operations`;
+  controller left behind is read as before; `meiva backup operations status|retire`
+  replaces `meiva pitr operations`;
 - the off-site publish is `services/gateway_side/backup/offsite.py`: OSS only,
   one function, the same server-side guarantees (per-part `Content-MD5`, the
   multipart ETag chain, forbid-overwrite on completion only, adopt-after-crash)
@@ -39,7 +39,7 @@ The backup domain owns what it uses, and the stack no longer sits under it:
   `pre-update`, `pitr-activation` and wall-clock-stamp name forms are deleted:
   nothing writes them.
 
-The configuration keys (`AVA_PITR_STORE_BACKEND`, `AVA_PITR_OSS_*`) keep their
+The configuration keys (`MEIVA_PITR_STORE_BACKEND`, `MEIVA_PITR_OSS_*`) keep their
 names in this change.
 
 ## Alternatives rejected

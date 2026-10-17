@@ -16,15 +16,15 @@ use tauri::{AppHandle, Manager, Runtime};
 /// Java package the overlay installs the plugin class into. Must match
 /// `identifier` in `tauri.conf.json`, which is what the Android project's
 /// package name is derived from.
-pub(crate) const PLUGIN_PACKAGE: &str = "com.ava.app";
-const BACKGROUND_PLUGIN_CLASS: &str = "AvaBackgroundPlugin";
-const BACKGROUND_PLUGIN_NAME: &str = "avabackground";
-const SECRET_PLUGIN_CLASS: &str = "AvaSecretPlugin";
-const SECRET_PLUGIN_NAME: &str = "avasecret";
-const COOKIE_PLUGIN_CLASS: &str = "AvaCookiePlugin";
-const COOKIE_PLUGIN_NAME: &str = "avacookie";
-const CLICK_PLUGIN_CLASS: &str = "AvaClickPlugin";
-const CLICK_PLUGIN_NAME: &str = "avaclick";
+pub(crate) const PLUGIN_PACKAGE: &str = "com.meiva.app";
+const BACKGROUND_PLUGIN_CLASS: &str = "MeivaBackgroundPlugin";
+const BACKGROUND_PLUGIN_NAME: &str = "meivabackground";
+const SECRET_PLUGIN_CLASS: &str = "MeivaSecretPlugin";
+const SECRET_PLUGIN_NAME: &str = "meivasecret";
+const COOKIE_PLUGIN_CLASS: &str = "MeivaCookiePlugin";
+const COOKIE_PLUGIN_NAME: &str = "meivacookie";
+const CLICK_PLUGIN_CLASS: &str = "MeivaClickPlugin";
+const CLICK_PLUGIN_NAME: &str = "meivaclick";
 
 /// `run_mobile_plugin` must never be called on the Android main thread: the
 /// JNI round-trip is serviced by the main looper, so a main-thread call

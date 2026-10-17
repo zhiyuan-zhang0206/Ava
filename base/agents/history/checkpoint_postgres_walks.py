@@ -39,7 +39,7 @@ _EXPECTED_PARAMETERS = (
 
 
 def validate_checkpoint_postgres_api() -> None:
-    """Fail at Ava saver construction if its pinned private extension seam changes."""
+    """Fail at Meiva saver construction if its pinned private extension seam changes."""
     dependency_version = version("langgraph-checkpoint-postgres")
     if dependency_version != "3.1.2":
         raise RuntimeError(
@@ -48,7 +48,7 @@ def validate_checkpoint_postgres_api() -> None:
         )
     descriptor = vars(BasePostgresSaver)["_try_advance_walks"]
     if not isinstance(descriptor, staticmethod):
-        raise TypeError("checkpoint-postgres _try_advance_walks was replaced outside Ava")
+        raise TypeError("checkpoint-postgres _try_advance_walks was replaced outside Meiva")
     original = descriptor.__func__
     method_signature = signature(original)
     if (
@@ -67,7 +67,7 @@ def validate_checkpoint_postgres_api() -> None:
 
 
 class CheckpointWalks:
-    """Ava-owned pagination extension; upstream classes remain unchanged."""
+    """Meiva-owned pagination extension; upstream classes remain unchanged."""
 
     @staticmethod
     def _try_advance_walks(

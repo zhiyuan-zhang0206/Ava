@@ -7,8 +7,8 @@ from typing import Literal
 from base.cluster.machine import MachineIdentity
 
 ObservabilityEndpointVariable = Literal[
-    "AVA_TELEMETRY_OTLP_ENDPOINT",
-    "AVA_TELEMETRY_LOKI_URL",
+    "MEIVA_TELEMETRY_OTLP_ENDPOINT",
+    "MEIVA_TELEMETRY_LOKI_URL",
 ]
 
 
@@ -24,7 +24,7 @@ def cluster_label(home: Path | None = None) -> str:
     from base import cluster, paths
 
     try:
-        resolved_home = home if home is not None else paths.ava_home()
+        resolved_home = home if home is not None else paths.meiva_home()
     except Exception as exc:
         _report_label_fallback("home resolution", exc)
         return ".unknown"
@@ -77,8 +77,8 @@ def home_is_observability_station(home: Path, *, machine: MachineIdentity, unit_
     """Whether this home is the observability station — the provider identity
     of the host's native LGTM backends.
 
-    Two equivalent forms: the legacy ``$AVA_HOME/lgtm-host`` marker (operator
-    designation via ``ava lgtm on``) and the declarative ``observability-station``
+    Two equivalent forms: the legacy ``$MEIVA_HOME/lgtm-host`` marker (operator
+    designation via ``meiva lgtm on``) and the declarative ``observability-station``
     unit capability. The capability form resolves through the process's own
     machine identity and only counts when the resolved home IS this ``home`` —
     a dev worktree home never inherits the prod station's capability. Role
@@ -109,7 +109,7 @@ def collector_allowed_for_home(
 
     The observability station (``lgtm-host`` marker or ``observability-station``
     capability) always runs the sidecar. A non-station gateway runs it only when
-    the operator explicitly overrode ``AVA_TELEMETRY_OTLP_ENDPOINT`` — the same
+    the operator explicitly overrode ``MEIVA_TELEMETRY_OTLP_ENDPOINT`` — the same
     escape hatch the exporter side honors
     (``base.telemetry.otlp.telemetry_otlp.observability_export_allowed``) — so an explicit
     collector export is not silently starved of its local sidecar. ``None`` (no
@@ -127,4 +127,4 @@ def collector_allowed_for_home(
         return True
     return home_is_observability_station(
         home, machine=machine, unit_home=unit_home
-    ) or endpoint_override_is_explicit("AVA_TELEMETRY_OTLP_ENDPOINT")
+    ) or endpoint_override_is_explicit("MEIVA_TELEMETRY_OTLP_ENDPOINT")

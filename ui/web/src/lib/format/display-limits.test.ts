@@ -33,30 +33,30 @@ afterEach(() => cleanup());
 describe("useDisplayLimit", () => {
   it("returns the baked fallback while the config read is pending", () => {
     vi.mocked(api.getConfig).mockReturnValue(new Promise<never>(() => undefined));
-    const { result } = renderHook(() => useDisplayLimit("AVA_X", 50), { wrapper });
+    const { result } = renderHook(() => useDisplayLimit("MEIVA_X", 50), { wrapper });
     expect(result.current).toBe(50);
   });
 
   it("resolves the configured value by env var", async () => {
     vi.mocked(api.getConfig).mockResolvedValue({
-      fields: [{ env_var: "AVA_X", current_value: 137 }],
+      fields: [{ env_var: "MEIVA_X", current_value: 137 }],
     } as never);
-    const { result } = renderHook(() => useDisplayLimit("AVA_X", 50), { wrapper });
+    const { result } = renderHook(() => useDisplayLimit("MEIVA_X", 50), { wrapper });
     await waitFor(() => expect(result.current).toBe(137));
   });
 
   it("keeps the fallback when the field is missing", async () => {
     vi.mocked(api.getConfig).mockResolvedValue({
-      fields: [{ env_var: "AVA_OTHER", current_value: 5 }],
+      fields: [{ env_var: "MEIVA_OTHER", current_value: 5 }],
     } as never);
-    const { result } = renderHook(() => useDisplayLimit("AVA_X", 50), { wrapper });
+    const { result } = renderHook(() => useDisplayLimit("MEIVA_X", 50), { wrapper });
     await waitFor(() => expect(api.getConfig).toHaveBeenCalled());
     expect(result.current).toBe(50);
   });
 
   it("keeps the fallback when the config read fails", async () => {
     vi.mocked(api.getConfig).mockRejectedValue(new Error("boom"));
-    const { result } = renderHook(() => useDisplayLimit("AVA_X", 50), { wrapper });
+    const { result } = renderHook(() => useDisplayLimit("MEIVA_X", 50), { wrapper });
     await waitFor(() => expect(api.getConfig).toHaveBeenCalled());
     expect(result.current).toBe(50);
   });
@@ -68,7 +68,7 @@ describe("useDisplayLimit", () => {
     // act flush is load-bearing: the crash would happen when the resolved
     // data re-renders the hook, after the initial render returned.
     vi.mocked(api.getConfig).mockResolvedValue({} as never);
-    const { result } = renderHook(() => useDisplayLimit("AVA_X", 50), { wrapper });
+    const { result } = renderHook(() => useDisplayLimit("MEIVA_X", 50), { wrapper });
     await act(async () => {
       await new Promise((r) => setTimeout(r, 0));
     });

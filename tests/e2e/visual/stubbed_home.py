@@ -26,10 +26,10 @@ from playwright.sync_api import Browser, BrowserContext, Page, Route
 # every suite the same context/open/settle sequence.
 
 
-# `AVA_MOBILE_TEST_BASE_URL` points new_context at the deployed bundle (session
-# cookie via AVA_TEST_SESSION_COOKIE); unset, the test module's `frontend_target`
+# `MEIVA_MOBILE_TEST_BASE_URL` points new_context at the deployed bundle (session
+# cookie via MEIVA_TEST_SESSION_COOKIE); unset, the test module's `frontend_target`
 # fixture serves the session `frontend_proc` build.
-OVERRIDE_BASE_URL = os.environ.get("AVA_MOBILE_TEST_BASE_URL")
+OVERRIDE_BASE_URL = os.environ.get("MEIVA_MOBILE_TEST_BASE_URL")
 
 
 _AGENT = {
@@ -345,10 +345,10 @@ def new_context(browser: Browser, width: int) -> BrowserContext:
         viewport={"width": width, "height": 664},
         device_scale_factor=2 if width < 768 else 1,
     )
-    if OVERRIDE_BASE_URL and os.environ.get("AVA_TEST_SESSION_COOKIE"):
-        cookie = os.environ["AVA_TEST_SESSION_COOKIE"].split("=", 1)[-1]
+    if OVERRIDE_BASE_URL and os.environ.get("MEIVA_TEST_SESSION_COOKIE"):
+        cookie = os.environ["MEIVA_TEST_SESSION_COOKIE"].split("=", 1)[-1]
         host = OVERRIDE_BASE_URL.split("//", 1)[-1].split(":", 1)[0]
-        ctx.add_cookies([{"name": "ava_session", "value": cookie, "domain": host, "path": "/"}])
+        ctx.add_cookies([{"name": "meiva_session", "value": cookie, "domain": host, "path": "/"}])
     return ctx
 
 

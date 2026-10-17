@@ -22,9 +22,9 @@ from base.db.code_version_gate import ProcessDbGate
 from base.db.connections import NoDatabaseAuthorityError, guard_db_url
 from base.host.db_authority import delivery, ledger, model
 from base.host.env import dotenv_boot
-from base.paths.home import resolve_ava_home
+from base.paths.home import resolve_meiva_home
 
-_ENDPOINT = "postgresql://ava@127.0.0.1:6433/ava"
+_ENDPOINT = "postgresql://meiva@127.0.0.1:6433/meiva"
 _REPO = Path(__file__).resolve().parents[2]
 
 
@@ -86,7 +86,7 @@ def test_write_grant_is_the_active_class_login_bound_to_the_ledger(home: Path, s
         "credential_digest": delivery.active_generation(home).credential_digest,
     }
     assert grant.dsn(_ENDPOINT) == (
-        f"postgresql://{grant.role}:{grant.password}@127.0.0.1:6433/ava"
+        f"postgresql://{grant.role}:{grant.password}@127.0.0.1:6433/meiva"
     )
 
 
@@ -104,7 +104,7 @@ def test_a_pending_generation_is_never_delivered(home: Path) -> None:
     from base.host.db_authority.ledger import begin_mint
 
     groups = model.Groups(gateway=model.GATEWAY_GROUP, runner=model.RUNNER_GROUP)
-    ledger.create_ledger(home, owner="ava", groups=groups)
+    ledger.create_ledger(home, owner="meiva", groups=groups)
     begin_mint(home, encrypt=_encrypt)
     with pytest.raises(model.LedgerRefusedError, match="no active generation"):
         delivery.write_grant(home, "gateway")
@@ -134,17 +134,17 @@ def boot(monkeypatch: pytest.MonkeyPatch, home: Path) -> Iterator[Path]:
     test inherits this fake unit's keys."""
     saved = dict(os.environ)
     env_file = home / ".env"
-    env_file.write_text(f"AVA_DB_URL={_ENDPOINT}\n")
-    monkeypatch.setenv("AVA_HOME", str(home))
+    env_file.write_text(f"MEIVA_DB_URL={_ENDPOINT}\n")
+    monkeypatch.setenv("MEIVA_HOME", str(home))
     for key in (
-        "AVA_PROCESS_PROFILE",
+        "MEIVA_PROCESS_PROFILE",
         dotenv_boot.LAUNCHER_PROFILE_ENV_KEY,
         delivery.GENERATION_ENV,
     ):
         os.environ.pop(key, None)
     # Not a bare assignment: a test body that monkeypatches this key records the value set here and
     # undoes it after the `finally` below, so the endpoint would outlive the test.
-    monkeypatch.setitem(os.environ, "AVA_DB_URL", _ENDPOINT)
+    monkeypatch.setitem(os.environ, "MEIVA_DB_URL", _ENDPOINT)
     try:
         yield home
     finally:
@@ -155,33 +155,33 @@ def boot(monkeypatch: pytest.MonkeyPatch, home: Path) -> Iterator[Path]:
 def test_a_delivered_login_for_this_home_survives_the_env_file(
     boot: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    delivered = "postgresql://ava_g4_gateway:delivered@127.0.0.1:6433/ava"
-    monkeypatch.setitem(os.environ, "AVA_PROCESS_PROFILE", "gateway")
-    monkeypatch.setitem(os.environ, "AVA_DB_URL", delivered)
+    delivered = "postgresql://meiva_g4_gateway:delivered@127.0.0.1:6433/meiva"
+    monkeypatch.setitem(os.environ, "MEIVA_PROCESS_PROFILE", "gateway")
+    monkeypatch.setitem(os.environ, "MEIVA_DB_URL", delivered)
     monkeypatch.setitem(os.environ, delivery.GENERATION_ENV, "4")
-    result = dotenv_boot.enforce_cluster_env_authority(resolve_ava_home())
-    assert os.environ["AVA_DB_URL"] == delivered
+    result = dotenv_boot.enforce_cluster_env_authority(resolve_meiva_home())
+    assert os.environ["MEIVA_DB_URL"] == delivered
     assert result.db_authority_refusal is None
 
 
 def test_a_sibling_homes_delivery_is_replaced_by_this_homes_endpoint(
     boot: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    monkeypatch.setitem(os.environ, "AVA_PROCESS_PROFILE", "gateway")
+    monkeypatch.setitem(os.environ, "MEIVA_PROCESS_PROFILE", "gateway")
     monkeypatch.setitem(
-        os.environ, "AVA_DB_URL", "postgresql://ava_g4_gateway:sibling@127.0.0.1:7433/ava"
+        os.environ, "MEIVA_DB_URL", "postgresql://meiva_g4_gateway:sibling@127.0.0.1:7433/meiva"
     )
     monkeypatch.setitem(os.environ, delivery.GENERATION_ENV, "4")
-    dotenv_boot.enforce_cluster_env_authority(resolve_ava_home())
-    assert os.environ["AVA_DB_URL"] == _ENDPOINT
+    dotenv_boot.enforce_cluster_env_authority(resolve_meiva_home())
+    assert os.environ["MEIVA_DB_URL"] == _ENDPOINT
 
 
 def test_an_admitted_operator_process_receives_the_gateway_login(boot: Path, seeded: Any) -> None:
     _intent(boot, _REPO)
-    result = dotenv_boot.enforce_cluster_env_authority(resolve_ava_home())
+    result = dotenv_boot.enforce_cluster_env_authority(resolve_meiva_home())
     gateway = seeded.roles.gateway
-    assert os.environ["AVA_DB_URL"] == (
-        f"postgresql://{gateway.name}:{gateway.password}@127.0.0.1:6433/ava"
+    assert os.environ["MEIVA_DB_URL"] == (
+        f"postgresql://{gateway.name}:{gateway.password}@127.0.0.1:6433/meiva"
     )
     assert os.environ[delivery.GENERATION_ENV] == "0"
     assert result.db_authority_refusal is None
@@ -192,15 +192,15 @@ def test_a_foreign_runtime_gets_nothing_and_its_dial_fails_by_name(
 ) -> None:
     del seeded
     _intent(boot, tmp_path / "another-checkout")
-    result = dotenv_boot.enforce_cluster_env_authority(resolve_ava_home())
-    assert os.environ["AVA_DB_URL"] == _ENDPOINT
+    result = dotenv_boot.enforce_cluster_env_authority(resolve_meiva_home())
+    assert os.environ["MEIVA_DB_URL"] == _ENDPOINT
     assert delivery.GENERATION_ENV not in os.environ
     refusal = result.db_authority_refusal
     assert refusal is not None and "source checkout" in refusal
     with pytest.raises(NoDatabaseAuthorityError, match="credential-free"):
         guard_db_url(_ENDPOINT, refusal=result.db_authority_refusal)
     # A URL carrying a credential is not the undelivered endpoint.
-    assert guard_db_url("postgresql://ava_g0_gateway:pw@127.0.0.1:6433/ava", refusal=refusal)
+    assert guard_db_url("postgresql://meiva_g0_gateway:pw@127.0.0.1:6433/meiva", refusal=refusal)
 
 
 def test_a_launched_process_without_delivery_is_refused(
@@ -208,16 +208,16 @@ def test_a_launched_process_without_delivery_is_refused(
 ) -> None:
     del seeded
     _intent(boot, _REPO)
-    monkeypatch.setitem(os.environ, "AVA_PROCESS_PROFILE", "runner")
-    result = dotenv_boot.enforce_cluster_env_authority(resolve_ava_home())
-    assert os.environ["AVA_DB_URL"] == _ENDPOINT
+    monkeypatch.setitem(os.environ, "MEIVA_PROCESS_PROFILE", "runner")
+    result = dotenv_boot.enforce_cluster_env_authority(resolve_meiva_home())
+    assert os.environ["MEIVA_DB_URL"] == _ENDPOINT
     refusal = result.db_authority_refusal
     assert refusal is not None and "only the root launcher delivers" in refusal
 
 
 def test_a_home_without_a_ledger_is_untouched(boot: Path) -> None:
-    result = dotenv_boot.enforce_cluster_env_authority(resolve_ava_home())
-    assert os.environ["AVA_DB_URL"] == _ENDPOINT
+    result = dotenv_boot.enforce_cluster_env_authority(resolve_meiva_home())
+    assert os.environ["MEIVA_DB_URL"] == _ENDPOINT
     assert result.db_authority_refusal is None
     assert guard_db_url(_ENDPOINT, refusal=result.db_authority_refusal) == _ENDPOINT
 
@@ -225,7 +225,7 @@ def test_a_home_without_a_ledger_is_untouched(boot: Path) -> None:
 # ── a URL's own startup options ──────────────────────────────────────────────
 
 _WITH_OPTIONS = (
-    "postgresql://osuser@/ava?host=/tmp/ava-pg-x&port=5433&options=-c%20role%3Dava_gateway"
+    "postgresql://osuser@/meiva?host=/tmp/meiva-pg-x&port=5433&options=-c%20role%3Dmeiva_gateway"
 )
 
 
@@ -234,7 +234,7 @@ def test_a_urls_own_startup_options_survive_the_statement_ceiling() -> None:
 
     assert statement_kwargs(_ENDPOINT) is PG_STATEMENT_TIMEOUT_KWARGS
     assert statement_kwargs(_WITH_OPTIONS)["options"] == (
-        "-c role=ava_gateway -c statement_timeout=60000"
+        "-c role=meiva_gateway -c statement_timeout=60000"
     )
     assert statement_kwargs(_WITH_OPTIONS)["connect_timeout"] == 5
 
@@ -253,14 +253,14 @@ def test_a_database_handle_retains_its_boot_refusal_after_another_delivery(
     from base.db import config as db_config
 
     _intent(boot, tmp_path / "another-checkout")
-    result = dotenv_boot.enforce_cluster_env_authority(resolve_ava_home())
+    result = dotenv_boot.enforce_cluster_env_authority(resolve_meiva_home())
     first = Settings(
         env_boot=result, data_plane={"db_url": _ENDPOINT, "redis_url": "redis://localhost:1"}
     )
     monkeypatch.setattr(db_config, "settings", first)
     handle = Database.from_settings(gate=database_gate)
     _intent(boot, _REPO)
-    dotenv_boot.enforce_cluster_env_authority(resolve_ava_home())
+    dotenv_boot.enforce_cluster_env_authority(resolve_meiva_home())
 
     def unexpected_dial(*_args: Any, **_kwargs: Any) -> Any:
         pytest.fail("a later boot authorized a previously refused database handle")

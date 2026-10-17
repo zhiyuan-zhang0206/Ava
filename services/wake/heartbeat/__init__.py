@@ -3,7 +3,7 @@
 The gateway is responsible for every agent in the cluster. This daemon
 periodically scans idle agents and sends a check-in (a normal inbound
 message) to those that have been idle past a threshold and have not asked to be
-left alone via `ava.self.pause_heartbeat()`. The check-in nudges the agent to
+left alone via `meiva.self.pause_heartbeat()`. The check-in nudges the agent to
 find something to do or pause its heartbeat — turning "don't disturb me" into
 an active agent choice (call `pause_heartbeat`) rather than a passive classifier
 guess.
@@ -15,7 +15,7 @@ normally delivers the check-in immediately. Runs once per cluster, on the
 gateway.
 
 Provides:
-- `daemon.py` — bounded dispatch loop; `AVA_HEARTBEAT_INTERVAL_SECONDS`
+- `daemon.py` — bounded dispatch loop; `MEIVA_HEARTBEAT_INTERVAL_SECONDS`
   (default 5 min) is each agent's durable minimum reminder cadence
 - the roster's `/healthz` identity probe (`services/supervision/roster/healthz.py`) — root's health monitor revives it on death
 """

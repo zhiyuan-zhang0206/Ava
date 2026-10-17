@@ -24,7 +24,7 @@ still not sufficiently tested for a claim stronger than that.
 ```
 Use goal mode to help me review a piece of code.
 
-First, load the goal skill: ava.help(ava.skills.ava_goal)
+First, load the goal skill: meiva.help(meiva.skills.meiva_goal)
 
 Then:
 1. Spawn a worker agent and have it implement a simple TODO list CLI (Python)
@@ -35,7 +35,7 @@ Then:
    - Does it have error handling?
    - Is the code structure clear?
 4. If it doesn't meet the standards, tell the worker what's missing
-5. Once it meets the standards, render the final code to HTML and display it with ava.ui.serve
+5. Once it meets the standards, render the final code to HTML and display it with meiva.ui.serve
 
 The worker needs at least 2-3 iterations to reach the quality standards.
 ```
@@ -43,7 +43,7 @@ The worker needs at least 2-3 iterations to reach the quality standards.
 Expected flow: spawn worker → launch watcher → worker implements a first cut →
 watcher wakes the supervisor → "missing error handling, no docstrings" → round 2 →
 "args parsing is fragile" → round 3 → quality bar met → final code presented via
-HTML served with `ava.ui.serve`.
+HTML served with `meiva.ui.serve`.
 
 
 ## Real runs (2026-08-13)
@@ -127,7 +127,7 @@ Root cause: **redis-py 8 defaults `socket_timeout` to 5s**, and the reference
 watcher built its client without overriding it — the long blocking read died the
 moment the event stream went quiet for a few seconds, killing the watcher. Had
 the worker idled after that, the supervisor would never have woken: a silent
-goal-mode stall. Fixed in all three reference watchers (ava-goal, ava-watcher,
-ava-fleet): explicit `socket_timeout=None`, and on any remaining stream failure
+goal-mode stall. Fixed in all three reference watchers (meiva-goal, meiva-watcher,
+meiva-fleet): explicit `socket_timeout=None`, and on any remaining stream failure
 the watcher falls back to polling the agents table instead of dying. The rest of
 run 3 ran under the patched watcher, which then fired correctly.

@@ -20,11 +20,11 @@ describe("Ops tab (Grafana link)", () => {
     wrap(<OpsPage />);
     const links = screen.getAllByRole("link");
     expect(links).toHaveLength(1);
-    const link = screen.getByRole("link", { name: "Open the Ava ops dashboard" });
+    const link = screen.getByRole("link", { name: "Open the Meiva ops dashboard" });
     expect(link.getAttribute("href")).toBe(
-      "http://localhost:8000/grafana/d/ava-ops-main?from=now-24h&to=now",
+      "http://localhost:8000/grafana/d/meiva-ops-main?from=now-24h&to=now",
     );
-    expect(link.getAttribute("href")).toContain("/grafana/d/ava-ops-main");
+    expect(link.getAttribute("href")).toContain("/grafana/d/meiva-ops-main");
     expect(link.getAttribute("target")).toBe("_blank");
     expect(link.getAttribute("rel")).toBe("noreferrer");
   });

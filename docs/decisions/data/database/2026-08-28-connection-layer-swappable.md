@@ -10,12 +10,12 @@ those must be a config change (URL + credentials + a data migration), not a
 code change.
 
 The data-dial side was already URL-first: every business process dials
-`AVA_DB_URL` / `AVA_REDIS_URL` as-is (`shared.db.connect` / `pool`,
+`MEIVA_DB_URL` / `MEIVA_REDIS_URL` as-is (`shared.db.connect` / `pool`,
 `shared/redis_client.py`), the runner data plane already lives off-box
 (tailnet PgBouncer 6433), the observability-station PG data source is
 decoupled, and the `pg_dump` restore path is drill-verified. What was missing
-is the **management plane**: bring-up (`ava start` → `ensure_cluster_instance`),
-teardown (`ava stop` / `ava cluster down`), health checks (`ava status`, the
+is the **management plane**: bring-up (`meiva start` → `ensure_cluster_instance`),
+teardown (`meiva stop` / `meiva cluster down`), health checks (`meiva status`, the
 watchdog's `redis-acl` / `pgbouncer` probes), role/ACL provisioning, credential
 rotation, and the converge-time URL rewrite all assume a *local* instance and
 would mis-manage (or try to repair) a foreign service when pointed at one.
@@ -29,7 +29,7 @@ existing self-dial loopback rewrite, is a foreign (non-loopback) host:
 
 - a local self-built instance keeps loopback URLs (a self-named host is
   rewritten to loopback by `_loopback_if_self`);
-- an off-box host on the private network (the `AVA_DATA_PLANE_HOST` birth
+- an off-box host on the private network (the `MEIVA_DATA_PLANE_HOST` birth
   knob, `ClusterRecord.data_plane_host`) names another machine;
 - a SaaS URL names the provider's host.
 
@@ -43,15 +43,15 @@ misfires on the pre-install or admin-socket paths.
 
 | Operation | Local (unchanged) | Remote |
 |---|---|---|
-| `ava start` data-plane step | `ensure_cluster_instance` (initdb / pg / redis / PgBouncer / ACL) | skip local bring-up; probe both URLs (auth-included connect / PING); unreachable → fail fast with the dial detail and the migration hint |
-| `ava stop` / `ava cluster down` | `stop_cluster_instance` tears down pg/redis/pooler | no-op: "remote-managed — nothing to stop locally" |
-| `ava status` data-plane section | `pg_isready` + pooled connect + admin redis PING + local pooler line | probe the URLs with their own credentials; no local pooler line; "remote-managed" marker |
+| `meiva start` data-plane step | `ensure_cluster_instance` (initdb / pg / redis / PgBouncer / ACL) | skip local bring-up; probe both URLs (auth-included connect / PING); unreachable → fail fast with the dial detail and the migration hint |
+| `meiva stop` / `meiva cluster down` | `stop_cluster_instance` tears down pg/redis/pooler | no-op: "remote-managed — nothing to stop locally" |
+| `meiva status` data-plane section | `pg_isready` + pooled connect + admin redis PING + local pooler line | probe the URLs with their own credentials; no local pooler line; "remote-managed" marker |
 | watchdog roster (gateway) | `redis-acl` + `pgbouncer` repairs | both skipped (no local ACL user / pooler to repair) |
 | credential split (`_data_plane_admin_secrets`) | journaled local transition | no-op (provider owns credentials) |
 | runner-grant refresh after migration | local `GRANT` refresh | skipped with a note (provider provisions roles) |
 | `scripts/data_plane_ops/rotate_data_plane_secrets.py` | local ALTER ROLE / ACL / pooler userlist | fail fast: rotate at the provider, update the URLs here |
-| `ava cluster ensure-db-role` | local role provisioning | fail fast: provisioned at the provider |
-| converge pooler step (`_ensure_pgbouncer_step`) | rewrites AVA_DB_URL port to the pooler listener | skipped: the URL's port is the provider's, never this cluster's |
+| `meiva cluster ensure-db-role` | local role provisioning | fail fast: provisioned at the provider |
+| converge pooler step (`_ensure_pgbouncer_step`) | rewrites MEIVA_DB_URL port to the pooler listener | skipped: the URL's port is the provider's, never this cluster's |
 
 Business code is untouched in every row: `shared.db.connect` / `pool` and the
 redis clients dial the URLs before and after the switch, so the only
@@ -60,7 +60,7 @@ migration (`pg_dump` / restore — drill-verified).
 
 ### Connection parameters into config (TLS / pool / ACL mapping)
 
-- **TLS (Postgres)**: `AVA_DB_SSLMODE` (default empty). Empty keeps the URL and
+- **TLS (Postgres)**: `MEIVA_DB_SSLMODE` (default empty). Empty keeps the URL and
   libpq in charge ('prefer' — today's behavior; a SaaS URL that already carries
   `sslmode=require` / `verify-full` is respected **as-is**: the URL is the
   switch, the field is a fallback default, never an override). Set
@@ -71,12 +71,12 @@ migration (`pg_dump` / restore — drill-verified).
   URL mode can never be downgraded.
 - **TLS (Redis)**: rides the URL — `rediss://` scheme + `ssl_ca_certs` etc.
   query params, as redis-py documents. Nothing to add.
-- **Pool sizing**: `AVA_DB_POOL_MIN_SIZE` / `AVA_DB_POOL_MAX_SIZE` (defaults
+- **Pool sizing**: `MEIVA_DB_POOL_MIN_SIZE` / `MEIVA_DB_POOL_MAX_SIZE` (defaults
   1 / 2 — the historical literals) become the defaults of
   `shared.db.pool()`; an explicit per-caller size always wins. A managed data
   plane with tight connection limits tunes its pool footprint from config.
 - **ACL mapping**: names-as-data, already in place — the URL userinfo *is* the
-  identity (owner role / `ava_runner` / Redis ACL user). Remote-managed simply
+  identity (owner role / `meiva_runner` / Redis ACL user). Remote-managed simply
   stops the local provisioning that used to mint those identities; the mapping
   itself never moves into code. The owner-password re-derivation
   (`_apply_data_plane_passwords`) is likewise exempted from FOREIGN URLs: a
@@ -88,9 +88,9 @@ migration (`pg_dump` / restore — drill-verified).
 
 ### Startup / health-check posture for an unreachable remote
 
-`ava start` fails fast with an actionable message naming the URL host and the
+`meiva start` fails fast with an actionable message naming the URL host and the
 dial detail (the gateway cannot serve without its data plane, and the boot
-policy retries exactly as it does for a dead local instance). `ava status`
+policy retries exactly as it does for a dead local instance). `meiva status`
 reports per-component `✓` / `✗` against the URLs and never touches local
 machinery. The watchdog stops repairing what it does not own. There is no
 silent "degraded" mode: either the URLs answer or the operator sees exactly
@@ -113,7 +113,7 @@ which one does not.
 
 ## Alternatives rejected
 
-- **A dedicated `AVA_DATA_PLANE_REMOTE` boolean**: rejected — the URL already
+- **A dedicated `MEIVA_DATA_PLANE_REMOTE` boolean**: rejected — the URL already
   carries the fact (a non-loopback dial host), and a separate flag could
   disagree with the URLs it describes (flag says remote, URL says loopback).
   Deriving the mode from the URLs keeps "the URL is the switch" literally true.

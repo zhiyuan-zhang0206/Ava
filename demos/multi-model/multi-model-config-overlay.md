@@ -5,20 +5,20 @@
 ## Prompt
 
 ```
-Your task: Use config_overlay to demonstrate Ava's multi-model switching capability.
+Your task: Use config_overlay to demonstrate Meiva's multi-model switching capability.
 
 **Steps**:
 
 1. Choose an interesting question that does not rely on time-sensitive information (for example: philosophical thinking, code design trade-offs, creative writing) as a common test question for the three models.
 
-2. Use `ava.agents.spawn()` to create 3 agents, each specifying a different `llm_model`:
+2. Use `meiva.agents.spawn()` to create 3 agents, each specifying a different `llm_model`:
    - `claude-sonnet-5`
    - `gpt-5.6-luna`
    - `deepseek-flash`
 
    Example:
    ```python
-   ava.agents.spawn(
+   meiva.agents.spawn(
        prompt=question_prompt,
        config_overlay={"llm_model": "claude-sonnet-5"},
        label="demo-claude"
@@ -31,7 +31,7 @@ Your task: Use config_overlay to demonstrate Ava's multi-model switching capabil
    - Style differences
    - Presence of hallucination or errors
 
-4. Render the comparison report to HTML and display it with `ava.ui.serve()`, including:
+4. Render the comparison report to HTML and display it with `meiva.ui.serve()`, including:
    - The original question
    - The full answers from the three models
    - Your comparative analysis

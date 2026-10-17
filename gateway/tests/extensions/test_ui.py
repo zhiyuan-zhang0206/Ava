@@ -1,13 +1,13 @@
-"""`ava.ui.show` / `.serve` / `.close` SDK entry point tests (R3 door ③).
+"""`meiva.ui.show` / `.serve` / `.close` SDK entry point tests (R3 door ③).
 
 show/close go through in-process FastAPI TestClient: SDK calls hit gateway
-endpoints directly, using a real ava_test DB to exercise the full wire
+endpoints directly, using a real meiva_test DB to exercise the full wire
 protocol. serve() declares the page (writes the agent_pages row + records
 serve_dir) and waits for the page_server daemon's server to answer on the
 port — in tests, a stub HTTP server stands in for the daemon's spawn.
 
-(`ava.ui.notify` is registered by the ava_fleet plugin; tests are in
-ava_builtins/plugins/ava_fleet/tests/test_ava_fleet_plugin.py.)
+(`meiva.ui.notify` is registered by the meiva_fleet plugin; tests are in
+meiva_builtins/plugins/meiva_fleet/tests/test_meiva_fleet_plugin.py.)
 """
 
 from __future__ import annotations
@@ -23,18 +23,18 @@ from typing import Any
 import psycopg
 import pytest
 
-import ava
-from ava import ui
-from ava.gateway_client import use_client
-from ava.sdk_surface import agent_identity
-from ava.tests.fixtures.pin_agent import pin_agent
-from ava.ui import InvalidPageName, PageClosed
+import meiva
 from base.agents.tests.units import spawn_agent
 from base.cluster.machine import MachineIdentity
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from base.config.service_read import ConfigAuthority
 from base.db.code_version_gate import ProcessDbGate
 from base.lm.catalog import ModelCatalog
+from meiva import ui
+from meiva.gateway_client import use_client
+from meiva.sdk_surface import agent_identity
+from meiva.tests.fixtures.pin_agent import pin_agent
+from meiva.ui import InvalidPageName, PageClosed
 from tests.fixtures.gateway_config import gateway_test_client
 
 _HOST = "127.0.0.1"  # loopback — the single-box posture the SDK registers (audit P1-4: only loopback / the agent's own machine are legal proxy targets)
@@ -54,10 +54,10 @@ def _sdk_via_inprocess_gateway(monkeypatch: pytest.MonkeyPatch, machine_identity
 def _use_page_host(
     monkeypatch: pytest.MonkeyPatch, *, local_machine: MachineIdentity, **overrides: Any
 ) -> None:
-    """`ava.ui` calls run against a page host with the given probes / ready timeout."""
+    """`meiva.ui` calls run against a page host with the given probes / ready timeout."""
 
-    def build() -> ava.ui.PageHost:
-        return ava.ui.PageHost(
+    def build() -> meiva.ui.PageHost:
+        return meiva.ui.PageHost(
             host=local_machine.host(),
             agent_id=agent_identity.require_agent_id(),
             **overrides,
@@ -158,7 +158,7 @@ class TestShow:
                 machine=machine_identity,
             )
         )
-        page = ava.ui.show("cleanup", 13580, title="Picker")
+        page = meiva.ui.show("cleanup", 13580, title="Picker")
         assert page.name == "cleanup"
         assert page.port == 13580
         assert page.title == "Picker"
@@ -190,8 +190,8 @@ class TestShow:
                 machine=machine_identity,
             )
         )
-        ava.ui.show("p1", 13581)
-        ava.ui.show("p2", 13581)
+        meiva.ui.show("p1", 13581)
+        meiva.ui.show("p2", 13581)
         db_conn.rollback()
         # Only p2 is open; p1 was auto-closed (single page per agent).
         assert _open_pages(db_conn, agent_identity.require_agent_id()) == [
@@ -216,7 +216,7 @@ class TestShow:
                 machine=machine_identity,
             )
         )
-        page = ava.ui.show("custom", 13579, title="Custom")
+        page = meiva.ui.show("custom", 13579, title="Custom")
         assert page.port == 13579
         assert (
             page.url
@@ -244,9 +244,9 @@ class TestShow:
             )
         )
         with pytest.raises(InvalidPageName):
-            ava.ui.show("bad/name", 13582)
+            meiva.ui.show("bad/name", 13582)
         with pytest.raises(InvalidPageName):
-            ava.ui.show("", 13582)
+            meiva.ui.show("", 13582)
 
     def test_show_requires_explicit_port(
         self,
@@ -267,9 +267,9 @@ class TestShow:
             )
         )
         with pytest.raises(TypeError, match="port"):
-            ava.ui.show("page")  # pyright: ignore[reportCallIssue]
+            meiva.ui.show("page")  # pyright: ignore[reportCallIssue]
         with pytest.raises(TypeError, match="port is required"):
-            ava.ui.show("page", None)  # pyright: ignore[reportArgumentType]
+            meiva.ui.show("page", None)  # pyright: ignore[reportArgumentType]
 
     def test_show_rejects_out_of_range_port(
         self,
@@ -289,9 +289,9 @@ class TestShow:
             )
         )
         with pytest.raises(ValueError, match="out of range"):
-            ava.ui.show("page", 80)
+            meiva.ui.show("page", 80)
         with pytest.raises(ValueError, match="out of range"):
-            ava.ui.show("page", 65536)
+            meiva.ui.show("page", 65536)
 
     def test_show_passes_integer_ttl_to_gateway(
         self,
@@ -322,8 +322,8 @@ class TestShow:
                 "url": "http://gateway/page",
             }
 
-        monkeypatch.setattr(ava.gateway_client, "register_page", _register)
-        ava.ui.show("timed", port=12000, ttl=12.9)
+        monkeypatch.setattr(meiva.gateway_client, "register_page", _register)
+        meiva.ui.show("timed", port=12000, ttl=12.9)
         assert captured["ttl_seconds"] == 12
 
     def test_show_without_ttl_omits_gateway_field(
@@ -355,8 +355,8 @@ class TestShow:
                 "url": "http://gateway/page",
             }
 
-        monkeypatch.setattr(ava.gateway_client, "register_page", _register)
-        ava.ui.show("plain", port=12000)
+        monkeypatch.setattr(meiva.gateway_client, "register_page", _register)
+        meiva.ui.show("plain", port=12000)
         assert "ttl_seconds" not in captured
 
 
@@ -380,7 +380,7 @@ def test_page_apis_reject_invalid_ttl(
             machine=machine_identity,
         )
     )
-    call = getattr(ava.ui, api)
+    call = getattr(meiva.ui, api)
     args = (str(tmp_path), "page", 13584)
     if api == "show":
         args = ("page", 13584)
@@ -406,8 +406,8 @@ class TestClose:
                 machine=machine_identity,
             )
         )
-        ava.ui.show("p", 13583)
-        ava.ui.close("p")
+        meiva.ui.show("p", 13583)
+        meiva.ui.close("p")
         db_conn.rollback()
         assert _open_pages(db_conn, agent_identity.require_agent_id()) == []
 
@@ -428,7 +428,7 @@ class TestClose:
             )
         )
         with pytest.raises(PageClosed):
-            ava.ui.close("never-registered")
+            meiva.ui.close("never-registered")
 
 
 class TestServe:
@@ -463,7 +463,7 @@ class TestServe:
         )
         (tmp_path / "index.html").write_text("<h1>served</h1>", encoding="utf-8")
         with _StubPageServer("127.0.0.1") as stub:
-            page = ava.ui.serve(str(tmp_path), "srv", port=stub.port, title="Served")
+            page = meiva.ui.serve(str(tmp_path), "srv", port=stub.port, title="Served")
         assert page.name == "srv"
         assert page.port == stub.port
         db_conn.rollback()
@@ -507,8 +507,8 @@ class TestServe:
                 "url": "http://gateway/page",
             }
 
-        monkeypatch.setattr(ava.gateway_client, "register_page", _register)
-        ava.ui.serve(str(tmp_path), "srv-ttl", port=12000, ttl=30)
+        monkeypatch.setattr(meiva.gateway_client, "register_page", _register)
+        meiva.ui.serve(str(tmp_path), "srv-ttl", port=12000, ttl=30)
         assert captured["ttl_seconds"] == 30
 
     def test_serve_waits_for_server_to_come_up(
@@ -532,7 +532,7 @@ class TestServe:
         )
         (tmp_path / "index.html").write_text("<h1>x</h1>", encoding="utf-8")
         with _StubPageServer("127.0.0.1") as stub:
-            page = ava.ui.serve(str(tmp_path), "late", port=stub.port)
+            page = meiva.ui.serve(str(tmp_path), "late", port=stub.port)
         assert page.port == stub.port
 
     def test_serve_times_out_without_daemon(
@@ -548,7 +548,7 @@ class TestServe:
     ) -> None:
         """A free port the daemon never binds -> serve() raises after the wait
         window (the page row stays registered; the daemon keeps retrying)."""
-        import ava.ui as ui_mod
+        import meiva.ui as ui_mod
 
         pin_agent(
             spawn_agent(
@@ -562,7 +562,7 @@ class TestServe:
         _use_page_host(monkeypatch, ready_timeout_s=0.5, local_machine=machine_identity)
         free = _free_port()
         with pytest.raises(ui_mod.PageError, match="did not come up"):
-            ava.ui.serve(str(tmp_path), "nod", port=free)
+            meiva.ui.serve(str(tmp_path), "nod", port=free)
         db_conn.rollback()
         # The declaration is durable even when the server is not up yet.
         assert _open_pages(db_conn, agent_identity.require_agent_id()) == [
@@ -589,9 +589,9 @@ class TestServe:
             )
         )
         with pytest.raises(TypeError, match="port"):
-            ava.ui.serve(str(tmp_path), "page")  # pyright: ignore[reportCallIssue]
+            meiva.ui.serve(str(tmp_path), "page")  # pyright: ignore[reportCallIssue]
         with pytest.raises(TypeError, match="port is required"):
-            ava.ui.serve(str(tmp_path), "page", None)  # pyright: ignore[reportArgumentType]
+            meiva.ui.serve(str(tmp_path), "page", None)  # pyright: ignore[reportArgumentType]
 
     def test_serve_rejects_port_held_by_foreign_process(
         self,
@@ -605,7 +605,7 @@ class TestServe:
     ) -> None:
         """A non-page listener on the port fails serve() before anything is
         registered — the daemon can never displace it."""
-        import ava.ui as ui_mod
+        import meiva.ui as ui_mod
 
         pin_agent(
             spawn_agent(
@@ -620,7 +620,7 @@ class TestServe:
             _SilentServer("127.0.0.1") as silent,
             pytest.raises(ui_mod.PageError, match="already in use"),
         ):
-            ava.ui.serve(str(tmp_path), "blocked", port=silent.port)
+            meiva.ui.serve(str(tmp_path), "blocked", port=silent.port)
         db_conn.rollback()
         assert _open_pages(db_conn, agent_identity.require_agent_id()) == []
 
@@ -636,7 +636,7 @@ class TestServe:
     ) -> None:
         """An HTTP server that is not a page server (no `ok:` /health) is the
         same foreign occupant — refused, not silently registered."""
-        import ava.ui as ui_mod
+        import meiva.ui as ui_mod
 
         pin_agent(
             spawn_agent(
@@ -651,7 +651,7 @@ class TestServe:
             _StubPageServer("127.0.0.1", health=None) as foreign,
             pytest.raises(ui_mod.PageError, match="already in use"),
         ):
-            ava.ui.serve(str(tmp_path), "blocked", port=foreign.port)
+            meiva.ui.serve(str(tmp_path), "blocked", port=foreign.port)
         db_conn.rollback()
         assert _open_pages(db_conn, agent_identity.require_agent_id()) == []
 
@@ -667,7 +667,7 @@ class TestServe:
     ) -> None:
         """Registry conflict: another agent's live page owns the port — the
         error names the occupying page, and nothing is registered."""
-        import ava.ui as ui_mod
+        import meiva.ui as ui_mod
 
         owner = spawn_agent(
             catalog=model_catalog,
@@ -676,7 +676,7 @@ class TestServe:
             machine=machine_identity,
         )
         pin_agent(owner)
-        ava.ui.show("held", 13586)
+        meiva.ui.show("held", 13586)
         pin_agent(
             spawn_agent(
                 catalog=model_catalog,
@@ -687,7 +687,7 @@ class TestServe:
         )
         (tmp_path / "index.html").write_text("<h1>x</h1>", encoding="utf-8")
         with pytest.raises(ui_mod.PageError, match="already used by page 'held' of agent"):
-            ava.ui.serve(str(tmp_path), "clash", port=13586)
+            meiva.ui.serve(str(tmp_path), "clash", port=13586)
         db_conn.rollback()
         assert [r[0] for r in _open_pages(db_conn, owner)] == ["held"]
         assert _open_pages(db_conn, agent_identity.require_agent_id()) == []
@@ -704,7 +704,7 @@ class TestServe:
     ) -> None:
         """A refused serve() (port taken by another agent) must not close the
         agent's own current page."""
-        import ava.ui as ui_mod
+        import meiva.ui as ui_mod
 
         owner = spawn_agent(
             catalog=model_catalog,
@@ -719,13 +719,13 @@ class TestServe:
             machine=machine_identity,
         )
         pin_agent(owner)
-        ava.ui.show("mine", 13587)
+        meiva.ui.show("mine", 13587)
         pin_agent(other)
-        ava.ui.show("theirs", 13588)
+        meiva.ui.show("theirs", 13588)
         pin_agent(owner)
         (tmp_path / "index.html").write_text("<h1>x</h1>", encoding="utf-8")
         with pytest.raises(ui_mod.PageError, match="already used by page 'theirs'"):
-            ava.ui.serve(str(tmp_path), "new", port=13588)
+            meiva.ui.serve(str(tmp_path), "new", port=13588)
         db_conn.rollback()
         assert [r[0] for r in _open_pages(db_conn, owner)] == ["mine"]
         assert [r[0] for r in _open_pages(db_conn, other)] == ["theirs"]
@@ -744,7 +744,7 @@ class TestServe:
         """The agent's own page on the port is not a foreign occupant: even
         with its (wedged) server still bound, serve() replaces it — the
         registry check owns that call, and the OS probe must not block it."""
-        import ava.ui as ui_mod
+        import meiva.ui as ui_mod
 
         pin_agent(
             spawn_agent(
@@ -757,9 +757,9 @@ class TestServe:
         (tmp_path / "index.html").write_text("<h1>x</h1>", encoding="utf-8")
         _use_page_host(monkeypatch, ready_timeout_s=0.5, local_machine=machine_identity)
         with _SilentServer("127.0.0.1") as silent:
-            ava.ui.show("wedged", silent.port)
+            meiva.ui.show("wedged", silent.port)
             with pytest.raises(ui_mod.PageError, match="did not come up"):
-                ava.ui.serve(str(tmp_path), "wedged2", port=silent.port)
+                meiva.ui.serve(str(tmp_path), "wedged2", port=silent.port)
         db_conn.rollback()
         # The replacement row was registered; only the (stub) server never came up.
         assert [r[0] for r in _open_pages(db_conn, agent_identity.require_agent_id())] == [
@@ -770,7 +770,7 @@ class TestServe:
         """The serve() wait must exceed the slowest observed daemon pass
         (~30s, 2026-08-28) — the fast path makes the normal path ~2s, but the
         window is the fallback for a slow pass / cold restart."""
-        import ava.ui as ui_mod
+        import meiva.ui as ui_mod
 
         assert ui_mod.PageHost(host="h", agent_id=1).ready_timeout_s >= 60.0
 
@@ -794,7 +794,7 @@ class TestServe:
         )
         (tmp_path / "index.html").write_text("<h1>x</h1>", encoding="utf-8")
         with _StubPageServer("127.0.0.1") as stub:
-            ava.ui.serve(str(tmp_path), "once", port=stub.port)
-            ava.ui.serve(str(tmp_path), "twice", port=stub.port)
+            meiva.ui.serve(str(tmp_path), "once", port=stub.port)
+            meiva.ui.serve(str(tmp_path), "twice", port=stub.port)
         db_conn.rollback()
         assert [r[0] for r in _open_pages(db_conn, agent_identity.require_agent_id())] == ["twice"]

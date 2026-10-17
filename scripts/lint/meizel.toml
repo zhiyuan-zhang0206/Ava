@@ -1,11 +1,11 @@
-exports = ["async_no_sync_blocking.py", "ava_root_scope.py", "diagnostics", "fixture_scope.py", "no_os_environ.py", "plugins", "pool_keepalives.py"]
+exports = ["async_no_sync_blocking.py", "meiva_root_scope.py", "diagnostics", "fixture_scope.py", "no_os_environ.py", "plugins", "pool_keepalives.py"]
 
 [uses]
 "docstring_budget_report.py" = ["agent_docstrings.py"]
-"tests" = ["agent_docstrings.py", "agents_md_size.py", "async_no_sync_blocking.py", "ava_root_scope.py", "code_structure.py", "diagnostics", "fixture_scope.py", "no_os_environ.py", "plugins", "pool_keepalives.py", "termination_source.py", "turn_scoped_config.py"]
+"tests" = ["agent_docstrings.py", "agents_md_size.py", "async_no_sync_blocking.py", "meiva_root_scope.py", "code_structure.py", "diagnostics", "fixture_scope.py", "no_os_environ.py", "plugins", "pool_keepalives.py", "termination_source.py", "turn_scoped_config.py"]
 
 [debt.private-name]
 "tests/runtime_rules/test_lint_async_no_sync_blocking.py -> async_no_sync_blocking.py#_ROOT" = 1
-"tests/runtime_rules/test_lint_ava_root_scope.py -> ava_root_scope.py#_REPO_ROOT" = 2
+"tests/runtime_rules/test_lint_meiva_root_scope.py -> meiva_root_scope.py#_REPO_ROOT" = 2
 "tests/test_lint_fixture_scope.py -> fixture_scope.py#_REPO_ROOT" = 4
 "tests/test_lint_only_mode.py -> diagnostics/zombie_pyright_ignores.py#_REPO_ROOT" = 3

@@ -561,7 +561,7 @@ async def test_kill_terminates_only_the_owners_real_shell_sessions(
     from ops import lifecycle
     from ops.rpc_schemas.terminate import ShellSessionsKill
 
-    monkeypatch.setenv("AVA_HOME", str(tmp_path))
+    monkeypatch.setenv("MEIVA_HOME", str(tmp_path))
     monkeypatch.setenv("HOME", str(tmp_path))
 
     job = tmp_path / "notice_on_exit.py"
@@ -583,14 +583,14 @@ async def test_kill_terminates_only_the_owners_real_shell_sessions(
         ).fetchone()
         db_conn.commit()
         assert row == (3,)
-        assert backend.new_session(replacement, "", tmp_path, env={"AVA_HOME": str(tmp_path)})
+        assert backend.new_session(replacement, "", tmp_path, env={"MEIVA_HOME": str(tmp_path)})
         shells[replacement] = pty_reaper.track_session(replacement).pid
 
     monkeypatch.setattr(lifecycle, "cancel_hosted_turn_best_effort", _allocate_after_acceptance)
     watcher_cmd = shlex.join([sys.executable, "-u", str(job), str(marker)])
     shells: dict[str, int] = {}
     for name, cmd in ((shell, ""), (watcher, watcher_cmd), (page, "sleep 300"), (foreign, "")):
-        assert backend.new_session(name, cmd, tmp_path, env={"AVA_HOME": str(tmp_path)})
+        assert backend.new_session(name, cmd, tmp_path, env={"MEIVA_HOME": str(tmp_path)})
         shells[name] = pty_reaper.track_session(name).pid
     job_pid = _wait_child(shells[watcher])
     pty_reaper.track(psutil.Process(job_pid))

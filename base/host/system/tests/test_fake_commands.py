@@ -98,14 +98,14 @@ def test_a_predicate_selects_commands_whose_program_is_not_known_up_front() -> N
     commands = FakeCommands()
     commands.on(lambda argv: "-verify-config" in argv, Reply(stdout="verified"), repeat=True)
     done = commands(
-        ["/home/ava/lgtm/loki", "-config.file=x", "-verify-config"],
+        ["/home/meiva/lgtm/loki", "-config.file=x", "-verify-config"],
         timeout=30,
         capture_output=True,
         text=True,
     )
     assert done.stdout == "verified"
     with pytest.raises(AssertionError, match="unscripted"):
-        commands(["/home/ava/lgtm/loki", "-version"], timeout=30)
+        commands(["/home/meiva/lgtm/loki", "-version"], timeout=30)
 
 
 def test_a_fake_host_finds_only_the_programs_it_was_given_and_runs_nothing_unscripted() -> None:

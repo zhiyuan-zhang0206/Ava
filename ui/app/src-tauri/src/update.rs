@@ -121,7 +121,7 @@ mod tests {
     fn valid() -> String {
         manifest(
             4003,
-            "https://github.com/zhiyuan-zhang0206/Ava/releases/download/android-latest/ava-app-1.2.3.apk",
+            "https://github.com/zhiyuan-zhang0206/Meiva/releases/download/android-latest/meiva-app-1.2.3.apk",
             DIGEST,
         )
     }

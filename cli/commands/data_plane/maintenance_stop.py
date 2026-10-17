@@ -38,7 +38,7 @@ from base.cluster.dataplane import pooler as pooler_files
 from base.host.db_authority.delivery import read_pooler_admin
 from base.log import logger
 from base.native_process.ownership import OwnedProcess, capture_tree
-from base.paths import ava_home
+from base.paths import meiva_home
 from base.telemetry import EventPipeline
 from cli.commands.data_plane import cluster_instance as instance
 from cli.commands.data_plane import pgbouncer as pooler
@@ -113,7 +113,7 @@ def report_pooler_clients(identity: OwnedProcess, report: list[str] | None) -> N
     """
     try:
         port = OwnedPooler.from_config(identity, pooler_files.ini_path()).port
-        found = pooler_files.clients(port, read_pooler_admin(ava_home()).password)
+        found = pooler_files.clients(port, read_pooler_admin(meiva_home()).password)
     except Exception as exc:
         line = f"pooler clients could not be listed before the pooler stop: {exc!r}"
     else:

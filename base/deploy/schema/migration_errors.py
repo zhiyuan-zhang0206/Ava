@@ -7,7 +7,7 @@ class MigrationError(Exception):
 
 
 class SchemaVersionMismatch(MigrationError):  # noqa: N818 — "state description" naming, same as AgentNotFound
-    """DB is missing migrations the code carries — run `ava start`, which applies
+    """DB is missing migrations the code carries — run `meiva start`, which applies
     pending migrations, to catch up."""
 
 
@@ -50,10 +50,10 @@ class MigrationAuthorityMismatch(MigrationError):  # noqa: N818
     (`CodeBehindSchema`) and rejects every agent boot — the 2026-07-31 wedge.
 
     Two paths reach here, both real:
-    - an **agent-runner**, whose `ava start` applies migrations against the
+    - an **agent-runner**, whose `meiva start` applies migrations against the
       central DB it shares with the gateway; its checkout races ahead whenever
       it self-heals past the cluster pin.
-    - a **dev worktree** whose process inherited `AVA_HOME=~/.ava` (every agent
+    - a **dev worktree** whose process inherited `MEIVA_HOME=~/.meiva` (every agent
       prod launches does), pointing its DB URL at prod while
       `MIGRATIONS_DIR` still resolves to the worktree's own files.
     """

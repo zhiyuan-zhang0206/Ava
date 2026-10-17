@@ -31,7 +31,7 @@ export interface ControlSectionDef {
 }
 
 // Render + nav order for Control (the write/manage surface). Guide leads —
-// "ask Ava to run the cluster" — then the config/policy surfaces, then the
+// "ask Meiva to run the cluster" — then the config/policy surfaces, then the
 // per-host extension inventories (Plugins / MCP / Skills) and Schedules.
 // Status + Ops are NOT here; they live on Insights (INSIGHTS_SECTIONS).
 export const CONTROL_SECTIONS: ControlSectionDef[] = [

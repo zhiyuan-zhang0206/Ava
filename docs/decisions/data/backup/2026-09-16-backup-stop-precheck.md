@@ -6,7 +6,7 @@ scheduler, the 300-second stop window expired against the still-running job, and
 the rollout aborted with the host half-stopped. That night's dispatch was
 released only by an operator gate that watched the publish finish.
 
-`ava cluster update`'s gateway leg now replays that gate immediately before its
+`meiva cluster update`'s gateway leg now replays that gate immediately before its
 stop. Two determinations: the scheduler's own `/healthz` `progress` field
 (`running <n>s` covers the dump, its encryption, its off-site publish and the
 weekly restore drill — none of which a process scan can see), and a live
@@ -14,7 +14,7 @@ stand-alone `services.backup --publish-offsite` process publishing this unit's
 managed dump. When either is in flight the leg refuses before signalling
 anything, returns `RESTART_DECLINED_EXIT_CODE` (nothing was stopped; the host
 keeps serving), and the orchestration's compensating resume restores the paused
-agent-runners. `AVA_UPDATE_BACKUP_PRECHECK=false` dispatches anyway.
+agent-runners. `MEIVA_UPDATE_BACKUP_PRECHECK=false` dispatches anyway.
 
 A scheduler that does not answer is reported but not treated as busy — a
 disabled or unhealthy daemon must not brick updates. The stop-side change

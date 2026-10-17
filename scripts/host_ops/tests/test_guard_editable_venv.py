@@ -27,7 +27,7 @@ def _run(checkout: Path, *, virtual_env: Path | None = None) -> subprocess.Compl
 
 
 def _write_pth(checkout: Path, target: Path) -> Path:
-    path = checkout / ".venv" / "lib" / "python3.12" / "site-packages" / "_editable_impl_ava.pth"
+    path = checkout / ".venv" / "lib" / "python3.12" / "site-packages" / "_editable_impl_meiva.pth"
     path.parent.mkdir(parents=True)
     path.write_text(str(target))
     return path
@@ -92,4 +92,4 @@ def test_checkout_editable_pointer_to_another_source_is_refused(tmp_path: Path) 
 
     assert result.returncode == 1
     assert str(external) in result.stderr
-    assert "_editable_impl_ava.pth" in result.stderr
+    assert "_editable_impl_meiva.pth" in result.stderr

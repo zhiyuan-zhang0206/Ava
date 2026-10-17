@@ -37,16 +37,18 @@ def _confirm_destroy(home: Path, *, roles: list[str], drop_db: bool) -> bool:
     """
     if not interactive():
         print(
-            "✗ ava cluster destroy: refusing without an interactive terminal "
+            "✗ meiva cluster destroy: refusing without an interactive terminal "
             "(over ssh, use `ssh -t`); there is no flag that skips the confirmation",
             file=sys.stderr,
         )
         return False
     role_text = ", ".join(roles) if roles else "no roles recorded"
-    print(f"ava cluster destroy will decommission the cluster at {home} ({role_text}):")
+    print(f"meiva cluster destroy will decommission the cluster at {home} ({role_text}):")
     print("  - stop its services and its own Postgres and Redis")
     print("  - retire this host's OS jobs (launchd, crontab, boot unit) and the permissions helper")
-    print("  - mark the home detached: `ava start` refuses it until destroy-intent.json is deleted")
+    print(
+        "  - mark the home detached: `meiva start` refuses it until destroy-intent.json is deleted"
+    )
     if "gateway" in roles:
         print("  - this host serves the gateway: every agent-runner loses its control plane")
     if drop_db:
@@ -66,7 +68,7 @@ def _confirm_destroy(home: Path, *, roles: list[str], drop_db: bool) -> bool:
 def stop_cluster() -> int:
     """Stop this cluster's services and its own pg/redis (does not drop data).
 
-    The child is `ava stop`, run from this checkout with the same home. No
+    The child is `meiva stop`, run from this checkout with the same home. No
     `--keep-infra`: `--drop-db` then removes the data directories of a genuinely
     stopped instance, never a live one. `-y` because the child has no terminal to
     confirm on (destroy confirmed already); a plain stop takes the headed
@@ -79,7 +81,7 @@ def cmd_cluster_destroy(*, drop_db: bool = False, host: Host) -> int:
     """Detach the host's cluster: stop it, retire its OS jobs and helper, mark the
     home detached, optionally remove its data dirs.
 
-    Acts on this process's home (`AVA_HOME`, else `~/.ava`), the default
+    Acts on this process's home (`MEIVA_HOME`, else `~/.meiva`), the default
     production home included, after `_confirm_destroy`. Returns 0 on success, 1
     when the home holds no start intent, the confirmation is not given, or a step
     fails.
@@ -91,13 +93,13 @@ def cmd_cluster_destroy(*, drop_db: bool = False, host: Host) -> int:
     again (`cli.start_identity.prepare_identity` refuses it); deleting that file by
     hand is the only way back.
     """
-    from base.paths import ava_home
+    from base.paths import meiva_home
     from cli.start_identity import read_intent
 
-    home = ava_home().resolve()
+    home = meiva_home().resolve()
     intent = read_intent(home)
     if intent is None:
-        print(f"✗ ava cluster destroy: no start intent at '{home}'", file=sys.stderr)
+        print(f"✗ meiva cluster destroy: no start intent at '{home}'", file=sys.stderr)
         return 1
     if not _confirm_destroy(home, roles=list(intent["roles"]), drop_db=drop_db):
         return 1

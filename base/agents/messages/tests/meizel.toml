@@ -1,7 +1,7 @@
 [debt.env-patch]
-"test_external_caller.py#monkeypatch.delenv os.environ.AVA_CALLER_IDENTITY" = 1
-"test_external_caller.py#monkeypatch.setenv os.environ.AVA_AGENT_ID" = 1
-"test_external_caller.py#monkeypatch.setenv os.environ.AVA_CALLER_IDENTITY" = 2
+"test_external_caller.py#monkeypatch.delenv os.environ.MEIVA_CALLER_IDENTITY" = 1
+"test_external_caller.py#monkeypatch.setenv os.environ.MEIVA_AGENT_ID" = 1
+"test_external_caller.py#monkeypatch.setenv os.environ.MEIVA_CALLER_IDENTITY" = 2
 
 [debt.first-party-patch]
 "test_envelope.py#monkeypatch.setattr base.clock.Clock.now_timestamp" = 1

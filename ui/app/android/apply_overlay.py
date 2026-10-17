@@ -8,7 +8,7 @@ upgrade a merge. So the release workflow regenerates it and this script layers
 the four things the app needs on top:
 
   1. the Kotlin foreground service, Keystore, and cookie plugins (`java/`);
-  2. ProGuard rules that preserve the JNI/reflection surface (`proguard-ava.pro`);
+  2. ProGuard rules that preserve the JNI/reflection surface (`proguard-meiva.pro`);
   3. the network security config (`network_security_config.xml`);
   4. the manifest edits that make (1) and (3) take effect — permissions, the
      `<service>` declaration, and the `android:networkSecurityConfig` attribute.
@@ -35,7 +35,7 @@ ET.register_namespace("android", ANDROID_NS)
 
 #: Java package the app is generated into — derived from `identifier` in
 #: tauri.conf.json, and hard-coded in the Kotlin sources' `package` line.
-PACKAGE = "com.ava.app"
+PACKAGE = "com.meiva.app"
 
 #: Permissions the app adds on top of the template's INTERNET.
 #:
@@ -52,12 +52,12 @@ PERMISSIONS = (
 )
 
 #: The foreground service, declared relative to the app package.
-SERVICE_NAME = ".AvaBackgroundService"
+SERVICE_NAME = ".MeivaBackgroundService"
 SERVICE_TYPE = "specialUse"
 SPECIAL_USE_PROPERTY = "android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
-SPECIAL_USE_DESCRIPTION = "Persistent user-enabled Ava agent event connection"
+SPECIAL_USE_DESCRIPTION = "Persistent user-enabled Meiva agent event connection"
 
-_GRADLE_SIGNING_MARKER = "// Ava release signing overlay."
+_GRADLE_SIGNING_MARKER = "// Meiva release signing overlay."
 
 
 def _android(attr: str) -> str:
@@ -193,7 +193,7 @@ def apply(overlay_dir: Path, gen_dir: Path) -> None:
     package_dir.mkdir(parents=True, exist_ok=True)
     for source in sorted((overlay_dir / "java").glob("*.kt")):
         shutil.copy2(source, package_dir / source.name)
-    shutil.copy2(overlay_dir / "proguard-ava.pro", app_dir / "proguard-ava.pro")
+    shutil.copy2(overlay_dir / "proguard-meiva.pro", app_dir / "proguard-meiva.pro")
 
     xml_dir = main / "res" / "xml"
     xml_dir.mkdir(parents=True, exist_ok=True)

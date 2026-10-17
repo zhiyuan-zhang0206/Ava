@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # -*- shell-script -*-
-# Worktree teardown and listing for the ~/Ava repo. Creating a worktree is
+# Worktree teardown and listing for the ~/Meiva repo. Creating a worktree is
 # scripts/setup-worktree.sh <task>: the one entry point that also bootstraps it.
 # Usage:
 #   scripts/worktree.sh clean  <task-name> [--force] # remove worktree + delete branch
@@ -29,10 +29,10 @@ cmd_clean() {
         die "unknown option: $force (usage: worktree.sh clean <task-name> [--force])"
     fi
 
-    # The branch setup-worktree.sh names after the task: ava-<task>, or <task>
-    # itself when it already starts with ava-. A custom --branch is left alone.
-    local branch="ava-${task}"
-    if [[ "$task" == ava-* ]]; then
+    # The branch setup-worktree.sh names after the task: meiva-<task>, or <task>
+    # itself when it already starts with meiva-. A custom --branch is left alone.
+    local branch="meiva-${task}"
+    if [[ "$task" == meiva-* ]]; then
         branch="$task"
     fi
     local wt_path="$WORKTREE_ROOT/$task"
@@ -144,7 +144,7 @@ usage() {
 Usage: worktree.sh <command> [args]
 
 Commands:
-  clean  <task-name> [--force]  Remove worktree and delete its branch (ava-<task>, or <task> when it starts with ava-)
+  clean  <task-name> [--force]  Remove worktree and delete its branch (meiva-<task>, or <task> when it starts with meiva-)
   list                          List all worktrees under .worktrees/
 
 To create a worktree, run: bash scripts/setup-worktree.sh <task-name>

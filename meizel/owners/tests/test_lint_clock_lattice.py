@@ -95,7 +95,7 @@ def test_exempt_clock_is_allowed(scan_tmp) -> None:
 def test_independent_clock_without_lattice_vocabulary_is_allowed(scan_tmp) -> None:
     errs = _errors(
         scan_tmp,
-        "ava/mcps/_oauth.py",
+        "meiva/mcps/_oauth.py",
         """
         OAUTH_FLOW_TIMEOUT_S = 600.0
         """,
@@ -110,7 +110,7 @@ def test_settings_field_in_class_body_is_not_scanned(scan_tmp) -> None:
         """
         class GatewaySettings(EnvSettings):
             launch_confirm_timeout_seconds: float = Field(
-                default=45.0, alias="AVA_LAUNCH_CONFIRM_TIMEOUT_SECONDS"
+                default=45.0, alias="MEIVA_LAUNCH_CONFIRM_TIMEOUT_SECONDS"
             )
         """,
     )

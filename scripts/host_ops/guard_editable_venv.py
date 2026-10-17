@@ -15,8 +15,8 @@ from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import cast
 
-_EDITABLE_PTH_NAME = "_editable_impl_ava.pth"
-_EDITABLE_DIST_INFO_GLOB = "ava-*.dist-info/direct_url.json"
+_EDITABLE_PTH_NAME = "_editable_impl_meiva.pth"
+_EDITABLE_DIST_INFO_GLOB = "meiva-*.dist-info/direct_url.json"
 _RECORD_PATTERNS = (
     f"lib/python*/site-packages/{_EDITABLE_PTH_NAME}",
     f"lib64/python*/site-packages/{_EDITABLE_PTH_NAME}",

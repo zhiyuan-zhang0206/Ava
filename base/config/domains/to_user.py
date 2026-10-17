@@ -1,4 +1,4 @@
-# ava:ref base/config/docs/to-user-limits.ava.okf.md#to-user-read-limits
+# meiva:ref base/config/docs/to-user-limits.meiva.okf.md#to-user-read-limits
 from __future__ import annotations
 
 from typing import Any
@@ -19,7 +19,7 @@ class ToUserSettings(EnvSettings):
     max_document_bytes: int = Field(
         default=1024 * 1024,
         gt=0,
-        alias="AVA_TO_USER_MAX_DOCUMENT_BYTES",
+        alias="MEIVA_TO_USER_MAX_DOCUMENT_BYTES",
         description=(
             "Largest Markdown panel document the reader accepts, in bytes. A guard "
             "against reading the wrong file as a panel document, not a writing "
@@ -34,7 +34,7 @@ class ToUserSettings(EnvSettings):
     max_references: int = Field(
         default=1024,
         gt=0,
-        alias="AVA_TO_USER_MAX_REFERENCES",
+        alias="MEIVA_TO_USER_MAX_REFERENCES",
         description=(
             "Most local references one panel document may carry. Each reference "
             "costs one stat/version probe while the document is read; the bound "
@@ -47,7 +47,7 @@ class ToUserSettings(EnvSettings):
     max_chain_depth: int = Field(
         default=16,
         gt=0,
-        alias="AVA_TO_USER_MAX_CHAIN_DEPTH",
+        alias="MEIVA_TO_USER_MAX_CHAIN_DEPTH",
         description=(
             "Longest reference chain a resource read may follow, across nested "
             "Markdown documents. Real report chains nest two or three documents; "
@@ -60,7 +60,7 @@ class ToUserSettings(EnvSettings):
     max_resource_bytes: int = Field(
         default=64 * 1024 * 1024,
         gt=0,
-        alias="AVA_TO_USER_MAX_RESOURCE_BYTES",
+        alias="MEIVA_TO_USER_MAX_RESOURCE_BYTES",
         description=(
             "Largest single referenced file served through the authenticated "
             "resource endpoint, in bytes. Both ends enforce it: the reading "

@@ -3,6 +3,6 @@
 "tests.path_scoped.cli_tests" = [
     "test_config_cmd.py",
 ]
-"ava.tests.fixtures.sdk" = [
+"meiva.tests.fixtures.sdk" = [
     "test_schedules_verify_foreign_checkout.py"
 ]

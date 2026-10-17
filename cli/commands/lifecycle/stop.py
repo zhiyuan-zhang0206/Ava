@@ -35,7 +35,7 @@ from cli.start_runtime import StartRuntime
 # restart / backend update preserves it by default (keep_browser=True):
 # bouncing it pops a window, risks a session-restore prompt, and re-attaches CDP
 # for no gain — the login state is the expensive part. Only a full teardown
-# (`ava stop`, `ava cluster destroy`) takes it down.
+# (`meiva stop`, `meiva cluster destroy`) takes it down.
 _BROWSER_SESSION = "browser"
 
 
@@ -52,7 +52,7 @@ def _stop_data_plane(
     the fleet update / internal-restart path) leaves the instance running so the
     following migrate/start still has DB; without this the migrate step would hit
     connect-refused now that every cluster (including `main`) owns its instance.
-    Otherwise (a full `ava stop`) the private instance is torn down."""
+    Otherwise (a full `meiva stop`) the private instance is torn down."""
     if runner_only:
         print("\n→ stop pg/redis: skipped (agent-runner uses the central node)")
     elif skip_infra:
@@ -74,7 +74,7 @@ def reap_cluster_chrome() -> None:
 
     Called only on an explicit force teardown with `keep_browser=False`.
     Normal stop waits for Chrome to exit without escalating signals. After a `SingletonLock` handoff Chrome is no longer a
-    descendant of the `ava-browser` session, so killing that session leaves it
+    descendant of the `meiva-browser` session, so killing that session leaves it
     running on the cluster's CDP port and the next launch's port guard refuses;
     `services/desktop/browser/orphan.py` names it by the cluster's own `--user-data-dir`
     and argues why that can never select a Chrome that is not ours.
@@ -323,13 +323,13 @@ def cmd_stop(
 def release_self_heal_pause(*, database_factory: DatabaseFactory, machine: MachineIdentity) -> None:
     """After a restart that failed before any service stopped, let go of what it took.
 
-    A restart that declines or fails never reaches `ava start`/`ava restart`'s
+    A restart that declines or fails never reaches `meiva start`/`meiva restart`'s
     unpause, so nothing else would release its hold or a paused posture and the
-    host would sit gated until an operator ran `ava start`. The hold this
+    host would sit gated until an operator ran `meiva start`. The hold this
     process's own stop took in its preparing, draining or drained phase is
     released here (nothing was stopped; no start is run and nothing is
     retried). A hold that has entered its stop window keeps gating agents until
-    `ava start` passes readiness, and a hold taken by anyone else is theirs. A
+    `meiva start` passes readiness, and a hold taken by anyone else is theirs. A
     posture read failure leaves the host paused — wrongly unpausing is the
     worse mistake.
     """
@@ -343,7 +343,7 @@ def release_self_heal_pause(*, database_factory: DatabaseFactory, machine: Machi
         and held.maintenance is not None
         and held.maintenance.phase in (MaintenancePhase.STOPPING, MaintenancePhase.STOPPED)
     ):
-        print("  · services partially stopped; holding agents until ava start passes readiness")
+        print("  · services partially stopped; holding agents until meiva start passes readiness")
         return
     if held is not None and owns_stop_hold(held.holder):
         _release_own_hold(database_factory=database_factory, machine=machine)
@@ -359,7 +359,7 @@ def release_self_heal_pause(*, database_factory: DatabaseFactory, machine: Machi
         )
         return
     if state is None or state.posture != "paused":
-        return  # nothing paused this host; an operator's `ava restart` changes nothing
+        return  # nothing paused this host; an operator's `meiva restart` changes nothing
     from ops.cluster_status.pause import unpause_local_cluster
 
     unpause_local_cluster(database_factory(), EventBus.from_settings(), local_machine=machine)
@@ -375,7 +375,7 @@ def _release_own_hold(*, database_factory: DatabaseFactory, machine: MachineIden
     except Exception as exc:
         print(
             f"  · could not release the maintenance hold this restart took ({exc}); "
-            "run `ava start` to release it",
+            "run `meiva start` to release it",
             file=sys.stderr,
         )
         return
@@ -433,7 +433,7 @@ def _cmd_restart_body(
             f"  ✗ refusing restart: this process runs inside an agent execute_code "
             f"exec domain ({exec_domain}) — its process group is SIGKILLed when the "
             "call's turn ends, this restart with it — the host stranded mid-restart. Run "
-            "it from a shell no ava session hosts (e.g. a plain ssh/login shell).",
+            "it from a shell no meiva session hosts (e.g. a plain ssh/login shell).",
             file=sys.stderr,
         )
         release_self_heal_pause(
@@ -444,13 +444,13 @@ def _cmd_restart_body(
     # Same refusal as `cmd_update`'s in-process legs: the stop below kills every
     # service session's tree, so a restart hosted inside one of them severs
     # itself mid stop→start and leaves the host down. The detached orchestration
-    # sessions (the updater ladder's own `ava restart`) are exempt.
+    # sessions (the updater ladder's own `meiva restart`) are exempt.
     hosting = hosting_supervised_session()
     if hosting is not None:
         print(
             f"  ✗ refusing restart: this process runs inside supervised session "
             f"{hosting!r}, which the stop leg kills — tree included, this restart with "
-            "it, leaving the host stopped. Run it from a shell no ava session hosts "
+            "it, leaving the host stopped. Run it from a shell no meiva session hosts "
             "(e.g. a plain ssh/login shell) — host still serving",
             file=sys.stderr,
         )
@@ -460,7 +460,7 @@ def _cmd_restart_body(
         return RESTART_DECLINED_EXIT_CODE
 
     repo = runtime.code_root
-    print(f"[ava restart] cwd = {repo}")
+    print(f"[meiva restart] cwd = {repo}")
     from base.deploy.lifecycle import status_journal
     from base.deploy.progress_timeout import SERVICE_READY_TIMEOUT_S
     from ops.agent_pause import PAUSE_TIMEOUT_SECONDS
@@ -471,7 +471,7 @@ def _cmd_restart_body(
     # to that caller instead of clobbering its diagnosis.
     owns_journal = status_journal.begin("restart")
     print(
-        f"[ava restart] budget contract: stop up to {PAUSE_TIMEOUT_SECONDS:.0f}s + "
+        f"[meiva restart] budget contract: stop up to {PAUSE_TIMEOUT_SECONDS:.0f}s + "
         f"start readiness up to {SERVICE_READY_TIMEOUT_S:.0f}s + bounded preflight probes; "
         "an outer caller's timeout must exceed this total. Status journal: "
         f"{status_journal.status_path()} (phase progress and the final diagnosis "
@@ -500,7 +500,7 @@ def _cmd_restart_body(
     # leg, so a refusal never blocks a viable bounce (the findings name the
     # repairs; a restart could not have made it past them either).
     # `check_launcher=False`: this start is in-process and never execs
-    # `.venv/bin/ava`; the gate's interpreter check covers the venv seam the
+    # `.venv/bin/meiva`; the gate's interpreter check covers the venv seam the
     # session launches actually use.
     print("\n→ start readiness preflight (validate-before-kill, local state)")
     with status_journal.phase("preflight"):
@@ -529,7 +529,7 @@ def _cmd_restart_body(
     require_restart_runtime(runtime)
 
     # Restart replaces the services, persistent terminals included (they close
-    # as at `ava stop`: the pty-sessions service runs the new code afterwards),
+    # as at `meiva stop`: the pty-sessions service runs the new code afterwards),
     # and keeps the private data plane (keep_infra), the browser (keep_browser)
     # and, with teardown_extras left off, Gate, the permissions helper and native LGTM.
     with status_journal.phase("stop"):
@@ -547,7 +547,7 @@ def _cmd_restart_body(
             helper=command.helper,
         )
     if rc != 0:
-        # The quiesce paused this host; a failed stop means no `ava start` is
+        # The quiesce paused this host; a failed stop means no `meiva start` is
         # coming to restore it. Release the pause unless a stop hold owns it
         # (same contract as the refusal paths above). The stop leg's own
         # journal phases (drain / services / ...) remain readable.

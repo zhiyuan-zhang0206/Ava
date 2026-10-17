@@ -3,6 +3,6 @@
     "test_plugin_load_containment.py",
     "test_messages_delta_switch.py",
 ]
-"ava.tests.fixtures.ava_tests" = [
+"meiva.tests.fixtures.meiva_tests" = [
     "test_register_namespace.py",
 ]

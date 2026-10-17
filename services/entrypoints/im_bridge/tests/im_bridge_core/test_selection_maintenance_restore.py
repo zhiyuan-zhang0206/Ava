@@ -88,7 +88,7 @@ async def test_cold_restoration_precedes_hold_release_without_admission_or_dispa
             assert adapter.sent == []
             await restored._cmd_switch(state, "7", replay_id="qualify-legacy")
             await restored.outbound_worker.run_once()
-        assert adapter.sent == [("chat", "[Ava #7] saved reply")]
+        assert adapter.sent == [("chat", "[Meiva #7] saved reply")]
 
 
 async def test_restoration_propagates_unknown_selection_fault(

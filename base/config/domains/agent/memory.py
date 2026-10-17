@@ -12,7 +12,7 @@ from base.config.base import EnvSettings
 class AgentMemorySettings(EnvSettings):
     memory_index_inject_enabled: bool = Field(
         default=True,
-        alias="AVA_MEMORY_INDEX_INJECT",
+        alias="MEIVA_MEMORY_INDEX_INJECT",
         description=(
             "Inject the standing memory index (the MEMORY.md pointer at the pool "
             "root) at cold start and after each compact, so durable facts stay in "
@@ -28,7 +28,7 @@ class AgentMemorySettings(EnvSettings):
 
     memory_per_agent_inject_enabled: bool = Field(
         default=True,
-        alias="AVA_MEMORY_PER_AGENT_INJECT",
+        alias="MEIVA_MEMORY_PER_AGENT_INJECT",
         description=(
             "Inject the agent's own memory index (workspace memory/MEMORY.md) at "
             "cold start and after compaction; entry files beside it are read on "
@@ -46,7 +46,7 @@ class AgentMemorySettings(EnvSettings):
 
     memory_per_agent_index_max_lines: int = Field(
         default=200,
-        alias="AVA_MEMORY_PER_AGENT_INDEX_MAX_LINES",
+        alias="MEIVA_MEMORY_PER_AGENT_INDEX_MAX_LINES",
         description=(
             "Soft line cap on the agent's own memory index (workspace "
             "memory/MEMORY.md): over it, the injection carries a note nudging the "
@@ -67,12 +67,12 @@ class AgentMemorySettings(EnvSettings):
         default=1,
         ge=0,
         le=10,
-        alias="AVA_MEMORY_INHERIT_DEPTH",
+        alias="MEIVA_MEMORY_INHERIT_DEPTH",
         description=(
             "How many ancestors up the birth chain an agent inherits from, in "
             "hops (1 = the direct birth parent), nearest first. 0 disables "
             "inheritance. An ancestor declares shareable content by wrapping it "
-            "in `<!-- ava:inheritable -->` … `<!-- /ava:inheritable -->` inside "
+            "in `<!-- meiva:inheritable -->` … `<!-- /meiva:inheritable -->` inside "
             "a personal memory entry; the child reads those blocks when its "
             "context window is established. Cap 10: chains are short, so a "
             "higher value only invites an accidental whole-family pull."
@@ -90,7 +90,7 @@ class AgentMemorySettings(EnvSettings):
     memory_inherit_max_block_chars: int = Field(
         default=4000,
         ge=0,
-        alias="AVA_MEMORY_INHERIT_MAX_BLOCK_CHARS",
+        alias="MEIVA_MEMORY_INHERIT_MAX_BLOCK_CHARS",
         description=(
             "Size guardrail for inherited-memory blocks: one declared block "
             "injects at most this many characters; over it the block is "
@@ -109,7 +109,7 @@ class AgentMemorySettings(EnvSettings):
     memory_inherit_max_total_chars: int = Field(
         default=16000,
         ge=0,
-        alias="AVA_MEMORY_INHERIT_MAX_TOTAL_CHARS",
+        alias="MEIVA_MEMORY_INHERIT_MAX_TOTAL_CHARS",
         description=(
             "Size guardrail for the whole inherited-memory note: once the "
             "accumulated block text reaches this budget, the crossing block is "
@@ -127,7 +127,7 @@ class AgentMemorySettings(EnvSettings):
 
     passive_memory_recall_enabled: bool = Field(
         default=True,
-        alias="AVA_PASSIVE_MEMORY_RECALL",
+        alias="MEIVA_PASSIVE_MEMORY_RECALL",
         description=(
             "Before each turn woken by new inbound, semantically search the memory "
             "pool with the recent conversation as the query and inject the top "
@@ -152,7 +152,7 @@ class AgentMemorySettings(EnvSettings):
         default=0.80,
         ge=0,
         le=1,
-        alias="AVA_MEMORY_RECALL_INJECT_THRESHOLD",
+        alias="MEIVA_MEMORY_RECALL_INJECT_THRESHOLD",
         description=(
             "Minimum relevance score (0..1, the decision model's probability that a "
             "note's best chunk is relevant to the conversation) for passive recall to "
@@ -174,7 +174,7 @@ class AgentMemorySettings(EnvSettings):
         default=3,
         ge=0,
         le=100,
-        alias="AVA_MEMORY_RECALL_INJECT_MAX",
+        alias="MEIVA_MEMORY_RECALL_INJECT_MAX",
         description=(
             "The most notes passive recall injects in one turn, taken best score first "
             "among the notes that reach memory_recall_inject_threshold. Notes crowd the "
@@ -195,7 +195,7 @@ class AgentMemorySettings(EnvSettings):
 
     memory_recall_deadline_seconds: float = Field(
         default=5.0,
-        alias="AVA_MEMORY_RECALL_DEADLINE_SECONDS",
+        alias="MEIVA_MEMORY_RECALL_DEADLINE_SECONDS",
         description=(
             "Wall-clock budget (seconds) for one passive-recall pass — the search "
             "request, which includes the gateway's rerank of the retrieved chunks. "
@@ -219,7 +219,7 @@ class AgentMemorySettings(EnvSettings):
 
     memory_write_check_deadline_seconds: float = Field(
         default=5.0,
-        alias="AVA_MEMORY_WRITE_CHECK_DEADLINE_SECONDS",
+        alias="MEIVA_MEMORY_WRITE_CHECK_DEADLINE_SECONDS",
         description=(
             "Wall-clock budget (seconds) for checking the memory notes one execute_code "
             "call wrote: the rule check of every written note plus the duplicate search for "
@@ -243,7 +243,7 @@ class AgentMemorySettings(EnvSettings):
         default=0.80,
         ge=0,
         le=1,
-        alias="AVA_MEMORY_WRITE_DEDUP_THRESHOLD",
+        alias="MEIVA_MEMORY_WRITE_DEDUP_THRESHOLD",
         description=(
             "Minimum probability (0..1, the decision model's answer to \"does an existing "
             'shared note record essentially the same knowledge as this new one") for the '

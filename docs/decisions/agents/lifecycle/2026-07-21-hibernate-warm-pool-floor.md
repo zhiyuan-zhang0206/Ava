@@ -16,7 +16,7 @@ idle," the standard warm-pool shape.
 
 ## Decision
 
-Add `hibernate_min_active` (`AVA_HIBERNATE_MIN_ACTIVE`, default **100**, `int`,
+Add `hibernate_min_active` (`MEIVA_HIBERNATE_MIN_ACTIVE`, default **100**, `int`,
 `ge=0`): this host's N most recently active agents are exempt from swap-out
 regardless of idle time. "Active" is ranked by `agents_meta.last_active_at`
 among `status IN ('running', 'idling')` **only** — a `hibernating` row (already

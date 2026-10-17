@@ -39,7 +39,7 @@ def test_policy_config_env_overlay_and_editor_keep_exact_choices(
     assert set(get_args(field.annotation)) == set(CompletionNoticePolicy)
     assert field_editor_type(field.annotation) == ("enum", ["all", "hourly"])
     env_file = tmp_path / ".env"
-    env_file.write_text(f"AVA_COMPLETION_NOTICE_POLICY={policy.value}\n")
+    env_file.write_text(f"MEIVA_COMPLETION_NOTICE_POLICY={policy.value}\n")
     source = DotEnvSettingsSource(AgentRuntimeSettings, env_file=env_file)
     settings = AgentRuntimeSettings.model_validate(source())
     assert settings.completion_notice_policy is policy
@@ -50,7 +50,7 @@ def test_policy_config_env_overlay_and_editor_keep_exact_choices(
         is policy
     )
     schema = AgentRuntimeSettings.model_json_schema()
-    assert schema["properties"]["AVA_COMPLETION_NOTICE_POLICY"]["enum"] == ["all", "hourly"]
+    assert schema["properties"]["MEIVA_COMPLETION_NOTICE_POLICY"]["enum"] == ["all", "hourly"]
 
 
 @pytest.mark.parametrize("invalid", ["unknown", "failures"])

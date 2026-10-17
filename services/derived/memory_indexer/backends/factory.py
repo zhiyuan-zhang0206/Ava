@@ -3,7 +3,7 @@
 `get_backend()` is the single entry point: the indexer daemon (write
 path) and the gateway search endpoint (read path) both take their backend
 from here, keyed by the name supplied by the composition root
-(`AVA_MEMORY_SEARCH_BACKEND`, default `numpy`). Switching storage is one
+(`MEIVA_MEMORY_SEARCH_BACKEND`, default `numpy`). Switching storage is one
 env var + a restart; the cold-start reconcile rebuilds the index on the
 new backend.
 
@@ -99,7 +99,7 @@ def get_backend(
 ) -> MemorySearchBackend:
     """Construct the configured backend
     (`settings.services.memory_search_backend`, env
-    `AVA_MEMORY_SEARCH_BACKEND`) for the given embedding vector space."""
+    `MEIVA_MEMORY_SEARCH_BACKEND`) for the given embedding vector space."""
     return get_backend_named(
         name,
         database=database,

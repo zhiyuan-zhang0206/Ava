@@ -1,0 +1,98 @@
+---
+type: doc
+title: Delivered upload acceptance and recovery
+description: Immutable physical batches, versioned native copy and one retained chat outcome.
+tags: [gateway, uploads]
+---
+
+# Delivered upload acceptance and recovery
+
+`POST /api/keyed/v1/agents/{id}/uploads` requires a verified credential, explicit
+`principal-v1` and caller `Idempotency-Key`. It promises at most one user chat, only
+**after** confirmed copy, and only within a bounded number of copy attempts: a batch
+that cannot be copied is held and the person uploads again. Browser file delivery uses this route with one key per
+submission; silent native-image attachments use the separate keyed
+`POST /api/agents/{id}/uploads`, which never notifies the agent.
+SDK/MCP callers are not activated. Agent IDs must be
+positive signed BIGINT values, validated before native storage or database work.
+
+The original ordered display names, bytes/SHA-256, sizes and content types identify
+the request. Same key with different valid input returns 409. A fresh manifest
+validates suffix/name length, URL delimiters, ASCII content type and object order
+before claiming files. Display names remain metadata; finals use bounded UUID,
+ordinal and true suffix, with a 217-byte basename budget that also fits the
+native create-only temporary name. `Acceptance` is the immutable historical 202 snapshot,
+not evidence that a URL remains accessible, remote files remain present or an
+agent ran. Auth is repeated for every replay and read; no persisted bearer secret.
+
+## Native ownership and receiving
+
+The [source publication owner](source-publication.meiva.okf.md)
+describes original unit binding, two-phase file publication, shared physical quota
+and manifest-bound object serving. Receiving reservations and final files remain
+retained; a historical key never retargets another unit.
+
+## Gateway round and versioned receiver
+
+Each Gateway lifespan retains its own recovery handle for start and close;
+`app.state.upload_recovery` only exposes that handle to HTTP handlers. A later
+app-state replacement cannot leave the original recovery TaskGroup unstopped.
+
+`gateway.upload_delivery.worker.UploadRecovery` belongs to Gateway lifespan,
+including pure Gateway topology without Ops. Four intents run in a scoped
+TaskGroup; due selection and final acceptance borrow short transactions, with no
+DB connection held across RPC/HTTP. A batch gets `source.MAX_COPY_ATTEMPTS` (3) copy
+attempts spaced by a short linear backoff. Backoff is scheduling, never a lease or proof
+another writer died. Multiple Gateway processes can repeat the same batch.
+Source placement is checked before copy and again under locks before inbound.
+
+The independently known Ops kind `upload-receive-v1` requires explicit integer
+protocol 1 (missing/bool/float/unknown refused), exact target unit and strict
+manifest. It receives no transport idempotency key and does not use uncertain
+RPC response caching. Unknown old consumers reject before effects; no fallback
+to another op. Native source/copy metadata and quota admission
+commit first. Download and create-only publication borrow no DB connection;
+receiver commit follows actual verify/fsync. Network work has a bounded round.
+
+Every receiver retry verifies/fills actual objects, including a historical ready
+copy. Conflicting finals never get replaced. Missing ready objects require quota
+reservation again before fill; wrong home, different manifest, source unavailable
+or incompatible protocol cannot become a usable copy proof. Native readiness
+requires the supported version, unit, manifest digest and absolute batch namespace.
+A same-unit shortcut also verifies actual source objects; machine name alone is
+insufficient. No promise survives operator deletion of irreplaceable bytes.
+
+## One inbound and honest status
+
+`source.complete` locks the retained intent and checks supplied immutable source,
+target and manifest first. Existing accepted IID/outcome returns before mutable
+target checks, even after IID/agent deletion; it never
+recreates a deleted IID. Only pending state can accept a fresh late proof. HOLD
+is not automatically unsealed by another overlapping worker.
+
+For pending delivery, the transaction locks current agent/placement and matching
+registered unit, then calls `insert_chat_inbound_in_transaction` with fixed
+batch-derived ID, original user source and frozen verified provenance. Original
+IID, copy proof and delivery outcome commit in the same transaction. Rollback
+creates neither acceptance nor chat; lost commit response recovers the original
+outcome. No mutable-target FK or TTL deletes this evidence.
+
+Authenticated `.../uploads/{batch}` projects receiving/pending/accepted/HOLD,
+frozen source/target, attempts, next retry, safe failure reason and retained IID.
+Accepted means chat acceptance, not execution. A receiver outage is retried until the
+third failed copy, which HOLDs the batch; unsupported protocol, native conflict/quota,
+missing source or changed/deleted placement HOLD at once. Every HOLD is visible in the
+status and emits the `upload_delivery_held` anomaly event; nothing retries a HOLD. There is no operator cancel/unseal/retarget endpoint in
+this contribution. Restoration or cancellation requires a separate reviewed policy.
+
+The worker wakes the target once, right after `source.complete` commits (the same
+publish-wake and resurrect-if-terminated path as ordinary chat delivery). A failed
+wake is logged and not repeated: the accepted chat stays a pending inbound that the
+agent's next ordinary wake delivers. Deleted/done IID is never requeued. Gateway business pause/quiesce stops fresh work. Lifespan stops
+rounds and drains actual shielded native futures before closing the pool; cancelling
+an HTTP wait does not pretend its filesystem/DB thread ended. Ops retains its
+existing maintenance admission and native-worker drainage.
+
+See [silent upload owner](../../../routers/docs/upload-batches.meiva.okf.md) for the
+native-image silent save. This is server Outbox recovery of one
+upload domain, not a generic workflow or client Outbox.

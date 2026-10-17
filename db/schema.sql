@@ -1,4 +1,4 @@
--- Ava schema — the squashed **baseline**: the full current schema a fresh DB
+-- Meiva schema — the squashed **baseline**: the full current schema a fresh DB
 -- bootstraps from. Since the 2026-07-19 re-baseline this file IS the source of
 -- truth for the current schema (history through sequential 0001..0081 was folded
 -- in). A schema change ships as a `migrations/YYYYMMDDTHHMMSS_*.sql` delta AND is
@@ -20,9 +20,9 @@
 --     production self-update goes through it.
 --
 -- Postgres trust boundary:
---   - The `ava_gateway` service dials the cluster-main role, which owns this
+--   - The `meiva_gateway` service dials the cluster-main role, which owns this
 --     schema and is the only role allowed DDL or unbounded application writes.
---   - `ava_runner` is a separate LOGIN NOSUPERUSER role. It has SELECT over the
+--   - `meiva_runner` is a separate LOGIN NOSUPERUSER role. It has SELECT over the
 --     public schema but may write only runner-local surfaces: inbound_messages
 --     (claiming and self-lifecycle); agents_meta and agents (process state and
 --     its own label); machine_units, machines, and host_deploy_state (unit
@@ -32,11 +32,11 @@
 --     checkpoints, checkpoint_blobs, and checkpoint_writes (agent state).
 --   - `base.cluster.authority.groups.ensure_groups` is the sole grant list and
 --     re-affirms it after migrations. All other writes travel through
---     `ava_gateway`, so runner credentials cannot create agents, run DDL, or
+--     `meiva_gateway`, so runner credentials cannot create agents, run DDL, or
 --     mutate gateway-owned tables.
 --
 -- LangGraph PostgresSaver creates only at fresh install; later versions are
--- mirrored by Ava timestamp migrations:
+-- mirrored by Meiva timestamp migrations:
 --   checkpoints / checkpoint_blobs / checkpoint_writes / checkpoint_migrations
 -- Here we only manage our own tables:
 --   agents            — agent identity + label (id also doubles as the LangGraph thread_id,
@@ -69,7 +69,7 @@ CREATE TABLE agents (
     -- ids are 1-based (BIGSERIAL auto-assigns from 1); a non-positive id can
     -- only come from a buggy direct DB write. Reject it at the storage layer so
     -- no such write lands a ghost row, complementing the gateway's gt=0 API
-    -- guard. (`ava.AGENT_ID`'s pre-assignment placeholder is None, outside this
+    -- guard. (`meiva.AGENT_ID`'s pre-assignment placeholder is None, outside this
     -- id space, so a premature write fails on NOT NULL rather than reaching
     -- here.)
     CONSTRAINT agents_id_positive CHECK (id > 0)
@@ -102,7 +102,7 @@ CREATE TABLE agents (
 -- Lineage fields:
 --   spawner                   identifier of the entity that triggered spawn, as a string:
 --                             - "user"          — UI button / scripts/start_agent
---                             - "agent:<id>"    — peer agent via ava.agents.spawn(...)
+--                             - "agent:<id>"    — peer agent via meiva.agents.spawn(...)
 --                             - "<other>"       — claude-code / cli / any external trigger
 --                             root also uses "user" — no NULL, simplifies frontend tree construction
 --                             For a fork this column records the fork SOURCE (the lineage
@@ -130,12 +130,12 @@ CREATE TABLE agents_meta (
     pid                        INTEGER,                  -- filled while a process owns the running/idling row, for ops ps lookup / force kill
     spawned_at                 TIMESTAMPTZ NOT NULL DEFAULT now(),
     started_at                 TIMESTAMPTZ,              -- filled alongside pid and lease by agent._starting.claim_agent_row
-    session_index              BIGINT NOT NULL DEFAULT 0,  -- unified shell+watcher session sequence number, auto-incrementing; ava.shell.new()/ava.watcher.launch() atomically take the next via UPDATE ... RETURNING
-    machine                    TEXT NOT NULL DEFAULT 'unknown',  -- physical machine identifier, for multi-machine deployment (private network + central Postgres); source = AVA_MACHINE_NAME, written on INSERT in the create path (spawn_agent), claim_agent_row only verifies
+    session_index              BIGINT NOT NULL DEFAULT 0,  -- unified shell+watcher session sequence number, auto-incrementing; meiva.shell.new()/meiva.watcher.launch() atomically take the next via UPDATE ... RETURNING
+    machine                    TEXT NOT NULL DEFAULT 'unknown',  -- physical machine identifier, for multi-machine deployment (private network + central Postgres); source = MEIVA_MACHINE_NAME, written on INSERT in the create path (spawn_agent), claim_agent_row only verifies
     status_changed_at          TIMESTAMPTZ NOT NULL DEFAULT now(),  -- when the row last entered its current status; maintained by the agents_meta_status_changed_at trigger. Lets the restarter reap unclaimed idling rows older than a grace (unlike spawned_at, this resets on resurrect's terminated -> idling)
     last_active_at             TIMESTAMPTZ NOT NULL DEFAULT now(),  -- when the agent last did REAL work: written = now() by the agent process on every completed LLM turn (agent/graph/llm/node.py). Deliberately NOT touched by ops lifecycle churn (rollout quiesce / restarter respawn / self.update / stop-start) — for an idle agent that whole cycle runs without an LLM turn, so this survives it. The heartbeat daemon's idle clock reads THIS (not status_changed_at, which every status flip incl. ops restarts bumps) so an ops event never resets an agent's idle timer. Backfilled from status_changed_at at add time.
-    heartbeat_paused_until     TIMESTAMPTZ,              -- pause window for the gateway heartbeat daemon; set to now()+duration by ava.self.pause_heartbeat(). While in the future, the daemon skips this agent's idle-nudge. NULL = never paused.
-    last_heartbeat_at          TIMESTAMPTZ,              -- when the heartbeat daemon last inserted a check-in inbound for this agent. A durable cadence floor: once a heartbeat is consumed without a completed LLM turn, the daemon still waits AVA_HEARTBEAT_INTERVAL_SECONDS before inserting another, rather than selecting the same idle row every dispatch step. NULL = never reminded / pre-migration row.
+    heartbeat_paused_until     TIMESTAMPTZ,              -- pause window for the gateway heartbeat daemon; set to now()+duration by meiva.self.pause_heartbeat(). While in the future, the daemon skips this agent's idle-nudge. NULL = never paused.
+    last_heartbeat_at          TIMESTAMPTZ,              -- when the heartbeat daemon last inserted a check-in inbound for this agent. A durable cadence floor: once a heartbeat is consumed without a completed LLM turn, the daemon still waits MEIVA_HEARTBEAT_INTERVAL_SECONDS before inserting another, rather than selecting the same idle row every dispatch step. NULL = never reminded / pre-migration row.
     heartbeat_backoff_level    INTEGER NOT NULL DEFAULT 0 CHECK (heartbeat_backoff_level BETWEEN 0 AND 16),  -- platform-side nudge backoff (B7): consecutive no-op nudges raise the level, stretching the reminder floor to heartbeat_interval * 2^level (cap 24h); reset to 0 on real inbound or an agent pause.
     last_message_text          TEXT,                     -- text of the last AI message produced by this agent; survives compact (which replaces the entire checkpoint). Written by the agent process after each LLM turn; read by get_last_message API. NULL = no AI message yet.
     config_overlay             JSONB,                    -- per-agent config overlay (currently llm_model); authoritative source read at agent boot after spawn/respawn/resurrect. NULL = cluster defaults.
@@ -202,7 +202,7 @@ COMMENT ON COLUMN agents_meta.last_permanent_reject_reason IS
     'the current streak; never backfilled by guess.';
 
 -- ─────────────── heartbeat_pause_log ───────────────
--- Append-only heartbeat-pause trail: one row per ava.self.pause_heartbeat
+-- Append-only heartbeat-pause trail: one row per meiva.self.pause_heartbeat
 -- call. The latest row supplies Inspector pause duration and the table retains
 -- agent-side history independently of telemetry.
 CREATE TABLE heartbeat_pause_log (
@@ -213,24 +213,24 @@ CREATE TABLE heartbeat_pause_log (
 );
 
 COMMENT ON TABLE heartbeat_pause_log IS
-    'Append-only heartbeat-pause trail: one row per ava.self.pause_heartbeat call. The latest row supplies Inspector pause duration without telemetry reads.';
+    'Append-only heartbeat-pause trail: one row per meiva.self.pause_heartbeat call. The latest row supplies Inspector pause duration without telemetry reads.';
 
 -- Latest-first ordering supports pause-trail inspection.
 CREATE INDEX heartbeat_pause_log_agent_created_idx
     ON heartbeat_pause_log (agent_id, created_at DESC, id DESC);
 
--- ava_runner surface for the pause trail (task #1932): the runner process
--- (ava.self.pause_heartbeat) INSERTs the new
+-- meiva_runner surface for the pause trail (task #1932): the runner process
+-- (meiva.self.pause_heartbeat) INSERTs the new
 -- row; the BIGSERIAL id draws from the owning sequence. UPDATE/DELETE stay
 -- out — the trail is append-only and no runner path rewrites rows.
 -- Gated on the role's existence: fresh bootstrap applies this baseline before
--- install birth creates ava_runner, and base/cluster/authority/groups.py's
+-- install birth creates meiva_runner, and base/cluster/authority/groups.py's
 -- ensure_groups grants the audited surface at birth.
 DO $$
 BEGIN
-    IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'ava_runner') THEN
-        GRANT SELECT, INSERT ON heartbeat_pause_log TO ava_runner;
-        GRANT USAGE, SELECT ON SEQUENCE heartbeat_pause_log_id_seq TO ava_runner;
+    IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'meiva_runner') THEN
+        GRANT SELECT, INSERT ON heartbeat_pause_log TO meiva_runner;
+        GRANT USAGE, SELECT ON SEQUENCE heartbeat_pause_log_id_seq TO meiva_runner;
     END IF;
 END $$;
 
@@ -242,18 +242,18 @@ END $$;
 --   require_response=TRUE,  blocking=TRUE  -> needs an answer, agent is stalled
 -- blocking is meaningful only when require_response is TRUE (you can only be
 -- stalled waiting on a reply you need) -- enforced by a CHECK, and rejected at
--- the SDK (ava.ui.notify raises). ava.ui.notify() INSERTs one row per call.
+-- the SDK (meiva.ui.notify raises). meiva.ui.notify() INSERTs one row per call.
 --
 -- title = one-line headline (queue list); content = optional detail body shown
 -- on click. resolved_at + resolution + reply is the single close triple:
 --   answered  -- user answered a require_response notice (reply = the answer)
 --   dismissed -- user waved away a require_response notice without answering
 --   read      -- user reviewed an FYI notice (reply optional)
---   withdrawn  -- the agent dismissed its own notice (ava.ui.dismiss_notice)
---   superseded -- replaced by a newer notice from the same agent (ava.ui.notify auto-resolve)
+--   withdrawn  -- the agent dismissed its own notice (meiva.ui.dismiss_notice)
+--   superseded -- replaced by a newer notice from the same agent (meiva.ui.notify auto-resolve)
 -- reply caches the user's free-text reply for history/display; the live delivery
 -- to the agent rides the chat-inbound path, not this column. updated_at tracks
--- the agent editing its own still-open notice (ava.ui.edit_notice).
+-- the agent editing its own still-open notice (meiva.ui.edit_notice).
 --
 -- The snapshot inlines the still-open require_response notices
 -- (notices_awaiting_response, bounded worklist) and counts the still-open FYI
@@ -337,11 +337,11 @@ CREATE TABLE inbound_messages (
                CONSTRAINT inbound_messages_kind_check CHECK (kind IN (
                    'chat',              -- conversation message from user / peer agent
                    'system_note',       -- framework system notification (task assign/update/reminder); claim renders as a system note
-                   'compact_summary',   -- written by agent ava.compact(summary); on claim, directly replaces messages
+                   'compact_summary',   -- written by agent meiva.compact(summary); on claim, directly replaces messages
                    'compact_request',   -- triggered by UI "/compact" / admin; on claim, runs the backend LLM to generate a summary, then replaces
                    'cancel',            -- /api/cancel pause; in-flight llm/exec interrupts on it, claim halts to idle (agent stays alive, resumable)
-                   'terminate',         -- ava.terminate() / admin terminate; claim appends lifecycle marker + goto END
-                   'restart',           -- ava.restart() / admin restart; applied as a hosted lifecycle command (no message appended)
+                   'terminate',         -- meiva.terminate() / admin terminate; claim appends lifecycle marker + goto END
+                   'restart',           -- meiva.restart() / admin restart; applied as a hosted lifecycle command (no message appended)
                    'restart_completed', -- historical rows only (written by the retired respawn path); claim still renders the lifecycle marker
                    'resurrect',         -- INSERTed by resurrect_agent; after the new process is up, claim appends lifecycle marker
                    'fork',              -- INSERTed by spawn_agent on a fork; the new process's first claim appends an identity marker (you are now agent N, forked from agent:M)
@@ -638,11 +638,11 @@ CREATE TRIGGER agents_meta_lifecycle_interval
     FOR EACH ROW EXECUTE FUNCTION record_agent_lifecycle_interval();
 
 DO $$ BEGIN
-    IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'ava_runner') THEN
-        GRANT SELECT, INSERT ON agent_metric_observations TO ava_runner;
-        GRANT SELECT, INSERT, UPDATE ON agent_metric_days, agent_lifecycle_intervals TO ava_runner;
-        GRANT SELECT ON agent_metric_collection TO ava_runner;
-        GRANT SELECT, INSERT, UPDATE ON agent_metric_file_cursors TO ava_runner;
+    IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'meiva_runner') THEN
+        GRANT SELECT, INSERT ON agent_metric_observations TO meiva_runner;
+        GRANT SELECT, INSERT, UPDATE ON agent_metric_days, agent_lifecycle_intervals TO meiva_runner;
+        GRANT SELECT ON agent_metric_collection TO meiva_runner;
+        GRANT SELECT, INSERT, UPDATE ON agent_metric_file_cursors TO meiva_runner;
     END IF;
 END $$;
 
@@ -851,8 +851,8 @@ CREATE UNIQUE INDEX event_dismissals_one_active_class_idx
     WHERE status = 'dismissed';
 
 -- ─────────────── agent_pages ───────────────
--- HTML UI server registry. ava.ui.show(name, port) registers an agent-owned
--- server, while ava.ui.serve() rows are supervised by the
+-- HTML UI server registry. meiva.ui.show(name, port) registers an agent-owned
+-- server, while meiva.ui.serve() rows are supervised by the
 -- page-server daemon in persistent sessions that outlive the agent process.
 CREATE TABLE agent_pages (
     id         BIGSERIAL PRIMARY KEY,
@@ -861,7 +861,7 @@ CREATE TABLE agent_pages (
     port       INTEGER NOT NULL CHECK (port > 0 AND port < 65536),
     host       TEXT,
     title      TEXT,
-    serve_dir  TEXT,  -- set by ava.ui.serve(); NULL for ava.ui.show().
+    serve_dir  TEXT,  -- set by meiva.ui.serve(); NULL for meiva.ui.show().
     server_token TEXT, -- durable per-page /health identity, minted by the page-server daemon.
     session_name TEXT, -- daemon-owned persistent shell; NULL for show() and pre-session rows.
     created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
@@ -871,7 +871,7 @@ CREATE TABLE agent_pages (
 );
 
 COMMENT ON COLUMN agent_pages.serve_dir IS
-    'Directory the page server serves, set by ava.ui.serve(); NULL for ava.ui.show().';
+    'Directory the page server serves, set by meiva.ui.serve(); NULL for meiva.ui.show().';
 
 CREATE UNIQUE INDEX agent_pages_unique_open
     ON agent_pages (agent_id, name)
@@ -906,7 +906,7 @@ CREATE TABLE agent_shell_ttls (
 
 CREATE INDEX agent_shell_ttls_expiry_idx ON agent_shell_ttls (expires_at);
 
-COMMENT ON TABLE agent_shell_ttls IS 'Persistent shell sessions whose agent declared a TTL at creation (ava.shell.sessions.new/run_background ttl=). Reaped by the gateway TTL reaper; rows are removed when reaped or when the session dies (the reaper self-cleans).';
+COMMENT ON TABLE agent_shell_ttls IS 'Persistent shell sessions whose agent declared a TTL at creation (meiva.shell.sessions.new/run_background ttl=). Reaped by the gateway TTL reaper; rows are removed when reaped or when the session dies (the reaper self-cleans).';
 
 CREATE TABLE agent_shell_ttl_renewals (
     id                    BIGSERIAL PRIMARY KEY,
@@ -922,7 +922,7 @@ CREATE INDEX agent_shell_ttl_renewals_agent_session_idx
     ON agent_shell_ttl_renewals (agent_id, session_id, created_at, id);
 
 COMMENT ON TABLE agent_shell_ttl_renewals IS
-    'Append-only shell-TTL renewal trail: one row per ava.shell.sessions.renew call, in the same transaction as the deadline UPDATE. prev/new_expires_at carry the before/after deadlines. No FK to agent_shell_ttls — the reaper deletes that row on reclamation while the audit history must survive.';
+    'Append-only shell-TTL renewal trail: one row per meiva.shell.sessions.renew call, in the same transaction as the deadline UPDATE. prev/new_expires_at carry the before/after deadlines. No FK to agent_shell_ttls — the reaper deletes that row on reclamation while the audit history must survive.';
 
 CREATE OR REPLACE FUNCTION cascade_close_agent_pages() RETURNS TRIGGER AS $$
 BEGIN
@@ -1070,19 +1070,19 @@ CREATE TABLE user_settings (
 );
 
 -- ─────────────── neighbor traversal (derived from the events stream) ───────
--- Recency-weighted "who is this agent connected to" used by ava.agents.get_neighbors.
+-- Recency-weighted "who is this agent connected to" used by meiva.agents.get_neighbors.
 -- Agent tie weights (spawn/fork/resurrect + send_message) and the neighbor walk moved to
 -- the event stream in Python (gateway/neighbors.py) when the unified `events` table froze
 -- at the LGTM cutover (task #180).
 -- ─────────────── machines ───────────────
--- Machine → inbound base URL registry for multi-machine deployment. At the tail of `ava start` on
+-- Machine → inbound base URL registry for multi-machine deployment. At the tail of `meiva start` on
 -- each machine, UPSERT its own (name, role, url) here. gateway_url is the machine's inbound base URL
 -- the rest of the cluster dials: the gateway URL, or an agent-runner's ops server URL
 -- `http://<reachable-host>:<ops_port>`. Cross-machine RPC (spawn / lifecycle / status / config /
 -- inventory) is a direct POST to that URL's /ops endpoint (gateway/cluster_rpc.py -> services/agent_runner/agent_ops).
--- description is free-text machine metadata surfaced to agents (ava.self.MACHINE / ava.agents.list_machines); the framework does not dispatch on it.
--- stopped_at marks an intentional `ava stop` (best-effort POST /api/cluster/stopping just before local
--- teardown); register_self() clears it back to NULL on `ava start`. The cluster view is a live probe, so a
+-- description is free-text machine metadata surfaced to agents (meiva.self.MACHINE / meiva.agents.list_machines); the framework does not dispatch on it.
+-- stopped_at marks an intentional `meiva stop` (best-effort POST /api/cluster/stopping just before local
+-- teardown); register_self() clears it back to NULL on `meiva start`. The cluster view is a live probe, so a
 -- stopped host and a crashed host both read online=False; stopped_at lets the UI tell them apart.
 CREATE TABLE machines (
     name           TEXT PRIMARY KEY,
@@ -1109,7 +1109,7 @@ CREATE TABLE machines (
     -- panel/agents' list_machines, from `list_agent_runners()` (no probe -> no
     -- offline alert; rollout skips it) and from spawn targets; pause_reason is
     -- the operator's recorded why. register_self NEVER clears the latch — only
-    -- `ava cluster resume` does — so the pause survives the machine's own
+    -- `meiva cluster resume` does — so the pause survives the machine's own
     -- re-registrations while it is away. The row (gateway_url/role) is kept:
     -- resume needs it.
     paused_at      TIMESTAMPTZ,
@@ -1149,9 +1149,9 @@ COMMENT ON TABLE machine_status_snapshot IS
     'Roster read model: the last status_probe per roster-visible agent-runner, written by the heartbeat liveness pass. status holds the last ClusterStatus payload and status_at when it was probed.';
 
 -- machine_units: per-unit capability contributions that COMPOSE the machines row
--- above. One row per (machine_name, home) — `home` is the unit's $AVA_HOME. Two
--- co-located units (e.g. a gateway-only unit under ~/.ava_gateway + an
--- agent-runner-only unit under ~/.ava) share machine_name but differ by home, so
+-- above. One row per (machine_name, home) — `home` is the unit's $MEIVA_HOME. Two
+-- co-located units (e.g. a gateway-only unit under ~/.meiva_gateway + an
+-- agent-runner-only unit under ~/.meiva) share machine_name but differ by home, so
 -- each UPSERTs only its own row instead of clobbering the shared machines row.
 -- register_self recomputes the machines row as the union over a machine's
 -- non-stopped units; every machines reader is unchanged.
@@ -1204,7 +1204,7 @@ CREATE TABLE host_deploy_state (
 );
 
 COMMENT ON TABLE host_deploy_state IS
-    'Host-level deploy posture (idle/paused), one row per machine: written by ava stop, pause, maintenance and start; read by the gateway 503 middleware, ava status and the deploy window.';
+    'Host-level deploy posture (idle/paused), one row per machine: written by meiva stop, pause, maintenance and start; read by the gateway 503 middleware, meiva status and the deploy window.';
 
 -- ─────────────── cluster_defaults ───────────────
 -- Cluster-level defaults a NEW agent's birth stamp reads. Singleton row; today it
@@ -1219,7 +1219,7 @@ COMMENT ON TABLE host_deploy_state IS
 -- agent's own `agents_meta.birth_config`.
 --
 -- llm_model NULL = no cluster choice; birth resolution falls through to the
--- ordinary config chain (`.env` AVA_MODEL, then the code default). A non-NULL
+-- ordinary config chain (`.env` MEIVA_MODEL, then the code default). A non-NULL
 -- value wins over `.env` at that boundary.
 -- See migrations/20260731T071500_cluster-defaults.sql.
 CREATE TABLE cluster_defaults (
@@ -1234,7 +1234,7 @@ INSERT INTO cluster_defaults (id, llm_model) VALUES (1, 'deepseek-flash');
 -- ─────────────── schedules ───────────────
 -- Gateway-hosted schedules: persistent supervised sessions (a `script` + a
 -- `command` to run it). The ScheduleManager writes the script under
--- $AVA_HOME/schedules/<id>/, runs it in a named session, and restarts it on
+-- $MEIVA_HOME/schedules/<id>/, runs it in a named session, and restarts it on
 -- crash. The script is arbitrary agent-written code and holds no scheduler state
 -- — reuse is label-keyed against the agents table. Supersedes cron_jobs.
 CREATE TABLE schedules (
@@ -1365,7 +1365,7 @@ CREATE TABLE extensions (
     source_ref      TEXT,               -- commit/tag as installed, when source is git
     version         TEXT,               -- manifest version, when the package declares one
     content_hash    TEXT REFERENCES extension_blobs(content_hash),
-    manifest        JSONB,              -- ava-plugin.json as landed
+    manifest        JSONB,              -- meiva-plugin.json as landed
     trust           TEXT NOT NULL DEFAULT 'unreviewed'
                     CHECK (trust IN ('builtin', 'reviewed', 'unreviewed')),
     default_enabled BOOLEAN NOT NULL DEFAULT true,
@@ -1593,16 +1593,16 @@ CREATE TABLE agent_impersonation_entries (
 CREATE INDEX agent_impersonation_entries_source
     ON agent_impersonation_entries(lease_id, source_key) WHERE source_key IS NOT NULL;
 
--- ava_runner surface for the session trail (task #3549): the lifecycle and
+-- meiva_runner surface for the session trail (task #3549): the lifecycle and
 -- inbound triggers, plus the handoff writer, INSERT rows; readers SELECT them
 -- back. UPDATE/DELETE stay out — the preserve trigger rejects rewrites and no
 -- runner path updates rows. Gated on the role's existence: fresh bootstrap
--- applies this baseline before install birth creates ava_runner, and
+-- applies this baseline before install birth creates meiva_runner, and
 -- base/cluster/authority/groups.py's ensure_groups grants the surface at birth.
 DO $$
 BEGIN
-    IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'ava_runner') THEN
-        GRANT SELECT, INSERT ON agent_impersonation_entries TO ava_runner;
+    IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'meiva_runner') THEN
+        GRANT SELECT, INSERT ON agent_impersonation_entries TO meiva_runner;
     END IF;
 END $$;
 
@@ -1737,15 +1737,15 @@ REVOKE ALL ON FUNCTION public.seal_impersonation_event_participant(UUID,TEXT,TEX
 REVOKE ALL ON FUNCTION public.lock_impersonation_event_participant(UUID,TEXT) FROM PUBLIC;
 DO $$
 BEGIN
-    IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname='ava_runner') THEN
-        REVOKE INSERT, UPDATE ON agent_impersonations FROM ava_runner;
-        REVOKE UPDATE ON agent_impersonation_event_participants FROM ava_runner;
+    IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname='meiva_runner') THEN
+        REVOKE INSERT, UPDATE ON agent_impersonations FROM meiva_runner;
+        REVOKE UPDATE ON agent_impersonation_event_participants FROM meiva_runner;
         GRANT INSERT (
             id,agent_id,source,machine,reason,status,ttl_seconds,expires_at,
             relay_provider,relay_thread_id,relay_codex_remote,relay_token_hash,
             relay_batch_window_seconds,name,executor_name,process_metadata,automatic,
             ack_window_seconds,max_delivery_attempts,event_delivery_protocol_version
-        ) ON agent_impersonations TO ava_runner;
+        ) ON agent_impersonations TO meiva_runner;
         GRANT UPDATE (
             status,ttl_seconds,expires_at,rejection_reason,summary_inbound_id,summary,
             accepted_generation,accepted_owner,consent_version,activated_at,ended_at,
@@ -1753,11 +1753,11 @@ BEGIN
             relay_last_failure_at,relay_minted_at,relay_minted_generation,relay_minted_owner,
             handoff_document,handoff_path,handoff_applied_at,
             next_entry,event_delivery_pending_reason,start_message
-        ) ON agent_impersonations TO ava_runner;
-        GRANT SELECT,INSERT ON agent_impersonation_event_participants TO ava_runner;
-        GRANT EXECUTE ON FUNCTION public.close_impersonation_event_admission(UUID) TO ava_runner;
-        GRANT EXECUTE ON FUNCTION public.seal_impersonation_event_participant(UUID,TEXT,TEXT,TEXT,BIGINT) TO ava_runner;
-        GRANT EXECUTE ON FUNCTION public.lock_impersonation_event_participant(UUID,TEXT) TO ava_runner;
+        ) ON agent_impersonations TO meiva_runner;
+        GRANT SELECT,INSERT ON agent_impersonation_event_participants TO meiva_runner;
+        GRANT EXECUTE ON FUNCTION public.close_impersonation_event_admission(UUID) TO meiva_runner;
+        GRANT EXECUTE ON FUNCTION public.seal_impersonation_event_participant(UUID,TEXT,TEXT,TEXT,BIGINT) TO meiva_runner;
+        GRANT EXECUTE ON FUNCTION public.lock_impersonation_event_participant(UUID,TEXT) TO meiva_runner;
     END IF;
 END $$;
 
@@ -1884,7 +1884,7 @@ BEGIN
         'status',NEW.status,'expires_at',NEW.expires_at,'executor_name',NEW.executor_name,
         'session_id',NEW.session_id,'name',NEW.name,'machine',NEW.machine,
         'summary',NEW.summary,'reason',NEW.reason,'rejection_reason',NEW.rejection_reason,
-        'source',COALESCE(NULLIF(current_setting('ava.impersonation_actor',true),''),'system:impersonation'),
+        'source',COALESCE(NULLIF(current_setting('meiva.impersonation_actor',true),''),'system:impersonation'),
         'previous_status',CASE WHEN TG_OP='UPDATE' THEN OLD.status ELSE NULL END,
         'previous_expires_at',CASE WHEN TG_OP='UPDATE' THEN OLD.expires_at ELSE NULL END));
     RETURN NEW;
@@ -1937,17 +1937,17 @@ CREATE TABLE plugin_stats (
 COMMENT ON TABLE plugin_stats IS
     'Runtime values behind declared statistics-panel cards (contributions.ui.stats): one upsert-only row per (plugin, id). A declared card with no row is the console''s empty state; a failed refresh writes status=error with the reason in detail.';
 
--- ava_runner surface: a plugin's refresh code runs in the runner process
+-- meiva_runner surface: a plugin's refresh code runs in the runner process
 -- (agent-process hook or daemon) and upserts its own cards — INSERT, UPDATE,
 -- SELECT; no DELETE (a card that stops being reported keeps its last value and
 -- updated_at, which is what makes staleness visible). Gated on the role's
 -- existence: fresh bootstrap applies this baseline before install birth
--- creates ava_runner, and base/cluster/authority/groups.py's ensure_groups
+-- creates meiva_runner, and base/cluster/authority/groups.py's ensure_groups
 -- grants the same surface at birth.
 DO $$
 BEGIN
-    IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'ava_runner') THEN
-        GRANT SELECT, INSERT, UPDATE ON plugin_stats TO ava_runner;
+    IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'meiva_runner') THEN
+        GRANT SELECT, INSERT, UPDATE ON plugin_stats TO meiva_runner;
     END IF;
 END $$;
 
@@ -1999,20 +1999,20 @@ CREATE INDEX understanding_nodes_reuse
 COMMENT ON TABLE understanding_nodes IS
     'The understanding tree: one text per (agent_id, depth, message span) — depth 1 written by a chunk call, each level above by an upper-level grouping check; hashes make rewrites idempotent.';
 
--- ava_runner surface: the generation pass ships as a gateway-side worker, but
+-- meiva_runner surface: the generation pass ships as a gateway-side worker, but
 -- the operational first-run / ad-hoc regeneration path executes from the
 -- agent/runner side (task #3704) — SELECT, INSERT, UPDATE, and DELETE for the
 -- write-side reconciliation that removes rows of a superseded earlier cut
 -- when a rebuild re-cuts the same stretch. Gated on the role's existence:
 -- fresh bootstrap applies this baseline before install birth creates
--- ava_runner, and
+-- meiva_runner, and
 -- base/cluster/authority/groups.py's ensure_groups grants the same surface at
 -- birth.
 DO $$
 BEGIN
-    IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'ava_runner') THEN
-        GRANT SELECT, INSERT, UPDATE, DELETE ON understanding_nodes TO ava_runner;
-        GRANT USAGE, SELECT ON SEQUENCE understanding_nodes_id_seq TO ava_runner;
+    IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'meiva_runner') THEN
+        GRANT SELECT, INSERT, UPDATE, DELETE ON understanding_nodes TO meiva_runner;
+        GRANT USAGE, SELECT ON SEQUENCE understanding_nodes_id_seq TO meiva_runner;
     END IF;
 END $$;
 
@@ -2020,7 +2020,7 @@ END $$;
 -- Chunk-triggered understanding queue (see migrations/20261007T045501_understanding-chunk-tree.sql):
 -- one row per context stretch the understanding layer must describe; claimed
 -- with SKIP LOCKED by the agent-host loop. Gated grant: fresh bootstrap applies
--- this baseline before install birth creates ava_runner.
+-- this baseline before install birth creates meiva_runner.
 CREATE TABLE IF NOT EXISTS understanding_chunk_jobs (
     id BIGSERIAL PRIMARY KEY,
     agent_id BIGINT NOT NULL,
@@ -2051,9 +2051,9 @@ COMMENT ON TABLE understanding_chunk_jobs IS
 
 DO $$
 BEGIN
-    IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'ava_runner') THEN
-        GRANT SELECT, INSERT, UPDATE ON understanding_chunk_jobs TO ava_runner;
-        GRANT USAGE, SELECT ON SEQUENCE understanding_chunk_jobs_id_seq TO ava_runner;
+    IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'meiva_runner') THEN
+        GRANT SELECT, INSERT, UPDATE ON understanding_chunk_jobs TO meiva_runner;
+        GRANT USAGE, SELECT ON SEQUENCE understanding_chunk_jobs_id_seq TO meiva_runner;
     END IF;
 END $$;
 
@@ -2092,9 +2092,9 @@ COMMENT ON TABLE understanding_chunk_calls IS
 
 DO $$
 BEGIN
-    IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'ava_runner') THEN
-        GRANT INSERT ON understanding_chunk_calls TO ava_runner;
-        GRANT USAGE, SELECT ON SEQUENCE understanding_chunk_calls_id_seq TO ava_runner;
+    IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'meiva_runner') THEN
+        GRANT INSERT ON understanding_chunk_calls TO meiva_runner;
+        GRANT USAGE, SELECT ON SEQUENCE understanding_chunk_calls_id_seq TO meiva_runner;
     END IF;
 END $$;
 
@@ -2142,10 +2142,10 @@ COMMENT ON TABLE understanding_group_calls IS
 
 DO $$
 BEGIN
-    IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'ava_runner') THEN
-        GRANT SELECT, INSERT, UPDATE ON understanding_group_state TO ava_runner;
-        GRANT INSERT ON understanding_group_calls TO ava_runner;
-        GRANT USAGE, SELECT ON SEQUENCE understanding_group_calls_id_seq TO ava_runner;
+    IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'meiva_runner') THEN
+        GRANT SELECT, INSERT, UPDATE ON understanding_group_state TO meiva_runner;
+        GRANT INSERT ON understanding_group_calls TO meiva_runner;
+        GRANT USAGE, SELECT ON SEQUENCE understanding_group_calls_id_seq TO meiva_runner;
     END IF;
 END $$;
 
@@ -2195,9 +2195,9 @@ COMMENT ON TABLE understanding_builds IS
 
 DO $$
 BEGIN
-    IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'ava_runner') THEN
-        GRANT SELECT, UPDATE ON understanding_rebuilds TO ava_runner;
-        GRANT DELETE ON understanding_group_state TO ava_runner;
+    IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'meiva_runner') THEN
+        GRANT SELECT, UPDATE ON understanding_rebuilds TO meiva_runner;
+        GRANT DELETE ON understanding_group_state TO meiva_runner;
     END IF;
 END $$;
 
@@ -2262,11 +2262,11 @@ CREATE TRIGGER audit_events_no_truncate
 -- bootstrap applies this before install birth creates them.
 DO $$
 BEGIN
-    IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'ava_runner') THEN
-        GRANT SELECT, INSERT ON audit_events TO ava_runner;
+    IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'meiva_runner') THEN
+        GRANT SELECT, INSERT ON audit_events TO meiva_runner;
     END IF;
-    IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'ava_gateway') THEN
-        REVOKE UPDATE, DELETE ON audit_events FROM ava_gateway;
+    IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'meiva_gateway') THEN
+        REVOKE UPDATE, DELETE ON audit_events FROM meiva_gateway;
     END IF;
 END $$;
 
@@ -2378,12 +2378,12 @@ SELECT public.ensure_telemetry_event_partitions(3);
 -- role-existence gate).
 DO $$
 BEGIN
-    IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'ava_runner') THEN
-        GRANT SELECT, INSERT ON telemetry_events TO ava_runner;
-        GRANT EXECUTE ON FUNCTION public.ensure_telemetry_event_partitions(INT, INT) TO ava_runner;
+    IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'meiva_runner') THEN
+        GRANT SELECT, INSERT ON telemetry_events TO meiva_runner;
+        GRANT EXECUTE ON FUNCTION public.ensure_telemetry_event_partitions(INT, INT) TO meiva_runner;
     END IF;
-    IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'ava_gateway') THEN
-        REVOKE UPDATE, DELETE ON telemetry_events FROM ava_gateway;
+    IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'meiva_gateway') THEN
+        REVOKE UPDATE, DELETE ON telemetry_events FROM meiva_gateway;
     END IF;
 END $$;
 
@@ -2521,8 +2521,8 @@ CREATE TRIGGER agent_impersonations_terminal_notice BEFORE UPDATE ON agent_imper
 
 DO $$
 BEGIN
-    IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname='ava_runner') THEN
-        GRANT UPDATE (relay_generation,relay_identity,relay_degraded_reason,relay_degraded_at,terminal_notice_accepted_at,terminal_notice_attempt_id,terminal_notice_attempt_at,terminal_notice_attempts,terminal_notice_error,terminal_notice_unsupported_at) ON agent_impersonations TO ava_runner;
+    IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname='meiva_runner') THEN
+        GRANT UPDATE (relay_generation,relay_identity,relay_degraded_reason,relay_degraded_at,terminal_notice_accepted_at,terminal_notice_attempt_id,terminal_notice_attempt_at,terminal_notice_attempts,terminal_notice_error,terminal_notice_unsupported_at) ON agent_impersonations TO meiva_runner;
     END IF;
 END $$;
 
@@ -2832,7 +2832,7 @@ CREATE TABLE upload_delivery_copies (
     PRIMARY KEY (batch_id, storage_machine, unit_home)
 );
 COMMENT ON TABLE upload_delivery_batches IS 'Retained source acceptance, physical receiving quota and original inbound outcome; no TTL or mutable target FK.';
-COMMENT ON TABLE upload_delivery_copies IS 'Retained immutable copy intent and physical-root reservation; AVA_HOME is target identity, not quota partition.';
+COMMENT ON TABLE upload_delivery_copies IS 'Retained immutable copy intent and physical-root reservation; MEIVA_HOME is target identity, not quota partition.';
 
 INSERT INTO schema_migrations (name) VALUES ('20261007T225057_upload-delivery-recovery');
 -- Only new guarded drafts opt in; no guessed backfill of mutable birth history.
@@ -3062,8 +3062,8 @@ CREATE INDEX IF NOT EXISTS run_timeline_blocks_end_idx
     ON run_timeline_blocks (agent_id, version, end_ts);
 
 DO $$ BEGIN
-    IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'ava_runner') THEN
+    IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'meiva_runner') THEN
         GRANT SELECT, INSERT, DELETE ON run_timeline_segments,
-            run_timeline_message_facts, run_timeline_blocks TO ava_runner;
+            run_timeline_message_facts, run_timeline_blocks TO meiva_runner;
     END IF;
 END $$;

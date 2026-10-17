@@ -12,9 +12,9 @@ Deliberately does NOT use the `google-genai` SDK: importing it eagerly
 pulls an MCP + ASGI (starlette / uvicorn) + aiohttp stack into the
 process (~50 MB resident) for what is a single HTTPS POST. This module
 runs inside the always-on memory-indexer daemon, and the same import is
-lazily pulled into the gateway on the first `ava.memory.search`, so that
+lazily pulled into the gateway on the first `meiva.memory.search`, so that
 weight is paid for the life of both processes. `httpx` is already a core
-dependency. `google-genai` stays installed for `ava._understand` (media)
+dependency. `google-genai` stays installed for `meiva._understand` (media)
 and `langchain-google-genai` (LLM factory), but nothing on the
 indexer / gateway path imports it now.
 
@@ -22,7 +22,7 @@ Billing imports are also lazy: they pull LangChain and OpenTelemetry into the
 always-on indexer only after a successful provider call, never at module load.
 
 API key is read from `GEMINI_API_KEY` env — prod injects it via
-`~/.ava/.env`.
+`~/.meiva/.env`.
 
 No module-level httpx client: AsyncClient belongs to its event loop, and this
 module runs in the daemon, gateway and per-test loops. The sync path runs its
@@ -66,7 +66,7 @@ DIM = 3072
 # host / version / endpoint for an api-key client; this replicates that
 # wire call. `models/<id>` is the resource name the endpoint expects.
 ENDPOINT = f"https://generativelanguage.googleapis.com/v1beta/models/{MODEL_ID}:batchEmbedContents"
-# Per-request timeout is configurable (AVA_EMBED_TIMEOUT_SECONDS, task #698
+# Per-request timeout is configurable (MEIVA_EMBED_TIMEOUT_SECONDS, task #698
 # G8). The daemon derives its liveness ceiling from the full document-batch
 # retry budget below, including Retry-After and jitter, so legitimate retries
 # do not trip the healthcheck. The retry policies are module constants (R2-D) —
@@ -85,7 +85,7 @@ ENDPOINT = f"https://generativelanguage.googleapis.com/v1beta/models/{MODEL_ID}:
 # `QUERY_EMBED_POLICY` — search query embeds on the gateway. They run inside
 # the search endpoint's own deadline (memory_search_deadline_seconds, default
 # 15s), so the 4-attempt schedule could spend the whole budget retrying a 429
-# the caller (passive recall / an explicit ava.memory.search) would simply
+# the caller (passive recall / an explicit meiva.memory.search) would simply
 # watch expire — and the caller retries the *search*, not the embed. One
 # retry with a 1s backoff still rides out a transient blip, and the caller is
 # the one that decides how long a persistent outage is worth waiting for.
@@ -123,7 +123,7 @@ def _api_key(api_key_reader: Callable[[], str | None]) -> str:
     if value is None:
         raise EmbeddingAPIError(
             "GEMINI_API_KEY not set — add GEMINI_API_KEY=<key> to "
-            "`~/.ava/.env`; takes effect after restarting the service "
+            "`~/.meiva/.env`; takes effect after restarting the service "
             "session to reload env."
         )
     return value

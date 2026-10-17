@@ -4,7 +4,7 @@ the CLI reads/writes.
 Downshifted from `gateway/schemas/config.py` so both sides of the wire can name
 one type: the gateway registers these on `GET/PUT /api/config` (so they keep
 their OpenAPI schema names `ConfigFieldView` / `ConfigView` /
-`ConfigFieldWriteResult` / `ConfigWriteResult`), and `ava config` thin clients
+`ConfigFieldWriteResult` / `ConfigWriteResult`), and `meiva config` thin clients
 validate the response against them without importing up into `gateway`.
 """
 
@@ -53,7 +53,7 @@ class ConfigFieldView(BaseModel):
     # "agent" | "ops" | "gateway" | "all" | "schedule" | "" — which process
     # must restart after a change. "gateway" covers the gateway process plus
     # the gateway-profile daemons that consume the field (im_bridge /
-    # memory_indexer / memory_search / ...) — an `ava restart`
+    # memory_indexer / memory_search / ...) — an `meiva restart`
     # bounces all of them; "schedule" = the gateway-hosted schedule runner.
     restart_required: str
     writable: bool

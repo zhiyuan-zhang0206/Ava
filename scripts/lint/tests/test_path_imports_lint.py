@@ -16,7 +16,7 @@ from tests.path_scoped.structure_tests import (
     synthetic_decision_allowlists as synthetic_decision_allowlists,
 )
 
-_SKILL = "ava_builtins/skills/demo/reference/run.py"
+_SKILL = "meiva_builtins/skills/demo/reference/run.py"
 
 
 def _write(root: pathlib.Path, name: str, content: str) -> None:

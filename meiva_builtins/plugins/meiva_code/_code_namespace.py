@@ -1,0 +1,71 @@
+"""Your persistent logical working directory; starts at your workspace."""
+
+# Audience = agent. Dev-perspective implementation details (read_state /
+# LangGraph reducer / deepcopy isolation, etc.) live in the top-of-file
+# comment in plugins/meiva_code/plugin.py.
+from pathlib import Path
+
+from loguru import logger
+
+from base.packages.skills import tree
+
+from . import _state_access
+
+__all_for_meiva__ = ["get", "set"]
+
+
+def get() -> Path:
+    return Path(_state_access.read_state().cwd)
+
+
+def set(path: str | Path) -> None:
+    """Persistent across turns and restarts.
+
+    Relative paths in Meiva file and shell operations resolve against this
+    directory. Python's process working directory is unchanged.
+
+    Args:
+        path: relative paths resolve against the current logical directory;
+            `~/...` is expanded.
+    """
+    import stat as _stat
+
+    import meiva.skills as _meiva_skills
+    from base.packages.skills.project_roots import project_skill_roots
+
+    p = Path(path).expanduser()
+    # Single stat avoids the TOCTOU race between exists() → is_dir() syscalls.
+    p = (get() / p).resolve() if not p.is_absolute() else p.resolve()
+    try:
+        st = p.stat()
+    except FileNotFoundError as e:
+        raise FileNotFoundError(f"meiva.cwd.set: path does not exist: {p}") from e
+    if not _stat.S_ISDIR(st.st_mode):
+        raise NotADirectoryError(f"meiva.cwd.set: path is not a directory: {p}")
+    _state_access.update_state({"cwd": str(p)})
+
+    # Set a cwd-note for the after-exec hook to inject as a system note.
+    # Same-turn dedup: each call overwrites cwd_note; only the final
+    # value is injected.  Project skills (if any) go through the separate
+    # project_skills_note mechanism so they survive across compactions.
+    _state_access.update_state({"cwd_note": f"Working directory set to {p}"})
+    try:
+        loaded = _meiva_skills.skills_in(project_skill_roots(p))
+    except AttributeError:
+        # meiva.skills is disabled via MEIVA_SDK_DISABLE — project-local skill
+        # listing is unavailable; cwd change itself succeeds normally.
+        logger.debug("meiva.skills unavailable under MEIVA_SDK_DISABLE")
+    else:
+        if loaded:
+            lines: list[str] = []
+            for s in loaded:
+                ident = tree.identifier(s)
+                path_attr = tree.target(s)
+                desc = s["description"]
+                path_str = s["path"]
+                lines.append(f"  - {ident} (meiva.skills.{path_attr}) — {desc}")
+                lines.append(f"      {path_str}")
+            summary = f"Skills available in this repo ({len(loaded)}):\n" + "\n".join(lines)
+            _state_access.update_state({"project_skills_note": summary})
+        else:
+            _state_access.update_state({"project_skills_note": None})

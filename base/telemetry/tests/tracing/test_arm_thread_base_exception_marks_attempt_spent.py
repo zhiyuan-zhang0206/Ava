@@ -48,7 +48,7 @@ def test_arm_thread_base_exception_marks_attempt_spent(
     """The one-attempt contract holds for ANY arm-thread death: a
     BaseException escape (SystemExit/GeneratorExit from inside the SDK — not
     expected, but not impossible) must still set arm_failed, so a later
-    initialize_tracing(machine=machine_identity(), home=Path(".ava")) cannot re-spawn the arm thread past the dead
+    initialize_tracing(machine=machine_identity(), home=Path(".meiva")) cannot re-spawn the arm thread past the dead
     is_alive() guard (the QA #1060 corner: with `except Exception` only, a
     dead arm thread carrying no flag left one-attempt-per-process bypassable).
     """
@@ -165,8 +165,8 @@ def test_otlp_exporter_posts_protobuf(monkeypatch: pytest.MonkeyPatch, tmp_path:
     exporter = OtlpJsonHttpSpanExporter(endpoint="http://127.0.0.1:4318")
     provider = TracerProvider()
     provider.add_span_processor(SimpleSpanProcessor(exporter))
-    tracer = provider.get_tracer("ava.session")
-    with tracer.start_as_current_span("ava-agent-7") as root:
+    tracer = provider.get_tracer("meiva.session")
+    with tracer.start_as_current_span("meiva-agent-7") as root:
         root.set_attribute("session.id", "7")
         with tracer.start_as_current_span("child"):
             pass
@@ -255,7 +255,7 @@ def test_turn_span_exports_root_at_start_not_at_end(monkeypatch: pytest.MonkeyPa
 
     Two export-timing assertions:
     1. while the turn is still running (inside `turn_span`), the exporter has
-       ALREADY received the root span (carrying session.id + ava.turn);
+       ALREADY received the root span (carrying session.id + meiva.turn);
     2. exiting the turn does NOT export the root again — the span is ended
        once, at turn start (use_span(end_on_exit=False) detaches the context
        without a second end).
@@ -276,12 +276,12 @@ def test_turn_span_exports_root_at_start_not_at_end(monkeypatch: pytest.MonkeyPa
     previous = otel_trace.get_tracer_provider()
     otel_trace.set_tracer_provider(provider)
     try:
-        with turn_span(name="ava-agent-7", session_id="7", turn=3):
+        with turn_span(name="meiva-agent-7", session_id="7", turn=3):
             # Assertion 1: the root is exported BEFORE the turn ends.
             root = assert_turn_root_exported_at_start(spans_received(posts))
 
             # A child created inside the turn must parent under the ended root.
-            with otel_trace.get_tracer("ava.session").start_as_current_span("child"):
+            with otel_trace.get_tracer("meiva.session").start_as_current_span("child"):
                 pass
 
         # Assertion 2: exiting the turn does not re-export the root (and the
@@ -518,16 +518,16 @@ def test_turn_span_opens_root_with_session_id(monkeypatch: pytest.MonkeyPatch):
     tracer = FakeTracer(span)
     monkeypatch.setattr("opentelemetry.trace.get_tracer", lambda _name: tracer)  # pyright: ignore[reportUnknownArgumentType]
 
-    with turn_span(name="ava-agent-42", session_id="42", turn=3):
+    with turn_span(name="meiva-agent-42", session_id="42", turn=3):
         # The placeholder root is ended (exported) at turn START, while the
         # turn is still running (#1964) — the trace has its root even when
         # the process dies mid-turn.
         assert span.ended is True
 
-    assert tracer.opened == ["ava-agent-42"]
+    assert tracer.opened == ["meiva-agent-42"]
     assert span.attributes == {
         "session.id": "42",
-        "ava.turn": 3,
+        "meiva.turn": 3,
     }
 
 
@@ -595,7 +595,7 @@ def test_claim_idle_wait_span_never_ends_non_node_span(
     monkeypatch.setattr(config.settings.observability, "trace_enabled", True)
     tracing_mod._state["initialized"] = True
 
-    root_span = NodeFakeSpan("ava-agent-42")
+    root_span = NodeFakeSpan("meiva-agent-42")
     monkeypatch.setattr("opentelemetry.trace.get_current_span", lambda: root_span)
     tracer = FakeTracer(FakeSpan())
     monkeypatch.setattr("opentelemetry.trace.get_tracer", lambda _name: tracer)  # pyright: ignore[reportUnknownArgumentType]

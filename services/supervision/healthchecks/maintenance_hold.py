@@ -1,7 +1,7 @@
 """Read-only age check on this home's maintenance hold.
 
-A hold (`deploy-pause-owner.json`, taken by `ava stop`/`ava restart`, released by
-`ava start` after readiness) freezes every wake on its machine and never expires.
+A hold (`deploy-pause-owner.json`, taken by `meiva stop`/`meiva restart`, released by
+`meiva start` after readiness) freezes every wake on its machine and never expires.
 One left behind by a lost CLI session would otherwise go unnoticed. This
 observation reports a hold older than a configured age; it never releases,
 restarts or repairs anything.
@@ -17,13 +17,13 @@ from base.daemon.health import DaemonProbe
 from base.deploy.maintenance import pause_owner
 
 _RECOVERY = (
-    "run `ava start` on this machine: it brings the services up and releases the hold once "
+    "run `meiva start` on this machine: it brings the services up and releases the hold once "
     "they are ready (a stop or restart still in progress is expected to hold it)"
 )
 # No command clears a journal without a readable hold; see graceful-maintenance.md.
 _RECOVERY_UNREADABLE = (
-    "confirm no `ava stop` is in flight, remove `run/deploy-pause-owner.json` under the "
-    "home by hand, then run `ava start`"
+    "confirm no `meiva stop` is in flight, remove `run/deploy-pause-owner.json` under the "
+    "home by hand, then run `meiva start`"
 )
 
 

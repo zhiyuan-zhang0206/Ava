@@ -63,7 +63,7 @@ def test_root_keeper_method_requests_and_results(fake_helper) -> None:
             "stop_requested": True,
             "pid": 5150,
         },
-        "helper_shutdown": {"stopping": True, "pid": 4242, "run_dir": "/opt/ava/run"},
+        "helper_shutdown": {"stopping": True, "pid": 4242, "run_dir": "/opt/meiva/run"},
     }
 
     def handler(req: dict) -> dict:
@@ -72,12 +72,12 @@ def test_root_keeper_method_requests_and_results(fake_helper) -> None:
 
     path = fake_helper(handler)
     config: client.RootSeedConfig = {
-        "argv": ["/opt/ava/.venv/bin/python", "-m", "services.supervision.ava_root"],
-        "cwd": "/opt/ava",
-        "run_dir": "/opt/ava/run",
-        "stdout": "/opt/ava/logs/root.out.log",
-        "stderr": "/opt/ava/logs/root.err.log",
-        "env": {"AVA_TEST": "1"},
+        "argv": ["/opt/meiva/.venv/bin/python", "-m", "services.supervision.meiva_root"],
+        "cwd": "/opt/meiva",
+        "run_dir": "/opt/meiva/run",
+        "stdout": "/opt/meiva/logs/root.out.log",
+        "stderr": "/opt/meiva/logs/root.err.log",
+        "env": {"MEIVA_TEST": "1"},
     }
 
     seeded = PermissionsHelperClient(path).seed_root(config)  # pyright: ignore[reportUnknownArgumentType]
@@ -94,9 +94,9 @@ def test_root_keeper_method_requests_and_results(fake_helper) -> None:
     assert stopped["state"] == "stopping"
     assert stopped["stop_requested"] is True
     assert seen[2] == {"method": "root_stop"}
-    shutdown = PermissionsHelperClient(path).shutdown_helper(Path("/opt/ava/run"))  # pyright: ignore[reportUnknownArgumentType]
-    assert shutdown == {"stopping": True, "pid": 4242, "run_dir": "/opt/ava/run"}
-    assert seen[3] == {"method": "helper_shutdown", "run_dir": "/opt/ava/run"}
+    shutdown = PermissionsHelperClient(path).shutdown_helper(Path("/opt/meiva/run"))  # pyright: ignore[reportUnknownArgumentType]
+    assert shutdown == {"stopping": True, "pid": 4242, "run_dir": "/opt/meiva/run"}
+    assert seen[3] == {"method": "helper_shutdown", "run_dir": "/opt/meiva/run"}
 
 
 def test_file_method_mapping_and_list_result(fake_helper) -> None:
@@ -112,7 +112,7 @@ def test_file_method_mapping_and_list_result(fake_helper) -> None:
         }
 
     path = fake_helper(handler)
-    assert PermissionsHelperClient(path).list_dir("/Users/ava/Downloads") == entries  # pyright: ignore[reportUnknownArgumentType]
+    assert PermissionsHelperClient(path).list_dir("/Users/meiva/Downloads") == entries  # pyright: ignore[reportUnknownArgumentType]
     assert seen == ["file_list"]
 
 
@@ -129,7 +129,7 @@ def test_read_file_decodes_base64_content(fake_helper, content: bytes) -> None:
         }
 
     path = fake_helper(handler)
-    assert PermissionsHelperClient(path).read_file("/Users/ava/Downloads/example.bin") == content  # pyright: ignore[reportUnknownArgumentType]
+    assert PermissionsHelperClient(path).read_file("/Users/meiva/Downloads/example.bin") == content  # pyright: ignore[reportUnknownArgumentType]
     assert seen == ["file_read"]
 
 
@@ -140,8 +140,9 @@ def test_read_file_rejects_missing_or_malformed_content(
     def handler(req: dict) -> dict:
         return {"id": req["id"], "ok": True, "result": result}
 
+    path = fake_helper(handler)
     with pytest.raises(PermissionsHelperError, match="invalid file_read response"):
-        PermissionsHelperClient(fake_helper(handler)).read_file("/Users/ava/Downloads/example.bin")  # pyright: ignore[reportUnknownArgumentType]
+        PermissionsHelperClient(path).read_file("/Users/meiva/Downloads/example.bin")  # pyright: ignore[reportUnknownArgumentType]
 
 
 def test_file_operations_raise_server_errors(fake_helper) -> None:
@@ -153,13 +154,13 @@ def test_file_operations_raise_server_errors(fake_helper) -> None:
     with pytest.raises(PermissionsHelperError, match="outside whitelist"):
         PermissionsHelperClient(path).list_dir("/private/secret")  # pyright: ignore[reportUnknownArgumentType]
     with pytest.raises(PermissionsHelperError, match="file too large"):
-        PermissionsHelperClient(path).read_file("/Users/ava/Downloads/large.bin")  # pyright: ignore[reportUnknownArgumentType]
+        PermissionsHelperClient(path).read_file("/Users/meiva/Downloads/large.bin")  # pyright: ignore[reportUnknownArgumentType]
 
 
 def test_file_whitelist_boundary_reference(tmp_path: Path) -> None:
     downloads = tmp_path / "Downloads"
     desktop = tmp_path / "Desktop"
-    incoming = tmp_path / ".ava" / "incoming"
+    incoming = tmp_path / ".meiva" / "incoming"
     for root in (downloads, desktop, incoming):
         root.mkdir(parents=True)
 
@@ -293,7 +294,7 @@ def test_connect_retries_then_succeeds(monkeypatch: pytest.MonkeyPatch) -> None:
     # Server binds only after the first connect attempt fails -> exercises the
     # retry loop that exists for the daemon-startup race.
     monkeypatch.setattr(client, "CONNECT_DELAY_S", 0.1)
-    path = f"/tmp/avah-retry{os.getpid()}.sock"  # noqa: S108 — short path for AF_UNIX
+    path = f"/tmp/meivah-retry{os.getpid()}.sock"  # noqa: S108 — short path for AF_UNIX
     Path(path).unlink(missing_ok=True)
     holder: list[FakeHelper] = []
 
@@ -320,8 +321,8 @@ def test_label_is_per_cluster(monkeypatch: pytest.MonkeyPatch) -> None:
     from base.cluster import home_slug
     from services.desktop.permissions_helper import lifecycle
 
-    monkeypatch.setattr(paths, "ava_home", lambda: Path("/x/.ava-demo"))
-    assert lifecycle.label() == f"com.ava.permissions-helper.{home_slug(Path('/x/.ava-demo'))}"
+    monkeypatch.setattr(paths, "meiva_home", lambda: Path("/x/.meiva-demo"))
+    assert lifecycle.label() == f"com.meiva.permissions-helper.{home_slug(Path('/x/.meiva-demo'))}"
 
 
 def test_screen_capture_probe_reads_the_helpers_grant(fake_helper) -> None:
@@ -343,13 +344,13 @@ def test_screen_capture_probe_reports_no_grant(fake_helper) -> None:
     assert status.available is False
     # The fix is authorizing the helper, not restarting the cluster from a local
     # terminal -- the SSH/terminal story never applied to the helper's own grant.
-    assert "AvaPermissionsHelper" in status.diagnostic
+    assert "MeivaPermissionsHelper" in status.diagnostic
     assert "System Settings" in status.diagnostic
     assert "Terminal.app" not in status.diagnostic
 
 
 def test_screen_capture_probe_keeps_unreachable_distinct_from_denied() -> None:
-    status = PermissionsHelperClient("/tmp/ava-native-does-not-exist.sock").check_screen_capture(  # noqa: S108 — nonexistent by design
+    status = PermissionsHelperClient("/tmp/meiva-native-does-not-exist.sock").check_screen_capture(  # noqa: S108 — nonexistent by design
         settle_s=0.0
     )
     assert status.state is ScreenCaptureState.HELPER_UNREACHABLE
@@ -399,7 +400,7 @@ def test_accessibility_probe_reports_missing_grant(fake_helper) -> None:
 
 
 def test_accessibility_probe_keeps_unreachable_distinct_from_missing_grant() -> None:
-    status = PermissionsHelperClient("/tmp/ava-native-does-not-exist.sock").check_accessibility(  # noqa: S108 — nonexistent by design
+    status = PermissionsHelperClient("/tmp/meiva-native-does-not-exist.sock").check_accessibility(  # noqa: S108 — nonexistent by design
         settle_s=0.0
     )
     assert status.state is AccessibilityState.HELPER_UNREACHABLE
@@ -481,7 +482,7 @@ def test_read_dr_accepts_legacy_stderr_stream(
 
     from services.desktop.permissions_helper import lifecycle
 
-    app = tmp_path / "AvaPermissionsHelper.app"
+    app = tmp_path / "MeivaPermissionsHelper.app"
 
     def run(cmd, **kwargs):
         if list(cmd)[:3] == ["codesign", "-d", "-r-"]:  # pyright: ignore[reportUnknownArgumentType]
@@ -514,7 +515,7 @@ def test_current_stable_signed_bundle_is_not_resigned(
 
 
 def test_keychain_path_env_override(monkeypatch: pytest.MonkeyPatch) -> None:
-    """AVA_PERMISSIONS_HELPER_KEYCHAIN routes signing to a CI-owned keychain."""
+    """MEIVA_PERMISSIONS_HELPER_KEYCHAIN routes signing to a CI-owned keychain."""
     from services.desktop.permissions_helper import lifecycle
 
     monkeypatch.setattr(
@@ -548,7 +549,7 @@ def test_signing_cert_import_uses_supported_security_argv(
         "-k",
         str(keychain),
         "-P",
-        "ava",
+        "meiva",
         "-T",
         "/usr/bin/codesign",
         "-A",
@@ -647,7 +648,7 @@ def test_source_mtime_change_does_not_rebuild_identical_content(
     app = stage_bundle(monkeypatch, tmp_path, exe_present=True)
     recorded = fake_tools(monkeypatch, authority=lifecycle.CERT_CN)
     write_current_build_state(app, lifecycle.source_content_hash())
-    exe = app / "Contents" / "MacOS" / "AvaPermissionsHelper"
+    exe = app / "Contents" / "MacOS" / "MeivaPermissionsHelper"
     newer = exe.stat().st_mtime + 60
     os.utime(lifecycle.SOURCE, (newer, newer))
 

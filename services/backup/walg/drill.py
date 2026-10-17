@@ -1,7 +1,7 @@
 """The weekly recovery drill: prove the newest backup and the WAL behind it restore, and read.
 
 Run by the daily tick, before that day's backup, once a week (and by hand through
-`ava backup walg drill`). It restores what a lost host would need right now, the newest
+`meiva backup walg drill`). It restores what a lost host would need right now, the newest
 backup, with the same code as a real restore (`restore.py`), into a scratch directory,
 and checks three things:
 
@@ -194,7 +194,7 @@ def _restore_and_verify(
         f"drill: restoring {backup.name} on {base} to "
         f"{'LSN ' + format_lsn(reached) if reached is not None else 'the end of the archive'}"
     )
-    scratch = Path(tempfile.mkdtemp(prefix="ava-walg-drill-", dir=base))
+    scratch = Path(tempfile.mkdtemp(prefix="meiva-walg-drill-", dir=base))
     try:
         with restored_instance(
             scratch / "data",

@@ -8,8 +8,8 @@ A specific deployment's concrete machine roster, SSH access pattern, cloud-host
 access, gateway-host layout, and which local files hold which credentials are
 operator-specific and not generic — they belong in your own private deployment
 notes, not here. The placeholders to fill in: a gateway is reached at
-`http://<gateway-host>:8000`, secrets live in per-machine `~/.ava/.env` +
-`~/.ava/secrets/*.env`, and SSH keys are per dev machine.
+`http://<gateway-host>:8000`, secrets live in per-machine `~/.meiva/.env` +
+`~/.meiva/secrets/*.env`, and SSH keys are per dev machine.
 
 ## Tool caches
 
@@ -21,40 +21,40 @@ instead of letting it drop a cache dir at the repo root.
 ## Joining a runner
 
 Acquire the checkout's dependencies using the
-[deployment procedure](../../ava_builtins/skills/platform/ava-guide/deploy/SKILL.md). A split
+[deployment procedure](../../meiva_builtins/skills/platform/meiva-guide/deploy/SKILL.md). A split
 gateway must already be serving and have a cluster bearer. On the new host,
 join the private network, then run (the runner never needs the gateway's
 bearer: its capability bundle authenticates it):
 
 ```bash
-.venv/bin/ava init --serve-agent-runner --no-serve-gateway \
+.venv/bin/meiva init --serve-agent-runner --no-serve-gateway \
   --gateway-url http://<gateway-host>:8000 \
   --machine-name <new-name> --machine-host <this-host-addr> \
   --db-capability <bundle>
-.venv/bin/ava start
+.venv/bin/meiva start
 ```
 
-The bundle comes from `ava cluster db-authority issue-unit --machine <new-name>
---home <this unit's $AVA_HOME> --out <bundle>` on the gateway; export its
-printed transport key as `AVA_DB_CAPABILITY_KEY` without echoing it, and unset
+The bundle comes from `meiva cluster db-authority issue-unit --machine <new-name>
+--home <this unit's $MEIVA_HOME> --out <bundle>` on the gateway; export its
+printed transport key as `MEIVA_DB_CAPABILITY_KEY` without echoing it, and unset
 it afterward. `--ssl-cert-file PATH` supplies a trusted CA
-bundle when required. `ava init` installs the capability (and deletes the
-bundle) and durably records local identity; the first `ava start` registers this
+bundle when required. `meiva init` installs the capability (and deletes the
+bundle) and durably records local identity; the first `meiva start` registers this
 host and starts its selected root services.
 Every runner process fetches current connection facts at Settings construction.
-Use bare start thereafter; `ava init` refuses an initialized home. A later bundle
-(a fresh expiry, a rotated telemetry token) goes to `ava cluster db-authority install-unit
+Use bare start thereafter; `meiva init` refuses an initialized home. A later bundle
+(a fresh expiry, a rotated telemetry token) goes to `meiva cluster db-authority install-unit
 <bundle>` with the unit stopped.
 
 ## Development in a worktree
 
 A worktree is a checkout, not a deployment: it owns no cluster. Use its own real
 `.venv`, never a symlink to another checkout's environment. Development invokes
-`.venv/bin/ava` directly; the host's bare `ava` runs the cluster `$AVA_HOME` names.
+`.venv/bin/meiva` directly; the host's bare `meiva` runs the cluster `$MEIVA_HOME` names.
 Package acquisition and Git hooks are separate from starting a cluster.
 
 `scripts/setup-worktree.sh <task>` is the one command that makes a worktree. It
-fetches `origin/main`, adds `.worktrees/<task>` on branch `ava-<task>` (`--branch`
+fetches `origin/main`, adds `.worktrees/<task>` on branch `meiva-<task>` (`--branch`
 and `--base` override), builds the worktree's own real `.venv`, runs the locked
 install and `npm ci`, and verifies the shared git hooks and the editable-install
 guard (an inherited `VIRTUAL_ENV` is cleared) — without creating a cluster.
@@ -71,21 +71,21 @@ cd <printed-worktree-path>             # a script cannot change your directory
 For a manual dependency operation in an existing worktree, clear inherited
 `VIRTUAL_ENV` and run `scripts/host_ops/guard_editable_venv.py` first.
 
-**Which home a worktree reads.** With `AVA_HOME` unset the home is `~/.ava`; on a
+**Which home a worktree reads.** With `MEIVA_HOME` unset the home is `~/.meiva`; on a
 development machine that also runs production, that is the production cluster. A
 home that carries its own `<home>/source` checkout is operated only by that
 checkout's CLI: a worktree's CLI refuses every command against it, `status`
-included (bare `ava` and a lone `-h`/`--help` excepted), and names the CLI to run;
-read production with the host's bare `ava`.
+included (bare `meiva` and a lone `-h`/`--help` excepted), and names the CLI to run;
+read production with the host's bare `meiva`.
 
 **The convention: a development tool that imports application code runs in a home of
 its own.** Any script, test run or subagent that imports application code, run in a
-development checkout, sets a temporary `AVA_HOME` first, once, at the top of the process
+development checkout, sets a temporary `MEIVA_HOME` first, once, at the top of the process
 tree (or runs inside the Docker or Tart verification boundary). Left unset, the home is
-`~/.ava`, and on a host that runs production that is production:
+`~/.meiva`, and on a host that runs production that is production:
 
 ```bash
-export AVA_HOME="$(mktemp -d)" AVA_CONFIG_FETCH=skip   # a throwaway home: no .env, no gateway fetch
+export MEIVA_HOME="$(mktemp -d)" MEIVA_CONFIG_FETCH=skip   # a throwaway home: no .env, no gateway fetch
 ```
 
 Code enforces this in one place only, where the convention is sure to be broken by
@@ -106,7 +106,7 @@ it is not a production update mechanism.
   Postgres/Redis and isolated configuration. Never use a real cluster home for
   test imports or a production endpoint as a test fixture.
 - A DB/SDK script needs a home that has been started and explicitly named with
-  `AVA_HOME`. A throwaway home carries no `.env`: its `AVA_DB_URL` is the
+  `MEIVA_HOME`. A throwaway home carries no `.env`: its `MEIVA_DB_URL` is the
   placeholder URL, so a connection fails fast with `PlaceholderDbUrlError`.
   Imports, lint scripts and codegen hooks work there as they do in CI.
 - End-to-end agent/frontend behavior runs in CI's e2e job (a real gateway, agent
@@ -124,7 +124,7 @@ The committed `uv.lock` stays on canonical PyPI origins. A host mirror changes
 artifact transport only: offline `uv export --locked` validates freshness and
 exports exact requirements, hashes and markers; `uv pip install --no-deps
 --require-hashes` installs them into the real checkout venv; a separate isolated
-editable build points Ava at that same checkout. Exported requirements are
+editable build points Meiva at that same checkout. Exported requirements are
 short-lived scratch files, never a second maintained lock. A stale or
 noncanonical lock fails before the venv changes; mirror hash failures stop before
 the editable build. A failed install is not a transactional rollback of every

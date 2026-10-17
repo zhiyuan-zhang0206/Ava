@@ -40,7 +40,7 @@ from agent.messages import NoteTag, system_note_message
 from agent.state import AgentState
 from agent.tests.claim.claim_status_support import compact_tail
 from agent.tests.claim.claim_status_support import running_agent as running_agent
-from base.agents.context import AvaContext
+from base.agents.context import MeivaContext
 from base.agents.tests.units import spawn_agent
 from base.cluster.machine import MachineIdentity
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
@@ -98,8 +98,8 @@ async def test_claim_resurrect_kind_appends_marker_and_continues(
     lifecycle = msgs[0]
     assert isinstance(lifecycle, HumanMessage)
     assert "You have been resurrected by user" in lifecycle.content  # pyright: ignore[reportUnknownMemberType]
-    assert lifecycle.additional_kwargs.get("ava_msg_type") == "system_note"  # pyright: ignore[reportUnknownMemberType]
-    assert lifecycle.additional_kwargs.get("ava_note_tag") == "lifecycle_resurrect"  # pyright: ignore[reportUnknownMemberType]
+    assert lifecycle.additional_kwargs.get("meiva_msg_type") == "system_note"  # pyright: ignore[reportUnknownMemberType]
+    assert lifecycle.additional_kwargs.get("meiva_note_tag") == "lifecycle_resurrect"  # pyright: ignore[reportUnknownMemberType]
 
 
 async def test_claim_resurrect_batch_appends_only_latest_marker(
@@ -290,7 +290,7 @@ async def test_claim_fork_kind_appends_identity_marker_and_continues(
     insert_inbound_kind(db_conn, tid, "", "fork", source="agent:7")
     monkeypatch = pytest.MonkeyPatch()
 
-    def fork_notes(_extensions: ExtensionRegistry, _ctx: AvaContext) -> list[HumanMessage]:
+    def fork_notes(_extensions: ExtensionRegistry, _ctx: MeivaContext) -> list[HumanMessage]:
         return [system_note_message(content="Your Agent ID is N.", tag=NoteTag.AGENT_ID)]
 
     monkeypatch.setattr(context_notes, "fork_notes", fork_notes)
@@ -312,7 +312,7 @@ async def test_claim_fork_kind_appends_identity_marker_and_continues(
     # Shape: [RemoveMessage(__remove_all__), sys, inherited, marker, agent_id].
     assert len(msgs) == 5  # pyright: ignore[reportUnknownArgumentType]
     assert isinstance(msgs[0], RemoveMessage) and msgs[0].id == REMOVE_ALL_MESSAGES  # pyright: ignore[reportUnknownMemberType]
-    assert [m.additional_kwargs.get("ava_note_tag") for m in msgs[-2:]] == [  # pyright: ignore[reportUnknownMemberType]
+    assert [m.additional_kwargs.get("meiva_note_tag") for m in msgs[-2:]] == [  # pyright: ignore[reportUnknownMemberType]
         "lifecycle_fork",
         "agent_id",
     ]
@@ -324,8 +324,8 @@ async def test_claim_fork_kind_appends_identity_marker_and_continues(
     assert "forked from agent:7" in content
     assert f"id {tid}" in content
     assert "inherited from agent:7" in content
-    assert lifecycle.additional_kwargs.get("ava_msg_type") == "system_note"  # pyright: ignore[reportUnknownMemberType]
-    assert lifecycle.additional_kwargs.get("ava_note_tag") == "lifecycle_fork"  # pyright: ignore[reportUnknownMemberType]
+    assert lifecycle.additional_kwargs.get("meiva_msg_type") == "system_note"  # pyright: ignore[reportUnknownMemberType]
+    assert lifecycle.additional_kwargs.get("meiva_note_tag") == "lifecycle_fork"  # pyright: ignore[reportUnknownMemberType]
 
 
 async def test_claim_fork_strips_inherited_source_notes(
@@ -356,7 +356,7 @@ async def test_claim_fork_strips_inherited_source_notes(
         return HumanMessage(
             content=f"[system] {content}",
             id=id,
-            additional_kwargs={"ava_msg_type": "system_note", "ava_note_tag": tag.value},
+            additional_kwargs={"meiva_msg_type": "system_note", "meiva_note_tag": tag.value},
         )
 
     old_id = _tagged(NoteTag.AGENT_ID, "old agent id", "note-old-id")
@@ -366,7 +366,7 @@ async def test_claim_fork_strips_inherited_source_notes(
     inherited = [SystemMessage(content="sys"), old_id, old_mem, old_preload, cluster_index]
     monkeypatch = pytest.MonkeyPatch()
 
-    def fork_notes(_extensions: ExtensionRegistry, _ctx: AvaContext) -> list[HumanMessage]:
+    def fork_notes(_extensions: ExtensionRegistry, _ctx: MeivaContext) -> list[HumanMessage]:
         return [
             system_note_message(content="Your Agent ID is N.", tag=NoteTag.AGENT_ID),
             system_note_message(content="the new agent's memory", tag=NoteTag.AGENT_MEMORY),
@@ -396,7 +396,7 @@ async def test_claim_fork_strips_inherited_source_notes(
     # Grafted after the rebuild: fork marker + the new agent's own id + its
     # own per-agent memory.
     tail = [m for m in msgs if not isinstance(m, RemoveMessage)][-3:]
-    assert [m.additional_kwargs.get("ava_note_tag") for m in tail] == [  # pyright: ignore[reportUnknownMemberType]
+    assert [m.additional_kwargs.get("meiva_note_tag") for m in tail] == [  # pyright: ignore[reportUnknownMemberType]
         "lifecycle_fork",
         "agent_id",
         "agent_memory",

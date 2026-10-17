@@ -20,7 +20,7 @@ FACE_MODULE = "agent_runtime"
 def pkg_of(plugin_dir: Path) -> str:
     """The dotted package a plugin's modules load under (builtin vs external)."""
     repo_dir = str(paths.repo_plugins_dir())
-    return "ava_builtins.plugins" if repo_dir in str(plugin_dir.resolve()) else "plugins"
+    return "meiva_builtins.plugins" if repo_dir in str(plugin_dir.resolve()) else "plugins"
 
 
 def discovered_and_config(
@@ -32,7 +32,7 @@ def discovered_and_config(
     rm) must not block the load: each dangling name is reported through the one
     canonical reporter on each failed read via `plugins_cfg.report_dangling`
     and treated as disabled (the same contract the loader always had —
-    2026-08-28 ava_ledger incident).
+    2026-08-28 meiva_ledger incident).
     """
     discovered = plugins_cfg.discover_plugins()
     known = set(discovered)

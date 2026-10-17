@@ -56,7 +56,7 @@ def test_reply_routing_and_handoff_policy_survive_every_style(
     assert "when resuming unfinished human requests from a handoff" in prompt
     assert "further investigation should address a concrete remaining question" in prompt
     assert "rather than inventing additional ones" in prompt
-    assert "ava.ui.notify" not in user_reply_section(slices)
+    assert "meiva.ui.notify" not in user_reply_section(slices)
 
 
 @pytest.fixture(

@@ -28,7 +28,7 @@ _REPO_ROOT = Path(__file__).resolve().parents[3]
 if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
 
-DEFAULT_REPO = "zhiyuan-zhang0206/Ava"
+DEFAULT_REPO = "zhiyuan-zhang0206/Meiva"
 # Thirty days matches PR flow and lets the next sampler republish a day after
 # Prometheus's shorter retention horizon would otherwise have expired it.
 DEFAULT_WINDOW_DAYS = 30
@@ -56,7 +56,7 @@ _INSTANT_SKIP_SECONDS = 2  # zero-execution proof/watchdog wrapper signature.
 _SUPERSEDE_SECONDS = 300  # replacement run must follow the cancellation promptly.
 _TRUNK_MERGE_BRANCH = re.compile(r"^trunk-merge/pr-(\d+)(?:/|$)")
 _FAILED_CONCLUSIONS = frozenset({"failure", "timed_out", "startup_failure"})
-# Rerun-recovery/machinery wrappers: Ava's CI failed-job rerun and Monsora's
+# Rerun-recovery/machinery wrappers: Meiva's CI failed-job rerun and Monsora's
 # Runner shutdown rerun must remain visible as separately filterable noise.
 _WATCHDOG_WORKFLOW_NAMES = frozenset({"CI failed-job rerun", "Runner shutdown rerun"})
 
@@ -731,7 +731,7 @@ def _parse_args(argv: list[str] | None) -> argparse.Namespace:
     )
     parser.add_argument("--window-days", type=int, default=DEFAULT_WINDOW_DAYS)
     parser.add_argument(
-        "--state-dir", type=Path, default=None, help="override $AVA_HOME/state/ci-runs"
+        "--state-dir", type=Path, default=None, help="override $MEIVA_HOME/state/ci-runs"
     )
     parser.add_argument(
         "--dry-run", action="store_true", help="print JSON without writes or emission"
@@ -761,9 +761,9 @@ def main(argv: list[str] | None = None, *, producer: Callable[[], Any] | None = 
     now = datetime.now(UTC)
     days = complete_days(now, args.window_days, tz)
     if args.state_dir is None:
-        from base.paths import ava_home
+        from base.paths import meiva_home
 
-        state_dir = ava_home() / _STATE_DIR_RELATIVE
+        state_dir = meiva_home() / _STATE_DIR_RELATIVE
     else:
         state_dir = args.state_dir
     try:

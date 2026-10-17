@@ -1,6 +1,6 @@
 """Event contract registry — the single source of truth for event names.
 
-Current structure: base/events/docs/events.ava.okf.md.
+Current structure: base/events/docs/events.meiva.okf.md.
 
 ``EVENTS`` is one ``EventSpec`` per event name (the stream's
 ``event_name`` field, OTel LogRecord semantics): writers add one entry;

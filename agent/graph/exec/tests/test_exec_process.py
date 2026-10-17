@@ -37,7 +37,6 @@ from agent.graph.exec._process import (
 from agent.graph.exec._result import ExecCrashed
 from agent.graph.exec._stream import StreamingTextIO
 from agent.graph.exec._subprocess import collect_child
-from ava.tests.fixtures.pin_agent import exec_context
 from base.db import Database
 from base.native_process.ownership import OwnedProcess
 from base.native_process.process_control import SYSTEM_PROCESS_CONTROL
@@ -45,6 +44,7 @@ from base.native_process.tests.fake_process_control import FakeProcessControl, S
 from base.native_process.turn_identity import HostedServiceResources, HostedTurnResources
 from base.sessions.posixproc import process_group_has_live_members
 from base.sessions.pty.tests.process_groups import kill_group_or_prove_already_gone
+from meiva.tests.fixtures.pin_agent import exec_context
 
 _AGENT_ID = 424242
 

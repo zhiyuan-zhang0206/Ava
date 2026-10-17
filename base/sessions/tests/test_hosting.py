@@ -9,14 +9,14 @@ import pytest
 
 from base.native_process import pid_starttime_ticks
 from base.native_process.os_platform import is_linux
-from base.paths import ava_home, run_dir
+from base.paths import meiva_home, run_dir
 from base.sessions.hosting import hosting_supervised_session
 from base.sessions.record import SessionRecord
 
 
 def test_hosting_supervised_session_resolves_home_when_called(unit_home: Path) -> None:
-    name = "ava-test-hosting-current"
-    path = run_dir(ava_home()) / "sessions" / f"{name}.json"
+    name = "meiva-test-hosting-current"
+    path = run_dir(meiva_home()) / "sessions" / f"{name}.json"
     SessionRecord(
         pid=os.getpid(),
         create_time=psutil.Process().create_time(),
@@ -37,8 +37,8 @@ def test_hosting_supervised_session_uses_starttime_despite_wall_clock_drift(
 ) -> None:
     starttime = pid_starttime_ticks(os.getpid())
     assert starttime is not None
-    name = "ava-test-hosting-starttime"
-    path = run_dir(ava_home()) / "sessions" / f"{name}.json"
+    name = "meiva-test-hosting-starttime"
+    path = run_dir(meiva_home()) / "sessions" / f"{name}.json"
     SessionRecord(
         pid=os.getpid(),
         create_time=1.0,

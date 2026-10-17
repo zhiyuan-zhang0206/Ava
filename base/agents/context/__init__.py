@@ -1,8 +1,8 @@
 """Run-scoped dependency context — what one graph run is handed.
 
-The agent host builds an `AvaContext` for each turn task and passes it via
+The agent host builds an `MeivaContext` for each turn task and passes it via
 `graph.ainvoke(input, context=ctx)`. Graph nodes have the signature
-`(state, runtime: Runtime[AvaContext], config: RunnableConfig)` and read their
+`(state, runtime: Runtime[MeivaContext], config: RunnableConfig)` and read their
 dependencies as `runtime.context.X`:
 
 - **handles** the host built and owns: `llm`, `event_publisher`, `ops_pool`, the cluster
@@ -25,7 +25,7 @@ dependencies as `runtime.context.X`:
 
 The exec child holds the same type. The host puts `describe()` of the turn's context in the exec
 request envelope and the child builds its instance with `from_description()`, so agent code reads
-the identity the host's turn carries (`ava.context`). Only what is serializable and not secret
+the identity the host's turn carries (`meiva.context`). Only what is serializable and not secret
 crosses (identity, the gateway endpoint); a connection the child needs it builds itself, on first
 use, from its own settings and environment, and releases when the process ends.
 
@@ -52,7 +52,7 @@ from base.lm.catalog import ModelCatalog
 from base.native_process.runtime_incarnation import RuntimeIncarnation
 from base.native_process.turn_identity import HostedTurnResources
 
-__all__ = ["AvaContext", "agent_id_from_config"]
+__all__ = ["MeivaContext", "agent_id_from_config"]
 
 # The handle types are annotations only: the exec child builds this same type from its request
 # envelope, and its start must not import psycopg / redis / langchain for handles it never holds.
@@ -85,7 +85,7 @@ def agent_id_from_config(
 
 
 @dataclass(frozen=True)
-class AvaContext:
+class MeivaContext:
     """Run-scoped dependency bundle — see module docstring."""
 
     # ── handles (host-built; all Optional so the eval driver and tests can build a
@@ -129,13 +129,13 @@ class AvaContext:
     def require_machine(self) -> MachineIdentity:
         """Read this root's machine owner; partial contexts fail without a fallback."""
         if self.machine is None:
-            raise RuntimeError("this AvaContext carries no MachineIdentity (ctx.machine is None)")
+            raise RuntimeError("this MeivaContext carries no MachineIdentity (ctx.machine is None)")
         return self.machine
 
     def require_clock(self) -> Clock:
         """Read the process owner's current clock; a partial context fails at first use."""
         if self.clock_factory is None:
-            raise RuntimeError("this AvaContext carries no clock factory")
+            raise RuntimeError("this MeivaContext carries no clock factory")
         return self.clock_factory()
 
     bus: EventBus | None = None
@@ -169,7 +169,7 @@ class AvaContext:
     def require_original_incarnation(self, agent_id: int) -> RuntimeIncarnation:
         """Require an explicit original admission for an owned native operation."""
         if self.original_incarnation is None:
-            raise RuntimeError("this AvaContext carries no original RuntimeIncarnation")
+            raise RuntimeError("this MeivaContext carries no original RuntimeIncarnation")
         return self.original_incarnation.require_agent(agent_id)
 
     clients: ClientSet = field(default_factory=ClientSet)
@@ -200,7 +200,7 @@ class AvaContext:
     def require_identity(self) -> AgentIdentity:
         """The identity of this run; a context built without one fails here."""
         if self.identity is None:
-            raise RuntimeError("this AvaContext carries no AgentIdentity (ctx.identity is None)")
+            raise RuntimeError("this MeivaContext carries no AgentIdentity (ctx.identity is None)")
         return self.identity
 
     def describe(self) -> dict[str, Any]:
@@ -244,29 +244,29 @@ class AvaContext:
     def require_db(self) -> Database:
         """The cluster database handle; a context built without one fails here."""
         if self.db is None:
-            raise RuntimeError("this AvaContext carries no Database (ctx.db is None)")
+            raise RuntimeError("this MeivaContext carries no Database (ctx.db is None)")
         return self.db
 
     def require_bus(self) -> EventBus:
         """The cluster event bus handle; a context built without one fails here."""
         if self.bus is None:
-            raise RuntimeError("this AvaContext carries no EventBus (ctx.bus is None)")
+            raise RuntimeError("this MeivaContext carries no EventBus (ctx.bus is None)")
         return self.bus
 
     def require_agent(self) -> AgentSlices:
         """The agent's slices; a graph run built without them fails here, not on first read."""
         if self.agent is None:
-            raise RuntimeError("this AvaContext carries no AgentSlices (ctx.agent is None)")
+            raise RuntimeError("this MeivaContext carries no AgentSlices (ctx.agent is None)")
         return self.agent
 
     def require_commands(self) -> CommandCatalog:
         """The composer command catalog; a claim run built without one fails explicitly."""
         if self.commands is None:
-            raise RuntimeError("this AvaContext carries no CommandCatalog (ctx.commands is None)")
+            raise RuntimeError("this MeivaContext carries no CommandCatalog (ctx.commands is None)")
         return self.commands
 
     def require_catalog(self) -> ModelCatalog:
         """The process-owned provider catalog; a run without one fails explicitly."""
         if self.catalog is None:
-            raise RuntimeError("this AvaContext carries no ModelCatalog (ctx.catalog is None)")
+            raise RuntimeError("this MeivaContext carries no ModelCatalog (ctx.catalog is None)")
         return self.catalog

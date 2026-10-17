@@ -25,17 +25,17 @@ from base.host.net.url_secret import (
 
 def self_machine_host() -> str:
     """This host's reachable address, mirroring `MachineIdentity.host`
-    (env `AVA_MACHINE_HOST` > `localhost`).
+    (env `MEIVA_MACHINE_HOST` > `localhost`).
     Duplicated at this leaf because base.cluster.machine imports settings — a config
     sub-model cannot import it back."""
-    return os.environ.get("AVA_MACHINE_HOST", "").strip() or "localhost"
+    return os.environ.get("MEIVA_MACHINE_HOST", "").strip() or "localhost"
 
 
 # A runner-class login: a local plane's write-generation runner login
-# (`ava_g0_runner`, base.host.db_authority.model.GENERATION_NAMES) or a
-# remote-managed plane's provider-provisioned `ava_runner`. Duplicated at this
+# (`meiva_g0_runner`, base.host.db_authority.model.GENERATION_NAMES) or a
+# remote-managed plane's provider-provisioned `meiva_runner`. Duplicated at this
 # leaf because this module runs DURING the Settings build.
-_RUNNER_LOGIN = re.compile(r"ava_runner|ava_g(?:0|[1-9][0-9]*)_runner")
+_RUNNER_LOGIN = re.compile(r"meiva_runner|meiva_g(?:0|[1-9][0-9]*)_runner")
 
 
 def _is_runner_db_url(url: str) -> bool:
@@ -84,11 +84,11 @@ def sslmode_for_url(url: str, configured: str) -> str | None:
     None means "leave TLS to the URL and libpq": the URL already names an
     sslmode query parameter (the URL is the switch — a SaaS connection string
     carries its own `sslmode=require` / `verify-full` and must win), or
-    `configured` (AVA_DB_SSLMODE) is empty — libpq's own default, 'prefer',
+    `configured` (MEIVA_DB_SSLMODE) is empty — libpq's own default, 'prefer',
     applies, so a local loopback dial against a non-TLS PgBouncer/Postgres
     stays plaintext exactly as today.
 
-    A configured AVA_DB_SSLMODE is injected only when the URL is silent, so
+    A configured MEIVA_DB_SSLMODE is injected only when the URL is silent, so
     the config field is a fallback default, never an override. psycopg merges
     kwargs over the URL's conninfo params, so injecting here when the URL
     already names a mode would silently downgrade a stricter URL mode.
@@ -104,7 +104,7 @@ def resolved_pool_size(
     min_size: int | None, max_size: int | None, default_min: int, default_max: int
 ) -> tuple[int, int]:
     """Resolve explicit pool sizes against the config defaults
-    (AVA_DB_POOL_MIN_SIZE / AVA_DB_POOL_MAX_SIZE): an explicit caller value
+    (MEIVA_DB_POOL_MIN_SIZE / MEIVA_DB_POOL_MAX_SIZE): an explicit caller value
     wins, None falls back to the defaults. A remote/SaaS data plane tunes its
     pool footprint from config without code changes (Task #1752)."""
     return (
@@ -143,7 +143,7 @@ def project_service_db_url(
     """
     if profile != "agent" or not cluster_secret:
         return raw
-    if home.expanduser().resolve() != (Path.home() / ".ava").resolve():
+    if home.expanduser().resolve() != (Path.home() / ".meiva").resolve():
         return raw
     try:
         local_owner = (
@@ -166,11 +166,11 @@ def project_service_db_url(
 
 class DataPlaneSettings(EnvSettings):
     db_url: str = Field(
-        alias="AVA_DB_URL",
+        alias="MEIVA_DB_URL",
         repr=False,  # carries the write generation's login password as userinfo
         description="The cluster's ONE database access URL, dialed as-is by every "
         "process. Its port is chosen at URL generation (install / converge) by "
-        "AVA_PGBOUNCER_ENABLED: the PgBouncer listener port when pooling is on "
+        "MEIVA_PGBOUNCER_ENABLED: the PgBouncer listener port when pooling is on "
         "(the default), the direct Postgres port when off — so a normal process "
         "never needs to know the pooler exists. The admin plane (migrations / "
         "pg_dump / provisioning) derives the direct Postgres URL from the "
@@ -184,7 +184,7 @@ class DataPlaneSettings(EnvSettings):
     )
 
     redis_url: str = Field(
-        alias="AVA_REDIS_URL",
+        alias="MEIVA_REDIS_URL",
         repr=False,
         description="Redis connection URL. Carries the runtime ACL user's password "
         "as userinfo, so it is sensitive.",
@@ -198,7 +198,7 @@ class DataPlaneSettings(EnvSettings):
 
     redis_bin_dir: str = Field(
         default="",
-        alias="AVA_REDIS_BIN_DIR",
+        alias="MEIVA_REDIS_BIN_DIR",
         description="Absolute directory containing redis-server and redis-cli for this "
         "unit. Empty keeps the platform default. Read from this home's .env, never "
         "an inherited override. Both tools must be executable; takes effect on the "
@@ -223,7 +223,7 @@ class DataPlaneSettings(EnvSettings):
 
     pg_throwaway_base: str = Field(
         default="",
-        alias="AVA_PG_THROWAWAY_BASE",
+        alias="MEIVA_PG_THROWAWAY_BASE",
         description="Absolute directory that throwaway Postgres clusters (test fixtures, "
         "the migration smoke, the restore drill's scratch restore) are created under. "
         "Empty keeps the platform default — /dev/shm on Linux, the OS temp dir "
@@ -250,14 +250,14 @@ class DataPlaneSettings(EnvSettings):
 
     pgbouncer_enabled: bool = Field(
         default=True,
-        alias="AVA_PGBOUNCER_ENABLED",
+        alias="MEIVA_PGBOUNCER_ENABLED",
         description="Whether this cluster's PgBouncer transaction pooler fronts "
-        "Postgres. Decides the port AVA_DB_URL carries: the pooler listener when "
+        "Postgres. Decides the port MEIVA_DB_URL carries: the pooler listener when "
         "on (the default — the density path past ~50 agents, where raising "
         "Postgres max_connections hits per-connection memory overhead), the "
         "direct Postgres port when off. On by default; set false as a kill-switch "
-        "(+ restart): converge rewrites AVA_DB_URL to the direct port and the "
-        "pooler never starts. Normal processes see only AVA_DB_URL either way. "
+        "(+ restart): converge rewrites MEIVA_DB_URL to the direct port and the "
+        "pooler never starts. Normal processes see only MEIVA_DB_URL either way. "
         "The admin plane (migrations / pg_dump / provisioning) always bypasses "
         "the pooler, regardless of this toggle.",
         json_schema_extra={
@@ -271,13 +271,13 @@ class DataPlaneSettings(EnvSettings):
 
     data_plane_host: str = Field(
         default="",
-        alias="AVA_DATA_PLANE_HOST",
+        alias="MEIVA_DATA_PLANE_HOST",
         description=(
             "Host the per-cluster data-plane URLs are DERIVED with (install "
             "birth / registry-record carry). Empty = loopback (127.0.0.1) — the "
             "single-box posture every cluster uses today. Set it to a reachable "
             "address when the data plane is hosted off-box (external-migration "
-            "step of Task #1752): the born AVA_DB_URL / AVA_REDIS_URL then carry "
+            "step of Task #1752): the born MEIVA_DB_URL / MEIVA_REDIS_URL then carry "
             "that host, and the self-dial loopback rewrite (`_loopback_if_self`) "
             "passes a foreign host through untouched. The URLs, not this knob, "
             "are what every process dials — this field only decides the host "
@@ -294,8 +294,8 @@ class DataPlaneSettings(EnvSettings):
     )
 
     events_channel: str = Field(
-        default="ava:events",
-        alias="AVA_EVENTS_CHANNEL",
+        default="meiva:events",
+        alias="MEIVA_EVENTS_CHANNEL",
         description="Redis pub/sub channel name for cluster events.",
         json_schema_extra={
             "restart_required": "",
@@ -307,7 +307,7 @@ class DataPlaneSettings(EnvSettings):
 
     cluster_secret: str = Field(
         default="",
-        alias="AVA_CLUSTER_SECRET",
+        alias="MEIVA_CLUSTER_SECRET",
         repr=False,
         description=(
             "The gateway's human/control-plane bearer (gateway API, frontend login). "
@@ -315,8 +315,8 @@ class DataPlaneSettings(EnvSettings):
             "generation's API token (an agent or runner process without one fails "
             "instead of presenting this secret), and remote units never receive or "
             "hold this secret (bootstrap does not serve it). Every gateway home has one "
-            "(`ava init` mints it) and the gateway refuses to start without it; the "
-            "network reach of the API, /ops and the data plane follows AVA_MACHINE_HOST "
+            "(`meiva init` mints it) and the gateway refuses to start without it; the "
+            "network reach of the API, /ops and the data plane follows MEIVA_MACHINE_HOST "
             "instead (loopback alone by default). The internal data plane authenticates "
             "whatever the bearer: Postgres/PgBouncer admit only SCRAM write-generation "
             "logins delivered by the launcher, and Redis requires its generated "
@@ -335,7 +335,7 @@ class DataPlaneSettings(EnvSettings):
 
     redis_admin_password: str = Field(
         default="",
-        alias="AVA_REDIS_ADMIN_PASSWORD",
+        alias="MEIVA_REDIS_ADMIN_PASSWORD",
         repr=False,
         description=(
             "Password for Redis's default administrative user and requirepass. "
@@ -354,7 +354,7 @@ class DataPlaneSettings(EnvSettings):
 
     db_sslmode: str = Field(
         default="",
-        alias="AVA_DB_SSLMODE",
+        alias="MEIVA_DB_SSLMODE",
         description=(
             "libpq sslmode for every Postgres dial through the sanctioned entry "
             "points (base.db.connect / pool). Empty (the default) leaves TLS to "
@@ -377,7 +377,7 @@ class DataPlaneSettings(EnvSettings):
 
     db_pool_min_size: int = Field(
         default=1,
-        alias="AVA_DB_POOL_MIN_SIZE",
+        alias="MEIVA_DB_POOL_MIN_SIZE",
         description=(
             "Default min_size for base.db.pool() when a caller does not pass an "
             "explicit size. A remote/SaaS data plane with tight connection limits "
@@ -394,10 +394,10 @@ class DataPlaneSettings(EnvSettings):
 
     db_pool_max_size: int = Field(
         default=2,
-        alias="AVA_DB_POOL_MAX_SIZE",
+        alias="MEIVA_DB_POOL_MAX_SIZE",
         description=(
             "Default max_size for base.db.pool() when a caller does not pass an "
-            "explicit size. See AVA_DB_POOL_MIN_SIZE."
+            "explicit size. See MEIVA_DB_POOL_MIN_SIZE."
         ),
         json_schema_extra={
             "restart_required": "all",
@@ -409,7 +409,7 @@ class DataPlaneSettings(EnvSettings):
 
     transport_encryption: str = Field(
         default="",
-        alias="AVA_TRANSPORT_ENCRYPTION",
+        alias="MEIVA_TRANSPORT_ENCRYPTION",
         description=(
             "Declared transport-encryption mode for this cluster's network surface: "
             "tls (TLS terminates in front of the gateway and ops servers), mtls "
@@ -427,7 +427,7 @@ class DataPlaneSettings(EnvSettings):
 
     trusted_cidrs: str = Field(
         default="",
-        alias="AVA_TRUSTED_CIDRS",
+        alias="MEIVA_TRUSTED_CIDRS",
         description=(
             "Comma-separated CIDR ranges, beyond loopback (always trusted), allowed "
             "to reach the data plane (Postgres / Redis). Empty = loopback only. Set "
@@ -456,7 +456,7 @@ class DataPlaneSettings(EnvSettings):
         allowed = set("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789._~-")
         if v and not set(v) <= allowed:
             raise ValueError(
-                "AVA_CLUSTER_SECRET must be a URL-safe token (letters, digits, and "
+                "MEIVA_CLUSTER_SECRET must be a URL-safe token (letters, digits, and "
                 "'._~-') — it is used as a control-plane bearer"
             )
         return v
@@ -464,7 +464,7 @@ class DataPlaneSettings(EnvSettings):
     @model_validator(mode="after")
     def _dial_self_host_via_loopback(self) -> DataPlaneSettings:
         """Self-dial goes loopback: when a data-plane URL's host IS this machine's
-        own reachable address (`AVA_MACHINE_HOST`), the dial host is rewritten to
+        own reachable address (`MEIVA_MACHINE_HOST`), the dial host is rewritten to
         `127.0.0.1`. Isomorphic with the uniform network posture — a single box is
         just the case where the reachable address is loopback — so dialing yourself
         never leaves the box: it must not route through the NIC or a VPN's network
@@ -478,7 +478,7 @@ class DataPlaneSettings(EnvSettings):
         Only the in-memory dial value changes: the `.env` file, the verbatim
         bootstrap payload (`bootstrap_config_values` serves raw `.env` text), and
         the machine-registration address are all upstream of this rewrite.
-        `AVA_DB_URL` is the one dial URL (pooler port when enabled), so the
+        `MEIVA_DB_URL` is the one dial URL (pooler port when enabled), so the
         rewrite covers both pg and redis here.
 
         After an external data-plane migration (Task #1752) the URLs name a
@@ -517,16 +517,16 @@ class DataPlaneSettings(EnvSettings):
             and is_loopback_host(urlsplit(self.db_url).hostname or "")
         )
         home = unit_home().expanduser().resolve()
-        on_default_home = home == (Path.home() / ".ava").resolve()
-        # AVA_PROCESS_PROFILE is a launcher-only process marker, not a Settings
+        on_default_home = home == (Path.home() / ".meiva").resolve()
+        # MEIVA_PROCESS_PROFILE is a launcher-only process marker, not a Settings
         # field. It must remain an environment read so agent startup can preserve
         # its injected database projection.
         agent_profile_on_default_home = (
-            os.environ.get("AVA_PROCESS_PROFILE") == "agent" and on_default_home
+            os.environ.get("MEIVA_PROCESS_PROFILE") == "agent" and on_default_home
         )
         if agent_profile_on_default_home and self.cluster_secret and local_owner_url:
             raise AgentProfileOwnerDbUrlRefusedError(
-                "agent-profile processes must receive a runner-class AVA_DB_URL; "
+                "agent-profile processes must receive a runner-class MEIVA_DB_URL; "
                 "refusing a local non-runner URL at the default home"
             )
         return self

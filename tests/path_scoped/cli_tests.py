@@ -18,7 +18,7 @@ from base.cluster.machine import MachineIdentity
 from base.cluster.machine.boot import machine_from_boot
 from base.config import ConfigBoot
 from base.deploy.lifecycle import service_selection as ds
-from base.paths import ava_home
+from base.paths import meiva_home
 from base.sessions.pty.tests.pty_reaper import pty_reaper as pty_reaper
 from base.telemetry import EventPipeline, process_logging
 from cli.commands.tests.health_port_guard import guard_health_port_gate as guard_health_port_gate
@@ -60,7 +60,7 @@ def operator_pipeline(
 ) -> Generator[OperatorEventPipeline]:
     """Borrow one lazy writer for the same command's work and reporter inputs."""
     producer = operator_event_pipeline(
-        operator_database, machine=command_runtime.machine, home=ava_home()
+        operator_database, machine=command_runtime.machine, home=meiva_home()
     )
     try:
         yield producer
@@ -85,7 +85,7 @@ def as_machine(
     def _enter(home: pathlib.Path) -> Generator[MachineIdentity]:
         home.mkdir(parents=True, exist_ok=True)
         with monkeypatch.context() as m:
-            m.setenv("AVA_HOME", str(home))
+            m.setenv("MEIVA_HOME", str(home))
             config = ConfigBoot()
             config.read_process_environment()
             machine = machine_from_boot(config)
@@ -102,8 +102,8 @@ def _isolate_disabled_services_marker(
     """Every CLI test's durable `--disable-service` marker lives in a per-test tmp
     file, never in the worker's shared session home.
 
-    An operator `ava start --disable-service X` persists X to
-    `$AVA_HOME/disabled_services` (`persist_services=True` — the real, intended
+    An operator `meiva start --disable-service X` persists X to
+    `$MEIVA_HOME/disabled_services` (`persist_services=True` — the real, intended
     behavior the start tests exercise). The suite's session home is shared by
     every test in a worker, so an un-isolated marker outlives the test that wrote
     it: a `cmd_start(disabled_services=("restarter",))` left "restarter durably
@@ -128,7 +128,7 @@ def _isolate_local_pause_journal(tmp_path: pathlib.Path, monkeypatch: pytest.Mon
 def cli_log_sinks(monkeypatch: pytest.MonkeyPatch) -> list[str]:
     """In-process dispatch opens no real loguru sinks; the names asked for are recorded.
 
-    `ava start`, `restart` and `lgtm on|off` open the
+    `meiva start`, `restart` and `lgtm on|off` open the
     service sink set (`cli.startup_support.init_cli_logging`). A real one here would
     outlive its test: a stderr sink bound to that test's captured stream, a
     file sink in the session home and the process-wide init guard latched.

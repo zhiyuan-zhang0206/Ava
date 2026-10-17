@@ -127,8 +127,8 @@ def test_gateway_first_load_image_does_not_follow_a_checkout_move(tmp_path: Path
         )
         assert result.returncode == 0, result.stderr
     env = dict(os.environ)
-    env["AVA_HOME"] = str(tmp_path / "home")
-    env["AVA_CONFIG_FETCH"] = "skip"
+    env["MEIVA_HOME"] = str(tmp_path / "home")
+    env["MEIVA_CONFIG_FETCH"] = "skip"
     result = proc.run_bounded(
         [
             sys.executable,
@@ -190,9 +190,9 @@ def test_create_app_from_environment_assembles_gateway_config(
     config_authority: ConfigAuthority,
 ) -> None:
     config_authority.env_path.write_text(
-        "AVA_MACHINE_SERVE_GATEWAY=true\n"
-        f"AVA_DB_URL={config_authority.service_field_value('db_url')}\n"
-        f"AVA_REDIS_URL={config_authority.service_field_value('redis_url')}\n",
+        "MEIVA_MACHINE_SERVE_GATEWAY=true\n"
+        f"MEIVA_DB_URL={config_authority.service_field_value('db_url')}\n"
+        f"MEIVA_REDIS_URL={config_authority.service_field_value('redis_url')}\n",
         encoding="utf-8",
     )
     saved_env = dict(os.environ)

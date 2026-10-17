@@ -108,7 +108,7 @@ def test_register_page_url_uses_gateway_url_var_not_request_host(
     never from the request's own Host.
 
     The SDK dials the gateway at its local loopback URL on a single box
-    (AVA_GATEWAY_URL=localhost), so absolutizing against the request Host
+    (MEIVA_GATEWAY_URL=localhost), so absolutizing against the request Host
     produced `http://localhost:8000/...` links that are unreachable from the
     user's other devices. Whatever address the caller dialed, the URL is the
     configured Gateway URL — the same for every client.

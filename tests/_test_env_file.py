@@ -5,9 +5,9 @@ from pathlib import Path
 
 
 def _neutralize_lgtm_host_env() -> None:
-    for key in [key for key in os.environ if key.startswith("AVA_LGTM_")]:
+    for key in [key for key in os.environ if key.startswith("MEIVA_LGTM_")]:
         os.environ.pop(key)
-    assert not any(key.startswith("AVA_LGTM_") for key in os.environ)
+    assert not any(key.startswith("MEIVA_LGTM_") for key in os.environ)
 
 
 _neutralize_lgtm_host_env()

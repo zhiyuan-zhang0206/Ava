@@ -182,7 +182,7 @@ def unreadable_migration_files() -> list[tuple[str, str]]:
     vets a target's migration NAMES before the update stops anything; this vets
     that the files the applier will actually open are readable on disk — a mode
     the checkout carried, a scrubber, a disk error. The applier runs inside
-    `ava start`, after the stop on the self-update leg, so an unreadable file
+    `meiva start`, after the stop on the self-update leg, so an unreadable file
     found there costs the host its services.
 
     Returns `(name, error)` per unreadable file, in name order; empty when all

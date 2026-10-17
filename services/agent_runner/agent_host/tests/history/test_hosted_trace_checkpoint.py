@@ -18,7 +18,7 @@ from agent.impersonation_handoff import flush_checkpoint
 from agent.startup import wrap_saver_writes_with_nstep_interval
 from agent.state import BaseAgentState
 from agent.tests.claim.test_inbound_ownership import admit_owner, agent_row
-from base.agents.context import AvaContext
+from base.agents.context import MeivaContext
 from base.agents.history.checkpoint import load_checkpoint_messages_by_trace
 from base.cluster.machine import MachineIdentity
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
@@ -67,7 +67,7 @@ async def test_host_trace_reads_final_messages_after_nstep_flush(
                 "turn_idle": True,
             }
 
-        builder = StateGraph(BaseAgentState, context_schema=AvaContext)
+        builder = StateGraph(BaseAgentState, context_schema=MeivaContext)
         builder.add_node("finish", finish)  # pyright: ignore[reportUnknownMemberType]
         builder.add_edge(START, "finish")
         builder.add_edge("finish", END)
@@ -94,7 +94,7 @@ async def test_host_trace_reads_final_messages_after_nstep_flush(
                 await host._invoke_until_done(
                     agent_id,
                     replace(
-                        AvaContext(
+                        MeivaContext(
                             ops_pool=aops_pool,
                             agent=AgentSlices.resolve(
                                 default_reader=configured_policy().default_reader

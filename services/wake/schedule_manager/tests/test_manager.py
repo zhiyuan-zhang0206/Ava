@@ -70,7 +70,7 @@ def fake_session(
     def _fake_new_session(
         _self: object, name: str, cmd: str, cwd: object, *, env: dict[str, object]
     ) -> bool:
-        sid = int(str(env["AVA_SCHEDULE_ID"]))
+        sid = int(str(env["MEIVA_SCHEDULE_ID"]))
         launched.append(sid)
         backend.launch_envs.append(dict(env))
         backend.live.append(session_name(f"schedule-{sid}"))
@@ -283,8 +283,8 @@ def test_launch_env_carries_cluster_timezone(
 
     assert launched == [sid]
     env = backend.launch_envs[0]
-    assert env["AVA_TIMEZONE"] == settings.general.timezone
-    assert env["AVA_SCHEDULE_ID"] == str(sid)
+    assert env["MEIVA_TIMEZONE"] == settings.general.timezone
+    assert env["MEIVA_SCHEDULE_ID"] == str(sid)
 
 
 def test_adopts_live_session_without_relaunch(

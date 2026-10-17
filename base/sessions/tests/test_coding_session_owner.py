@@ -23,7 +23,7 @@ WRITER = AtomicWriter(SYSTEM_FS)
 
 @pytest.fixture(autouse=True)
 def _isolated_home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("AVA_HOME", str(tmp_path / "home"))
+    monkeypatch.setenv("MEIVA_HOME", str(tmp_path / "home"))
 
 
 def _key(tmp_path: Path, workspace: str = "workspace") -> owner.CodingSessionKey:
@@ -253,7 +253,7 @@ def test_takeover_never_attaches_a_supervisor(tmp_path: Path) -> None:
             key,
             _generation(record),
             session_id=99,
-            session_name="ava-agent-41-shell-99-ignored",
+            session_name="meiva-agent-41-shell-99-ignored",
             writer=WRITER,
         )
 
@@ -271,7 +271,7 @@ def test_supervised_active_record_still_requires_its_supervisor(tmp_path: Path) 
 def test_takeover_record_with_a_supervisor_fails_closed(tmp_path: Path) -> None:
     key = _key(tmp_path)
     active = _publish(_launch(key, agent_id=41, takeover=True), 3, supervised=False)
-    _rewrite(active, supervisor_session_id=9, supervisor_session_name="ava-agent-41-shell-9-x")
+    _rewrite(active, supervisor_session_id=9, supervisor_session_name="meiva-agent-41-shell-9-x")
 
     invalid = owner.read(key, _generation(active))
     assert invalid.status == "invalid"
@@ -423,11 +423,11 @@ def test_misdirected_full_handle_fails_closed_and_is_never_stopped(tmp_path: Pat
     key = _key(tmp_path)
     active = _publish(_launch(key, agent_id=41), 3)
     assert active.session_name is not None
-    _rewrite(active, session_name="ava-gateway")
+    _rewrite(active, session_name="meiva-gateway")
     stopped: list[str] = []
 
     invalid = owner.read(key, _generation(active))
-    _launch(key, agent_id=99, live={"ava-gateway"}, stopped=stopped)
+    _launch(key, agent_id=99, live={"meiva-gateway"}, stopped=stopped)
 
     assert invalid.status == "invalid"
     assert "session_name does not match" in (invalid.error or "")
@@ -466,7 +466,7 @@ def test_socket_directory_selects_the_platform_at_call_time(
     directory = owner.private_socket_dir()
 
     assert selected == [str(Path("/").joinpath(*root))]
-    assert directory == tmp_path / f"ava-{os.getuid()}"
+    assert directory == tmp_path / f"meiva-{os.getuid()}"
     info = directory.lstat()
     assert stat.S_ISDIR(info.st_mode) and not directory.is_symlink()
     assert info.st_uid == os.getuid() and stat.S_IMODE(info.st_mode) == 0o700
@@ -498,7 +498,7 @@ def test_codex_app_server_socket_is_short_and_generation_scoped(tmp_path: Path) 
     socket_base = (
         Path("/").joinpath("private", "tmp") if sys.platform == "darwin" else Path("/") / "tmp"
     )
-    assert first.parent == socket_base / f"ava-{os.getuid()}"
+    assert first.parent == socket_base / f"meiva-{os.getuid()}"
     assert first.name.startswith("codex-app-server.")
     assert first.name.endswith("-be6a5e0a.sock")
     assert len(first.name) == len("codex-app-server.") + 12 + 1 + 8 + len(".sock")
@@ -530,7 +530,7 @@ def test_a_socket_dir_that_is_not_our_real_directory_is_refused(
 ) -> None:
     elsewhere = tmp_path / "elsewhere"
     elsewhere.mkdir()
-    (tmp_path / f"ava-{os.getuid()}").symlink_to(elsewhere)
+    (tmp_path / f"meiva-{os.getuid()}").symlink_to(elsewhere)
     monkeypatch.setattr(
         owner, "private_socket_dir", partial(owner.private_socket_dir, base=tmp_path)
     )

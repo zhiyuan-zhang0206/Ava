@@ -6,6 +6,6 @@
 "base.cluster.machine.tests.identity" = [
     ".",
 ]
-"ava.tests.fixtures.sdk" = [
+"meiva.tests.fixtures.sdk" = [
     ".",
 ]

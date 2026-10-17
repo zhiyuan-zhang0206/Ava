@@ -26,7 +26,7 @@ class TestRegistryEnforcement:
         class Missing(EnvSettings):
             synthetic_knob: int = Field(
                 default=1,
-                alias="AVA_SYNTHETIC_KNOB",
+                alias="MEIVA_SYNTHETIC_KNOB",
                 json_schema_extra={"per_agent": True, "scope": "cluster-default"},
             )
 
@@ -37,7 +37,7 @@ class TestRegistryEnforcement:
         class Bogus(EnvSettings):
             synthetic_knob: int = Field(
                 default=1,
-                alias="AVA_SYNTHETIC_KNOB",
+                alias="MEIVA_SYNTHETIC_KNOB",
                 json_schema_extra={
                     "per_agent": True,
                     "scope": "cluster-default",
@@ -53,7 +53,7 @@ class TestRegistryEnforcement:
         class Overreach(EnvSettings):
             synthetic_knob: int = Field(
                 default=1,
-                alias="AVA_SYNTHETIC_KNOB",
+                alias="MEIVA_SYNTHETIC_KNOB",
                 json_schema_extra={"scope": "cluster-pinned", "lifecycle": "frozen"},
             )
 
@@ -65,7 +65,7 @@ class TestRegistryEnforcement:
         class Fine(EnvSettings):
             synthetic_knob: int = Field(
                 default=1,
-                alias="AVA_SYNTHETIC_KNOB",
+                alias="MEIVA_SYNTHETIC_KNOB",
                 json_schema_extra={
                     "per_agent": True,
                     "scope": "cluster-default",

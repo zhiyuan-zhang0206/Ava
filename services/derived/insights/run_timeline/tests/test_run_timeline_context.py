@@ -40,7 +40,7 @@ T0 = datetime(2026, 10, 4, 12, 0, tzinfo=UTC)
 
 
 def stamp(minutes: int) -> dict[str, object]:
-    return {"ava_created_at": (T0 + timedelta(minutes=minutes)).isoformat()}
+    return {"meiva_created_at": (T0 + timedelta(minutes=minutes)).isoformat()}
 
 
 def ai(text: str, tokens: int, minutes: int) -> AIMessage:
@@ -53,7 +53,7 @@ def ai(text: str, tokens: int, minutes: int) -> AIMessage:
 
 def human(text: str, minutes: int) -> HumanMessage:
     return HumanMessage(
-        content=text, additional_kwargs={"ava_msg_type": "inbound", **stamp(minutes)}
+        content=text, additional_kwargs={"meiva_msg_type": "inbound", **stamp(minutes)}
     )
 
 

@@ -9,7 +9,7 @@ from fastapi.responses import JSONResponse
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from base.agents.inbox.chat_delivery import ChatInboundCommittedError
-from base.api_contracts.agent_contract import AgentLaunchFailed, AvaAgentError
+from base.api_contracts.agent_contract import AgentLaunchFailed, MeivaAgentError
 from gateway.http.middleware.error_envelope import error_response
 
 _log = logging.getLogger(__name__)
@@ -25,7 +25,7 @@ async def model_catalog_unavailable_handler(request: Request, exc: Exception) ->
     )
 
 
-async def ava_agent_error_handler(request: Request, exc: AvaAgentError) -> JSONResponse:
+async def meiva_agent_error_handler(request: Request, exc: MeivaAgentError) -> JSONResponse:
 
     return error_response(
         request,
@@ -50,7 +50,7 @@ async def ava_agent_error_handler(request: Request, exc: AvaAgentError) -> JSONR
     )
 
 
-# ava:ref gateway/docs/error-responses-and-middleware-order.ava.okf.md#error-response-cors
+# meiva:ref gateway/docs/error-responses-and-middleware-order.meiva.okf.md#error-response-cors
 def cors_headers(request: Request) -> dict[str, str]:
 
     origin = request.headers.get("origin")

@@ -177,7 +177,7 @@ def test_collector_config_bytes_change_the_live_unit_generation(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     from services.supervision import roster
-    from services.supervision.ava_root.manifest import UnitManifest
+    from services.supervision.meiva_root.manifest import UnitManifest
 
     config = tmp_path / "collector.yaml"
     config.write_text("receivers: {otlp: {}}\n")
@@ -205,8 +205,8 @@ def test_obsolete_custody_records_do_not_block_an_absent_root(
 
 
 def test_manifest_change_requires_generation_replacement(tmp_path: Path) -> None:
-    from services.supervision.ava_root.manifest import load_manifests
-    from services.supervision.ava_root_glue.manifests import generate
+    from services.supervision.meiva_root.manifest import load_manifests
+    from services.supervision.meiva_root_glue.manifests import generate
 
     path = tmp_path / "manifest.json"
     generate(
@@ -214,7 +214,7 @@ def test_manifest_change_requires_generation_replacement(tmp_path: Path) -> None
         capabilities={"gateway"},
         repo_root=tmp_path,
         specs=[spec()],
-        environments={"gateway": {"AVA_PROCESS_PROFILE": "gateway"}},
+        environments={"gateway": {"MEIVA_PROCESS_PROFILE": "gateway"}},
     )
     manifest = load_manifests(path).units[0]
     snapshot = status()
@@ -225,7 +225,7 @@ def test_manifest_change_requires_generation_replacement(tmp_path: Path) -> None
         capabilities={"gateway"},
         repo_root=tmp_path,
         specs=[spec()],
-        environments={"gateway": {"AVA_PROCESS_PROFILE": "agent"}},
+        environments={"gateway": {"MEIVA_PROCESS_PROFILE": "agent"}},
     )
     assert driver.changed_units(json.loads(path.read_text()), snapshot) == {"gateway"}
     assert path.stat().st_mode & 0o777 == 0o600
@@ -267,7 +267,7 @@ def test_helper_seed_is_durable_before_wire_start(
 
     from base.host.permissions_helper import client
 
-    monkeypatch.setattr(driver, "root_child_env", lambda: {"AVA_HOME": str(tmp_path)})
+    monkeypatch.setattr(driver, "root_child_env", lambda: {"MEIVA_HOME": str(tmp_path)})
 
     def seed(config: client.RootSeedConfig) -> client.RootStatus:
         path = tmp_path / "seed.json"
@@ -279,7 +279,7 @@ def test_helper_seed_is_durable_before_wire_start(
         tmp_path,
         tmp_path,
         tmp_path / "manifests.json",
-        {"AVA_HOME": str(tmp_path)},
+        {"MEIVA_HOME": str(tmp_path)},
         helper=serve(ScriptedHelper(seed_root=seed)),
     )
 
@@ -350,8 +350,8 @@ def test_linux_root_launch_never_consults_a_helper(
 def test_generation_change_refuses_without_signal_or_seed_publication(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path, removed: bool
 ) -> None:
-    from services.supervision.ava_root.manifest import UnitManifest
-    from services.supervision.ava_root_glue.manifests import build_manifest
+    from services.supervision.meiva_root.manifest import UnitManifest
+    from services.supervision.meiva_root_glue.manifests import build_manifest
 
     requested = (spec(),)
     manifest = build_manifest(capabilities={"gateway"}, repo_root=tmp_path, specs=requested)
@@ -434,12 +434,12 @@ def test_mac_boot_tail_does_not_read_or_notify(monkeypatch: pytest.MonkeyPatch) 
 def test_root_launch_digest_controls_reuse(tmp_path: Path) -> None:
     import hashlib
 
-    from services.supervision.ava_root.manifest import UnitManifest
-    from services.supervision.ava_root_glue.manifests import build_manifest, write_manifest
+    from services.supervision.meiva_root.manifest import UnitManifest
+    from services.supervision.meiva_root_glue.manifests import build_manifest, write_manifest
 
     requested = (spec(),)
     manifest = build_manifest(capabilities={"gateway"}, repo_root=tmp_path, specs=requested)
-    launch_env = {"AVA_HOME": str(tmp_path), "AVA_TOKEN": "test-private-value"}
+    launch_env = {"MEIVA_HOME": str(tmp_path), "MEIVA_TOKEN": "test-private-value"}
     digest = hashlib.sha256(
         json.dumps(launch_env, sort_keys=True, separators=(",", ":")).encode()
     ).hexdigest()
@@ -475,16 +475,16 @@ def test_root_launch_path_uses_home_declaration_across_callers(
 # launchd job also gets its per-user TMPDIR, the agent socket and XPC names.
 _SERVICE_MANAGER_INJECTIONS = {
     "systemd User=": {
-        "USER": "ava-owner",
-        "LOGNAME": "ava-owner",
+        "USER": "meiva-owner",
+        "LOGNAME": "meiva-owner",
         "SHELL": "/bin/sh",
         "INVOCATION_ID": "0" * 32,
         "JOURNAL_STREAM": "8:12345",
         "SYSTEMD_EXEC_PID": "4242",
     },
     "launchd": {
-        "USER": "ava-owner",
-        "LOGNAME": "ava-owner",
+        "USER": "meiva-owner",
+        "LOGNAME": "meiva-owner",
         "SHELL": "/bin/zsh",
         "TMPDIR": "/private/var/folders/xy/T/",
         "SSH_AUTH_SOCK": "/private/tmp/com.apple.launchd.x/Listeners",
@@ -589,7 +589,7 @@ def test_plugin_birth_config_is_part_of_the_existing_unit_generation(
     from pydantic import BaseModel, ConfigDict
 
     from base.host.env.registry import SERVICE_PLUGIN_CONFIG_ENV
-    from services.supervision.ava_root.manifest import UnitManifest
+    from services.supervision.meiva_root.manifest import UnitManifest
 
     class Config(BaseModel):
         model_config = ConfigDict(frozen=True)
@@ -641,7 +641,7 @@ def _spent_budget_status() -> dict[str, Any]:
 def test_an_operator_start_brings_up_a_unit_whose_restart_budget_is_spent(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Explicit `ava start` is the operator's way to revive an exhausted unit."""
+    """Explicit `meiva start` is the operator's way to revive an exhausted unit."""
     monkeypatch.setattr(driver, "root_status", _no_refresh)
     client = _UnitClient()
     driver.reconcile_units((spec(),), client, _spent_budget_status())
@@ -673,7 +673,7 @@ def test_a_boot_attempt_still_brings_up_a_unit_with_budget_left(
 def test_seed_wait_reports_a_keeper_that_stopped_restarting_root(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    monkeypatch.setattr(driver, "root_child_env", lambda: {"AVA_HOME": str(tmp_path)})
+    monkeypatch.setattr(driver, "root_child_env", lambda: {"MEIVA_HOME": str(tmp_path)})
     exited = {
         "state": "exited",
         "seeded": True,
@@ -687,6 +687,6 @@ def test_seed_wait_reports_a_keeper_that_stopped_restarting_root(
             tmp_path,
             tmp_path,
             tmp_path / "manifests.json",
-            {"AVA_HOME": str(tmp_path)},
+            {"MEIVA_HOME": str(tmp_path)},
             helper=serve(ScriptedHelper(seed_root=exited)),
         )

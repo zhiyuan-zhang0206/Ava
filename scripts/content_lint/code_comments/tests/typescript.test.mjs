@@ -15,7 +15,7 @@ test('JSX comments and JSDoc are both visible', () => {
 });
 
 test('a source pointer binds the adjacent function', () => {
-  const source = scanSource('pkg/core.ts', '// ava:ref pkg/docs/core.ava.okf.md#positive-budget\nexport function budget() { return 1; }');
+  const source = scanSource('pkg/core.ts', '// meiva:ref pkg/docs/core.meiva.okf.md#positive-budget\nexport function budget() { return 1; }');
   assert.equal(source.notes[0].owner, 'budget');
 });
 

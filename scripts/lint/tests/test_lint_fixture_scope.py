@@ -15,16 +15,16 @@ def test_session_scoped_env_write_in_a_subdirectory_conftest_is_flagged() -> Non
     src = (
         '@pytest.fixture(scope="session", autouse=True)\n'
         "def _process_env():\n"
-        '    prev = os.environ.get("AVA_HOME")\n'
-        '    os.environ["AVA_HOME"] = "/tmp/x"\n'
+        '    prev = os.environ.get("MEIVA_HOME")\n'
+        '    os.environ["MEIVA_HOME"] = "/tmp/x"\n'
         "    try:\n"
         "        yield\n"
         "    finally:\n"
-        '        os.environ["AVA_HOME"] = prev\n'
+        '        os.environ["MEIVA_HOME"] = prev\n'
     )
     found = _findings(src)
     assert len(found) == 1
-    assert "os.environ['AVA_HOME']" in found[0]
+    assert "os.environ['MEIVA_HOME']" in found[0]
 
 
 def test_session_scoped_settings_attribute_write_is_flagged() -> None:
@@ -41,7 +41,7 @@ def test_environ_pop_is_flagged_although_it_is_a_method_call_not_an_assignment()
     src = (
         '@pytest.fixture(scope="session")\n'
         "def _unset():\n"
-        '    os.environ.pop("AVA_MACHINE_SERVE_GATEWAY", None)\n'
+        '    os.environ.pop("MEIVA_MACHINE_SERVE_GATEWAY", None)\n'
         "    yield\n"
     )
     assert "os.environ.pop(...)" in _findings(src)[0]
@@ -51,7 +51,7 @@ def test_an_unrecognised_environ_mutator_is_flagged_by_default() -> None:
     src = (
         '@pytest.fixture(scope="session")\n'
         "def _bulk():\n"
-        '    os.environ.update({"AVA_HOME": "/tmp/x"})\n'
+        '    os.environ.update({"MEIVA_HOME": "/tmp/x"})\n'
         "    yield\n"
     )
     assert "os.environ.update(...)" in _findings(src)[0]
@@ -62,7 +62,7 @@ def test_reading_the_environment_is_not_a_mutation() -> None:
         '@pytest.fixture(scope="session")\n'
         "def _read():\n"
         '    headed = os.environ.get("HEADED") == "1"\n'
-        '    keys = [k for k in os.environ if k.startswith("AVA_")]\n'
+        '    keys = [k for k in os.environ if k.startswith("MEIVA_")]\n'
         "    yield (headed, keys)\n"
     )
     assert _findings(src) == []
@@ -73,10 +73,10 @@ def test_writing_through_an_alias_of_the_environment_is_flagged() -> None:
         '@pytest.fixture(scope="session")\n'
         "def _aliased():\n"
         "    env = os.environ\n"
-        '    env["AVA_HOME"] = "/tmp/x"\n'
+        '    env["MEIVA_HOME"] = "/tmp/x"\n'
         "    yield\n"
     )
-    assert "env['AVA_HOME']" in _findings(src)[0]
+    assert "env['MEIVA_HOME']" in _findings(src)[0]
 
 
 def test_a_local_object_returned_by_a_call_is_not_an_alias() -> None:
@@ -118,12 +118,12 @@ def test_a_function_scoped_fixture_may_mutate_the_environment() -> None:
     src = (
         "@pytest.fixture\n"
         "def scenario_env():\n"
-        '    prev = os.environ.get("AVA_LLM_OVERRIDE")\n'
-        '    os.environ["AVA_LLM_OVERRIDE"] = "x"\n'
+        '    prev = os.environ.get("MEIVA_LLM_OVERRIDE")\n'
+        '    os.environ["MEIVA_LLM_OVERRIDE"] = "x"\n'
         "    try:\n"
         "        yield\n"
         "    finally:\n"
-        '        os.environ["AVA_LLM_OVERRIDE"] = prev\n'
+        '        os.environ["MEIVA_LLM_OVERRIDE"] = prev\n'
     )
     assert _findings(src) == []
 
@@ -133,7 +133,7 @@ _PROVISIONED_DB = (
     "def provisioned_db():\n"
     "    with postgres() as url:\n"
     "        settings.data_plane.db_url = url\n"
-    '        os.environ["AVA_DB_URL"] = url\n'
+    '        os.environ["MEIVA_DB_URL"] = url\n'
     "        yield url\n"
 )
 
@@ -150,7 +150,7 @@ def test_the_provisioning_plugins_session_fixtures_are_not_flagged() -> None:
 def test_the_same_fixture_moved_into_a_subdirectory_conftest_is_flagged() -> None:
     found = _findings(_PROVISIONED_DB)
     assert len(found) == 1
-    assert "os.environ['AVA_DB_URL']" in found[0]
+    assert "os.environ['MEIVA_DB_URL']" in found[0]
     assert "settings.data_plane.db_url" in found[0]
 
 
@@ -171,7 +171,7 @@ def test_package_scope_without_an_init_py_is_also_judged_as_session_scope() -> N
     src = (
         '@pytest.fixture(scope="package")\n'
         "def _pkg_env():\n"
-        '    os.environ["AVA_HOME"] = "/tmp/x"\n'
+        '    os.environ["MEIVA_HOME"] = "/tmp/x"\n'
         "    yield\n"
     )
     assert len(_findings(src, init=False)) == 2
@@ -184,14 +184,14 @@ def test_a_non_literal_scope_is_reported() -> None:
 
 
 def test_a_fixture_with_no_scope_argument_is_function_scoped_and_silent() -> None:
-    src = '@pytest.fixture\ndef _f():\n    os.environ["AVA_HOME"] = "/x"\n    yield\n'
+    src = '@pytest.fixture\ndef _f():\n    os.environ["MEIVA_HOME"] = "/x"\n    yield\n'
     assert _findings(src) == []
-    src_called = '@pytest.fixture()\ndef _g():\n    os.environ["AVA_HOME"] = "/x"\n    yield\n'
+    src_called = '@pytest.fixture()\ndef _g():\n    os.environ["MEIVA_HOME"] = "/x"\n    yield\n'
     assert _findings(src_called) == []
 
 
 def test_a_plain_function_that_is_not_a_fixture_is_ignored() -> None:
-    src = 'def helper():\n    os.environ["AVA_HOME"] = "/x"\n'
+    src = 'def helper():\n    os.environ["MEIVA_HOME"] = "/x"\n'
     assert _findings(src) == []
 
 
@@ -200,7 +200,7 @@ def test_setup_env_keys_ignores_the_teardown_restore_loop() -> None:
         '@pytest.fixture(scope="package")\n'
         "def _env():\n"
         "    prev = {k: os.environ.get(k) for k in _env_keys}\n"
-        '    os.environ["AVA_HOME"] = "/tmp/x"\n'
+        '    os.environ["MEIVA_HOME"] = "/tmp/x"\n'
         "    try:\n"
         "        yield\n"
         "    finally:\n"
@@ -208,7 +208,7 @@ def test_setup_env_keys_ignores_the_teardown_restore_loop() -> None:
         "            os.environ[k] = v\n"
     )
     literal, dynamic = _lint.setup_env_keys(src, "_env")
-    assert literal == frozenset({"AVA_HOME"})
+    assert literal == frozenset({"MEIVA_HOME"})
     assert dynamic == frozenset()
 
 
@@ -216,12 +216,12 @@ def test_setup_env_keys_reports_a_computed_setup_key_as_dynamic() -> None:
     src = (
         '@pytest.fixture(scope="package")\n'
         "def _env():\n"
-        '    os.environ[f"AVA_{name.upper()}"] = "1"\n'
+        '    os.environ[f"MEIVA_{name.upper()}"] = "1"\n'
         "    yield\n"
     )
     literal, dynamic = _lint.setup_env_keys(src, "_env")
     assert literal == frozenset()
-    assert dynamic == frozenset({"f'AVA_{name.upper()}'"})
+    assert dynamic == frozenset({"f'MEIVA_{name.upper()}'"})
 
 
 def test_setup_env_keys_covers_pop_as_well_as_assignment() -> None:
@@ -256,12 +256,12 @@ def test_directory_with_unreadable_member_is_skipped(
     (tests / "sub" / "conftest.py").write_text(
         '@pytest.fixture(scope="session")\n'
         "def _process_env():\n"
-        '    os.environ["AVA_HOME"] = "/tmp/x"\n'
+        '    os.environ["MEIVA_HOME"] = "/tmp/x"\n'
         "    yield\n",
         encoding="utf-8",
     )
     assert _lint.main([str(tests)]) == 1
-    assert "AVA_HOME" in capsys.readouterr().out
+    assert "MEIVA_HOME" in capsys.readouterr().out
 
 
 def test_explicit_missing_target_is_an_error(
@@ -286,7 +286,7 @@ def test_configured_new_host_joins_the_default_fixture_scan(
     fixture.parent.mkdir(parents=True)
     fixture.write_text(
         'import os\nimport pytest\n@pytest.fixture(scope="session")\n'
-        'def leaky():\n    os.environ["AVA_SCOPE_PROOF"] = "1"\n',
+        'def leaky():\n    os.environ["MEIVA_SCOPE_PROOF"] = "1"\n',
         encoding="utf-8",
     )
     assert _lint.main([]) == 1

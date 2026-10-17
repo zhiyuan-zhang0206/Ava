@@ -1,13 +1,13 @@
 # Third-party notices
 
-Ava itself is licensed under Apache-2.0 (see `LICENSE`). It depends on
-third-party libraries that keep their own licenses; using Ava means complying
+Meiva itself is licensed under Apache-2.0 (see `LICENSE`). It depends on
+third-party libraries that keep their own licenses; using Meiva means complying
 with those too. The dependency tree is overwhelmingly permissive (MIT /
 Apache-2.0 / BSD / ISC) and contains **no GPL/AGPL/SSPL strong-copyleft runtime
 dependency**. The libraries below carry weak-copyleft obligations worth calling
 out — each is used as an **unmodified library via dynamic import** (the standard
 LGPL/MPL "use without infecting" path), so the obligations attach to those
-libraries' own files, not to Ava's source.
+libraries' own files, not to Meiva's source.
 
 The authoritative, always-current license set is the metadata of the resolved
 dependencies (`uv.lock`, `ui/web/package-lock.json`); regenerate a full

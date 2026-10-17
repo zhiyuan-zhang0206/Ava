@@ -1,4 +1,4 @@
-# OTel Collector sidecar — one per machine, the ONLY OTLP entry Ava agents see.
+# OTel Collector sidecar — one per machine, the ONLY OTLP entry Meiva agents see.
 #
 # Generated at converge from this template (cli/commands/observability/otel_collector.py):
 # the dollar placeholders below are baked from this unit's settings, so the file
@@ -7,20 +7,20 @@
 # Architecture: every agent process sends OTLP/HTTP to its local
 # 127.0.0.1:4318 receiver. On a gateway/single-box collector the pipelines fan
 # out to Tempo/Loki/Prometheus — loopback by default, or the remote observatory
-# station's endpoints when AVA_OBSERVABILITY_URL is set (two-state render,
+# station's endpoints when MEIVA_OBSERVABILITY_URL is set (two-state render,
 # task #1791). A pure runner keeps the same exporter
 # component IDs and queues but points them at the gateway collector's separate,
 # authenticated remote receiver; the gateway then fans those batches into its
 # loopback backends. Backend ports never need an off-box bind.
 # Every collector also mirrors locally produced traces to JSONL
-# ($AVA_HOME/traces/spans.jsonl, rotated), so agents can grep spans without a
+# ($MEIVA_HOME/traces/spans.jsonl, rotated), so agents can grep spans without a
 # backend. Every exporter uses a bounded in-memory sending queue (a collector
 # restart drops what was queued) and rejects the newest batch immediately when
 # its queue is full, bounds each send attempt to 5s, and retries for at
 # most 15m before dropping with collector failure metrics. Cumulative metrics
 # repair on a later successful sample. The independent file/traces exporter is
 # not queued behind remote delivery and remains the local durable trace sink.
-# `ava trace ship` replays a mirrored gap without re-entering the local mirror.
+# `meiva trace ship` replays a mirrored gap without re-entering the local mirror.
 #
 # The sidecar also scrapes the traditional SRE layer (issue #46) into the same
 # metrics fan-out: `host_metrics` on every machine, plus `postgresql` + `redis`
@@ -30,10 +30,10 @@
 # from a runner's rendered config entirely).
 receivers:
   otlp:
-    # OTLP/HTTP only — every Ava producer speaks OTLP/HTTP
+    # OTLP/HTTP only — every Meiva producer speaks OTLP/HTTP
     # (base/telemetry/otlp/telemetry_otlp.py rejects non-http schemes);
     # no dead gRPC receiver.
-    # The receiver endpoint is baked from AVA_TELEMETRY_OTLP_PORT at converge
+    # The receiver endpoint is baked from MEIVA_TELEMETRY_OTLP_PORT at converge
     # (default 127.0.0.1:4318 — the standard OTLP port; single source in
     # base/config/domains/observability/settings.py, task #1945).
     protocols:
@@ -72,7 +72,7 @@ $REMOTE_OTLP_RECEIVER
         # Synthetic mounts carry no operator signal and dominate the series
         # count on macOS (a dozen /System/Volumes/* entries). What survives is
         # the real root volume plus, on macOS, the data volume that actually
-        # holds $AVA_HOME — the two the disk watermark alert is about.
+        # holds $MEIVA_HOME — the two the disk watermark alert is about.
         exclude_fs_types:
           fs_types: [autofs, devfs, nullfs, overlay, squashfs, tmpfs]
           match_type: strict
@@ -109,7 +109,7 @@ $REMOTE_OTLP_RECEIVER
   prometheus/otelcol:
     config:
       scrape_configs:
-        - job_name: ava-otel-collector
+        - job_name: meiva-otel-collector
           scrape_interval: 30s
           static_configs:
             - targets: [localhost:$SELF_METRICS_PORT]
@@ -132,7 +132,7 @@ $REMOTE_OTLP_RECEIVER
   # rediscoveries.
   filelog/sessions:
     include:
-      - $AVA_HOME/logs/ava-agent-*-shell-*.out.log
+      - $MEIVA_HOME/logs/meiva-agent-*-shell-*.out.log
     start_at: end
     include_file_name: true
     include_file_path: false
@@ -142,13 +142,13 @@ $REMOTE_OTLP_RECEIVER
     max_concurrent_files: 200
   filelog/services:
     include:
-      - $AVA_HOME/logs/*.out.log
+      - $MEIVA_HOME/logs/*.out.log
     # Exclude all agent output so this receiver cannot overlap the shell-only
     # receiver. The collector's own stdout is excluded to prevent exported log
     # diagnostics feeding back into the collector.
     exclude:
-      - $AVA_HOME/logs/ava-agent-*.out.log
-      - $AVA_HOME/logs/ava-otel-collector.out.log
+      - $MEIVA_HOME/logs/meiva-agent-*.out.log
+      - $MEIVA_HOME/logs/meiva-otel-collector.out.log
     start_at: end
     include_file_name: true
     include_file_path: false
@@ -201,7 +201,7 @@ processors:
   # The infra pipeline's extra processors. host_metrics/postgresql/redis carry
   # no host identity of their own, so detection supplies host.name and the
   # transform puts both identities on every datapoint: `host` is the OS
-  # hostname (physical identity), and `machine_name` is the Ava roster identity
+  # hostname (physical identity), and `machine_name` is the Meiva roster identity
   # baked from this unit at converge via $MACHINE_NAME (macmini / macbook-air /
   # company-mini / ...). One label per meaning; dashboards and alert rules group by
   # `machine_name`. App metrics already carry `machine` / `agent_id`, and this
@@ -214,11 +214,11 @@ processors:
       hostname_sources: [os]
   # Prometheus's OTLP receiver derives `job` from service.name; without one the
   # infra series would land under a synthesized unknown_service job. Pinning it
-  # makes `{job="ava-infra"}` the one selector for everything on this layer.
+  # makes `{job="meiva-infra"}` the one selector for everything on this layer.
   resource/infra:
     attributes:
       - key: service.name
-        value: ava-infra
+        value: meiva-infra
         action: upsert
   transform/host_label:
     metric_statements:
@@ -247,7 +247,7 @@ processors:
 
 extensions:
   file_storage/logoffsets:
-    directory: $AVA_HOME/otel-collector/log-offsets
+    directory: $MEIVA_HOME/otel-collector/log-offsets
     create_directory: true
 $CLUSTER_AUTH_EXTENSION
 
@@ -280,7 +280,7 @@ $OTLP_EXPORTERS
   # parse (retention would prune the wrong files, or none) without either
   # side signaling the mismatch (tz audit, 2026-08, PR-6).
   file/traces:
-    path: $AVA_HOME/traces/spans.jsonl
+    path: $MEIVA_HOME/traces/spans.jsonl
     rotation:
       max_megabytes: 64
       max_days: $RETENTION_DAYS

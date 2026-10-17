@@ -19,7 +19,7 @@ from that:
   day instead of pinning a stale point).
 
 The panel SQL/JSON mirror lives in
-``deploy/lgtm/config/grafana/provisioning/dashboards/ava-ops-main.json``
+``deploy/lgtm/config/grafana/provisioning/dashboards/meiva-ops-main.json``
 (row "PR flow") and is locked by ``tests/components/plugins/test_plugin_metrics_logql.py``.
 """
 
@@ -39,7 +39,7 @@ def core_metrics() -> list[MetricSpec]:
                 "Ready-for-review to merge latency by complete cluster-tz day "
                 "\u2014 median and p90 seconds, sampled by the daily PR-flow export "
                 "job (scripts/ci/pull_requests/pr_flow_export.py) into the "
-                "ava_pr_flow_daily_ready_to_merge_median_seconds / _p90_seconds "
+                "meiva_pr_flow_daily_ready_to_merge_median_seconds / _p90_seconds "
                 "gauges. One row per day; a day leaves the table once its last "
                 "sample ages past the 26h lookback (a missed run shows as a gap)."
             ),
@@ -47,10 +47,10 @@ def core_metrics() -> list[MetricSpec]:
             category="telemetry",
             unit="s",
             panel="table",
-            query="max by (day) (last_over_time(ava_pr_flow_daily_ready_to_merge_median_seconds[26h]))",
+            query="max by (day) (last_over_time(meiva_pr_flow_daily_ready_to_merge_median_seconds[26h]))",
             query_type="promql",
             targets=[
-                "max by (day) (last_over_time(ava_pr_flow_daily_ready_to_merge_p90_seconds[26h]))"
+                "max by (day) (last_over_time(meiva_pr_flow_daily_ready_to_merge_p90_seconds[26h]))"
             ],
             target_names=["median", "p90"],
             thresholds=[],
@@ -76,7 +76,7 @@ def core_metrics() -> list[MetricSpec]:
             title="Trunk queue depth",
             description=(
                 "Trunk merge-queue depth sampled once per PR-flow export run "
-                "(ava_pr_flow_run_queue_depth_ratio gauge, macmini daily job). The "
+                "(meiva_pr_flow_run_queue_depth_ratio gauge, macmini daily job). The "
                 "run event is emitted even when Trunk is unreachable, so the "
                 "breadcrumb survives an outage while the depth sample stays absent."
             ),
@@ -84,7 +84,7 @@ def core_metrics() -> list[MetricSpec]:
             category="telemetry",
             unit="short",
             panel="timeseries",
-            query="ava_pr_flow_run_queue_depth_ratio",
+            query="meiva_pr_flow_run_queue_depth_ratio",
             query_type="promql",
             target_names=["queue depth"],
             panel_id=2402,
@@ -99,7 +99,7 @@ def core_metrics() -> list[MetricSpec]:
             title="Flake \u2014 new quarantines (by day)",
             description=(
                 "Tests newly quarantined by Trunk\u2019s flaky detector per complete "
-                "cluster-tz day (ava_pr_flow_daily_flake_new_quarantines_ratio "
+                "cluster-tz day (meiva_pr_flow_daily_flake_new_quarantines_ratio "
                 "gauge, daily PR-flow export job). A day whose flaky source was "
                 "unreachable is omitted rather than shown as zero."
             ),
@@ -107,7 +107,7 @@ def core_metrics() -> list[MetricSpec]:
             category="telemetry",
             unit="short",
             panel="table",
-            query="max by (day) (last_over_time(ava_pr_flow_daily_flake_new_quarantines_ratio[26h]))",
+            query="max by (day) (last_over_time(meiva_pr_flow_daily_flake_new_quarantines_ratio[26h]))",
             query_type="promql",
             target_names=["new quarantines"],
             thresholds=[],

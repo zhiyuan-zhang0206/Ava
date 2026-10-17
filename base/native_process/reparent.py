@@ -30,7 +30,7 @@ import os
 import sys
 
 # stdout/stderr log files are opened append-only; a fresh machine may not have
-# $AVA_HOME/logs yet, but the caller (posixproc.new_session) mkdirs it first.
+# $MEIVA_HOME/logs yet, but the caller (posixproc.new_session) mkdirs it first.
 _LOG_OPEN_FLAGS = os.O_WRONLY | os.O_CREAT | os.O_APPEND
 _LOG_MODE = 0o644
 

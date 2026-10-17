@@ -41,7 +41,7 @@ _BLOCK_B = (
     "scheduler_lease_window = resolve_lease_window(state)\n"
 )
 _KEEP = "def handle(payload):\n    return payload\n"
-_DISTINCTIVE = "AVA_DELIVERY_WATCHDOG_ALERT_GRACE_SECONDS = recompute_grace(default_config)\n"
+_DISTINCTIVE = "MEIVA_DELIVERY_WATCHDOG_ALERT_GRACE_SECONDS = recompute_grace(default_config)\n"
 _GENERIC_LINE = "result = compute(total, rate)\n"
 _PAIR = "    result = compute(total, rate)\n    value = lookup(source, key)\n"
 
@@ -481,7 +481,7 @@ def test_unknown_revision_is_a_usage_error(
         ("result = compute(total, rate)", (True, False)),
         ("capture_output = run_tool(command)", (True, False)),
         ("delivery_watchdog_fields = compute_fields(config)", (True, True)),
-        ("AVA_DELIVERY_WATCHDOG_ALERT_GRACE_SECONDS = recompute_grace(cfg)", (True, True)),
+        ("MEIVA_DELIVERY_WATCHDOG_ALERT_GRACE_SECONDS = recompute_grace(cfg)", (True, True)),
     ],
 )
 def test_line_classification(text: str, expected: tuple[bool, bool]) -> None:
@@ -607,8 +607,8 @@ def test_incomplete_prefix_still_participates_in_a_restored_block(
         "def _ensure_permissions_helper(ctx: ConvergeCtx) -> None:",
         "async def restore_deleted_watchdog_fields(config: Config):",
         "class DeletedDeliveryWatchdogContract(BaseContract):",
-        "except (AvaAgentError, ClientMessageConflictError) as exc:",
-        "except* (AvaAgentError, ClientMessageConflictError) as errors:",
+        "except (MeivaAgentError, ClientMessageConflictError) as exc:",
+        "except* (MeivaAgentError, ClientMessageConflictError) as errors:",
         "except DeletedDeliveryWatchdogError as exc:",
         'monkeypatch.setattr(hc, "init_gateway_process", Mock())',
         'result = lookup("deleted_delivery_watchdog_contract")',
@@ -629,7 +629,7 @@ def test_a_declaration_string_or_type_reference_is_not_a_solo_operation(
     [
         "restore_deleted_watchdog_fields(config)",
         "watchdog.deleted_delivery_watchdog_contract = value",
-        "return settings.AVA_DELIVERY_WATCHDOG_ALERT_GRACE_SECONDS",
+        "return settings.MEIVA_DELIVERY_WATCHDOG_ALERT_GRACE_SECONDS",
         'raise psycopg.errors.ReadOnlySqlTransaction("write denied")',
         "def restore_deleted_watchdog_fields(config): return restore_old_fields(config)",
         "except restore_deleted_watchdog_errors(config):",
@@ -669,7 +669,7 @@ def test_exception_handler_header_still_participates_in_a_deleted_block(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
     block = (
-        "except (AvaAgentError, ClientMessageConflictError) as exc:\n"
+        "except (MeivaAgentError, ClientMessageConflictError) as exc:\n"
         "    record = serialize_error(exc)\n"
         "    emit = publish_error(record)\n"
     )

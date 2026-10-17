@@ -17,11 +17,11 @@ object: the server tracks the pane, and the pane's shell can outlive the daemon
 that ran in it.
 
 On 2026-07-30's 21:09 prod rollout both fired. The stop reported a forced kill of
-`ava-gateway`; the session survived; the start 24 s later printed `✓ ava-gateway
-already running` and launched everything else. `~/.ava/run/gateway.pid` and the
+`meiva-gateway`; the session survived; the start 24 s later printed `✓ meiva-gateway
+already running` and launched everything else. `~/.meiva/run/gateway.pid` and the
 session's `session_created` both read 21:11:29 — a minute later, written by the watchdog, not by
 the start. `gateway.log` has zero lines in between. Every prod rollout log inspected
-(5 of 5) shows `⚠ ava-gateway (forced)`: the gateway always outlives the 15 s graceful
+(5 of 5) shows `⚠ meiva-gateway (forced)`: the gateway always outlives the 15 s graceful
 window, so the unconfirmed branch is taken every single time and the four runs that
 did not break were luck, not difference.
 
@@ -93,13 +93,13 @@ right severity here; the start-side guard is what turns the report into recovery
 
 ## Consequences
 
-- `ava stop` / `ava update`'s stop now spends up to `_FORCE_CONFIRM_TIMEOUT_S` per
+- `meiva stop` / `meiva update`'s stop now spends up to `_FORCE_CONFIRM_TIMEOUT_S` per
   session that outlives its kill. A session that dies confirms on the first poll, so a
   healthy stop pays one extra `has-session` per service and nothing else.
-- `ava start` on a host whose sessions are all live and serving pays one probe per
+- `meiva start` on a host whose sessions are all live and serving pays one probe per
   service — the same probes the status snapshot runs seconds later.
 - A start can now tear down and relaunch a session that was merely slow to bind (a
-  concurrent `ava start` catching a daemon mid-boot). The cost is one restart of a
+  concurrent `meiva start` catching a daemon mid-boot). The cost is one restart of a
   service the start then waits `SERVICE_READY_TIMEOUT_S` for; the cost of the opposite
   mistake is an unlaunched daemon reported as `✓`.
 - Tests that fake `subprocess.run` with a blanket `returncode=0` have faked a server

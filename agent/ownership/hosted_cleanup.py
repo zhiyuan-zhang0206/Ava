@@ -3,15 +3,15 @@
 import asyncio
 from collections.abc import Awaitable, Callable
 
-from ava.mcps import release_agent_chrome_pages
 from base.events.live.announce import publish_agent_updated
 from base.events.live.bus import EventBus
 from base.log import logger
-from base.paths import ava_home
+from base.paths import meiva_home
+from meiva.mcps import release_agent_chrome_pages
 
 
 async def _release_default_chrome_pages(agent_id: int) -> bool:
-    return await release_agent_chrome_pages(agent_id, ava_home())
+    return await release_agent_chrome_pages(agent_id, meiva_home())
 
 
 async def release_browser_pages(

@@ -1,6 +1,6 @@
 """Acquire an install source into a package directory.
 
-Shared by `ava plugins install` (git only) and `ava mcp install` (git or local
+Shared by `meiva plugins install` (git only) and `meiva mcp install` (git or local
 path). A git source is cloned into a fresh temp dir; a local path is used in
 place (never moved — the caller copies out of it). The caller resolves the
 `--path` subdir and then moves / copies the package into its load dir.
@@ -16,7 +16,7 @@ from pathlib import Path
 
 from base.packages.extensions.install_registry import looks_like_local_path
 
-_TEMP_PREFIX = "ava-install-"
+_TEMP_PREFIX = "meiva-install-"
 
 
 class SourcePathNotFoundError(ValueError):

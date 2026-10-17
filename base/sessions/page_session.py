@@ -1,12 +1,12 @@
 """The page-server session name: one grammar, owned here.
 
-An `ava.ui.serve` page's server runs in a persistent shell session of its
+An `meiva.ui.serve` page's server runs in a persistent shell session of its
 agent, named like any agent shell with a `page-<slug>` label:
-`ava-agent-<agent_id>-shell-<session_id>-page-<slug>`. Three sites read that
+`meiva-agent-<agent_id>-shell-<session_id>-page-<slug>`. Three sites read that
 grammar, all through this module:
 
 - the page-server daemon builds each page's session name (`page_session_name`);
-- `ava.shell.sessions` refuses the `page-` label for an ordinary shell, so the
+- `meiva.shell.sessions` refuses the `page-` label for an ordinary shell, so the
   label names page sessions exactly (`is_page_label`);
 - a terminate's shell-session kill (`ops.cluster_status.kill_agent_shells`)
   spares page sessions — a page keeps its own lifecycle (`is_page_label`).

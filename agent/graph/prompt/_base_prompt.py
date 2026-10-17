@@ -1,4 +1,4 @@
-"""The immutable base of the system prompt + the lazily captured `ava` SDK overview.
+"""The immutable base of the system prompt + the lazily captured `meiva` SDK overview.
 
 Imported lazily by `system_prompt.build_system_prompt`.
 """
@@ -8,14 +8,14 @@ from __future__ import annotations
 import contextlib
 import io
 
-# The SDK itself is introspected (`ava.sdk_surface.help.render(ava)`), not called.
-import ava
+# The SDK itself is introspected (`meiva.sdk_surface.help.render(meiva)`), not called.
+import meiva
 
 
-def capture_ava_overview() -> str:
-    """Emit the `# ava` overview — the public SDK surface as a name + docstring index.
+def capture_meiva_overview() -> str:
+    """Emit the `# meiva` overview — the public SDK surface as a name + docstring index.
 
-    `ava.help(ava)` renders ava's own docstring plus one entry per public
+    `meiva.help(meiva)` renders meiva's own docstring plus one entry per public
     top-level namespace — both the static ones (agents / monitor / self /
     schedule / memory / files / shell / skills / ...) and any a plugin
     registered at runtime — each as `from . import X` + that module's docstring.
@@ -24,20 +24,20 @@ def capture_ava_overview() -> str:
     namespace itself must show here so it's discoverable even if the plugin adds
     no section — otherwise a top-level namespace could silently vanish. This is
     the natural "what's my SDK" index; full per-namespace detail (function
-    signatures) stays on demand via `ava.help(ava.X)`.
+    signatures) stays on demand via `meiva.help(meiva.X)`.
 
-    Scope is driven by `AVA_SDK_DISABLE`: a disabled namespace is removed from
-    `ava` entirely, so it simply doesn't appear here — e.g. SWE-Bench disables
+    Scope is driven by `MEIVA_SDK_DISABLE`: a disabled namespace is removed from
+    `meiva` entirely, so it simply doesn't appear here — e.g. SWE-Bench disables
     monitor / schedule / self / agents / skills and the overview narrows to
     match, no framework change needed.
 
     Duplication note: namespaces a plugin promotes in detail via its own
-    declared system prompt section (ava_code → cwd / files / shell) still
+    declared system prompt section (meiva_code → cwd / files / shell) still
     appear here at index level (name + docstring); the plugin section adds the
-    function stubs *without* repeating the docstring (help(ava.X) drops a
-    submodule target's own docstring — see ava._format_module_stub).
+    function stubs *without* repeating the docstring (help(meiva.X) drops a
+    submodule target's own docstring — see meiva._format_module_stub).
     """
-    from ava.sdk_surface.help import render as render_help
+    from meiva.sdk_surface.help import render as render_help
 
     buf = io.StringIO()
     with contextlib.redirect_stdout(buf):
@@ -46,11 +46,11 @@ def capture_ava_overview() -> str:
         # themselves is applied by the expand section (`system_prompt.py`), which
         # knows the agent's model. Keeps the overview byte-stable across models
         # and processes.
-        render_help(ava, hidden_members=frozenset())
+        render_help(meiva, hidden_members=frozenset())
     return buf.getvalue()
 
 
-# At module top-level execution time, ava plugins are not yet loaded (order: import
+# At module top-level execution time, meiva plugins are not yet loaded (order: import
 # _base_prompt → module top → main() → build_graph() → load_extensions()). So capture is
 # deferred to the build_system_prompt() call site — by then plugins are loaded
 # and each plugin's `contribute()` declaration is in the registry the caller holds.
@@ -59,12 +59,12 @@ def capture_ava_overview() -> str:
 # when the first _claim sees state.messages empty; afterward SystemMessage is
 # persisted into state.messages[0] and reused across restart — cache hit rate
 # is 1/1, no point.
-def get_ava_overview() -> str:
-    return capture_ava_overview()
+def get_meiva_overview() -> str:
+    return capture_meiva_overview()
 
 
 # BASE_SYSTEM_PROMPT is the immutable core of the system prompt.
-# The {_AVA_OVERVIEW} placeholder is filled by get_ava_overview() lazy capture
+# The {_MEIVA_OVERVIEW} placeholder is filled by get_meiva_overview() lazy capture
 # the first time build_system_prompt() is called — by then load_extensions() has
 # run and all plugin namespaces are visible.
 # Plugins add extension content through `PluginContributions.system_prompt_sections`.
@@ -72,14 +72,14 @@ def get_ava_overview() -> str:
 # Its {_SEQUENTIAL_TOOL_CALLS} placeholder takes SEQUENTIAL_TOOL_CALLS_NOTE when
 # `prompt_sequential_tool_calls_enabled` is on for the agent, else "".
 CODE_ACTION_PREAMBLE = """\
-You are Ava, an agent that acts by writing Python code — call the
+You are Meiva, an agent that acts by writing Python code — call the
 `execute_code(code: str)` tool — each call runs in an ephemeral interpreter. To idle, do not output any
 tool calls.{_SEQUENTIAL_TOOL_CALLS}
 
-Before using any `ava.*` function, you must explicitly `import ava` in your code.
+Before using any `meiva.*` function, you must explicitly `import meiva` in your code.
 """
 
 SEQUENTIAL_TOOL_CALLS_NOTE = """ Several tool calls in one response run one at a time, in the order given; an error in one
 does not stop the later ones, so keep steps that depend on an earlier step succeeding in one call."""
 
-BASE_SYSTEM_PROMPT = CODE_ACTION_PREAMBLE + "\n{_AVA_OVERVIEW}"
+BASE_SYSTEM_PROMPT = CODE_ACTION_PREAMBLE + "\n{_MEIVA_OVERVIEW}"

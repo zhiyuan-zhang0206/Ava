@@ -10,10 +10,10 @@ from services.backup.artifact.names import DUMP_NAME_RE, REMOTE_ROOT, TS_FORMAT,
 @pytest.mark.parametrize(
     ("name", "db", "stamp"),
     [
-        ("ava-20260930T190000Z.dump.enc", "ava", "20260930T190000Z"),
-        ("ava_main-20260930T190000Z.dump.enc", "ava_main", "20260930T190000Z"),
+        ("meiva-20260930T190000Z.dump.enc", "meiva", "20260930T190000Z"),
+        ("meiva_main-20260930T190000Z.dump.enc", "meiva_main", "20260930T190000Z"),
         ("my-db-20260930T190000Z.dump.enc", "my-db", "20260930T190000Z"),
-        ("ava-20260609T190000Z.dump", "ava", "20260609T190000Z"),
+        ("meiva-20260609T190000Z.dump", "meiva", "20260609T190000Z"),
     ],
 )
 def test_a_utc_stamped_dump_is_managed(name: str, db: str, stamp: str) -> None:
@@ -26,18 +26,18 @@ def test_a_utc_stamped_dump_is_managed(name: str, db: str, stamp: str) -> None:
 @pytest.mark.parametrize(
     "name",
     [
-        "ava-20260609T190000Z.dump.gz.enc",
-        "ava-20260827-030001.dump",
-        "ava-20260930T190000Z.pre-update.dump.enc",
-        "ava-20260930T190000Z.pitr-activation-11111111-1111-1111-1111-111111111111.dump.enc",
+        "meiva-20260609T190000Z.dump.gz.enc",
+        "meiva-20260827-030001.dump",
+        "meiva-20260930T190000Z.pre-update.dump.enc",
+        "meiva-20260930T190000Z.pitr-activation-11111111-1111-1111-1111-111111111111.dump.enc",
         "manual.dump",
-        "ava-before-migration.dump",
-        "ava-20260930T190000Z.dump.partial",
-        "ava-20260930T190000Z.dump.enc.partial",
-        ".ava-20260930T190000Z.dump.enc.1.copy",
-        "ava-20260930T190000.dump.enc",
+        "meiva-before-migration.dump",
+        "meiva-20260930T190000Z.dump.partial",
+        "meiva-20260930T190000Z.dump.enc.partial",
+        ".meiva-20260930T190000Z.dump.enc.1.copy",
+        "meiva-20260930T190000.dump.enc",
         "20260930T190000Z.dump.enc",
-        "ava-20260930T190000Z.dump.enc.bak",
+        "meiva-20260930T190000Z.dump.enc.bak",
         "notes.txt",
     ],
 )
@@ -57,4 +57,4 @@ def test_a_stamp_without_its_utc_marker_is_refused_not_guessed() -> None:
 
 
 def test_the_off_site_namespace_is_the_published_one() -> None:
-    assert REMOTE_ROOT == "ava-logical"
+    assert REMOTE_ROOT == "meiva-logical"

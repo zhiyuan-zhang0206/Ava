@@ -1,10 +1,10 @@
 """The test process must never hold the operator's real home or credentials.
 
-`tests/fixtures/env_bootstrap.py` redirects AVA_HOME to a tmpfs dir *before* the first project
-import, because the config boot loads `$AVA_HOME/.env` at import and
+`tests/fixtures/env_bootstrap.py` redirects MEIVA_HOME to a tmpfs dir *before* the first project
+import, because the config boot loads `$MEIVA_HOME/.env` at import and
 `_enforce_cluster_env_authority()` then force-assigns every `derived_env_keys()`
 entry from whatever `.env` that home held. Get the ordering wrong and the
-suite silently runs against `~/.ava` — production cluster secret, db/redis URLs
+suite silently runs against `~/.meiva` — production cluster secret, db/redis URLs
 and gateway URL all live in the test process.
 
 The env_bootstrap assertion catches the specific mistake of importing a project module
@@ -15,7 +15,7 @@ loudly. Both halves matter: the assertion says "you broke the rule", these say
 "the rule stopped being true".
 
 History: three separate `tests/cli` runs on one dev box rewrote the operator's
-real `~/.ava/.env` on 2026-07-28/29, one of them during a production rollout.
+real `~/.meiva/.env` on 2026-07-28/29, one of them during a production rollout.
 
 **These tests only speak when something runs before them in the same process.** Two
 of the four assert equality against a sentinel that any earlier test could overwrite,
@@ -43,13 +43,13 @@ from pathlib import Path
 
 import pytest
 
-from base.paths.home import resolve_ava_home
+from base.paths.home import resolve_meiva_home
 
 _E2E_CONFTEST = Path(__file__).parents[1] / "e2e" / "conftest.py"
 
 
 def _real_home() -> Path:
-    return Path.home() / ".ava"
+    return Path.home() / ".meiva"
 
 
 def _e2e_restore_list() -> frozenset[str]:
@@ -74,30 +74,30 @@ def _e2e_restore_list() -> frozenset[str]:
 
 
 def test_home_is_not_the_operators_real_home() -> None:
-    """The resolved home is the session's tmpfs home, not `~/.ava`.
+    """The resolved home is the session's tmpfs home, not `~/.meiva`.
 
     This is the single fact everything else follows from — boot loads
-    `$AVA_HOME/.env` and force-assigns its cluster keys, and the CLI's `.env`
+    `$MEIVA_HOME/.env` and force-assigns its cluster keys, and the CLI's `.env`
     writers land beside it, so if it points at the real home a test can read or
     rewrite the operator's live cluster config.
     """
-    home = resolve_ava_home()
+    home = resolve_meiva_home()
     assert home != _real_home(), (
-        f"the resolved home is the operator's real home ({home}). AVA_HOME was set too "
+        f"the resolved home is the operator's real home ({home}). MEIVA_HOME was set too "
         "late — see the env block at the top of tests/fixtures/env_bootstrap.py."
     )
-    assert home == Path(os.environ["AVA_HOME"])
+    assert home == Path(os.environ["MEIVA_HOME"])
 
 
 def test_cluster_secret_is_the_test_secret_not_the_real_one() -> None:
     """The production cluster secret is not in this process.
 
-    `AVA_CLUSTER_SECRET` is in `derived_env_keys()`, which
+    `MEIVA_CLUSTER_SECRET` is in `derived_env_keys()`, which
     `_enforce_cluster_env_authority()` assigns unconditionally (`os.environ[key] =
     val`) — so a real `.env` on the resolved path does not merely win a tie, it
     overwrites the value env_bootstrap set moments earlier.
     """
-    assert os.environ["AVA_CLUSTER_SECRET"] == "test-cluster-secret"  # noqa: S105 — the fixture value
+    assert os.environ["MEIVA_CLUSTER_SECRET"] == "test-cluster-secret"  # noqa: S105 — the fixture value
 
 
 def test_data_plane_and_gateway_urls_are_not_the_real_ones() -> None:
@@ -107,23 +107,23 @@ def test_data_plane_and_gateway_urls_are_not_the_real_ones() -> None:
     the box, so it is asserted against the reserved-by-RFC-2606 `.invalid` host
     the suite pins rather than merely "not the real value".
     """
-    assert os.environ["AVA_GATEWAY_URL"] == "http://test-gateway.invalid:8000"
-    for key in ("AVA_DB_URL", "AVA_REDIS_URL"):
+    assert os.environ["MEIVA_GATEWAY_URL"] == "http://test-gateway.invalid:8000"
+    for key in ("MEIVA_DB_URL", "MEIVA_REDIS_URL"):
         assert "127.0.0.1" in os.environ[key] or "localhost" in os.environ[key]
 
 
 def test_config_fetch_is_skipped() -> None:
     """No import-time fetch to a live gateway.
 
-    The config source is role-derived (AVA_CONFIG_SOURCE is gone): this test
+    The config source is role-derived (MEIVA_CONFIG_SOURCE is gone): this test
     process is agent-runner-only, so without the suite's pin its Settings build
     would call `inject_config_from_gateway()` and make a real authenticated GET
     to whatever gateway URL leaked into the env — at import, before any fixture
     exists, so the autouse `_guard_bootstrap_fetch` cannot reach it. The suite
-    pins AVA_CONFIG_FETCH=skip in the env_bootstrap env block; asserting it here is
+    pins MEIVA_CONFIG_FETCH=skip in the env_bootstrap env block; asserting it here is
     the guard that the pin stays.
     """
-    assert os.environ.get("AVA_CONFIG_FETCH") == "skip"
+    assert os.environ.get("MEIVA_CONFIG_FETCH") == "skip"
 
 
 def test_the_native_root_conftest_defers_to_the_repo_root_conftest(
@@ -134,7 +134,7 @@ def test_the_native_root_conftest_defers_to_the_repo_root_conftest(
 
     It finds it by path, so moving or renaming the root conftest silently turns the
     rewrite on for every run that collects `tests/` (the hook fires while the tree is
-    collected, before any test): AVA_HOME becomes a throwaway dir while the settings
+    collected, before any test): MEIVA_HOME becomes a throwaway dir while the settings
     singleton keeps the session home, and every test that reads one and spawns a child
     that reads the other disagrees with itself (pty sessions the test cannot list, a
     gateway `.env` that does not exist). Run against a private copy of the environment
@@ -158,7 +158,7 @@ def test_the_e2e_env_fixture_tears_down_when_pytest_leaves_its_package() -> None
     """Both halves of the 2026-07-29 fix, asserted together because either alone is a
     no-op.
 
-    `tests/e2e/conftest.py:e2e_process_env` reassigns `AVA_HOME` / `AVA_GATEWAY_URL`
+    `tests/e2e/conftest.py:e2e_process_env` reassigns `MEIVA_HOME` / `MEIVA_GATEWAY_URL`
     and restores them in a `finally`. For that restore to fire when pytest *leaves*
     `tests/e2e/` rather than at end-of-session, two independent things must hold:
 
@@ -176,7 +176,7 @@ def test_the_e2e_env_fixture_tears_down_when_pytest_leaves_its_package() -> None
     exist" shape as the leak itself.
 
     **What this still does NOT prove**: that the env is clean right now. A second,
-    differently-named session-scoped fixture mutating `AVA_HOME` would leave this
+    differently-named session-scoped fixture mutating `MEIVA_HOME` would leave this
     green. The three assertions above are what prove that, and they only speak when
     something ran before them in the same process — which is why the e2e CI job runs
     `tests/e2e/ tests/harness/test_home_isolation.py` in one serial worker. This test is the
@@ -189,8 +189,8 @@ def test_the_e2e_env_fixture_tears_down_when_pytest_leaves_its_package() -> None
     # around a public API (pytest exposes no public reader for it).
     scope = conftest.e2e_process_env._fixture_function_marker.scope
     assert scope == "package", (
-        f"e2e_process_env is {scope!r}-scoped. It reassigns AVA_HOME / "
-        "AVA_GATEWAY_URL and restores them on teardown; at session scope that "
+        f"e2e_process_env is {scope!r}-scoped. It reassigns MEIVA_HOME / "
+        "MEIVA_GATEWAY_URL and restores them on teardown; at session scope that "
         "teardown fires after every other test in the process, so this file's "
         "sentinel assertions fail and the leak guard is disarmed. Keep it 'package'."
     )
@@ -212,8 +212,8 @@ def test_the_e2e_fixture_restores_every_env_key_it_assigns() -> None:
     Correct scope only makes the restore fire at the right *time*; it says nothing
     about the restore being complete. `_env_keys` is a hand-written tuple sitting
     thirty lines above a body that assigns keys one at a time, and the two drifted:
-    `AVA_GATEWAY_HEALTH_URL` and `AVA_LAUNCH_CONFIRM_TIMEOUT_SECONDS` were assigned
-    and never listed, so they leaked out of the package exactly as `AVA_HOME` did —
+    `MEIVA_GATEWAY_HEALTH_URL` and `MEIVA_LAUNCH_CONFIRM_TIMEOUT_SECONDS` were assigned
+    and never listed, so they leaked out of the package exactly as `MEIVA_HOME` did —
     a correctly-scoped teardown restoring seven of ten keys.
 
     Derived from the body by AST rather than compared against a second hand-written

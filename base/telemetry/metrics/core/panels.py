@@ -1,6 +1,6 @@
 # ruff: noqa: RUF001 — RUF001: Chinese UI text uses full-width punctuation; S608: query templates interpolate only registry-derived key fragments (base/events/contract.py SQL constants), never user input
 """Core ops-dashboard panels — the hand-written core section of
-``deploy/lgtm/config/grafana/provisioning/dashboards/ava-ops-main.json``, migrated to core-metric registrations
+``deploy/lgtm/config/grafana/provisioning/dashboards/meiva-ops-main.json``, migrated to core-metric registrations
 (Task #882) and from Postgres-event SQL to Loki LogQL (Task #1280).
 
 The core dashboard panels (ids < 1000) are registered here as core metrics,
@@ -206,7 +206,7 @@ def core_metrics() -> list[MetricSpec]:
             category="telemetry",
             unit="short",
             panel="stat",
-            query="ava_resolution_status_unresolved_warnings_ratio",
+            query="meiva_resolution_status_unresolved_warnings_ratio",
             query_type="promql",
             target_names=["unresolved_warning"],
             field_defaults={"color": {"mode": "fixed", "fixedColor": "orange"}},
@@ -226,7 +226,7 @@ def core_metrics() -> list[MetricSpec]:
             category="telemetry",
             unit="short",
             panel="stat",
-            query="ava_resolution_status_unresolved_errors_ratio",
+            query="meiva_resolution_status_unresolved_errors_ratio",
             query_type="promql",
             target_names=["unresolved_error"],
             options={"noValue": "0"},

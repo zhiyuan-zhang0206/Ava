@@ -83,7 +83,7 @@ CLOCKS: dict[str, Clock] = {
     "SERVICE_READY_TIMEOUT_S": Clock(
         "deploy",
         lambda: deploy.SERVICE_READY_TIMEOUT_S,
-        "how long `ava start` waits for freshly launched services to pass liveness",
+        "how long `meiva start` waits for freshly launched services to pass liveness",
     ),
     "NON_CRITICAL_SERVICE_READY_TIMEOUT_S": Clock(
         "deploy",

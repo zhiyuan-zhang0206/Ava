@@ -35,7 +35,7 @@ from agent.graph.llm_errors import (
     LLMStreamTruncatedError,
     LLMStreamUnexpectedStopReasonError,
 )
-from base.agents.context import AvaContext
+from base.agents.context import MeivaContext
 from base.clock import Clock
 from base.config import settings
 from base.config.tests.configuration import defaults
@@ -227,8 +227,8 @@ def test_the_transient_schedule_starts_at_the_agents_phase() -> None:
         assert start <= wait < start + 1.0
 
 
-def _runtime(database_gate: ProcessDbGate) -> Runtime[AvaContext]:
-    ctx = AvaContext(
+def _runtime(database_gate: ProcessDbGate) -> Runtime[MeivaContext]:
+    ctx = MeivaContext(
         ops_pool=None,
         llm=MagicMock(),
         event_publisher=MagicMock(),
@@ -393,7 +393,7 @@ def _failing_node_run(
 
     monkeypatch.setattr(node, "llm_attempt", fake_attempt)
     monkeypatch.setattr(node.asyncio, "sleep", fake_sleep)
-    ctx = AvaContext(
+    ctx = MeivaContext(
         ops_pool=None,
         llm=MagicMock(),
         event_publisher=MagicMock(),

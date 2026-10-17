@@ -1,7 +1,7 @@
-"""Profile provisioning for the shared headed Chrome (ava-browser).
+"""Profile provisioning for the shared headed Chrome (meiva-browser).
 
 The browser daemon runs Chrome against a *dedicated* profile at
-`$AVA_HOME/chrome-profile`, isolated from the operator's daily Chrome. On a
+`$MEIVA_HOME/chrome-profile`, isolated from the operator's daily Chrome. On a
 fresh install that profile is empty, so the agent must sign in to every site
 from scratch. This module offers the alternative at first-start time: seed the
 dedicated profile by COPYING the operator's daily Chrome profile, so the agent
@@ -11,10 +11,10 @@ Copying hands the agent the user's full logged-in identity (cookies, sessions,
 saved passwords, signed-in accounts), so it is a SECURITY decision. It is made
 only interactively and only when the dedicated profile does not yet exist — any
 existing profile directory is NEVER touched (constraint: prod carries a multi-GB
-logged-in profile that must survive every `ava start`).
+logged-in profile that must survive every `meiva start`).
 
 `ensure_browser_profile` is called from the converge `_ensure_browser` step,
-which runs at `ava start` before the browser session launches. Non-interactive
+which runs at `meiva start` before the browser session launches. Non-interactive
 paths (watchdog respawn, boot autostart, the fleet update rollout) pass
 `interactive=False` and take the fresh-profile default without prompting.
 """
@@ -29,7 +29,7 @@ from pathlib import Path
 from base.host.proc import process_alive
 from base.host.system.hostport import Host
 from base.host.system.probes import default_chrome_user_data_dir
-from base.paths import ava_home
+from base.paths import meiva_home
 
 # Names never worth copying out of a Chrome user-data dir. `Singleton*` are the
 # live lock/socket/cookie files Chrome holds while running — copying them would
@@ -53,11 +53,11 @@ _EXCLUDED_NAMES = frozenset(
 
 
 def profile_dir() -> Path:
-    """The agent's dedicated Chrome profile (`$AVA_HOME/chrome-profile`).
+    """The agent's dedicated Chrome profile (`$MEIVA_HOME/chrome-profile`).
 
     Single source of truth shared by the daemon (which launches Chrome against
     it) and this module (which may seed it)."""
-    return ava_home() / "chrome-profile"
+    return meiva_home() / "chrome-profile"
 
 
 def profile_is_populated(path: Path) -> bool:

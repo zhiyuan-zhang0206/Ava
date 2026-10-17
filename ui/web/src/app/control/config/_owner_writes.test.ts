@@ -4,8 +4,8 @@ import { writeConfigOwners } from "./_owner_writes";
 
 const fields: Pick<ConfigFieldView, "name" | "owner">[] = [
   { name: "core_value", owner: null },
-  { name: "fleet_value", owner: "ava_fleet" },
-  { name: "fleet_other", owner: "ava_fleet" },
+  { name: "fleet_value", owner: "meiva_fleet" },
+  { name: "fleet_other", owner: "meiva_fleet" },
 ];
 const ok = (target: string): ConfigWriteResult => ({
   applied: true,

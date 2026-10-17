@@ -26,13 +26,13 @@ def _backups(env_path: Path) -> list[Path]:
 
 def test_upsert_adds_and_updates(tmp_path: Path):
     f = tmp_path / ".env"
-    f.write_text("AVA_DB_URL=old\nKEEP=1\n")
-    upsert_env(f, {"AVA_DB_URL": "new", "AVA_CLUSTER": "t1"})
+    f.write_text("MEIVA_DB_URL=old\nKEEP=1\n")
+    upsert_env(f, {"MEIVA_DB_URL": "new", "MEIVA_CLUSTER": "t1"})
     text = f.read_text()
-    assert "AVA_DB_URL=new" in text
-    assert "AVA_CLUSTER=t1" in text
+    assert "MEIVA_DB_URL=new" in text
+    assert "MEIVA_CLUSTER=t1" in text
     assert "KEEP=1" in text
-    assert text.count("AVA_DB_URL=") == 1
+    assert text.count("MEIVA_DB_URL=") == 1
 
 
 def test_upsert_creates_file_and_preserves_comments(tmp_path: Path):
@@ -310,22 +310,22 @@ def test_env_line_key_agrees_with_dotenv_on_assignments() -> None:
 
 def test_upsert_rewrites_an_export_prefixed_line_in_place(tmp_path: Path) -> None:
     f = tmp_path / ".env"
-    f.write_text("export AVA_DB_URL=old\nKEEP=1\nexport\tAVA_CLUSTER=old2\n")
-    upsert_env(f, {"AVA_DB_URL": "new", "AVA_CLUSTER": "t1"})
-    assert f.read_text() == "export AVA_DB_URL=new\nKEEP=1\nexport AVA_CLUSTER=t1\n"
+    f.write_text("export MEIVA_DB_URL=old\nKEEP=1\nexport\tMEIVA_CLUSTER=old2\n")
+    upsert_env(f, {"MEIVA_DB_URL": "new", "MEIVA_CLUSTER": "t1"})
+    assert f.read_text() == "export MEIVA_DB_URL=new\nKEEP=1\nexport MEIVA_CLUSTER=t1\n"
 
 
 def test_upsert_leaves_lookalike_export_keys_alone(tmp_path: Path) -> None:
     f = tmp_path / ".env"
     f.write_text("exportED_KEY=keep\n")
-    upsert_env(f, {"AVA_DB_URL": "new"})
-    assert f.read_text() == "exportED_KEY=keep\nAVA_DB_URL=new\n"
+    upsert_env(f, {"MEIVA_DB_URL": "new"})
+    assert f.read_text() == "exportED_KEY=keep\nMEIVA_DB_URL=new\n"
 
 
 def test_remove_env_drops_export_prefixed_lines(tmp_path: Path) -> None:
     f = tmp_path / ".env"
-    f.write_text("export AVA_OLD_KEY=6543\nKEEP=1\n")
-    remove_env(f, {"AVA_OLD_KEY"})
+    f.write_text("export MEIVA_OLD_KEY=6543\nKEEP=1\n")
+    remove_env(f, {"MEIVA_OLD_KEY"})
     assert f.read_text() == "KEEP=1\n"
 
 

@@ -20,7 +20,7 @@ from pathlib import Path
 import pytest
 
 # Ensure settings-lite so we can import config without a real .env
-os.environ["AVA_CONFIG_FETCH"] = (
+os.environ["MEIVA_CONFIG_FETCH"] = (
     "skip"  # assignment, not setdefault: a setdefault would silently keep an inherited value (the login-shell .env leak class) instead of pinning settings-lite
 )
 
@@ -67,13 +67,13 @@ class TestScopeDerivationRules:
         assert len(expected) > 150  # the six-gap class lives in this set
 
     def test_session_forward_is_host_scope(self) -> None:
-        from base.host.env.registry import AVA_HOME_ENV, session_forward_keys
+        from base.host.env.registry import MEIVA_HOME_ENV, session_forward_keys
 
         # The home is no Settings field; it rides every child as a declared key.
-        expected = _aliases_with(scope=("host",)) | {AVA_HOME_ENV}
+        expected = _aliases_with(scope=("host",)) | {MEIVA_HOME_ENV}
         assert session_forward_keys() == expected
         # The F-s3-4 headline: per-agent identity never rides a daemon session.
-        assert "AVA_AGENT_ID" not in session_forward_keys()
+        assert "MEIVA_AGENT_ID" not in session_forward_keys()
 
     def test_session_forward_carries_the_ambient_passthroughs(self) -> None:
         from base.host.env.registry import HOST_PASSTHROUGH_KEYS
@@ -142,10 +142,10 @@ class TestScopeDerivationRules:
         from base.host.env.registry import child_env, session_forward_keys
 
         # `child_env` reads the live environment, so the environment is the seam here.
-        monkeypatch.setitem(os.environ, "AVA_CLUSTER_SECRET", "human-bearer")
-        assert "AVA_CLUSTER_SECRET" not in session_forward_keys()
+        monkeypatch.setitem(os.environ, "MEIVA_CLUSTER_SECRET", "human-bearer")
+        assert "MEIVA_CLUSTER_SECRET" not in session_forward_keys()
         for role in ("gateway", "runner"):
-            assert "AVA_CLUSTER_SECRET" not in child_env(role)
+            assert "MEIVA_CLUSTER_SECRET" not in child_env(role)
 
     def test_agent_runner_cluster_aliases_are_capability_plus_cluster_scope(self) -> None:
         from base.host.env.registry import agent_runner_cluster_aliases
@@ -171,7 +171,7 @@ class TestDaemonChildEnv:
     def test_session_view_carries_the_gateway_url_and_port(self) -> None:
         from base.host.env.registry import session_forward_keys
 
-        assert {"AVA_GATEWAY_URL", "AVA_GATEWAY_PORT"} <= session_forward_keys()
+        assert {"MEIVA_GATEWAY_URL", "MEIVA_GATEWAY_PORT"} <= session_forward_keys()
 
 
 class TestConsumptionMatrixDeclarations:
@@ -183,40 +183,40 @@ class TestConsumptionMatrixDeclarations:
         from base.host.env.registry import env_identity_keys
 
         expected = _aliases_with(scope=("host",)) & {
-            "AVA_MACHINE_SERVE_GATEWAY",
-            "AVA_MACHINE_SERVE_AGENT_RUNNER",
-            "AVA_MACHINE_SERVE_OBSERVABILITY_STATION",
-            "AVA_MACHINE_HOST",
-            "AVA_MACHINE_NAME",
-            "AVA_MACHINE_DESCRIPTION",
-            "AVA_GATEWAY_URL",
-            "AVA_REDIS_BIN_DIR",
+            "MEIVA_MACHINE_SERVE_GATEWAY",
+            "MEIVA_MACHINE_SERVE_AGENT_RUNNER",
+            "MEIVA_MACHINE_SERVE_OBSERVABILITY_STATION",
+            "MEIVA_MACHINE_HOST",
+            "MEIVA_MACHINE_NAME",
+            "MEIVA_MACHINE_DESCRIPTION",
+            "MEIVA_GATEWAY_URL",
+            "MEIVA_REDIS_BIN_DIR",
         }
         # memory_remote is cluster-pinned (a remote is cluster config) but still
         # machine identity.
-        expected |= {"AVA_MEMORY_REMOTE"}
+        expected |= {"MEIVA_MEMORY_REMOTE"}
         assert env_identity_keys() == expected
-        assert "AVA_HOME" not in env_identity_keys()
+        assert "MEIVA_HOME" not in env_identity_keys()
 
     def test_derived_keys_are_the_derive_env_surface(self) -> None:
         from base.host.env.registry import derived_env_keys, health_port_env_aliases
 
         expected = {
-            "AVA_CLUSTER_SECRET",
-            "AVA_GATEWAY_PORT",
-            "AVA_GATEWAY_URL",
-            "AVA_GATEWAY_HEALTH_URL",
-            "AVA_FRONTEND_HEALTHCHECK_URL",
-            "AVA_APP_PORT",
-            "AVA_MEMORY_SEARCH_PORT",
-            "AVA_MEMORY_SEARCH_URI",
-            "AVA_BROWSER_CDP_PORT",
-            "AVA_PERMISSIONS_HELPER_PORT",
-            "AVA_DB_URL",
-            "AVA_REDIS_URL",
-            "AVA_REDIS_ADMIN_PASSWORD",
-            "AVA_REDIS_PASSWORD",
-            "AVA_EVENTS_CHANNEL",
+            "MEIVA_CLUSTER_SECRET",
+            "MEIVA_GATEWAY_PORT",
+            "MEIVA_GATEWAY_URL",
+            "MEIVA_GATEWAY_HEALTH_URL",
+            "MEIVA_FRONTEND_HEALTHCHECK_URL",
+            "MEIVA_APP_PORT",
+            "MEIVA_MEMORY_SEARCH_PORT",
+            "MEIVA_MEMORY_SEARCH_URI",
+            "MEIVA_BROWSER_CDP_PORT",
+            "MEIVA_PERMISSIONS_HELPER_PORT",
+            "MEIVA_DB_URL",
+            "MEIVA_REDIS_URL",
+            "MEIVA_REDIS_ADMIN_PASSWORD",
+            "MEIVA_REDIS_PASSWORD",
+            "MEIVA_EVENTS_CHANNEL",
         } | set(health_port_env_aliases().values())
         assert derived_env_keys() == expected
 
@@ -266,12 +266,12 @@ class TestRegistryInvariants:
         registered = set(_aliases_with(scope=())) | _all_aliases()
         registered |= er.HOST_PASSTHROUGH_KEYS
         registered |= {
-            er.AVA_HOME_ENV,
+            er.MEIVA_HOME_ENV,
             "SSL_CERT_FILE",
             "REQUESTS_CA_BUNDLE",
-            "AVA_AGENT_CONFIG_OVERLAY",
-            "AVA_AGENT_BIRTH_CONFIG",
-            "AVA_REDIS_PASSWORD",
+            "MEIVA_AGENT_CONFIG_OVERLAY",
+            "MEIVA_AGENT_BIRTH_CONFIG",
+            "MEIVA_REDIS_PASSWORD",
             "PATH",
             "VIRTUAL_ENV",
             "TMPDIR",
@@ -293,7 +293,7 @@ def _all_aliases() -> frozenset[str]:
 
 
 def test_env_registry_imports_on_clean_env_without_config_package() -> None:
-    """Task #1099 regression: importing base.host.env.registry first (a first `ava start`
+    """Task #1099 regression: importing base.host.env.registry first (a first `meiva start`
     prepares identity before any settings) must not circular-import through the
     config package.
 

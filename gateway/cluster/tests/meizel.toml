@@ -1,6 +1,6 @@
 [debt.env-patch]
-"test_bootstrap_admission.py#monkeypatch.setenv os.environ.AVA_HOME" = 2
-"test_bootstrap_admission.py#monkeypatch.setitem os.environ.AVA_API_TOKEN" = 1
+"test_bootstrap_admission.py#monkeypatch.setenv os.environ.MEIVA_HOME" = 2
+"test_bootstrap_admission.py#monkeypatch.setitem os.environ.MEIVA_API_TOKEN" = 1
 
 [debt.first-party-patch]
 "test_bootstrap_admission.py#monkeypatch.setattr base.config.service_read.ConfigAuthority.read_env_aliases" = 1
@@ -10,7 +10,7 @@
 "test_bootstrap_admission.py#monkeypatch.setattr base.config.settings.data_plane.cluster_secret" = 1
 "test_bootstrap_admission.py#monkeypatch.setattr base.host.env.bootstrap.dial_get" = 2
 "test_bootstrap_admission.py#monkeypatch.setattr base.host.env.bootstrap.os" = 2
-"test_bootstrap_admission.py#monkeypatch.setattr base.paths.ava_home" = 1
+"test_bootstrap_admission.py#monkeypatch.setattr base.paths.meiva_home" = 1
 "test_cluster_status_fields_cluster.py#monkeypatch.setattr gateway.cluster.status.cluster_is_paused" = 2
 "test_cluster_status_fields_cluster.py#monkeypatch.setattr gateway.cluster.status.cluster_rpc.dispatch_to_url" = 6
 "test_cluster_status_fields_cluster.py#monkeypatch.setattr gateway.cluster.status.prod_source_head_sha" = 2

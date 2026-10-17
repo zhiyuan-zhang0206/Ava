@@ -37,7 +37,7 @@ from agent.graph.hooks.compact import (
     generate_summary,
 )
 from agent.state import AgentState, CompactState
-from base.agents.context import AvaContext
+from base.agents.context import MeivaContext
 from base.clock import Clock
 from base.config.tests.configuration import defaults
 from base.db import Database
@@ -128,11 +128,11 @@ def _fake_llm_seq(*summaries: str) -> Any:
     return llm
 
 
-def _runtime_with_llm(llm: Any, database_gate: ProcessDbGate) -> Runtime[AvaContext]:
+def _runtime_with_llm(llm: Any, database_gate: ProcessDbGate) -> Runtime[MeivaContext]:
     # These unit tests have no DB. ops_pool=None is the container-mode value:
     # the post-compact checkpoint trim treats it as a no-op (real-pool trimming is covered by
     # base/agents/history/tests/test_compact_boundary.py and the aops_pool compact tests below).
-    ctx = AvaContext(
+    ctx = MeivaContext(
         ops_pool=None,
         llm=llm,
         event_publisher=MagicMock(),
@@ -208,7 +208,7 @@ def _over_threshold_state() -> AgentState:
     )
 
 
-# --- compact_reminder (plugins/ava_compact/plugin.py) tests ---
+# --- compact_reminder (plugins/meiva_compact/plugin.py) tests ---
 #
 # This wrapper is the implementation side of the Layer 3 monotonic counter producer. Tests cover three things:
 # 1. inner returns None → wrap returns None (no bump version, pass-through)
@@ -219,7 +219,7 @@ def _over_threshold_state() -> AgentState:
 
 
 @pytest.fixture
-def ava_compact_loaded():
+def meiva_compact_loaded():
     """Compact is built-in (Issue #1284). The wrapper function lives in
     agent.graph.hooks.compact; state fields are on BaseAgentState. Returns
     (state_cls, wrap_fn) for tests to call.
@@ -237,7 +237,7 @@ def _over_threshold_messages() -> list[AnyMessage]:
     ]
 
 
-# --- compact reminder (plugins/ava_compact/plugin.py) tests ---
+# --- compact reminder (plugins/meiva_compact/plugin.py) tests ---
 #
 # The reminder is the same single before_llm hook's below-ceiling branch: when
 # est sits in (compact_reminder_tokens, auto_compact_tokens] it injects a
@@ -291,7 +291,7 @@ def _make_runtime(ops_pool=None, llm=None, *, database_gate: ProcessDbGate):
         ops_pool = AsyncMock()
     if llm is None:
         llm = AsyncMock()
-    ctx = AvaContext(
+    ctx = MeivaContext(
         ops_pool=ops_pool,  # pyright: ignore[reportUnknownArgumentType]
         llm=llm,  # pyright: ignore[reportUnknownArgumentType]
         event_publisher=MagicMock(),
@@ -314,7 +314,7 @@ async def test_auto_compact_summary_message_carries_msg_type(
     monkeypatch: pytest.MonkeyPatch, database_gate: ProcessDbGate
 ):
     """Task #1017: the auto-compact summary message must carry the same
-    ava_msg_type stamp the claim-node (force) compact path writes. Without it
+    meiva_msg_type stamp the claim-node (force) compact path writes. Without it
     the timeline read side classifies the HumanMessage as a catch-all
     system_marker with source=null and the frontend renders the red
     UNRECOGNIZED SYSTEM_MARKER alarm (2026-08-07 user report)."""
@@ -330,15 +330,15 @@ async def test_auto_compact_summary_message_carries_msg_type(
     tail = result["context_reset"].tail  # pyright: ignore[reportUnknownMemberType]
     assert isinstance(tail[0], HumanMessage)
     kwargs = tail[0].additional_kwargs  # pyright: ignore[reportUnknownMemberType]
-    assert kwargs.get("ava_msg_type") == "compact_summary"  # pyright: ignore[reportUnknownMemberType]
-    assert "ava_created_at" in kwargs
+    assert kwargs.get("meiva_msg_type") == "compact_summary"  # pyright: ignore[reportUnknownMemberType]
+    assert "meiva_created_at" in kwargs
 
 
 async def test_claim_compact_request_summary_message_carries_msg_type(
     monkeypatch: pytest.MonkeyPatch,
 ):
     """Task #1017: the claim-node (force / UI /compact) compact path stamps its
-    summary message with ava_msg_type=compact_request — the two compact paths
+    summary message with meiva_msg_type=compact_request — the two compact paths
     must produce the same message contract so the frontend never sees an
     unrecognized system_marker."""
     from agent.graph.hooks.compact import build_compact_transition
@@ -348,11 +348,11 @@ async def test_claim_compact_request_summary_message_carries_msg_type(
         resume="llm",
         summary_kwargs={
             "additional_kwargs": {
-                "ava_msg_type": "compact_request",
-                "ava_created_at": "2026-08-07T00:00:00+00:00",
+                "meiva_msg_type": "compact_request",
+                "meiva_created_at": "2026-08-07T00:00:00+00:00",
             },
         },
     )
     tail = transition["context_reset"].tail
     assert isinstance(tail[0], HumanMessage)
-    assert tail[0].additional_kwargs.get("ava_msg_type") == "compact_request"
+    assert tail[0].additional_kwargs.get("meiva_msg_type") == "compact_request"

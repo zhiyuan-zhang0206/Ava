@@ -26,9 +26,7 @@ from langgraph.types import Command
 from agent.graph import LlmLedger, exec_node, llm_node
 from agent.hooks.tests.fakes import make_fake_ops_pool
 from agent.state import AgentState
-from ava.boot import process_clients
-from ava.tests.fixtures.pin_agent import hosted_resources as hosted_resources
-from base.agents.context import AvaContext
+from base.agents.context import MeivaContext
 from base.agents.context.identity import AgentIdentity
 from base.clock import Clock
 from base.config import settings
@@ -39,6 +37,8 @@ from base.events.live.projection import EVENT_ADAPTER, ExecOutput, ExecStart
 from base.host.env.agent_slices import AgentSlices
 from base.native_process.turn_identity import HostedTurnResources
 from base.packages.plugin_providers import build_model_catalog
+from meiva.boot import process_clients
+from meiva.tests.fixtures.pin_agent import hosted_resources as hosted_resources
 
 
 def _make_runtime(
@@ -47,8 +47,8 @@ def _make_runtime(
     llm=None,
     event_publisher=None,
     database_gate: ProcessDbGate,
-) -> Runtime[AvaContext]:
-    """test helper: assemble AvaContext into Runtime; ops_pool
+) -> Runtime[MeivaContext]:
+    """test helper: assemble MeivaContext into Runtime; ops_pool
     placeholders for nodes that don't actually borrow conns.
 
     llm_node now `ctx.llm.bind_tools(...)` then astream——set bind_tools
@@ -62,7 +62,7 @@ def _make_runtime(
         llm = MagicMock()
     if isinstance(llm, MagicMock):
         llm.bind_tools.return_value = llm
-    ctx = AvaContext(
+    ctx = MeivaContext(
         hosted_resources=hosted_resources,
         ops_pool=make_fake_ops_pool(),
         llm=llm,  # pyright: ignore[reportUnknownArgumentType]
@@ -162,7 +162,7 @@ async def test_llm_node_stamps_last_active_at_with_text(
         ]
     )
     ops_pool = make_fake_ops_pool()
-    ctx = AvaContext(
+    ctx = MeivaContext(
         hosted_resources=hosted_resources,
         ops_pool=ops_pool,
         llm=fake_llm,
@@ -215,7 +215,7 @@ async def test_llm_node_stamps_last_active_at_on_tool_only_turn(
         ]
     )
     ops_pool = make_fake_ops_pool()
-    ctx = AvaContext(
+    ctx = MeivaContext(
         hosted_resources=hosted_resources,
         ops_pool=ops_pool,
         llm=fake_llm,
@@ -480,8 +480,8 @@ async def test_exec_node_output_uses_wrap_code_output_envelope(
     assert "[exit" not in content
     # exec wall-clock captured (drives the 'ran in Xs' chip); a real run is
     # non-negative ms — just assert the contract that the field is populated.
-    assert isinstance(msg.additional_kwargs["ava_exec_ms"], int)  # pyright: ignore[reportUnknownMemberType]
-    assert msg.additional_kwargs["ava_exec_ms"] >= 0  # pyright: ignore[reportUnknownMemberType]
+    assert isinstance(msg.additional_kwargs["meiva_exec_ms"], int)  # pyright: ignore[reportUnknownMemberType]
+    assert msg.additional_kwargs["meiva_exec_ms"] >= 0  # pyright: ignore[reportUnknownMemberType]
     # Old format should not appear
     assert not content.startswith("[exec output]")  # pyright: ignore[reportUnknownMemberType]
 

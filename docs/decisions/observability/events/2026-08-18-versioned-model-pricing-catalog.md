@@ -2,16 +2,16 @@
 
 ## Context
 
-Ava estimates LLM spend when a call completes and stores the rates and cost on
+Meiva estimates LLM spend when a call completes and stores the rates and cost on
 the usage event. The model registry previously carried one three-number tuple
 per model. That representation cannot express published future price changes,
 daily peak/off-peak windows, or token-volume tiers. It also has no freshness
-signal: provider prices can change while every Ava test remains green.
+signal: provider prices can change while every Meiva test remains green.
 
 The primary user is a cluster operator who needs current cost estimates without
 watching every provider pricing page. They need deterministic billing semantics,
 an audit trail for every rate, and an explicit unknown state instead of a guessed
-or zero price. Ava supports direct providers whose source capabilities differ:
+or zero price. Meiva supports direct providers whose source capabilities differ:
 xAI exposes a machine-readable price catalog, while OpenAI, Anthropic, Gemini,
 DeepSeek, Mistral, and Groq publish prices only in documentation. Account cost
 APIs report historical spend and are not next-call unit-price catalogs.
@@ -39,7 +39,7 @@ Published future rates may be checked in ahead of time and activate at their
 effective timestamp without another deployment.
 
 When a provider publishes only a calendar date for a price increase, without a
-timezone, Ava records that ambiguity in the model entry and normalizes the
+timezone, Meiva records that ambiguity in the model entry and normalizes the
 cutover to the earliest global occurrence of that date (midnight UTC+14). This
 can conservatively overestimate for part of a day, but cannot keep quoting the
 lower rate after the announced date has begun somewhere in the world. A later
@@ -70,7 +70,7 @@ new pricing shape leaks into the updater and its callers.
 ### Trust one third-party aggregate price API
 
 Aggregators are useful drift detectors, but their route, region, markup, cache,
-and long-context semantics do not necessarily match Ava's direct provider
+and long-context semantics do not necessarily match Meiva's direct provider
 accounts. In particular, OpenRouter pricing is authoritative only for the
 OpenRouter billing channel. An aggregate cannot replace channel-specific official
 sources.

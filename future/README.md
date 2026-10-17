@@ -22,7 +22,7 @@ lives with the current agent documentation; these rows track its remaining work.
 
 | File | What's left |
 |------|------|
-| [Ava / Ava Code prompt architecture](../agent/docs/prompt-architecture.md) | Living doc; the core-vs-`ava_code` responsibility split + the mechanics-vs-behavior axis. Open: malicious-code refusal stance (pending a threat-model call), a minor whitespace nudge. The `ava_code` memory layer was **rejected**, not deferred |
+| [Meiva / Meiva Code prompt architecture](../agent/docs/prompt-architecture.md) | Living doc; the core-vs-`meiva_code` responsibility split + the mechanics-vs-behavior axis. Open: malicious-code refusal stance (pending a threat-model call), a minor whitespace nudge. The `meiva_code` memory layer was **rejected**, not deferred |
 | [Compaction redesign](agent/compaction-redesign.md) | Forced / command / spontaneous compact mechanics |
 | [Import an existing agent's history](agent/import-existing-agent-history.md) | Onboarding demo script — distil a new user's Claude Code / Codex history into the memory pool. Gated on going public |
 
@@ -40,13 +40,13 @@ lives with the current agent documentation; these rows track its remaining work.
 | [Decentralized install + local config](infra/extensions/decentralized-install-and-config.md) | **Hooks-only plugin bundles only** — everything else (install registry, CC plugin materialization, `type="mcp"` packages, the cross-machine inventory UI) landed. The per-machine enable-state direction is proposed to be reversed by [extension-ownership](infra/extensions/extension-ownership.md) |
 | [Core package update channel](infra/lifecycle/core-package-update-channel.md) | **P2 core-plugin materialization** (P0+P1 landed — PRs #2355/#2368): collision rule, module-identity verification, isolation gates; then P3 alignment with [extension-ownership](infra/extensions/extension-ownership.md) |
 | [MCP scope & bundling](infra/extensions/mcp-scope-and-bundling.md) | **Formalizing per-machine scope** — all three config sources landed; there is still no `scope` field, and the one real machine-scope consumer (the shared browser MCP upstream) is hand-built. [extension-ownership](infra/extensions/extension-ownership.md) proposes dissolving the scope field into capability matching |
-| [Prompt injection — boundary map](infra/security/prompt-injection.md) | The content-layer scanner (`ava/security.py`) is built and default-on. Left: two coverage gaps (content-source skills, `ava.understand(url)`) and the whole structural boundary (sandboxed reader, egress allowlist) |
+| [Prompt injection — boundary map](infra/security/prompt-injection.md) | The content-layer scanner (`meiva/security.py`) is built and default-on. Left: two coverage gaps (content-source skills, `meiva.understand(url)`) and the whole structural boundary (sandboxed reader, egress allowlist) |
 | [Skill supply-chain trust](infra/security/skill-supply-chain-trust.md) | The install gate + trust tier are built. Left: recall must enforce the tier (highest value), a re-scan sweep when the rule table grows, a human-presence channel for `--accept-risk`, publisher signatures |
 | [PG backup — off-site leg](infra/data/pg-backup.md) | Off-site leg (GCS / R2) for the disk-loss scenario; the local daily `pg_dump` landed |
 | [Release-directory atomic code swap](infra/lifecycle/release-dir-atomic-code-swap.md) | Deferred, not started — document the immutable-artifact swap mechanism |
 | [Locality](infra/engineering/locality.md) | Re-verify the remaining owner-bypass/private-import debt against current baselines. The co-change index and native identity owner exist; the historical directory counts and #3479 wait conditions are not current blockers |
 | [Computer Use — per-app access tiers](infra/security/computer-use-app-access-tiers.md) | **All of it** — deferred 2026-10-12, not scheduled. There is no per-app layer today (the denied-app gate was removed 2026-08-10); left: view / click / full tiers, who authorizes and where it persists, a helper-side checkpoint reusing the capture-badge window decision, per-agent vs per-machine grants |
-| [Dependency injection](infra/security/dependency-injection.md) | **All of it** — target shape and migration order; nothing built. Left: the structure lint and its baseline, the import-time config reads (44), composition roots per process, the field-ownership slices (survey pending), turn context in `AvaContext`, background duties as services with sequential loops (audit pending). Open: the non-graph ContextVars, the cross-agent contamination audit, the per-service memory and onboarding cost (memory audit pending), plugins outside the repo |
+| [Dependency injection](infra/security/dependency-injection.md) | **All of it** — target shape and migration order; nothing built. Left: the structure lint and its baseline, the import-time config reads (44), composition roots per process, the field-ownership slices (survey pending), turn context in `MeivaContext`, background duties as services with sequential loops (audit pending). Open: the non-graph ContextVars, the cross-agent contamination audit, the per-service memory and onboarding cost (memory audit pending), plugins outside the repo |
 | [Living tech-debt ledger](tech-debt/ledger.md) | Single "what debt is open now" register maintained by the sweeper engine |
 | [Checkpoint storage rebuild](infra/data/checkpoint-storage-rebuild.md) | **Observation-window calibrations (Section 7)** — delta-channel storage, keep-everything retention (R1–R4), read-time fold, and the reader-first write switch are all landed and deployed (write switch 2026-09-14, task #3180) |
 | [Heartbeat design](infra/lifecycle/heartbeat-design.md) | Original research evidence for the rejected two-tier proposal; the opt-out decision and current heartbeat implementation own behavior, with no remaining work assigned to this source |
@@ -56,7 +56,7 @@ lives with the current agent documentation; these rows track its remaining work.
 
 | File | Role |
 |------|------|
-| [**Roadmap**](roadmap/README.md) | ★ The live, ordered list of what Ava builds next. Buckets: **now**, **north star**, gated-on-sandbox, open-source prerequisites, low-priority, deliberate-no list |
+| [**Roadmap**](roadmap/README.md) | ★ The live, ordered list of what Meiva builds next. Buckets: **now**, **north star**, gated-on-sandbox, open-source prerequisites, low-priority, deliberate-no list |
 | [Distribution form: one core, packaging is a gated outer layer](distribution-form.md) | Distribution architecture |
 | [Frontend plugin contributions](frontend-plugin-contributions.md) | **U4 (agent-inspect sections beyond the shipped U4a widgets) + U5 (bless the gateway API)** — U1–U3, U1a, U6 shipped (issue #57) |
 | [web-ai — drive frontier-model web apps](web-ai.md) | Driving ChatGPT / Gemini / Claude through a logged-in browser |
@@ -64,7 +64,7 @@ lives with the current agent documentation; these rows track its remaining work.
 > **Cleaned up 2026-07-28.** Deleted as fully landed with no load-bearing decision
 > left to keep: `preview-validation-suite`, `preview-cluster`,
 > `web-fetch-skill-routing`, `config-decomposition`, `plugin-extension-api`,
-> `dynamic-workflow`, `fleet-view-design`, `ava-code-memory` (the last one
+> `dynamic-workflow`, `fleet-view-design`, `meiva-code-memory` (the last one
 > *rejected* — memory belongs to the cluster's memory plugin, and repo facts belong
 > in that repo's `AGENTS.md`). Moved to [`docs/decisions/`](../docs/decisions) because
 > the decision outlived the plan: `multihost-deployment` →

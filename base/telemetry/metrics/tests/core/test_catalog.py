@@ -79,8 +79,8 @@ def test_collect_core_metrics_includes_statistics_coverage() -> None:
     assert all(s.plugin == "core" for s in specs)
     by_name = {spec.name: spec for spec in specs}
     assert set(by_name) >= {
-        "ava_obs_llm_cost_usd",
-        "ava_obs_events_rate",
+        "meiva_obs_llm_cost_usd",
+        "meiva_obs_events_rate",
         "core_llm_input_tokens_24h",
         "core_llm_output_tokens_24h",
         "core_cache_hit_rate_24h",
@@ -93,10 +93,12 @@ def test_collect_core_metrics_includes_statistics_coverage() -> None:
     assert by_name["core_unresolved_warning"].query_type == "promql"
     assert (
         by_name["core_unresolved_warning"].query
-        == "ava_resolution_status_unresolved_warnings_ratio"
+        == "meiva_resolution_status_unresolved_warnings_ratio"
     )
     assert by_name["core_unresolved_error"].query_type == "promql"
-    assert by_name["core_unresolved_error"].query == "ava_resolution_status_unresolved_errors_ratio"
+    assert (
+        by_name["core_unresolved_error"].query == "meiva_resolution_status_unresolved_errors_ratio"
+    )
 
 
 # ── LogQL dialect (task #1280) ────────────────────────────────────────────────

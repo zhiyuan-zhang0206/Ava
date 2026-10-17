@@ -3,7 +3,7 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-    <title>Ava</title>
+    <title>Meiva</title>
     <style>
       :root {
         color-scheme: dark;
@@ -106,8 +106,8 @@
   <body>
     <main>
       <section id="setup" hidden>
-        <h1 data-i18n="connectTitle">Connect to Ava</h1>
-        <p data-i18n="connectIntro">Enter the Ava server address; the secret is optional — with it you land already signed in</p>
+        <h1 data-i18n="connectTitle">Connect to Meiva</h1>
+        <p data-i18n="connectIntro">Enter the Meiva server address; the secret is optional — with it you land already signed in</p>
         <form id="setup-form">
           <label for="server"><span data-i18n="serverLabel">Server address</span></label>
           <input
@@ -213,7 +213,7 @@
       // Android WebView reports through navigator.language). English strings are
       // the static HTML defaults; this table swaps every copy element when the
       // device runs a Chinese system locale.
-      const I18N = window.AVA_APP_I18N || {};
+      const I18N = window.MEIVA_APP_I18N || {};
       const LOCALE = (navigator.language || "en").toLowerCase().startsWith("zh") ? "zh" : "en";
       const t = (key) => (I18N[LOCALE] && I18N[LOCALE][key]) ?? I18N.en?.[key] ?? key;
       function applyI18n() {
@@ -449,7 +449,7 @@
             aboutBuild.textContent = String(info.versionCode);
           }
         } catch (error) {
-          console.error("[ava-app] could not read the installed build", error);
+          console.error("[meiva-app] could not read the installed build", error);
         }
         if (config.platform === "android") updatePanel.hidden = false;
       }
@@ -480,7 +480,7 @@
             setUpdateStatus(t("updateCheckFailed"));
           }
         } catch (error) {
-          console.error("[ava-app] update check failed", error);
+          console.error("[meiva-app] update check failed", error);
           setUpdateStatus(t("updateCheckFailed"));
         } finally {
           updateCheckButton.disabled = false;
@@ -509,7 +509,7 @@
             setUpdateStatus(t("updateInstallFailed"));
           }
         } catch (error) {
-          console.error("[ava-app] update install failed", error);
+          console.error("[meiva-app] update install failed", error);
           updateInstallButton.disabled = false;
           setUpdateStatus(t("updateInstallFailed"));
         }
@@ -518,7 +518,7 @@
       updateDownloadButton.addEventListener("click", () => {
         if (!updateDownloadPage) return;
         invoke("app_open_external", { url: updateDownloadPage }).catch((error) => {
-          console.error("[ava-app] could not open the download page", error);
+          console.error("[meiva-app] could not open the download page", error);
         });
       });
 

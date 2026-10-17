@@ -103,7 +103,7 @@ mod tests {
 
     #[test]
     fn missing_file_yields_defaults() {
-        let dir = std::env::temp_dir().join("ava-app-settings-missing");
+        let dir = std::env::temp_dir().join("meiva-app-settings-missing");
         let _ = fs::remove_dir_all(&dir);
         assert_eq!(Settings::load(&dir), Settings::default());
     }
@@ -117,7 +117,7 @@ mod tests {
 
     #[test]
     fn round_trips_through_disk() {
-        let dir = std::env::temp_dir().join("ava-app-settings-roundtrip");
+        let dir = std::env::temp_dir().join("meiva-app-settings-roundtrip");
         let _ = fs::remove_dir_all(&dir);
         let settings = Settings {
             entry_url: Some("http://box:3000".into()),
@@ -133,7 +133,7 @@ mod tests {
 
     #[test]
     fn partial_json_keeps_defaults_for_absent_keys() {
-        let dir = std::env::temp_dir().join("ava-app-settings-partial");
+        let dir = std::env::temp_dir().join("meiva-app-settings-partial");
         let _ = fs::remove_dir_all(&dir);
         fs::create_dir_all(&dir).expect("mkdir");
         fs::write(dir.join(FILE_NAME), r#"{"autoLogin": false}"#).expect("write");
@@ -145,7 +145,7 @@ mod tests {
 
     #[test]
     fn malformed_json_falls_back_instead_of_panicking() {
-        let dir = std::env::temp_dir().join("ava-app-settings-malformed");
+        let dir = std::env::temp_dir().join("meiva-app-settings-malformed");
         let _ = fs::remove_dir_all(&dir);
         fs::create_dir_all(&dir).expect("mkdir");
         fs::write(dir.join(FILE_NAME), "{ not json").expect("write");

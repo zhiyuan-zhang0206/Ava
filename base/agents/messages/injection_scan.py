@@ -1,7 +1,7 @@
 """Rule-based scan that marks ingested content carrying prompt-injection
 patterns; pure string matching, no model call, no process state. The agent host's claim
 node scans inbound text with it and owns the finding it gets back; the SDK side
-(`ava.security`) delivers findings for tool results through the exec turn's state update.
+(`meiva.security`) delivers findings for tool results through the exec turn's state update.
 
 A mitigation, not a boundary: a clean result means "no known pattern
 matched", not "safe".

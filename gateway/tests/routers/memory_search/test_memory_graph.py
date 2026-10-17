@@ -17,7 +17,7 @@ class TestMemoryGraph:
             """---
 type: Memory
 title: Alpha
-tags: [ava-internal]
+tags: [meiva-internal]
 ---
 
 See [Beta](beta.md).
@@ -45,7 +45,7 @@ tags: [tech-ops]
         by_id = {node["id"]: node for node in body["nodes"]}
         assert by_id["/"]["kind"] == "folder"
         assert by_id["alpha"]["kind"] == "note"
-        assert by_id["alpha"]["primary_tag"] == "ava-internal"
+        assert by_id["alpha"]["primary_tag"] == "meiva-internal"
         assert body["edges"] == [
             {"source": "alpha", "target": "/", "kind": "containment"},
             {"source": "beta", "target": "/", "kind": "containment"},
@@ -57,7 +57,7 @@ tags: [tech-ops]
             """---
 type: Memory
 title: Alpha
-tags: [ava-internal]
+tags: [meiva-internal]
 ---
 
 # Alpha
@@ -79,8 +79,8 @@ tags: [ava-internal]
             "tags": [],
             "primary_tag": "",
             "timestamp": None,
-            "ava_agent": None,
-            "ava_machine": None,
+            "meiva_agent": None,
+            "meiva_machine": None,
         }
 
     def test_graph_scans_subdirectories(self, tmp_path: Path) -> None:
@@ -88,7 +88,7 @@ tags: [ava-internal]
             """---
 type: Memory
 title: Root Note
-tags: [ava-internal]
+tags: [meiva-internal]
 ---
 
 See [Sub Note](subdir/sub-note.md).
@@ -130,7 +130,7 @@ See [Root Note](../root-note.md).
             """---
 type: Memory
 title: Root
-tags: [ava-internal]
+tags: [meiva-internal]
 ---
 
 # Root
@@ -142,7 +142,7 @@ tags: [ava-internal]
             """---
 type: Memory
 title: Mid
-tags: [ava-internal]
+tags: [meiva-internal]
 ---
 
 # Mid
@@ -154,7 +154,7 @@ tags: [ava-internal]
             """---
 type: Memory
 title: Deep
-tags: [ava-internal]
+tags: [meiva-internal]
 ---
 
 # Deep
@@ -192,7 +192,7 @@ tags: [ava-internal]
             """---
 type: Memory
 title: Only
-tags: [ava-internal]
+tags: [meiva-internal]
 ---
 
 # Only
@@ -226,7 +226,7 @@ tags: [ava-internal]
             """---
 type: Memory
 title: Alpha
-tags: [ava-internal]
+tags: [meiva-internal]
 ---
 
 See [Outside](../outside.md) and [Absolute](/etc/passwd).
@@ -354,7 +354,7 @@ title: Good
             """---
 type: Memory
 title: Alpha
-tags: [ava-internal]
+tags: [meiva-internal]
 ---
 
 See [Web](https://example.com) and [Anchor](#section).
@@ -373,7 +373,7 @@ See [Web](https://example.com) and [Anchor](#section).
             """---
 type: Memory
 title: Alpha
-tags: [ava-internal]
+tags: [meiva-internal]
 ---
 
 See [Ghost](ghost.md).
@@ -392,9 +392,9 @@ See [Ghost](ghost.md).
             """---
 type: Memory
 title: Alpha
-tags: [ava-internal]
+tags: [meiva-internal]
 timestamp: 2026-01-02 03:04:05
-ava_agent: 1609
+meiva_agent: 1609
 ---
 
 # Alpha
@@ -417,9 +417,9 @@ title: Beta
         assert resp.status_code == 200
         by_id = {node["id"]: node for node in resp.json()["nodes"]}
         assert by_id["alpha"]["timestamp"] is not None
-        assert by_id["alpha"]["ava_agent"] == "1609"
+        assert by_id["alpha"]["meiva_agent"] == "1609"
         assert by_id["beta"]["timestamp"] is None
-        assert by_id["beta"]["ava_agent"] is None
+        assert by_id["beta"]["meiva_agent"] is None
 
 
 def test_primary_tag_prefers_a_domain_tag_over_the_type_tag() -> None:

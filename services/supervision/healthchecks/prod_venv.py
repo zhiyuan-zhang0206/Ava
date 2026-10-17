@@ -20,8 +20,8 @@ _log = logging.getLogger("services.supervision.healthchecks.prod_venv")
 _PROBE_TIMEOUT_S = 5.0
 _STDERR_TAIL_CHARS = 1000
 _IMPORT_SMOKE = """\
-import ava, pydantic, psycopg, fastapi
-for module in (ava, pydantic, psycopg, fastapi):
+import meiva, pydantic, psycopg, fastapi
+for module in (meiva, pydantic, psycopg, fastapi):
     if module.__file__ is None:
         raise ImportError(f"{module.__name__}: hollow package (namespace without __init__.py)")
 """

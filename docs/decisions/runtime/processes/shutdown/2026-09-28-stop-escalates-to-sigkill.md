@@ -2,7 +2,7 @@
 
 ## Context
 
-`ava stop` closes this unit's persistent shells after the agents drained and
+`meiva stop` closes this unit's persistent shells after the agents drained and
 the services stopped (`cli/commands/_temporary_stop.py:_stop_terminals`). It
 captured each shell's descendants, sent the shell SIGHUP and the descendants
 SIGTERM, and waited for all of them until the stop's deadline (300 s by
@@ -54,7 +54,7 @@ new updater closes terminals at release (FC-6).
   and the hold stays.
 - **Notices.** A busy session that is verified closed gets the existing
   durable closure notice, including when the SIGKILL was what ended it.
-- **Scope.** Only terminal closure changes. `ava pause` (and the updates and
+- **Scope.** Only terminal closure changes. `meiva pause` (and the updates and
   restarts built on it) never closes a terminal, so its behaviour is
   unchanged. The service stop and the data-plane stop keep their
   no-escalation contract. `--force` keeps its own path.
@@ -110,7 +110,7 @@ closes the escape in the third consequence above (a process forked and
 orphaned after the shell is gone), and a closed session's notice is now
 recorded even when another session leaves the stop incomplete.
 
-Forward link (2026-10-03): `ava pause` was deleted; a stop with a different keep set replaces it. See [delete ava pause](../../../agents/graph/2026-10-03-delete-ava-pause.md).
+Forward link (2026-10-03): `meiva pause` was deleted; a stop with a different keep set replaces it. See [delete meiva pause](../../../agents/graph/2026-10-03-delete-meiva-pause.md).
 
 Forward link (2026-10-03): the closure described here is run by the
 [pty-sessions service](../sessions/2026-10-03-pty-sessions-service.md) on a `close_all` request

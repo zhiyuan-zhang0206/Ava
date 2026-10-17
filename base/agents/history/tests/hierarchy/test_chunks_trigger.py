@@ -168,7 +168,7 @@ def test_segment_without_a_head_keeps_indices_unshifted() -> None:
 
 def test_message_time_takes_the_first_and_last_stamped_message() -> None:
     def stamped(content: str, at: str) -> BaseMessage:
-        return AIMessage(content=content, additional_kwargs={"ava_created_at": at})
+        return AIMessage(content=content, additional_kwargs={"meiva_created_at": at})
 
     msgs = [
         HumanMessage(content="legacy"),

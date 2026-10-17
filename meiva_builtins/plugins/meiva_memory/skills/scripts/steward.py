@@ -1,0 +1,73 @@
+from __future__ import annotations
+
+import argparse
+import sys
+
+from meiva_builtins.plugins.meiva_memory.pool_ops import (
+    branch_name,
+    current_branch,
+    pool_dir,
+    regenerate_indexes,
+    repo_slug,
+    run,
+    stage_and_commit,
+)
+
+
+def main() -> int:
+    ap = argparse.ArgumentParser(description="Per-machine memory steward sync")
+    ap.add_argument("-m", "--message", required=True, help="commit message")
+    args = ap.parse_args()
+
+    pool = pool_dir()
+    branch = branch_name()
+    print(f"memory pool: {pool}  branch: {branch}")
+
+    current = current_branch(pool)
+    if current != branch:
+        print(
+            f"✗ refusing: the checkout is on {current or 'a detached HEAD'}, not {branch} —\n"
+            f"  the steward pushes whatever branch is checked out (a run from `main`\n"
+            f"  would push straight to main). Check out this machine's branch first:\n"
+            f"    git -C {pool} checkout -B {branch} origin/main",
+            file=sys.stderr,
+        )
+        return 2
+
+    regenerate_indexes()
+    stage_and_commit(args.message, pool)
+    run(["git", "-C", str(pool), "push", "origin", "HEAD"])
+
+    slug = repo_slug(pool)
+    existing = run(
+        ["gh", "pr", "list", "--repo", slug, "--head", branch, "--json", "url", "-q", ".[0].url"],
+        check=False,
+    )
+    if existing.stdout.strip():
+        print(f"  PR already open: {existing.stdout.strip()}")
+        return 0
+
+    url = run(
+        [
+            "gh",
+            "pr",
+            "create",
+            "--repo",
+            slug,
+            "--base",
+            "main",
+            "--head",
+            branch,
+            "--title",
+            args.message,
+            "--body",
+            f"Notes from {branch}",
+        ]
+    )
+    print(f"  PR created: {url.stdout.strip()}")
+    print("  → notify the Memory Arbiter that the PR is ready")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

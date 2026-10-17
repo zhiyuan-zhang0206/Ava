@@ -1,12 +1,12 @@
 """Per-cluster native Postgres+Redis bring-up.
 
 Every cluster (including `main`) runs its OWN Postgres and Redis under its
-`$AVA_HOME` on the fixed port table (`base.host.env.port_table`) — this is the only
+`$MEIVA_HOME` on the fixed port table (`base.host.env.port_table`) — this is the only
 data-plane path; there is no shared host instance.
 
 Model (mirrors `base.cluster.dataplane.pg_tools.throwaway_postgres`, but persistent + authed):
 
-- Postgres `initdb`s into `$AVA_HOME/pg` (cold) — cached through a host-level
+- Postgres `initdb`s into `$MEIVA_HOME/pg` (cold) — cached through a host-level
   template dir so a new cluster / a test spins up by directory copy, not a fresh
   multi-second init — and is launched directly with durable native custody on its pg port.
   pg_hba ALWAYS authenticates, whatever the bearer: the OS-user bootstrap
@@ -17,7 +17,7 @@ Model (mirrors `base.cluster.dataplane.pg_tools.throwaway_postgres`, but persist
 - Redis runs `redis-server` on the cluster's redis port and ALWAYS authenticates,
   whatever the bearer: `requirepass` = the gateway-only Redis admin password, and
   the cluster's ACL user has its own runtime password. Both are minted at first
-  start; a home without them is refused, never converted. Data dir under `$AVA_HOME/redis`. The
+  start; a home without them is refused, never converted. Data dir under `$MEIVA_HOME/redis`. The
   Redis admin password reaches redis through a 0600 `redis.conf` and reaches `redis-cli`
   through `$REDISCLI_AUTH` — never argv, which `ps` shows to any local user
   (issue #974).
@@ -28,7 +28,7 @@ read each from its supplied URL (`db_identity(db_url)` / `redis_identity(redis_u
 `DATA_PLANE_IDENTITY` for both; later starts preserve different existing names.
 
 Bind posture — authenticated Postgres, PgBouncer and Linux Redis bind loopback
-and this host's declared reachable address (`AVA_MACHINE_HOST`), never all
+and this host's declared reachable address (`MEIVA_MACHINE_HOST`), never all
 interfaces; a host that declares none (`localhost`) binds loopback only. macOS Redis
 retains its loopback-only workaround and the root-supervised `redis-bridge` relay
 (task #1469).
@@ -62,7 +62,7 @@ from base.host.private_storage import write_private_bytes
 from base.host.system.backend import PG_BIN_LINUX
 from base.native_process.child_env import daemon_process_env, inherited_process_env
 from base.native_process.os_platform import is_macos
-from base.paths import ava_home
+from base.paths import meiva_home
 from cli.commands.data_plane.config import DataPlaneConfig
 from cli.commands.data_plane.walg import warn_archive_inactive
 from services.backup.walg.archive import archive_pg_args
@@ -70,7 +70,7 @@ from services.backup.walg.archive import archive_pg_args
 
 def pg_dial_host(config: DataPlaneConfig) -> str:
     """The host this cluster's own Postgres is dialed at — read from this
-    cluster's AVA_DB_URL (the URL is the one dial source every consumer uses;
+    cluster's MEIVA_DB_URL (the URL is the one dial source every consumer uses;
     DataPlaneSettings rewrites a self-host URL to loopback before anything
     dials). The home identity and its URLs exist before native bring-up.
     External data-plane reachability is handled separately by `bringup`.
@@ -80,7 +80,7 @@ def pg_dial_host(config: DataPlaneConfig) -> str:
 
 def redis_dial_host(config: DataPlaneConfig) -> str:
     """The host this cluster's own Redis is dialed at — read from this
-    cluster's AVA_REDIS_URL (see `pg_dial_host`)."""
+    cluster's MEIVA_REDIS_URL (see `pg_dial_host`)."""
     return url_host(config.redis_url)
 
 
@@ -91,22 +91,22 @@ _PG_MAX_CONNECTIONS = 500
 _PG_START_TIMEOUT_S = 60.0
 _PG_PROBE_TIMEOUT_S = 3.0
 
-# Bounded wait for this host's non-loopback bind address (AVA_MACHINE_HOST) to
+# Bounded wait for this host's non-loopback bind address (MEIVA_MACHINE_HOST) to
 # appear on a local interface before the Postgres data plane binds to it. On
-# reboot brew / launchd can start `ava` before the private network has assigned
+# reboot brew / launchd can start `meiva` before the private network has assigned
 # the address, so binding it fails and the whole autostart dies.
 BIND_WAIT_TIMEOUT_S = 60.0
 _BIND_WAIT_INTERVAL_S = 2.0
 
 
 def pg_data_dir() -> Path:
-    return ava_home() / "pg"
+    return meiva_home() / "pg"
 
 
 def pg_template_dir() -> Path:
     """Cached `initdb` output, copied so a new instance is a directory copy rather
     than a multi-second init. Kept in the home, beside the data directory it seeds."""
-    return ava_home() / "pg-template-17"
+    return meiva_home() / "pg-template-17"
 
 
 def _redis_bin(config: DataPlaneConfig, name: str) -> str:
@@ -117,7 +117,7 @@ def _redis_bin(config: DataPlaneConfig, name: str) -> str:
         for tool in ("redis-server", "redis-cli"):
             path = root / tool
             if not path.is_file() or not os.access(path, os.X_OK):
-                raise RuntimeError(f"AVA_REDIS_BIN_DIR requires an executable file: {path}")
+                raise RuntimeError(f"MEIVA_REDIS_BIN_DIR requires an executable file: {path}")
         return str(root / name)
     return str(brew_prefix("redis@8.2") / "bin" / name) if is_macos() else name
 
@@ -222,7 +222,7 @@ def require_authenticated_hba(pg_port: int, dial_host: str) -> None:
 
     import psycopg
 
-    probe = f"ava_hba_probe_{secrets.token_hex(4)}"
+    probe = f"meiva_hba_probe_{secrets.token_hex(4)}"
     # A path that never exists: no ~/.pgpass entry can answer the challenge.
     passfile = str(pg_socket_dir() / "no-passfile")
     deadline = time.monotonic() + _HBA_PROOF_TIMEOUT_S
@@ -293,8 +293,8 @@ def ensure_pg_data() -> Path:
 # names stay for existing cli callers and their monkeypatches.
 def pg_socket_dir(socket_root: Path | None = None) -> Path:
     """Thin shell over base.cluster.dataplane.pg_admin.pg_socket_dir — the home resolution stays
-    in the cli namespace so tests steering `ava_home` keep steering this probe."""
-    return _base_pg_socket_dir(socket_root, home=ava_home())
+    in the cli namespace so tests steering `meiva_home` keep steering this probe."""
+    return _base_pg_socket_dir(socket_root, home=meiva_home())
 
 
 def pg_admin_url(pg_port: int) -> str:
@@ -344,7 +344,7 @@ def start_pg(
             f"  ✗ reachable bind address {machine.host()!r} is not assigned to any "
             f"local interface after {int(BIND_WAIT_TIMEOUT_S)}s — postgres cannot bind "
             f"it. On reboot this means the private network has not come "
-            f"up yet; retry `ava start` once it is.",
+            f"up yet; retry `meiva start` once it is.",
             file=sys.stderr,
         )
         return 1
@@ -554,7 +554,7 @@ def ensure_cluster_storage(
     if not (config.redis_admin_password and redis_password):
         raise ValueError(
             "Redis always authenticates, but this home has no generated Redis credentials "
-            "(AVA_REDIS_ADMIN_PASSWORD / AVA_REDIS_PASSWORD): it was born before Redis "
+            "(MEIVA_REDIS_ADMIN_PASSWORD / MEIVA_REDIS_PASSWORD): it was born before Redis "
             "always authenticated and no conversion exists; re-birth it as a new home."
         )
     print(f"\n→ per-cluster data plane (pg :{pg_port}, redis :{redis_port})")
@@ -577,7 +577,7 @@ def redis_reachable(
     config: DataPlaneConfig, redis_port: int, redis_host: str = "127.0.0.1"
 ) -> bool:
     """True if this cluster's Redis answers PING as its `default` user (using
-    the gateway-only Redis admin password). Used by `ava status`; degrades to
+    the gateway-only Redis admin password). Used by `meiva status`; degrades to
     False on any error, including a home without its admin password."""
     import redis as _redis
     from redis.exceptions import RedisError

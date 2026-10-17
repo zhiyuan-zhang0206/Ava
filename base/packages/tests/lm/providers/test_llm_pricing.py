@@ -305,7 +305,7 @@ def test_mimo_v2_6_published_rates(prices: pricing.PriceBook, model: str, expect
 
 
 def test_qwen_implicit_cache_hit_is_the_registered_rate(prices: pricing.PriceBook) -> None:
-    """Ava never sends DashScope's explicit `cache_control` block, so every qwen
+    """Meiva never sends DashScope's explicit `cache_control` block, so every qwen
     cache hit is an IMPLICIT one — the catalog's cache_read must therefore be
     Alibaba's published implicit rate ($0.206/M for qwen3.8-max in Beijing), not
     the cheaper explicit-read rate ($0.137/M) the same page also lists. A fully

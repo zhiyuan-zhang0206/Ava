@@ -78,7 +78,7 @@ Opus 5 / Fable 5 vs 150,000 for Sonnet 5 / Haiku 4.5.
 **The 100,000 is marked PRIOR in the registry, and that marking is load-bearing.**
 No per-length curve exists for Opus 5 or Fable 5 in any public benchmark —
 ContextArena, the MRCR-v2 board, fiction.livebench, and AA-LCR all lack them.
-This is the single largest evidence gap in the sweep and it lands on Ava's two
+This is the single largest evidence gap in the sweep and it lands on Meiva's two
 most-used models. The *direction* is documented; the *number* is Anthropic's
 other first-party absolute (the context-editing trigger) rather than a
 measurement. Revisit if a curve is ever published.
@@ -96,7 +96,7 @@ The interval between 0.15 and Claude Code's 0.967 is genuinely contested.
 streaming model response when no bytes arrive",
 https://code.claude.com/docs/en/env-vars) and Codex CLI (`stream_idle_timeout_ms`,
 https://learn.chatgpt.com/docs/config-file/config-reference) both ship **300** for
-the same parameter. Ava was 30x tighter.
+the same parameter. Meiva was 30x tighter.
 
 Three independent mechanisms make long mid-stream silence normal rather than
 faulty: Anthropic's default `display: "omitted"` thinking sends **no**
@@ -112,7 +112,7 @@ The sweep flagged this as a one-line question with a large blast radius either
 way, and refused to recommend numbers until it was answered. Answer, read out of
 the installed provider bindings:
 
-**Ava's TTFT timer stops at the first SSE event that LangChain converts into a
+**Meiva's TTFT timer stops at the first SSE event that LangChain converts into a
 chunk — not at the first content delta.** For the Anthropic protocol (claude +
 deepseek) that is `message_start`, which langchain-anthropic turns into an empty
 chunk carrying `model_name`. For GPT on the Responses API that is
@@ -150,15 +150,15 @@ window specifically:
 
 ## Decision 4: reasoning_effort needs exactly two values
 
-Each vendor's documented default already equals what Ava wants — Anthropic
+Each vendor's documented default already equals what Meiva wants — Anthropic
 `high` (and the docs state `""` is *exactly* equivalent to omitting the
 parameter), OpenAI `medium` (which is also where OpenAI files agentic coding),
 Gemini flash `medium` / pro `high`, Kimi K3 `max`, GLM-5.2 `max`, Grok `high`.
-Leaving those `None` is not laziness: it means Ava automatically follows a vendor
+Leaving those `None` is not laziness: it means Meiva automatically follows a vendor
 that changes its own default.
 
 DeepSeek is the exception. It auto-promotes to `max` only for harnesses it
-recognizes — the docs name Claude Code and OpenCode — and Ava is not on that
+recognizes — the docs name Claude Code and OpenCode — and Meiva is not on that
 list, while DeepSeek's own report has max beating high on **every** agentic
 metric. So the promotion has to be explicit.
 
@@ -174,12 +174,12 @@ That created a second problem worth recording: `settings.lm.deepseek_reasoning_e
 job `ModelTuning.reasoning_effort` was built for. Once the registry carried
 `"max"`, the old field became **unreachable** for both DeepSeek models — a
 silently dead knob. Retired it rather than leaving two sources of truth for one
-value; `AVA_REASONING_EFFORT` plus the per-agent overlay cover everything it did.
+value; `MEIVA_REASONING_EFFORT` plus the per-agent overlay cover everything it did.
 
 `claude_thinking_budget_tokens` stays 0 everywhere. Fable/Opus/Sonnet 5 return
 400 if it is set; Haiku 4.5 is the only valid target and it does **not** support
 interleaved thinking, so the budget is spent once per turn before the first tool
-call and never between `execute_code` calls — the marginal value in Ava's loop is
+call and never between `execute_code` calls — the marginal value in Meiva's loop is
 close to zero.
 
 ## Roster fact corrections
@@ -213,7 +213,7 @@ first:
 ## What stays unset, and why that is the finding
 
 - **All 10 prompt-behavior fields** (`prompt_*_enabled`,
-  `agent_communication_style`, `agent_reflection_enabled`). These are Ava's own
+  `agent_communication_style`, `agent_reflection_enabled`). These are Meiva's own
   prompt-section switches. No external evidence about them can exist; only an
   internal eval can set them.
 - **glm-5.2 compaction.** Z.ai publishes zero per-length data — no needle, no

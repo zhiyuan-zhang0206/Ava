@@ -215,38 +215,38 @@ def _admit(*faces: tuple[str, list[MetricSpec]]) -> tuple[list[MetricSpec], list
 
 
 def test_admission_fills_plugin_from_the_registry_entry() -> None:
-    admitted, refused = _admit(("ava_demo", [_spec()]))
+    admitted, refused = _admit(("meiva_demo", [_spec()]))
     assert refused == []
-    assert [(m.name, m.plugin) for m in admitted] == [("test_metric", "ava_demo")]
+    assert [(m.name, m.plugin) for m in admitted] == [("test_metric", "meiva_demo")]
 
 
 def test_admission_overrides_the_plugin_a_spec_claims() -> None:
-    admitted, _ = _admit(("ava_demo", [_spec(plugin="someone_else")]))
-    assert [m.plugin for m in admitted] == ["ava_demo"]
+    admitted, _ = _admit(("meiva_demo", [_spec(plugin="someone_else")]))
+    assert [m.plugin for m in admitted] == ["meiva_demo"]
 
 
 def test_a_second_plugin_claiming_a_metric_name_is_refused() -> None:
     admitted, refused = _admit(
-        ("ava_demo", [_spec(name="dup")]), ("ava_other", [_spec(name="dup"), _spec(name="own")])
+        ("meiva_demo", [_spec(name="dup")]), ("meiva_other", [_spec(name="dup"), _spec(name="own")])
     )
-    assert refused == ["ava_other"]
-    assert [(m.name, m.plugin) for m in admitted] == [("dup", "ava_demo")]
+    assert refused == ["meiva_other"]
+    assert [(m.name, m.plugin) for m in admitted] == [("dup", "meiva_demo")]
 
 
 def test_duplicate_name_within_one_plugin_is_refused() -> None:
-    admitted, refused = _admit(("ava_demo", [_spec(name="dup"), _spec(name="dup")]))
-    assert refused == ["ava_demo"]
+    admitted, refused = _admit(("meiva_demo", [_spec(name="dup"), _spec(name="dup")]))
+    assert refused == ["meiva_demo"]
     assert admitted == []
 
 
 def test_a_refused_plugin_leaves_no_metrics_and_spares_the_others() -> None:
     bad = _spec(name="bad_target", targets=["SELECT pg_sleep(1)"])
     admitted, refused = _admit(
-        ("ava_good", [_spec(name="good")]),
-        ("ava_bad", [_spec(name="first_ok"), bad]),
-        ("ava_after", [_spec(name="after")]),
+        ("meiva_good", [_spec(name="good")]),
+        ("meiva_bad", [_spec(name="first_ok"), bad]),
+        ("meiva_after", [_spec(name="after")]),
     )
-    assert refused == ["ava_bad"]
+    assert refused == ["meiva_bad"]
     assert [m.name for m in admitted] == ["good", "after"]
 
 
@@ -260,7 +260,7 @@ def test_spec_bad_event_name_rejected() -> None:
 
 
 def test_admission_hyphenated_event_name_accepted() -> None:
-    admitted, refused = _admit(("ava_demo", [_spec(event_name="recall-filter")]))
+    admitted, refused = _admit(("meiva_demo", [_spec(event_name="recall-filter")]))
     assert refused == []
     (ok,) = admitted
     assert ok.event_name == "recall-filter"
@@ -279,8 +279,8 @@ def test_admission_rejects_template_placeholders() -> None:
     )
     with pytest.raises(InvalidMetricQuery, match="template placeholders"):
         validate_spec_sql(spec)
-    admitted, refused = _admit(("ava_demo", [spec]))
-    assert (admitted, refused) == ([], ["ava_demo"])
+    admitted, refused = _admit(("meiva_demo", [spec]))
+    assert (admitted, refused) == ([], ["meiva_demo"])
 
 
 def test_spec_duplicate_output_surface_rejected() -> None:
@@ -294,7 +294,7 @@ def test_spec_empty_output_rejected() -> None:
 
 
 def test_render_static_sql_passes_through() -> None:
-    (spec,) = _admit(("ava_demo", [_spec()]))[0]
+    (spec,) = _admit(("meiva_demo", [_spec()]))[0]
     assert render_query(spec) == _spec().query
 
 

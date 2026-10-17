@@ -18,8 +18,8 @@ The runtime itself leaves rows with no runtime identity:
 A force terminate is the only writer that ends such a row. The reapers
 require a hosted kind, and every other terminating path keeps the identity.
 Forces happen whenever an operator kills an agent that never came up, and
-`ava cluster pause` forces every row of the machine, including a whole cohort
-that `ava pause` or `ava stop` had drained. Each such row was refused for
+`meiva cluster pause` forces every row of the machine, including a whole cohort
+that `meiva pause` or `meiva stop` had drained. Each such row was refused for
 good.
 
 The birth marker cannot cover these rows. Spawn does not stamp it: a marker
@@ -90,7 +90,7 @@ hold, the managed-resource predecessor rule and the owner CAS are unchanged.
 
 - An agent this runtime spawned, resurrected, released or settled, and then
   force-terminated before admission, resurrects by chat, manual resurrection
-  or the watchdog. After `ava cluster pause`, this includes a machine's
+  or the watchdog. After `meiva cluster pause`, this includes a machine's
   drained cohort.
 - A legacy row that this runtime has not admitted since the cutover still
   refuses after a force. So does a row terminated before the fix shipped, or
@@ -122,7 +122,7 @@ hold, the managed-resource predecessor rule and the owner CAS are unchanged.
   retention must keep these rows; otherwise resurrection falls back, closed,
   to refusing the rows they vouched for.
 
-Forward link (2026-10-03): `ava pause` was deleted; a stop with a different keep set replaces it. See [delete ava pause](../graph/2026-10-03-delete-ava-pause.md).
+Forward link (2026-10-03): `meiva pause` was deleted; a stop with a different keep set replaces it. See [delete meiva pause](../graph/2026-10-03-delete-meiva-pause.md).
 
 ## Follow-up shipped (2026-10-15, tasks #5049/#5155)
 

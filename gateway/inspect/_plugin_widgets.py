@@ -11,7 +11,7 @@ The registry is built **in process** like the plugin-metric one (task #180
 PR D): the enabled builtin plugins' ``inspector.py`` declarations are admitted
 into a data registry per request, module caching makes the imports free, and no
 snapshot file exists to go stale. The enable-state is consulted per request
-(``plugins_config``), so ``ava plugins disable`` takes effect without a
+(``plugins_config``), so ``meiva plugins disable`` takes effect without a
 gateway restart.
 
 Resolution happens server-side because the payloads are *data*, not routes:
@@ -19,7 +19,7 @@ a ``taskList`` widget lists the agent's active tasks (owned by the agent, not
 done/cancelled, priority-ordered — P0 first, ties by task id — complete).
 A widget with an empty payload drops
 out of the response entirely (the panel's empty-section rule). Import errors are fail-soft (the plugin-load contract —
-2026-08-28 ava_ledger incident, restated for plugins 2026-09-11): a plugin
+2026-08-28 meiva_ledger incident, restated for plugins 2026-09-11): a plugin
 whose ``inspector.py`` fails to import, or whose declaration is refused, is
 reported loudly and skipped, and the endpoint keeps serving the remaining
 plugins' widgets; an unknown agent is a 404 like the rest of the /inspect
@@ -46,7 +46,7 @@ from gateway.inspect.schemas import InspectWidgetResult, InspectWidgetTask
 # The shipped-plugin inspector directory — every builtin plugin dir with an
 # inspector.py is part of the in-process registry (the metric loader's
 # convention; external plugin code is not imported by the gateway).
-PLUGINS_DIR = Path(__file__).resolve().parents[2] / "ava_builtins" / "plugins"
+PLUGINS_DIR = Path(__file__).resolve().parents[2] / "meiva_builtins" / "plugins"
 
 
 def enabled_inspector_modules() -> list[Path]:
@@ -69,7 +69,7 @@ def load_inspect_widgets(modules: Sequence[Path] | None = None) -> list[InspectW
         data_registry.load_declaration(
             module.parent.name,
             lambda name=module.parent.name: importlib.import_module(
-                f"ava_builtins.plugins.{name}.inspector"
+                f"meiva_builtins.plugins.{name}.inspector"
             ),
             (module.parent, data_registry.WIDGETS_KEY),
         )

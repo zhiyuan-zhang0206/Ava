@@ -279,7 +279,7 @@ def managed_proc(
 #
 # Fixture teardowns CANNOT fix that class of leak — they never run after a
 # kill -9. What fixes it is a reaper the NEXT session runs before it spawns
-# anything: identify e2e processes by their AVA_HOME (`tmp/ava_e2e_home_<pid>_<ts>`
+# anything: identify e2e processes by their MEIVA_HOME (`tmp/meiva_e2e_home_<pid>_<ts>`
 # under the checkout — every gateway/ops/agent/daemon/browser process inherits
 # it) or, for the session-scoped frontend (its env snapshot predates the e2e
 # env layering), by its build dir cwd (`ui/web/.builds/build-<pid>_<ts>`), and
@@ -294,8 +294,8 @@ _PS_ENV_ROW_RE = re.compile(r"^\s*(\d+)\s+\S+\s+\S+\s+\S+\s+(.*)$")
 _ENV_TOKEN_RE = re.compile(r"^[A-Z][A-Z0-9_]*=")
 
 # The e2e run id embedded in every throwaway home / build dir:
-# `ava_e2e_home_<pytest-pid>_<microsecond-ts>` and `build-<pytest-pid>_<ts>`.
-_E2E_HOME_RUN_RE = re.compile(r"ava_e2e_home_(\d+)_(\d+)")
+# `meiva_e2e_home_<pytest-pid>_<microsecond-ts>` and `build-<pytest-pid>_<ts>`.
+_E2E_HOME_RUN_RE = re.compile(r"meiva_e2e_home_(\d+)_(\d+)")
 _E2E_BUILD_RUN_RE = re.compile(r"/ui/web/\.builds/build-(\d+)_(\d+)")
 
 _FRONTEND_HINTS = ("next", "npm")
@@ -703,8 +703,8 @@ def sweep_stale_e2e_processes(
 def pty_sessions_proc() -> Iterator[None]:
     """The machine's pty-sessions service, which holds every agent shell a scenario opens.
 
-    A real `ava start` runs it as a roster unit; here it is a direct process under the
-    suite's AVA_HOME with the runner machine token, stopped (sessions closed) with the test.
+    A real `meiva start` runs it as a roster unit; here it is a direct process under the
+    suite's MEIVA_HOME with the runner machine token, stopped (sessions closed) with the test.
     """
     log_path = (
         Path(__file__).resolve().parents[2] / "tmp" / "e2e-logs" / f"pty-sessions-{os.getpid()}.log"

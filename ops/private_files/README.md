@@ -12,7 +12,7 @@ The migration first places the exact bytes in an approved durable git source,
 then records that source and the expected SHA-256 digest in `manifest.json`.
 An entry with `status: archived` is retained as audit history after the file is
 no longer a production dependency. The five `ci_autoscale` entries are the
-reference: their on-disk copies were verified against `~/Ava-archive`, and the
+reference: their on-disk copies were verified against `~/Meiva-archive`, and the
 component is now dead code.
 
 ## Add an entry
@@ -25,8 +25,8 @@ component is now dead code.
    the production file. For example:
 
    ```bash
-   git -C ~/Ava-private cat-file blob HEAD:path/to/file | shasum -a 256
-   shasum -a 256 "$AVA_HOME/source/path/to/file"
+   git -C ~/Meiva-private cat-file blob HEAD:path/to/file | shasum -a 256
+   shasum -a 256 "$MEIVA_HOME/source/path/to/file"
    ```
 
 4. Add one manifest entry with a stable `id`, relative `path`, `git` source,
@@ -56,11 +56,11 @@ afterwards.
 Run manually from the repository:
 
 ```bash
-.venv/bin/python -m ops.private_files verify --root "$AVA_HOME/source"
+.venv/bin/python -m ops.private_files verify --root "$MEIVA_HOME/source"
 ```
 
 `--root` is explicit for cron and watchdog use. When omitted, it defaults to
-`$AVA_HOME/source` if `AVA_HOME` is set, otherwise to the current directory.
+`$MEIVA_HOME/source` if `MEIVA_HOME` is set, otherwise to the current directory.
 `--manifest` defaults to the co-located `manifest.json`. `--json` emits a JSON
 array for machine consumers.
 

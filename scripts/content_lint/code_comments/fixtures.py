@@ -184,6 +184,6 @@ def fixtures_in_scope(
     return owners
 
 
-# ava:ref scripts/content_lint/code_comments/docs/fixtures.ava.okf.md#native-fixture-help
+# meiva:ref scripts/content_lint/code_comments/docs/fixtures.meiva.okf.md#native-fixture-help
 def fixture_owners(tree: ast.Module) -> frozenset[str]:
     return frozenset(fixtures_in_scope(tree.body, {}, classes=True))

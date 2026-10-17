@@ -14,7 +14,7 @@ import type { AgentRoster } from "../contracts/types";
 export { AGENTS_QUERY_KEY } from "../fold/agents";
 export type { PendingAction } from "./use-agent-actions";
 const EMPTY_ROSTER: AgentRoster = { agents: [], ancestors: [] };
-const ACTIVE_ID_KEY = "ava.active.agent_id";
+const ACTIVE_ID_KEY = "meiva.active.agent_id";
 
 export function useAgentRoster() {
   return useQuery({

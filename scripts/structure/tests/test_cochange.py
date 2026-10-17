@@ -170,7 +170,7 @@ def test_rename_history_uses_the_current_path(tmp_path: pathlib.Path, old: str, 
     ("subject", "expected"),
     [
         ("fix(gateway): do a thing", "fix"),
-        ("[Ava-123] fix(gateway): do a thing", "fix"),
+        ("[Meiva-123] fix(gateway): do a thing", "fix"),
         ("feat(cli)!: breaking change", "feat"),
         ("refactor(shared): tidy", "refactor"),
         ("chore: bump deps", "other"),

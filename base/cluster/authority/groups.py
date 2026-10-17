@@ -1,4 +1,4 @@
-# ava:ref base/cluster/authority/docs/group-grants.ava.okf.md#capability-grant-convergence
+# meiva:ref base/cluster/authority/docs/group-grants.meiva.okf.md#capability-grant-convergence
 from __future__ import annotations
 
 from typing import LiteralString

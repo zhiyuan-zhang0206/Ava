@@ -4,20 +4,20 @@
 
 User ruling 2026-08-27 (Task #1758,
 [`decisions/2026-08-27-cluster-timezone-wall-clock.md`](../../runtime/hosts/2026-08-27-cluster-timezone-wall-clock.md))
-made the cluster's `AVA_TIMEZONE` the one wall clock every display path
+made the cluster's `MEIVA_TIMEZONE` the one wall clock every display path
 renders through, and named `shared.envfile` backup-name stamps as one of
 those paths.
 
 `shared.envfile.snapshot_env` backs up a unit's `.env` before every rewrite
 (`upsert_env`, `remove_env`, `replace_env_bytes_cas`) into
-`$AVA_HOME/backups/env/.env.<stamp>`, and it is deliberately called from
+`$MEIVA_HOME/backups/env/.env.<stamp>`, and it is deliberately called from
 those doors while holding the `.env` lock, before the write it protects.
 Reading the cluster clock means resolving `cluster_tz()`, which needs a built
 `Settings` instance (`shared/config/_lite.py:prepare`, `field_explicitly_set`)
-— `load_ava_env()` plus data-plane source resolution, and on a pure
+— `load_meiva_env()` plus data-plane source resolution, and on a pure
 agent-runner without a local `.env` yet, a `GET /api/bootstrap` call. One of
 `snapshot_env`'s callers writes `.env` before that is safe to do: a unit's
-first `ava start`, which publishes the unit's identity keys into `.env`
+first `meiva start`, which publishes the unit's identity keys into `.env`
 (`cli/start_identity.py`) before machine identity is resolved — on a gateway
 home and on a remote agent-runner joining with `--gateway-url` and
 `--db-capability` alike. At that point, loading runtime config has side
@@ -32,7 +32,7 @@ never `cluster_tz()` and never `settings.general.timezone`. This is a named
 exception to the 2026-08-27 one-cluster-clock rule, scoped to exactly this
 one call site: every other display path that decision named
 (`shared.alerts.format_local`, `ops.cluster_status`, `shared.memory_repo`,
-`ava.agents`, the watcher announcement) keeps going through `cluster_tz()`
+`meiva.agents`, the watcher announcement) keeps going through `cluster_tz()`
 unchanged.
 
 The backup filename's stamp exists only to order and de-duplicate snapshots

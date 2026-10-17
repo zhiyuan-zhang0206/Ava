@@ -5,18 +5,18 @@
 > not built" and stayed stale through the 2026-06-30 implementation — it was never
 > updated. Corrected here.
 >
-> **Built** — `ava/security.py` (~240 lines), a rule-based scanner gated on
-> `AVA_SECURITY_SCAN_ENABLED` (`base/config/domains/agent/settings.py`), **default on**. It is
+> **Built** — `meiva/security.py` (~240 lines), a rule-based scanner gated on
+> `MEIVA_SECURITY_SCAN_ENABLED` (`base/config/domains/agent/settings.py`), **default on**. It is
 > wired into every one of these ingestion points:
 >
 > | Call site | Source tag |
 > |---|---|
-> | `ava/files.py` — `ava.files.read` | `file.read:<path>` |
-> | `ava/web/` — `web.search` results, `web.fetch` answers | `web.search` / `web.fetch` |
-> | `ava/mcps/__init__.py` — **every MCP tool return** | `mcps.<server>.<tool>` |
+> | `meiva/files.py` — `meiva.files.read` | `file.read:<path>` |
+> | `meiva/web/` — `web.search` results, `web.fetch` answers | `web.search` / `web.fetch` |
+> | `meiva/mcps/__init__.py` — **every MCP tool return** | `mcps.<server>.<tool>` |
 > | `agent/graph/claim/_chat_inbound.py` — **inbound chat** | `inbound.chat:<source>` |
 | `agent/graph/claim/_dispatch.py` — **inbound system notes** (peer-authored task notes) | `inbound.system_note:<source>` |
-> | `ava_builtins/plugins/ava_code/plugin.py` — the `AGENTS.md` auto-injection | `context-file:<path>` |
+> | `meiva_builtins/plugins/meiva_code/plugin.py` — the `AGENTS.md` auto-injection | `context-file:<path>` |
 >
 > Design points worth keeping: a hit **does not mutate the content** (no marker
 > prepended, so the scan is trivially idempotent and never corrupts what the agent
@@ -28,9 +28,9 @@
 > the claim node (`agent/graph/claim/_dispatch.py`) in its own delta right behind the
 > flagged message — the agent host holds no findings buffer, because one process
 > interleaves many agents' turns; there is no side-channel file (user ruling
-> 2026-08-11). Memory writes are not scanned or marked: `ava.files.write` stores
+> 2026-08-11). Memory writes are not scanned or marked: `meiva.files.write` stores
 > exactly what it is given, and a note's content is only checked for the pool's
-> format rules and for duplicates (the ava_memory write check).
+> format rules and for duplicates (the meiva_memory write check).
 >
 > **Not built** — everything structural: the sandboxed deprivileged reader, egress
 > allowlisting, privilege separation. (On-install skill scanning **is** built —
@@ -55,9 +55,9 @@ to be on the network; they only need the agent to *read* their content.
 
 ## Ingestion surface — where untrusted content enters
 
-- `ava.web.fetch` / `ava.web.search`, `ava.understand(url)`, `ava.mcps.chrome.*`
+- `meiva.web.fetch` / `meiva.web.search`, `meiva.understand(url)`, `meiva.mcps.chrome.*`
   (a live browser) — arbitrary web content.
-- `ava.files.read` + **`ava_code`'s AGENTS.md auto-injection** — cloning a
+- `meiva.files.read` + **`meiva_code`'s AGENTS.md auto-injection** — cloning a
   malicious repo auto-walks its `AGENTS.md` into the prompt: direct injection the
   agent never "chose" to read.
 - The content-feed skills (x / youtube / zhihu / xiaohongshu / douyin) —
@@ -81,11 +81,11 @@ to be on the network; they only need the agent to *read* their content.
    privilege separation. And even this **leaks**: Claude Code's sandbox shipped
    repeated bypasses (SOCKS5 null-byte across ~130 versions, `/proc` reads,
    network-allowlist bypass). Structural = defense-in-depth, not a guarantee.
-3. **Ava-specific: there is no hard boundary today, by two design choices.**
-   - Ava is **autonomous — no per-action human-in-the-loop**. Claude Code's
-     *primary* everyday defense is a permission prompt before sensitive ops; Ava
+3. **Meiva-specific: there is no hard boundary today, by two design choices.**
+   - Meiva is **autonomous — no per-action human-in-the-loop**. Claude Code's
+     *primary* everyday defense is a permission prompt before sensitive ops; Meiva
      deliberately doesn't have it.
-   - `execute_code` is **raw Python**, so `AVA_SDK_DISABLE` / capability scoping
+   - `execute_code` is **raw Python**, so `MEIVA_SDK_DISABLE` / capability scoping
      is **not** a security boundary — a hijacked agent just `import subprocess`.
      (This is the same point `non-goals.md` "Agent permission verification"
      already makes: the real boundary needs a sandbox.) Reader/actor privilege
@@ -110,11 +110,11 @@ to be on the network; they only need the agent to *read* their content.
 
 ## Candidate defenses at common entry points (on the shelf, not building now)
 
-Ranked by leverage for Ava's actual shape. None built; listed so a future
+Ranked by leverage for Meiva's actual shape. None built; listed so a future
 trigger has a starting point rather than a blank page.
 
 1. **On-install skill scan** (à la OpenClaw) — vet a skill's text for injection /
-   exfil patterns when it enters via `ava plugins install`. Cheapest high-value
+   exfil patterns when it enters via `meiva plugins install`. Cheapest high-value
    move *if* untrusted skills ever become a thing.
 2. **Sandboxed, deprivileged, disposable reader** for untrusted ingestion (web /
    feeds / chrome): no host fs, no secrets in env, egress allowlisted, no
@@ -171,10 +171,10 @@ and both are load-bearing:
    plus `web-ai` / `audio-transcribe`, and the x / zhihu / xiaohongshu / douyin family). These are
    *by definition* untrusted third-party content, and they are the one category the
    surface map calls out as such. They fetch through their own scripts rather than
-   `ava.web.*`, so they bypass the scanned path entirely. This is the widest gap.
-2. **`ava.understand(url)`** (`ava/_understand.py`) — listed in the ingestion surface
+   `meiva.web.*`, so they bypass the scanned path entirely. This is the widest gap.
+2. **`meiva.understand(url)`** (`meiva/_understand.py`) — listed in the ingestion surface
    below as an arbitrary-web-content entry point, but it does not import
-   `ava.security` and is not in the call-site table above.
+   `meiva.security` and is not in the call-site table above.
 
 Both are cheap to close (they are call-site additions, not new machinery), and
 closing them is what makes the built scanner's coverage claim honest.

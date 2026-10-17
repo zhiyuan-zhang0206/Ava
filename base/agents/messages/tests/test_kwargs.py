@@ -2,11 +2,11 @@ from __future__ import annotations
 
 from langchain_core.messages import HumanMessage
 
-from base.agents.messages.kwargs import AvaMsgType, NoteTag, read_ava_kwargs
+from base.agents.messages.kwargs import MeivaMsgType, NoteTag, read_meiva_kwargs
 
 
 def test_msg_type_value_set() -> None:
-    assert {t.value for t in AvaMsgType} == {
+    assert {t.value for t in MeivaMsgType} == {
         "attach",
         "inbound",
         "system_note",
@@ -48,11 +48,11 @@ def test_note_tag_value_set() -> None:
     }
 
 
-def test_read_ava_kwargs_is_live_view() -> None:
-    msg = HumanMessage(content="x", additional_kwargs={"ava_msg_type": "inbound"})
-    kw = read_ava_kwargs(msg)
+def test_read_meiva_kwargs_is_live_view() -> None:
+    msg = HumanMessage(content="x", additional_kwargs={"meiva_msg_type": "inbound"})
+    kw = read_meiva_kwargs(msg)
     assert kw is msg.additional_kwargs
-    assert kw.get("ava_msg_type") == AvaMsgType.INBOUND
+    assert kw.get("meiva_msg_type") == MeivaMsgType.INBOUND
 
 
 def test_read_time_prefers_picked_up_over_created_at() -> None:
@@ -63,11 +63,11 @@ def test_read_time_prefers_picked_up_over_created_at() -> None:
     inbound = HumanMessage(
         content="x",
         additional_kwargs={
-            "ava_created_at": "2026-01-01T00:00:00+00:00",
-            "ava_picked_up_at": "2026-01-01T00:00:09+00:00",
+            "meiva_created_at": "2026-01-01T00:00:00+00:00",
+            "meiva_picked_up_at": "2026-01-01T00:00:09+00:00",
         },
     )
-    ai = AIMessage(content="y", additional_kwargs={"ava_created_at": "2026-01-01T00:00:05+00:00"})
+    ai = AIMessage(content="y", additional_kwargs={"meiva_created_at": "2026-01-01T00:00:05+00:00"})
     assert message_read_time(inbound) == "2026-01-01T00:00:09+00:00"
     assert message_read_time(ai) == "2026-01-01T00:00:05+00:00"
     assert message_read_time(HumanMessage(content="legacy")) is None

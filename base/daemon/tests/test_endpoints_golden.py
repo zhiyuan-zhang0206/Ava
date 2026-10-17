@@ -8,7 +8,7 @@ import pytest
 from base.config import get_field, settings
 from base.daemon.endpoints import ServiceEndpoints
 from base.host.env.registry import health_port_env_aliases
-from base.paths import ava_home, run_dir
+from base.paths import meiva_home, run_dir
 
 _FIXED_PORTS: Mapping[str, int] = {
     "labeler": 8103,
@@ -33,7 +33,7 @@ def _old_health_port(name: str) -> int:
 
 
 def _old_pid_path(name: str) -> Path:
-    return run_dir(ava_home()) / f"{name}.pid"
+    return run_dir(meiva_home()) / f"{name}.pid"
 
 
 def _assert_rows_match_the_old_lookups() -> None:
@@ -86,7 +86,7 @@ def test_a_partial_override_moves_only_the_overridden_rows(
 
 
 def test_pidfiles_follow_the_home(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    monkeypatch.setenv("AVA_HOME", str(tmp_path))
+    monkeypatch.setenv("MEIVA_HOME", str(tmp_path))
     table = ServiceEndpoints.from_settings()
     assert {e.name: e.pidfile for e in table} == {
         name: tmp_path / "run" / f"{name}.pid" for name in _FIXED_PORTS

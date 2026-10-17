@@ -1,11 +1,11 @@
-"""Tests for the system-prompt SDK-expand wildcard (`AVA_SDK_EXPAND="*"`).
+"""Tests for the system-prompt SDK-expand wildcard (`MEIVA_SDK_EXPAND="*"`).
 
 `effective_sdk_expand()` turns the configured expand list into the concrete
 paths the "# Expanded SDK reference" section renders. The `"*"` entry stands for
-every top-level public ava namespace, discovered live from `help(ava)` so a new
+every top-level public meiva namespace, discovered live from `help(meiva)` so a new
 namespace is covered without editing that override. These tests pin: what `"*"`
 discovers (and what it deliberately skips — top-level functions, private names,
-AVA_SDK_DISABLE entries, and the capability surfaces `skills` / `mcps` that the
+MEIVA_SDK_DISABLE entries, and the capability surfaces `skills` / `mcps` that the
 `# Capabilities` section indexes), how it merges with explicit and
 plugin-declared entries, that the legacy explicit-list format is untouched,
 that the rendered section reflects the wildcard, and that the field default is
@@ -23,18 +23,18 @@ from agent.graph.prompt.system_prompt import (
     effective_sdk_expand,
     sdk_expand_section,
 )
-from ava.sdk_surface import install, sdk_disable
-from ava.sdk_surface.installation import installed
 from base.config import FIELD_INFOS, AgentSettings, settings
 from base.config.service_read import ConfigAuthority
 from base.host.env.agent_slices import AgentSlices
 from base.lm.catalog import ModelCatalog
 from base.packages.plugins.extensions import ExtensionRegistry, PluginContributions
 from base.telemetry import audit_events
+from meiva.sdk_surface import install, sdk_disable
+from meiva.sdk_surface.installation import installed
 
 # The framework-owned top-level namespaces the wildcard must always surface.
 # Asserted as a subset (not equality) so a plugin namespace installed into
-# `ava.__all_for_ava__` during the session does not make these tests brittle.
+# `meiva.__all_for_meiva__` during the session does not make these tests brittle.
 # `skills` / `mcps` are deliberately absent — they are capability surfaces, not
 # SDK API (see test_wildcard_skips_capability_surfaces).
 FRAMEWORK_NAMESPACES = {
@@ -115,7 +115,7 @@ def test_wildcard_excludes_functions_and_private_names(
     assert "help" not in result
     assert "understand" not in result
     assert "impersonation" not in result
-    assert "## ava.impersonation" not in sdk_expand_section(
+    assert "## meiva.impersonation" not in sdk_expand_section(
         AgentSlices.resolve(
             default_reader=lambda domain, field: getattr(getattr(settings, domain), field)
         ),
@@ -146,8 +146,8 @@ def test_wildcard_skips_capability_surfaces(
         ),
         catalog=model_catalog,
     )
-    assert "## ava.skills" not in text
-    assert "## ava.mcps" not in text
+    assert "## meiva.skills" not in text
+    assert "## meiva.mcps" not in text
 
 
 def test_capability_surface_expands_when_named_explicitly(
@@ -171,12 +171,12 @@ def test_capability_surface_expands_when_named_explicitly(
         ),
         catalog=model_catalog,
     )
-    assert "## ava.skills" in text
+    assert "## meiva.skills" in text
     assert skill_writes == []
     # An index render carries descriptions, never bodies. Every SKILL.md in this
     # repo opens with a markdown heading; none may appear under the skills block.
-    skills_block = text[text.index("## ava.skills") :]
-    skills_block = skills_block.split("\n## ava.")[0]
+    skills_block = text[text.index("## meiva.skills") :]
+    skills_block = skills_block.split("\n## meiva.")[0]
     assert "\n# " not in skills_block
 
 
@@ -192,7 +192,7 @@ def test_member_of_a_capability_surface_is_refused(
     for as prompt cost.
 
     The refusal lives in `effective_sdk_expand`, so it holds for every consumer
-    of that view (the ava_code section reads it too), not only for the section
+    of that view (the meiva_code section reads it too), not only for the section
     that renders it."""
     monkeypatch.setattr(
         settings.agent, "sdk_expand_in_system_prompt", ["*", "skills.gmail", "mcps.chrome"]
@@ -216,13 +216,13 @@ def test_member_of_a_capability_surface_is_refused(
         ),
         catalog=model_catalog,
     )
-    assert "## ava.skills.gmail" not in text
-    assert "## ava.mcps.chrome" not in text
+    assert "## meiva.skills.gmail" not in text
+    assert "## meiva.mcps.chrome" not in text
     assert skill_writes == []
 
 
 def test_wildcard_respects_sdk_disable(monkeypatch: pytest.MonkeyPatch) -> None:
-    """A namespace listed in AVA_SDK_DISABLE is dropped from the wildcard set —
+    """A namespace listed in MEIVA_SDK_DISABLE is dropped from the wildcard set —
     a disabled namespace must never be expanded back into the prompt."""
     monkeypatch.setattr(settings.agent, "sdk_expand_in_system_prompt", ["*"])
     monkeypatch.setattr(settings.agent, "sdk_disable", ["watcher"])
@@ -318,7 +318,7 @@ def test_missing_unregistered_expand_path_warns(
         )
 
     assert text == ""
-    assert "ava.missing_sdk_namespace does not resolve" in caplog.text
+    assert "meiva.missing_sdk_namespace does not resolve" in caplog.text
 
 
 def test_plugin_expansions_lead_the_wildcard(
@@ -347,7 +347,7 @@ def test_plugin_expansions_lead_the_wildcard(
 def test_section_renders_all_wildcard_namespaces(
     monkeypatch: pytest.MonkeyPatch, model_catalog: ModelCatalog
 ) -> None:
-    """The rendered section carries one `## ava.<name>` contract per discovered
+    """The rendered section carries one `## meiva.<name>` contract per discovered
     namespace and no heading for the skipped top-level functions."""
     monkeypatch.setattr(settings.agent, "sdk_expand_in_system_prompt", ["*"])
     text = sdk_expand_section(
@@ -358,10 +358,10 @@ def test_section_renders_all_wildcard_namespaces(
     )
     assert text.startswith("# Expanded SDK reference")
     for ns in FRAMEWORK_NAMESPACES:
-        assert f"## ava.{ns}" in text
-    assert "## ava.understand" not in text
-    assert "## ava.help" not in text
-    assert "## ava.shell.sessions" in text  # nested namespace rendered
+        assert f"## meiva.{ns}" in text
+    assert "## meiva.understand" not in text
+    assert "## meiva.help" not in text
+    assert "## meiva.shell.sessions" in text  # nested namespace rendered
 
 
 def test_field_default_is_production_p95() -> None:
@@ -402,7 +402,7 @@ def test_plugin_expansions_merge_with_p95_without_duplicates(
 def test_env_comma_string_with_wildcard_parses() -> None:
     """The env form (a comma string) splits into entries; `"*"` survives as its
     own entry and combines with an explicit nested path."""
-    s = AgentSettings(AVA_SDK_EXPAND="*,shell.sessions")  # pyright: ignore[reportArgumentType]  # env-form str; validator splits to list
+    s = AgentSettings(MEIVA_SDK_EXPAND="*,shell.sessions")  # pyright: ignore[reportArgumentType]  # env-form str; validator splits to list
     assert s.sdk_expand_in_system_prompt == ["*", "shell.sessions"]
 
 
@@ -419,7 +419,7 @@ def test_section_hides_attach_for_text_only_model(
         ),
         catalog=model_catalog,
     )
-    assert "## ava.self" in text
+    assert "## meiva.self" in text
     assert "def attach(" not in text
 
 
@@ -436,5 +436,5 @@ def test_section_keeps_attach_for_media_capable_model(
         ),
         catalog=model_catalog,
     )
-    assert "## ava.self" in text
+    assert "## meiva.self" in text
     assert "def attach(" in text

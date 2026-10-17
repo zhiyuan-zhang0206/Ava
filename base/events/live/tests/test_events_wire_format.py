@@ -62,7 +62,7 @@ FROZEN_WIRE: list[tuple[type, str, dict[str, Any]]] = [
         },
     ),
     (CodeStart, "code_start", {"item_id": "5.1"}),
-    (CodeDelta, "code_delta", {"item_id": "5.1", "content": "ava."}),
+    (CodeDelta, "code_delta", {"item_id": "5.1", "content": "meiva."}),
     (ReasoningStart, "reasoning_start", {"item_id": "5.0"}),
     (ReasoningDelta, "reasoning_delta", {"item_id": "5.0", "content": "thinking"}),
     (ExecStart, "exec_start", {"item_id": "5.0"}),

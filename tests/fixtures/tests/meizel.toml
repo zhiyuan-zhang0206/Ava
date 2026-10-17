@@ -6,7 +6,7 @@
 "test_database_gate.py#monkeypatch.setattr base.db.connections.connect" = 1
 "test_database_gate.py#monkeypatch.setattr base.native_process.code_version.first_parent_count" = 1
 "test_database_gate.py#monkeypatch.setattr base.native_process.loaded_commit.LoadedCommit.capture" = 1
-"test_stub_everywhere_alias_scan.py#monkeypatch.setattr ava.mcps.servers" = 1
+"test_stub_everywhere_alias_scan.py#monkeypatch.setattr meiva.mcps.servers" = 1
 
 [debt.stdlib-patch]
 "test_full_run_guard.py#monkeypatch.setattr pathlib.Path.home" = 1

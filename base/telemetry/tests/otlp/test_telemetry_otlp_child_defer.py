@@ -24,8 +24,8 @@ _AGENT = 8902
 
 @pytest.fixture(autouse=True)
 def _clean_deferral_env(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.delenv("AVA_TELEMETRY_OTLP_CHILD_DEFER", raising=False)
-    monkeypatch.delenv("AVA_TELEMETRY_OTLP_CHILD_DEFER_MAX_AGE_S", raising=False)
+    monkeypatch.delenv("MEIVA_TELEMETRY_OTLP_CHILD_DEFER", raising=False)
+    monkeypatch.delenv("MEIVA_TELEMETRY_OTLP_CHILD_DEFER_MAX_AGE_S", raising=False)
 
 
 @pytest.fixture(autouse=True)
@@ -40,7 +40,7 @@ def _event(**overrides: Any) -> Event:
         "span_id": "ef01" * 4,
         "agent_id": _AGENT,
         "machine": "test-mac",
-        "cluster": ".ava-test",
+        "cluster": ".meiva-test",
         "process": "test-proc",
         "category": "telemetry",
         "event_name": "sdk_call",
@@ -184,7 +184,7 @@ def test_saturation_goes_live_once(deferred_backend: Any, monkeypatch: pytest.Mo
 
 def test_max_age_clock_goes_live(deferred_backend: Any, monkeypatch: pytest.MonkeyPatch) -> None:
     backend, log_exporter, _ = deferred_backend
-    monkeypatch.setenv("AVA_TELEMETRY_OTLP_CHILD_DEFER_MAX_AGE_S", "0.15")
+    monkeypatch.setenv("MEIVA_TELEMETRY_OTLP_CHILD_DEFER_MAX_AGE_S", "0.15")
     ensure_calls = _spy_calls(monkeypatch, backend, "_ensure")
     backend.export_batch([_event()])
 
@@ -227,9 +227,9 @@ def test_explicit_backend_arms_and_completes(otlp_backend: Any) -> None:
 
 
 def test_flag_off_disables_defer(otlp_backend: Any, monkeypatch: pytest.MonkeyPatch) -> None:
-    """AVA_TELEMETRY_OTLP_CHILD_DEFER=0 restores the eager first-record bring-up."""
+    """MEIVA_TELEMETRY_OTLP_CHILD_DEFER=0 restores the eager first-record bring-up."""
     backend, log_exporter, _ = otlp_backend
-    monkeypatch.setenv("AVA_TELEMETRY_OTLP_CHILD_DEFER", "0")
+    monkeypatch.setenv("MEIVA_TELEMETRY_OTLP_CHILD_DEFER", "0")
 
     backend.defer_until_exit()
 
@@ -247,11 +247,11 @@ def test_env_defaults_locked_to_settings_fields() -> None:
 
     fields = type(settings.observability).model_fields
     assert fields["telemetry_otlp_child_defer"].default is True
-    assert fields["telemetry_otlp_child_defer"].alias == "AVA_TELEMETRY_OTLP_CHILD_DEFER"
+    assert fields["telemetry_otlp_child_defer"].alias == "MEIVA_TELEMETRY_OTLP_CHILD_DEFER"
     assert fields["telemetry_otlp_child_defer_max_age_s"].default == CHILD_DEFER_MAX_AGE_DEFAULT_S
     assert (
         fields["telemetry_otlp_child_defer_max_age_s"].alias
-        == "AVA_TELEMETRY_OTLP_CHILD_DEFER_MAX_AGE_S"
+        == "MEIVA_TELEMETRY_OTLP_CHILD_DEFER_MAX_AGE_S"
     )
 
 

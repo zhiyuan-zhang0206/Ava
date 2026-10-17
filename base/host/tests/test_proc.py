@@ -77,7 +77,7 @@ def test_hosting_exec_domain_names_the_entry_of_its_session_leader(entry: str) -
 
 def test_hosting_exec_domain_none_when_the_leader_is_not_an_exec_entry() -> None:
     """A session whose leader is anything else — the per-session PTY host shape
-    behind `ava.shell.run_background` (a login shell) — is not an exec domain."""
+    behind `meiva.shell.run_background` (a login shell) — is not an exec domain."""
     assert _predicate_in_new_session() == "None"
 
 
@@ -437,7 +437,7 @@ def test_timeout_stderr_tail_bounds_the_number_of_lines() -> None:
 # --- the git-driving modules stay converted ------------------------------
 
 
-# The modules that drive git on Ava's behalf — the ones whose timeouts were
+# The modules that drive git on Meiva's behalf — the ones whose timeouts were
 # silently bounding only a launcher. A `subprocess.run(timeout=)`
 # reappearing in any of them is the regression, and it is invisible on review
 # because it looks exactly like a correct bound.

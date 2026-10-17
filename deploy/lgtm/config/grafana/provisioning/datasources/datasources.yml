@@ -3,7 +3,7 @@ apiVersion: 1
 # precedent): the process env supplies the values, so this checkout file is
 # ALWAYS a valid configuration — native Grafana loads this file with the
 # converge-rendered runtime.env supplying the values.
-# AVA_OBSERVABILITY_URL empty (default) → loopback backends (current behavior);
+# MEIVA_OBSERVABILITY_URL empty (default) → loopback backends (current behavior);
 # non-empty → the remote observatory station's URLs (converge bakes the derived
 # values into the native runtime.env).
 datasources:
@@ -12,7 +12,7 @@ datasources:
     type: tempo
     access: proxy
     # Query URL is rendered into native Grafana from the host-scoped setting.
-    url: $__env{AVA_TELEMETRY_TEMPO_QUERY_URL}
+    url: $__env{MEIVA_TELEMETRY_TEMPO_QUERY_URL}
     # Explore should open the event stream, not the trace backend.
     isDefault: false
     jsonData:
@@ -22,13 +22,13 @@ datasources:
     uid: loki
     type: loki
     access: proxy
-    url: $__env{AVA_TELEMETRY_LOKI_URL}
+    url: $__env{MEIVA_TELEMETRY_LOKI_URL}
 
   - name: Prometheus
     uid: prometheus
     type: prometheus
     access: proxy
-    url: $__env{AVA_TELEMETRY_PROMETHEUS_URL}
+    url: $__env{MEIVA_TELEMETRY_PROMETHEUS_URL}
 
   # Read-only Postgres — the one remaining SQL panel is core_live_agents
   # (reads the live agents_meta table). Task #1280 decision (405 2026-08-14):
@@ -40,19 +40,19 @@ datasources:
   # in this repo).
   #
   # ⚠️ PG is the most typical bomb in observatory cutovers (#3606): it is the
-  # CLUSTER's OWN database (grafana_ro/ava_main), not an observatory service.
+  # CLUSTER's OWN database (grafana_ro/meiva_main), not an observatory service.
   # Native converge derives this endpoint from the cluster's direct DB URL,
-  # independently of AVA_OBSERVABILITY_URL. The configured host and port must
-  # serve this cluster's ava_main with grafana_ro; no default port is assumed.
-  - name: Postgres (ava read-only)
+  # independently of MEIVA_OBSERVABILITY_URL. The configured host and port must
+  # serve this cluster's meiva_main with grafana_ro; no default port is assumed.
+  - name: Postgres (meiva read-only)
     uid: ops
     type: postgres
     access: proxy
-    url: $__env{AVA_PG_URL}
+    url: $__env{MEIVA_PG_URL}
     user: grafana_ro
     secureJsonData:
       password: $GRAFANA_PG_PASSWORD
     jsonData:
-      database: ava_main
+      database: meiva_main
       sslmode: disable
       postgresVersion: 1700

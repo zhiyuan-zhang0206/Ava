@@ -1,0 +1,12 @@
+[debt.env-patch]
+"test_sdk_failure_propagation.py#monkeypatch.setenv os.environ.MEIVA_HOME" = 1
+
+[debt.first-party-patch]
+"test_sdk_failure_propagation.py#monkeypatch.setattr meiva.__plugin_installation__" = 1
+"test_sdk_failure_propagation.py#monkeypatch.setattr base.agents.sdk.call_policy.policy" = 1
+"test_sdk_failure_propagation.py#monkeypatch.setattr base.agents.sdk.telemetry.emit" = 1
+"test_seed_guard.py#monkeypatch.setattr base.config.settings.data_plane.db_url" = 2
+"test_self_compact_publish.py#monkeypatch.setattr base.telemetry.audit_events.record_audit" = 1
+
+[debt.third-party-patch]
+"test_seed_guard.py#monkeypatch.setattr psycopg.connect" = 1

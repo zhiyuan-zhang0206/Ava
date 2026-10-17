@@ -31,11 +31,11 @@ def start_child(dsn: str, agent: int, stage: str) -> subprocess.Popen[str]:
         text=True,
         env={
             **os.environ,
-            "AVA_DB_URL": dsn,
-            "AVA_REDIS_URL": settings.data_plane.redis_url,
+            "MEIVA_DB_URL": dsn,
+            "MEIVA_REDIS_URL": settings.data_plane.redis_url,
             "OPENAI_API_KEY": "test-key",
-            "AVA_TEST_COMPACT_AGENT": str(agent),
-            "AVA_TEST_COMPACT_STAGE": stage,
+            "MEIVA_TEST_COMPACT_AGENT": str(agent),
+            "MEIVA_TEST_COMPACT_STAGE": stage,
         },
     )
 

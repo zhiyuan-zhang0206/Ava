@@ -1,0 +1,25 @@
+# Fixture modules (tests/path_scoped/) that govern this directory's tests: "." is the
+# directory itself, otherwise the test files named here (tests/fixtures/path_scopes.py).
+"meiva.tests.fixtures.meiva_tests" = [
+    "test_agent_identity.py",
+    "test_attachment_transport.py",
+    "test_files.py",
+    "test_security.py",
+    "test_self_machine_spec.py",
+]
+"base.paths.tests.homes" = ["."]
+"base.packages.tests.model_catalog" = [
+    "test_attachment_transport.py",
+    "test_security.py",
+]
+"base.config.tests.config_authority" = [
+    "test_attachment_transport.py",
+    "test_security.py",
+]
+"meiva.tests.fixtures.model_owner" = [
+    "test_attachment_transport.py",
+    "test_security.py",
+]
+"meiva.tests.fixtures.sdk" = [
+    "."
+]

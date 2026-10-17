@@ -10,7 +10,7 @@ AttributeError instead of a value -- the window was accepted as a failure
 surface because it is normally sub-second.
 
 On 2026-09-19 the window surfaced as a user-visible hard failure (task #4069):
-in a long-running agent process, two concurrent `ava.web.fetch` workers raced
+in a long-running agent process, two concurrent `meiva.web.fetch` workers raced
 the process's first web-domain read; the loser raised "config boot-lite:
 settings.web.web_jina_reader_base is not readable while the eager config build
 is in flight" and the caller fell back to fetching by hand. Any concurrent

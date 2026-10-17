@@ -15,7 +15,7 @@ Core registers no providers; enabled plugins are the sole source of bindings,
 chat-model rows, provider vocabularies, media fallbacks, keys, and live prices.
 
 A ``provider.py`` module may import ``base`` and LangChain packages only —
-never ``ava`` / ``agent`` (the gateway, the labeler daemon, and the eval
+never ``meiva`` / ``agent`` (the gateway, the labeler daemon, and the eval
 harness load it, and none of those processes has an agent runtime). Plugin
 discovery is keyed on ``plugin.py``, so a provider plugin ships one even when
 it contributes nothing agent-side (an empty stub satisfies discovery and the
@@ -162,7 +162,7 @@ def require_key(key_env: str) -> str:
     if not key:
         raise RuntimeError(
             f"{key_env} not set — this provider needs its key; "
-            "configure in ~/.ava/.env or export before starting"
+            "configure in ~/.meiva/.env or export before starting"
         )
     return key
 

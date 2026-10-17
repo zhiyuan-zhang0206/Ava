@@ -24,8 +24,8 @@ _AGENT_SKILL_VIEW_TIMEOUT_S = 3.0
 
 def _local_commands() -> list[CommandItem]:
     """The gateway-local catalog: the unscoped view and the availability fallback."""
-    from ava import skills
     from base.packages.composer_commands import CommandCatalog
+    from meiva import skills
 
     return [
         CommandItem(

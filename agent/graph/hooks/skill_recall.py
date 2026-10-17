@@ -36,7 +36,7 @@ from agent.graph.recall.skill_recall import SkillRecall, recall_skills
 from agent.hooks import Hook
 from agent.messages import tail_has_skill_recall_inbound
 from agent.state import SkillRecallState
-from base.agents.context import AvaContext, agent_id_from_config
+from base.agents.context import MeivaContext, agent_id_from_config
 from base.log import logger
 
 _LABEL = "skill-recall"
@@ -56,7 +56,7 @@ class SkillRecallHook(Hook):
     async def __call__(
         self,
         state: _state.AgentState,
-        runtime: Runtime[AvaContext],
+        runtime: Runtime[MeivaContext],
         config: RunnableConfig,
         /,
     ) -> dict[str, Any] | None:
@@ -85,7 +85,7 @@ class SkillRecallHook(Hook):
     async def _offer(
         self,
         state: _state.AgentState,
-        runtime: Runtime[AvaContext],
+        runtime: Runtime[MeivaContext],
         config: RunnableConfig,
         *,
         excluded: set[str],

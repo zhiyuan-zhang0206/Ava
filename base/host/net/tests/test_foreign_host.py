@@ -8,11 +8,11 @@ from base.host.net.url_secret import names_foreign_host
 @pytest.mark.parametrize(
     ("urls", "foreign"),
     [
-        (("postgresql://ava@127.0.0.1:5432/ava", "redis://127.0.0.1:6380/0"), False),
-        (("postgresql://ava@localhost/ava", "redis://[::1]:6380/0"), False),
-        (("postgresql://ava@10.0.0.7:5432/ava", "redis://127.0.0.1:6380/0"), True),
-        (("postgresql://ava@127.0.0.1:5432/ava", "rediss://ava@cache.example:6380/0"), True),
-        (("postgresql:///ava", "redis:///0"), False),
+        (("postgresql://meiva@127.0.0.1:5432/meiva", "redis://127.0.0.1:6380/0"), False),
+        (("postgresql://meiva@localhost/meiva", "redis://[::1]:6380/0"), False),
+        (("postgresql://meiva@10.0.0.7:5432/meiva", "redis://127.0.0.1:6380/0"), True),
+        (("postgresql://meiva@127.0.0.1:5432/meiva", "rediss://meiva@cache.example:6380/0"), True),
+        (("postgresql:///meiva", "redis:///0"), False),
         ((), False),
     ],
 )

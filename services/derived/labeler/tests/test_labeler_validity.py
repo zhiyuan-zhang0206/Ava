@@ -2,7 +2,7 @@
 generation out of the user-facing `agents.label`.
 
 Issue #178: fed a long English second-person imperative brief (the shape
-`ava.agents.spawn()` produces when an agent writes another agent's prompt),
+`meiva.agents.spawn()` produces when an agent writes another agent's prompt),
 `deepseek-v4-flash` failed every draw on the real preview-cluster prompts —
 15/15 on replay — answering the brief in assistant voice, emitting `<think>` /
 `<thinking>` scaffolding as plain text, and echoing the `<user_request>` fence
@@ -127,7 +127,7 @@ _PROD_LABELS = [
     "\u4e3aenum\u589e\u52a0Jina Reader\u5347\u7ea7\u4ee5\u9002\u914d\u4eba\u6c11\u7f51\u6293\u53d6",
     "\u6e05\u7406config_overlay\u4e2dskills_to_inject_into_system_prompt\u7684\u65e7\u683c\u5f0fskill\u540d",
     "\u8c03\u67e5\u96c6\u7fa4\u62d3\u6251\u4e0e\u5355\u673a\u591acluster\u95ee\u9898",
-    "\u4ee3\u7801\u5c42\u5168\u91cf\u91cd\u547d\u540d\u539f\u751f\u8f85\u52a9\u5de5\u5177\u4e3aava-desktop-helper",
+    "\u4ee3\u7801\u5c42\u5168\u91cf\u91cd\u547d\u540d\u539f\u751f\u8f85\u52a9\u5de5\u5177\u4e3ameiva-desktop-helper",
     "\u4fee\u590dpg_tools._free_port\u7684TOCTOU\u7ade\u6001\u95ee\u9898",
     "\u9489\u4f4fchrome-devtools-mcp\u7248\u672c\u5e76\u5ba1\u8ba1\u672a\u9489\u4f9d\u8d56",
     "\u8c03\u67e5\u6d88\u606f\u6295\u9012\u5ef6\u8fdf\u4e0e\u8f6e\u8be2\u673a\u5236\u5ba1\u8ba1",

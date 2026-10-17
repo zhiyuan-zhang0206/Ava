@@ -171,19 +171,19 @@ def test_wrong_home_source_is_refused(tmp_path: Path, monkeypatch: pytest.Monkey
     (tmp_path / "start-intent.json").write_text(
         json.dumps({"home": str(tmp_path), "checkout": str(tmp_path / "another-source")})
     )
-    monkeypatch.delenv("AVA_DB_GENERATION", raising=False)
-    monkeypatch.delenv("AVA_PROCESS_PROFILE", raising=False)
-    monkeypatch.setenv("AVA_HOME", str(tmp_path))
+    monkeypatch.delenv("MEIVA_DB_GENERATION", raising=False)
+    monkeypatch.delenv("MEIVA_PROCESS_PROFILE", raising=False)
+    monkeypatch.setenv("MEIVA_HOME", str(tmp_path))
     with pytest.raises(RuntimeError, match="source checkout"):
         repair.load_installed_runtime(tmp_path, source)
 
 
-@pytest.mark.parametrize("key", ["AVA_PROCESS_PROFILE", "AVA_LAUNCHER_PROFILE"])
+@pytest.mark.parametrize("key", ["MEIVA_PROCESS_PROFILE", "MEIVA_LAUNCHER_PROFILE"])
 def test_launcher_delivery_cannot_be_transplanted(
     key: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.setenv(key, "untrusted-delivery")
-    monkeypatch.setenv("AVA_HOME", str(tmp_path))
+    monkeypatch.setenv("MEIVA_HOME", str(tmp_path))
     with pytest.raises(RuntimeError, match="without a launcher"):
         repair.load_installed_runtime(tmp_path, Path(sys.prefix).parent)
 
@@ -272,7 +272,7 @@ def test_utf8_digest_preserves_newlines() -> None:
     assert repair.script_sha256("pass\r\n") != repair.script_sha256("pass\n")
 
 
-# ava:ref scripts/host_ops/tests/docs/schedule-maintenance.ava.okf.md#installed-runtime-writer
+# meiva:ref scripts/host_ops/tests/docs/schedule-maintenance.meiva.okf.md#installed-runtime-writer
 def test_external_file_uses_installed_runtime_and_real_writer(
     db_conn: psycopg.Connection,
     database: Database,
@@ -281,7 +281,7 @@ def test_external_file_uses_installed_runtime_and_real_writer(
     pytester: pytest.Pytester,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    source = Path(os.environ.get("AVA_TEST_INSTALLED_SOURCE", Path(sys.prefix).parent)).resolve()
+    source = Path(os.environ.get("MEIVA_TEST_INSTALLED_SOURCE", Path(sys.prefix).parent)).resolve()
     home = tmp_path / "home"
     (home / "run").mkdir(parents=True)
     (home / "start-intent.json").write_text(
@@ -291,8 +291,8 @@ def test_external_file_uses_installed_runtime_and_real_writer(
     journal = pause_owner.state_path().read_bytes()
     (home / "run" / "deploy-pause-owner.json").write_bytes(journal)
     (home / ".env").write_text(
-        f"AVA_DB_URL={db_url}\nAVA_SERVE_GATEWAY=true\n"
-        "AVA_SERVE_AGENT_RUNNER=false\nAVA_MACHINE_NAME=external-script-test\n"
+        f"MEIVA_DB_URL={db_url}\nMEIVA_SERVE_GATEWAY=true\n"
+        "MEIVA_SERVE_AGENT_RUNNER=false\nMEIVA_MACHINE_NAME=external-script-test\n"
     )
     with database.pool() as pool:
         row = router.create_blocking(
@@ -304,9 +304,9 @@ def test_external_file_uses_installed_runtime_and_real_writer(
     script_file.write_bytes(b"raise AssertionError('the body must never run')\r\n")
     with monkeypatch.context() as child_environment:
         for key in list(os.environ):
-            if key.startswith("AVA_"):
+            if key.startswith("MEIVA_"):
                 child_environment.delenv(key)
-        child_environment.setenv("AVA_HOME", str(home))
+        child_environment.setenv("MEIVA_HOME", str(home))
         child_environment.chdir(tmp_path)
         result = pytester.run(
             str(source / ".venv" / "bin" / "python"),

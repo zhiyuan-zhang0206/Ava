@@ -2,10 +2,10 @@
 
 ## Context
 
-Two process-level containers lived in the `ava` package. `ava/security.py::_pending_findings` held
+Two process-level containers lived in the `meiva` package. `meiva/security.py::_pending_findings` held
 the prompt-injection findings `scan_content` raised while agent code ran, until the exec child drained
 them with `take_findings()` into a `findings` field of its result envelope; the exec node re-validated
-each entry and merged a SECURITY note into its messages delta. `ava/skills/__init__.py::_recorded_skill_invocations`
+each entry and merged a SECURITY note into its messages delta. `meiva/skills/__init__.py::_recorded_skill_invocations`
 was a `(agent, skill)` set that deduplicated the `skill_invoked` audit events a body consumption writes.
 
 The skill set only suppressed writes: each event was already written to `audit_events` at the call.
@@ -15,7 +15,7 @@ the envelope that bypassed the state update every plugin delta already travels i
 ## Decision
 
 1. **A finding that must reach the model is written into the turn's state update the moment it is
-   found.** `ava.security` appends it to `ava.state_update["security_findings"]`, a base channel
+   found.** `meiva.security` appends it to `meiva.state_update["security_findings"]`, a base channel
    `BaseAgentState.security_findings` with an `operator.add` reducer. The exec node commits it like
    any plugin delta (`SDK_WRITTEN_BASE_FIELDS` lets this one framework channel through
    `_validate_plugin_state_keys`). The framework's after_exec hook `agent/hooks/security.py` reads
@@ -27,7 +27,7 @@ the envelope that bypassed the state update every plugin delta already travels i
    emits one `skill_invoked` event per body consumption through `record_audit_reported` (the
    `audit_events` row, then the unified stream; a failed write is an error log with traceback plus an
    `audit_write_failed` event, never a raise and never silent). The dedup set is deleted rather than
-   moved: the consumer (`ava_self_evolution`'s `_skills_touched`) reads the set of skills, and the old
+   moved: the consumer (`meiva_self_evolution`'s `_skills_touched`) reads the set of skills, and the old
    set was scoped to one exec child, i.e. one `execute_code`, so it never deduplicated a run.
 3. Both entries leave `scripts/structure/baseline`; the baseline only shrinks.
 
@@ -38,7 +38,7 @@ the envelope that bypassed the state update every plugin delta already travels i
   context notes, but the finding would live only in the node's local variables. The channel is part of
   the checkpoint, so a finding committed with the tool result survives a crash before delivery, and
   every consumer reads graph state the way the hooks decision (2026-10-04) requires.
-- **Write the SECURITY note itself into `ava.state_update["messages"]`.** Needs a plugin to declare
+- **Write the SECURITY note itself into `meiva.state_update["messages"]`.** Needs a plugin to declare
   `messages` (the validation rejects an undeclared base write) and the SDK to import the agent's
   message constructors, which it may not.
 - **Keep a dedup for skill events, in the database** (`INSERT ... WHERE NOT EXISTS`). It needs a custom

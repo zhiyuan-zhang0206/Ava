@@ -50,8 +50,8 @@ def test_a_session_in_the_service_refuses_before_any_signal(
 ) -> None:
     """A terminal refuses a stop that closes none; nothing is signalled."""
     del pty_service
-    proc = launch("ava-agent-host")
-    assert new_session("ava-agent-123-shell-1", home)
+    proc = launch("meiva-agent-host")
+    assert new_session("meiva-agent-123-shell-1", home)
     with pytest.raises(RuntimeError, match="will not kill or replay"):
         stop.require_no_terminals()
     assert proc.poll() is None
@@ -293,7 +293,7 @@ def test_a_dead_service_with_only_a_known_job_does_not_block_terminal_closure(
     job = launch("surviving-job", term="ignore")
     member = OwnedProcess.capture(psutil.Process(job.pid))
     ledger.write(
-        ledger_path(), [closure.Target("ava-agent-123-shell-1", _dead_shell(launch), (member,))]
+        ledger_path(), [closure.Target("meiva-agent-123-shell-1", _dead_shell(launch), (member,))]
     )
     with pytest.raises(client.ServiceDownError):
         client.request("list")
@@ -308,7 +308,7 @@ def test_a_dead_service_whose_ledger_names_only_dead_processes_does_not_refuse(
     home: Path, launch: Launcher
 ) -> None:
     del home
-    ledger.write(ledger_path(), [closure.Target("ava-agent-123-shell-1", _dead_shell(launch))])
+    ledger.write(ledger_path(), [closure.Target("meiva-agent-123-shell-1", _dead_shell(launch))])
     stop.require_no_terminals()
 
 
@@ -531,7 +531,7 @@ def _launch_incident_shape_pooler(
     if addr is None:
         pytest.skip("this host has no non-loopback address for the reachable bind")
 
-    monkeypatch.setattr(base_pooler, "ava_home", lambda: home)
+    monkeypatch.setattr(base_pooler, "meiva_home", lambda: home)
     command_machine.set(host=addr)
     command_machine.set(host=addr)
     monkeypatch.setattr(pb, "pg_socket_dir", lambda: home / "pg-socket")  # pyright: ignore[reportUnknownArgumentType] — private fixture home
@@ -542,7 +542,7 @@ def _launch_incident_shape_pooler(
     pb.write_config(
         pg_port=15433,
         listen_port=port,
-        db_name="ava_maintenance_test",
+        db_name="meiva_maintenance_test",
         userlist=f'"{role}" "{secret}"\n'.encode(),
         machine=command_machine,
     )
@@ -637,7 +637,7 @@ def test_real_start_retains_pooler_with_held_client(
                 pb.ensure_pgbouncer(
                     pg_port=15433,
                     listen_port=port,
-                    db_name="ava_maintenance_test",
+                    db_name="meiva_maintenance_test",
                     userlist=f'"{role}" "{secret}"\n'.encode(),
                     admin_password=secret,
                     machine=command_machine,

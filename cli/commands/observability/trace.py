@@ -1,12 +1,12 @@
-"""`ava trace ship` — replay the local trace mirror (collector JSONL) to Tempo.
+"""`meiva trace ship` — replay the local trace mirror (collector JSONL) to Tempo.
 
 Recording (base/telemetry/tracing.py) exports spans over OTLP/HTTP to the local OTel
-Collector sidecar, whose file exporter mirrors them to `$AVA_HOME/traces/`:
+Collector sidecar, whose file exporter mirrors them to `$MEIVA_HOME/traces/`:
 the active `spans.jsonl` plus rotated `spans-<ISO-timestamp>.jsonl` backups,
 each line a standard OTLP/JSON `ExportTraceServiceRequest`. This command is
 the RECOVERY consumer: it reads the mirror and POSTs each line back over
 OTLP/HTTP (protobuf). A gateway/single-box unit sends straight to its loopback
-Tempo endpoint (`AVA_TELEMETRY_TEMPO_ENDPOINT`); a pure runner sends to the
+Tempo endpoint (`MEIVA_TELEMETRY_TEMPO_ENDPOINT`); a pure runner sends to the
 gateway collector's private-address receiver with the cluster bearer:
 
 - **why bypass the local sidecar**: live delivery is the collector's job, with a
@@ -16,7 +16,7 @@ gateway collector's private-address receiver with the cluster bearer:
   write the replayed lines back into the mirror (the file exporter mirrors
   everything it receives), looping the watermark — so ship dials Tempo
   directly on a gateway, or the gateway's relay receiver on a pure runner.
-- **gating**: refuses while `AVA_TELEMETRY_OTLP_ENABLED=false` (one kill
+- **gating**: refuses while `MEIVA_TELEMETRY_OTLP_ENABLED=false` (one kill
   switch for the whole OTLP surface — with the sidecar architecture that also
   stops recording, so there is nothing to replay either).
 
@@ -50,7 +50,7 @@ _OTLP_V1_PATH = "/v1/traces"
 
 
 class TraceShipError(RuntimeError):
-    """Shipping config is incomplete — AVA_TELEMETRY_OTLP_ENABLED is false."""
+    """Shipping config is incomplete — MEIVA_TELEMETRY_OTLP_ENABLED is false."""
 
 
 @dataclass(frozen=True)
@@ -64,12 +64,12 @@ def _require_ship_config(*, machine: MachineIdentity) -> ShipTarget:
     """Validate config and return the role-correct OTLP replay target.
 
     Raises:
-        TraceShipError: AVA_TELEMETRY_OTLP_ENABLED=false (the whole-OTLP kill
+        TraceShipError: MEIVA_TELEMETRY_OTLP_ENABLED=false (the whole-OTLP kill
             switch).
     """
     if not settings.observability.telemetry_otlp_enabled:
         raise TraceShipError(
-            "AVA_TELEMETRY_OTLP_ENABLED is false — the whole OTLP surface "
+            "MEIVA_TELEMETRY_OTLP_ENABLED is false — the whole OTLP surface "
             "(live exporter + trace ship) is off. Set it true to ship the "
             "mirror to Tempo."
         )

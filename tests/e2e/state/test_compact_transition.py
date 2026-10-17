@@ -27,14 +27,14 @@ from tests.e2e.fixture_environment import E2EEnv
 
 @pytest.fixture
 def transition_env(request: pytest.FixtureRequest) -> Iterator[E2EEnv]:
-    env_path = Path(os.environ["AVA_HOME"]) / ".env"
+    env_path = Path(os.environ["MEIVA_HOME"]) / ".env"
     original = env_path.read_text()
     lines = [
         line
         for line in original.splitlines()
-        if not line.startswith("AVA_TIMELINE_COMPACT_HISTORY=")
+        if not line.startswith("MEIVA_TIMELINE_COMPACT_HISTORY=")
     ]
-    env_path.write_text("\n".join([*lines, "AVA_TIMELINE_COMPACT_HISTORY=-1"]) + "\n")
+    env_path.write_text("\n".join([*lines, "MEIVA_TIMELINE_COMPACT_HISTORY=-1"]) + "\n")
     try:
         yield request.getfixturevalue("e2e_env")
     finally:

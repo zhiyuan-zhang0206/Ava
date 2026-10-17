@@ -17,5 +17,5 @@ def use_env_files(
     (home / ".env").write_text(env_file.read_text())
     if mirror_file is not None and mirror_file.exists():
         (home / "mirror.env").write_text(mirror_file.read_text())
-    monkeypatch.setenv("AVA_HOME", str(home))
+    monkeypatch.setenv("MEIVA_HOME", str(home))
     return home

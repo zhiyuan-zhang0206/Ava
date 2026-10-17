@@ -22,7 +22,7 @@
 "base.packages.tests.model_catalog" = [
     "test_maintenance_recovery.py",
 ]
-"ava.tests.fixtures.sdk" = [
+"meiva.tests.fixtures.sdk" = [
     "test_commands_register.py",
     "test_external_skills.py",
     "test_maintenance_recovery.py",

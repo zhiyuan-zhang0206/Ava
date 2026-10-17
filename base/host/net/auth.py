@@ -2,10 +2,10 @@
 
 Two auth methods for the gateway's human cluster secret:
 - Bearer token: `Authorization: Bearer <secret>` — operator SDK / scripts.
-- Session cookie: `ava_session=<opaque-id>` — browser (login flow); the gateway
+- Session cookie: `meiva_session=<opaque-id>` — browser (login flow); the gateway
   stores expiry and revocation state in Postgres.
 
-The secret (`AVA_CLUSTER_SECRET`) stays on the gateway; machine callers present
+The secret (`MEIVA_CLUSTER_SECRET`) stays on the gateway; machine callers present
 their write generation's API token instead (`base.host.db_authority.api`),
 which an accepting side may verify by digest (`verify_bearer_digest`). Every
 bearer is presented as an HTTP `Authorization: Bearer <token>` header and
@@ -27,15 +27,15 @@ from secrets import token_bytes
 # The launch-environment key carrying this process's machine API token
 # (`base.host.db_authority.api`): set per process by the root launcher, or by
 # the boot pass for an admitted operator process; never in `.env`.
-API_TOKEN_ENV = "AVA_API_TOKEN"  # noqa: S105 — env key name, not a credential
+API_TOKEN_ENV = "MEIVA_API_TOKEN"  # noqa: S105 — env key name, not a credential
 _SCHEME = "Bearer "
-_COOKIE_NAME = "ava_session"
+_COOKIE_NAME = "meiva_session"
 _DEFAULT_SESSION_TTL_SECONDS = 24 * 3600
 
 # User-Agent the managed-browser daemon sends on its gateway login, so the
 # sessions list can label its session rows and users can tell them apart from
 # their own browser sessions (and avoid revoking the wrong one).
-MANAGED_BROWSER_USER_AGENT = "ava-managed-browser"
+MANAGED_BROWSER_USER_AGENT = "meiva-managed-browser"
 
 
 def bearer_header(secret: str) -> dict[str, str]:
@@ -49,22 +49,22 @@ def delivered_token() -> str | None:
 
 
 class ClusterSecretMissingError(RuntimeError):
-    """A gateway home has no `AVA_CLUSTER_SECRET`: the cluster API cannot start."""
+    """A gateway home has no `MEIVA_CLUSTER_SECRET`: the cluster API cannot start."""
 
 
 def require_cluster_secret(secret: str, *, where: str) -> str:
     """The gateway's human secret, or `ClusterSecretMissingError`.
 
     Every cluster authenticates its API with a human secret; there is no open
-    posture. `ava init` mints one into a new home's `.env`, so a missing one
+    posture. `meiva init` mints one into a new home's `.env`, so a missing one
     means a hand-edited or pre-existing home.
     """
     if not secret:
         raise ClusterSecretMissingError(
-            f"{where} has no AVA_CLUSTER_SECRET, and the cluster API always authenticates. "
+            f"{where} has no MEIVA_CLUSTER_SECRET, and the cluster API always authenticates. "
             "Set it in the gateway home's .env to a fresh URL-safe token "
-            "(python3 -c 'import secrets; print(secrets.token_urlsafe(32))'), then run `ava start`; "
-            "`ava init` mints one for every new home"
+            "(python3 -c 'import secrets; print(secrets.token_urlsafe(32))'), then run `meiva start`; "
+            "`meiva init` mints one for every new home"
         )
     return secret
 

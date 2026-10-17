@@ -1,8 +1,8 @@
-"""ava.__getattr__ env-gated lazy plugin-namespace load + ava.ensure_plugins_loaded.
+"""meiva.__getattr__ env-gated lazy plugin-namespace load + meiva.ensure_plugins_loaded.
 
-A process an agent launched (AVA_AGENT_ID forwarded, no bootstrap to hook — a
+A process an agent launched (MEIVA_AGENT_ID forwarded, no bootstrap to hook — a
 bare `python x.py` in a persistent shell session) self-loads plugin namespaces
-on the first unknown `ava.X`; gateway / cli / the agent process itself keep the
+on the first unknown `meiva.X`; gateway / cli / the agent process itself keep the
 fail-fast AttributeError.
 
 These lock the gating matrix + the once-per-process load (the installation slot) so a future edit can't silently
@@ -19,10 +19,7 @@ from typing import Any
 
 import pytest
 
-import ava
-from ava.sdk_surface import install
-from ava.sdk_surface.installation import installed
-from ava.tests.fixtures.pin_agent import pin_agent, pin_no_identity
+import meiva
 from base.agents.sdk import call_policy
 from base.clock import Clock
 from base.config.service_read import ConfigAuthority
@@ -34,6 +31,9 @@ from base.packages.plugins.extensions import (
     SdkMember,
     SdkNamespace,
 )
+from meiva.sdk_surface import install
+from meiva.sdk_surface.installation import installed
+from meiva.tests.fixtures.pin_agent import pin_agent, pin_no_identity
 
 
 @pytest.fixture(autouse=True)
@@ -45,7 +45,7 @@ def _reset(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
     monkeypatch.setattr(call_policy, "policy", _policy_for_test)
     # Each test drives the installation slot + agent identity explicitly;
     # snapshot-restore so nothing leaks between tests. Any SDK surface already
-    # installed in this process (ava.memory, ava.tasks, ava.cwd ...) is taken out
+    # installed in this process (meiva.memory, meiva.tasks, meiva.cwd ...) is taken out
     # for the test and put back after, so the lazy loads below start from a surface
     # with no plugin namespaces and never wipe the others.
     prior = installed()
@@ -83,10 +83,10 @@ def _installing(
 
 
 def _spy_loader(monkeypatch: pytest.MonkeyPatch, *, register: str | None) -> list[int]:
-    """Replace ava.sdk_surface.extensions.load_extensions (reached by ensure_plugins_loaded
+    """Replace meiva.sdk_surface.extensions.load_extensions (reached by ensure_plugins_loaded
     via importlib) with a spy that records calls and optionally registers a namespace.
     Avoids the heavy, DB-touching real load in a unit test."""
-    from ava.sdk_surface import extensions
+    from meiva.sdk_surface import extensions
 
     calls: list[int] = []
 
@@ -128,7 +128,7 @@ def _spy_loader(monkeypatch: pytest.MonkeyPatch, *, register: str | None) -> lis
 
 def _as_launched_child(monkeypatch: pytest.MonkeyPatch) -> None:
     pin_no_identity()
-    monkeypatch.setenv("AVA_AGENT_ID", "42")
+    monkeypatch.setenv("MEIVA_AGENT_ID", "42")
 
 
 def test_lazy_load_fires_in_launched_child(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -136,7 +136,7 @@ def test_lazy_load_fires_in_launched_child(monkeypatch: pytest.MonkeyPatch) -> N
     calls = _spy_loader(monkeypatch, register="lazytasks")
 
     assert (
-        ava.lazytasks.ping() == "pong"
+        meiva.lazytasks.ping() == "pong"
     )  # first access triggers the load  # type: ignore[attr-defined]
     assert calls == [1]
     assert installed() is not None
@@ -146,22 +146,22 @@ def test_lazy_load_latches_once(monkeypatch: pytest.MonkeyPatch) -> None:
     _as_launched_child(monkeypatch)
     calls = _spy_loader(monkeypatch, register="lazytasks")
 
-    _ = ava.lazytasks  # loads  # type: ignore[attr-defined]
+    _ = meiva.lazytasks  # loads  # type: ignore[attr-defined]
     # A later unknown miss must NOT reload (latched) — it fails fast instead.
     with pytest.raises(AttributeError):
-        _ = ava.still_unknown  # type: ignore[attr-defined]
+        _ = meiva.still_unknown  # type: ignore[attr-defined]
     assert calls == [1]
 
 
 def test_no_lazy_load_without_agent_id(monkeypatch: pytest.MonkeyPatch) -> None:
-    # gateway / cli: no AVA_AGENT_ID -> behavior byte-identical to before the fix
+    # gateway / cli: no MEIVA_AGENT_ID -> behavior byte-identical to before the fix
     # (same AttributeError message, loader never touched).
     pin_no_identity()
-    monkeypatch.delenv("AVA_AGENT_ID", raising=False)
+    monkeypatch.delenv("MEIVA_AGENT_ID", raising=False)
     calls = _spy_loader(monkeypatch, register=None)
 
-    with pytest.raises(AttributeError, match=r"module 'ava' has no attribute 'nope_xyz'"):
-        _ = ava.nope_xyz  # type: ignore[attr-defined]
+    with pytest.raises(AttributeError, match=r"module 'meiva' has no attribute 'nope_xyz'"):
+        _ = meiva.nope_xyz  # type: ignore[attr-defined]
     assert calls == []
 
 
@@ -169,12 +169,12 @@ def test_no_lazy_load_in_agent_process(monkeypatch: pytest.MonkeyPatch) -> None:
     # owns_loop=True + established id = the agent process. A typo must fail fast,
     # not re-run load_extensions — which clears all hooks and would drop the
     # built-in ones build_graph registers after it.
-    monkeypatch.setenv("AVA_AGENT_ID", "7")
+    monkeypatch.setenv("MEIVA_AGENT_ID", "7")
     pin_agent(7, owns_loop=True)
     calls = _spy_loader(monkeypatch, register=None)
 
     with pytest.raises(AttributeError):
-        _ = ava.nope_xyz  # type: ignore[attr-defined]
+        _ = meiva.nope_xyz  # type: ignore[attr-defined]
     assert calls == []
 
 
@@ -186,25 +186,25 @@ def test_underscore_names_never_lazy_load(monkeypatch: pytest.MonkeyPatch) -> No
     calls = _spy_loader(monkeypatch, register=None)
 
     with pytest.raises(AttributeError):
-        _ = ava._some_private  # type: ignore[attr-defined]
+        _ = meiva._some_private  # type: ignore[attr-defined]
     assert calls == []
 
 
 def test_db_url_forward_wins_over_lazy_load(monkeypatch: pytest.MonkeyPatch) -> None:
     # DB_URL/REDIS_URL/GATEWAY_URL forward to _settings and must return before the
-    # lazy branch — even in a launched child, accessing ava.DB_URL never loads.
+    # lazy branch — even in a launched child, accessing meiva.DB_URL never loads.
     _as_launched_child(monkeypatch)
     calls = _spy_loader(monkeypatch, register=None)
 
-    assert isinstance(ava.DB_URL, str)
+    assert isinstance(meiva.DB_URL, str)
     assert calls == []
 
 
 def test_ensure_plugins_loaded_idempotent(monkeypatch: pytest.MonkeyPatch) -> None:
     calls = _spy_loader(monkeypatch, register="lazytasks")
 
-    ava.ensure_plugins_loaded()
-    ava.ensure_plugins_loaded()
+    meiva.ensure_plugins_loaded()
+    meiva.ensure_plugins_loaded()
 
     assert calls == [1]  # loads at most once per process
     assert installed() is not None
@@ -219,14 +219,14 @@ def test_ensure_plugins_loaded_idempotent(monkeypatch: pytest.MonkeyPatch) -> No
         (OSError, "original plugin boot error"),
         (
             AttributeError,
-            "partially initialized module 'ava.sdk_surface.extensions' implementation bug",
+            "partially initialized module 'meiva.sdk_surface.extensions' implementation bug",
         ),
     ],
 )
 def test_ensure_plugins_loaded_preserves_unknown_failure_without_retry(
     monkeypatch: pytest.MonkeyPatch, error_type: type[Exception], message: str
 ) -> None:
-    from ava.sdk_surface import extensions
+    from meiva.sdk_surface import extensions
 
     error = error_type(message)
     calls: list[int] = []
@@ -246,7 +246,7 @@ def test_ensure_plugins_loaded_preserves_unknown_failure_without_retry(
     monkeypatch.setattr(extensions, "load_extensions", boom)
     for _ in range(2):
         with pytest.raises(error_type) as caught:
-            ava.ensure_plugins_loaded()
+            meiva.ensure_plugins_loaded()
         assert caught.value is error
     assert calls == [1]
     assert install.load_attempted()
@@ -256,7 +256,7 @@ def test_ensure_plugins_loaded_preserves_unknown_failure_without_retry(
 def test_failed_lazy_lookup_repeats_the_original_boot_error(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from ava.sdk_surface import extensions
+    from meiva.sdk_surface import extensions
 
     _as_launched_child(monkeypatch)
     error = RuntimeError("lazy boot failed")
@@ -275,7 +275,7 @@ def test_failed_lazy_lookup_repeats_the_original_boot_error(
     monkeypatch.setattr(extensions, "load_extensions", boom)
     for _ in range(2):
         with pytest.raises(RuntimeError) as caught:
-            _ = ava.missing_after_failure
+            _ = meiva.missing_after_failure
         assert caught.value is error
 
 
@@ -284,7 +284,7 @@ def test_faces_failure_is_not_marked_successful_and_repeats_original_error(
 ) -> None:
 
     calls = _spy_loader(monkeypatch, register="lazytasks")
-    ava.ensure_plugins_loaded()
+    meiva.ensure_plugins_loaded()
     surface = installed()
     assert surface is not None and not surface.faces
     error = RuntimeError("runtime faces boot failed")
@@ -299,20 +299,20 @@ def test_faces_failure_is_not_marked_successful_and_repeats_original_error(
     monkeypatch.setattr(faces, "load_agent_faces", boom)
     for full in (True, False, True):
         with pytest.raises(RuntimeError) as caught:
-            ava.ensure_plugins_loaded(surface=not full)
+            meiva.ensure_plugins_loaded(surface=not full)
         assert caught.value is error
     assert face_calls == calls == [1]
     assert installed() is surface and not surface.faces
     install.uninstall()
-    assert not hasattr(ava, "lazytasks")
+    assert not hasattr(meiva, "lazytasks")
 
 
 def _spy_member_loader(
     monkeypatch: pytest.MonkeyPatch, *, namespace: str, member: str
 ) -> list[int]:
     """Loader spy that registers a plugin MEMBER on an existing framework
-    namespace (ava.self / ava.ui) — the shape ava_fleet uses for log/notify."""
-    from ava.sdk_surface import extensions
+    namespace (meiva.self / meiva.ui) — the shape meiva_fleet uses for log/notify."""
+    from meiva.sdk_surface import extensions
 
     calls: list[int] = []
 
@@ -341,34 +341,34 @@ def _spy_member_loader(
     return calls
 
 
-def test_member_lazy_load_on_ava_self(monkeypatch: pytest.MonkeyPatch) -> None:
-    # ava.self exists as a module, so ava.__getattr__ never fires for
-    # ava.self.<missing member> — ava/self/__init__.py's own __getattr__ must trigger
+def test_member_lazy_load_on_meiva_self(monkeypatch: pytest.MonkeyPatch) -> None:
+    # meiva.self exists as a module, so meiva.__getattr__ never fires for
+    # meiva.self.<missing member> — meiva/self/__init__.py's own __getattr__ must trigger
     # the shared lazy load in a launched child.
     _as_launched_child(monkeypatch)
     calls = _spy_member_loader(monkeypatch, namespace="self", member="lazylog")
 
-    assert ava.self.lazylog() == "pong"  # type: ignore[attr-defined]
+    assert meiva.self.lazylog() == "pong"  # type: ignore[attr-defined]
     assert calls == [1]
 
 
-def test_member_lazy_load_on_ava_ui(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_member_lazy_load_on_meiva_ui(monkeypatch: pytest.MonkeyPatch) -> None:
     _as_launched_child(monkeypatch)
     calls = _spy_member_loader(monkeypatch, namespace="ui", member="lazynotify")
 
-    assert ava.ui.lazynotify() == "pong"  # type: ignore[attr-defined]
+    assert meiva.ui.lazynotify() == "pong"  # type: ignore[attr-defined]
     assert calls == [1]
 
 
 def test_member_fail_fast_outside_child(monkeypatch: pytest.MonkeyPatch) -> None:
-    # No AVA_AGENT_ID: gateway/cli semantics — missing members on ava.self /
-    # ava.ui stay a fail-fast AttributeError and the loader never runs.
+    # No MEIVA_AGENT_ID: gateway/cli semantics — missing members on meiva.self /
+    # meiva.ui stay a fail-fast AttributeError and the loader never runs.
     pin_no_identity()
-    monkeypatch.delenv("AVA_AGENT_ID", raising=False)
+    monkeypatch.delenv("MEIVA_AGENT_ID", raising=False)
     calls = _spy_member_loader(monkeypatch, namespace="self", member="lazylog")
 
     with pytest.raises(AttributeError):
-        _ = ava.self.lazylog  # type: ignore[attr-defined]
+        _ = meiva.self.lazylog  # type: ignore[attr-defined]
     with pytest.raises(AttributeError):
-        _ = ava.ui.lazynotify  # type: ignore[attr-defined]
+        _ = meiva.ui.lazynotify  # type: ignore[attr-defined]
     assert calls == []

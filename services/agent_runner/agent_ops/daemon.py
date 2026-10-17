@@ -1,4 +1,4 @@
-# ava:ref services/agent_runner/agent_ops/docs/request-ownership.ava.okf.md#request-ownership
+# meiva:ref services/agent_runner/agent_ops/docs/request-ownership.meiva.okf.md#request-ownership
 from __future__ import annotations
 
 import argparse
@@ -30,7 +30,7 @@ from pydantic import ValidationError
 from base import paths
 from base.agents.context.clients import ClientSet
 from base.agents.incarnation.native_restart_models import NativeRestartOperation
-from base.api_contracts.agent_contract import AvaAgentError, ResurrectRefused
+from base.api_contracts.agent_contract import MeivaAgentError, ResurrectRefused
 from base.api_contracts.launch_retry import LaunchReconcileRequest
 from base.cluster.dataplane.direct_url import ClusterDirectUrl
 from base.cluster.machine import MachineIdentity
@@ -216,7 +216,7 @@ async def _dispatch(
                     local_machine=local_machine,
                     host=host,
                 )
-    except AvaAgentError as exc:
+    except MeivaAgentError as exc:
         return OpStatus.FAILED, {
             "error": f"{type(exc).__name__}: {exc}",
             "detail": str(exc),
@@ -475,16 +475,16 @@ async def serve_ops_daemon(
     authority = ConfigAuthority(
         runtime=runtime,
         all_domains=runtime if runtime.profile is None else config.complete_read_model(),
-        env_path=paths.ava_home() / ".env",
+        env_path=paths.meiva_home() / ".env",
     )
 
     active_ops: ActiveOps = {}
     requests: maintenance_activity.RequestTokens = set()
     workers: maintenance_activity.WorkerFutures = set()
-    runtime_dir = paths.run_dir(paths.ava_home())
+    runtime_dir = paths.run_dir(paths.meiva_home())
     if boot.is_running(config, runtime=runtime_dir):
         _log.info(
-            "ava-ops pidfile %s indicates another instance is alive — exiting",
+            "meiva-ops pidfile %s indicates another instance is alive — exiting",
             boot.pidfile(config, runtime=runtime_dir),
         )
         sys.exit(1)
@@ -500,7 +500,7 @@ async def serve_ops_daemon(
         assert_schema_current(config.view.data_plane.db_url)
     except Exception as exc:
         _log.error(
-            "schema version mismatch on ops-server startup: %s — run `git pull && uv sync && ava start` to catch up",
+            "schema version mismatch on ops-server startup: %s — run `git pull && uv sync && meiva start` to catch up",
             exc,
         )
         sys.exit(1)
@@ -559,7 +559,7 @@ async def serve_ops_daemon(
             image=image,
         )
         _log.info(
-            "ava-ops up, machine=%s serving POST /ops on %s:%d",
+            "meiva-ops up, machine=%s serving POST /ops on %s:%d",
             our_machine,
             bind_host,
             endpoint.health_port,
@@ -569,13 +569,13 @@ async def serve_ops_daemon(
             config=config,
             machine=local_machine,
             ops_port=endpoint.health_port,
-            home=paths.ava_home(),
+            home=paths.meiva_home(),
         )
         _, bus = boot.ops_handles(database=database, authority=authority)
         try:
             async with server, asyncio.TaskGroup() as background:
                 watcher = background.create_task(
-                    watch_to_user(paths.ava_home() / "workspaces", bus)
+                    watch_to_user(paths.meiva_home() / "workspaces", bus)
                 )
                 try:
                     await server.serve_forever()
@@ -612,7 +612,7 @@ def main(*, argv: list[str] | None = None) -> None:
     clients = ClientSet(
         database=database,
         pipeline_factory=lambda: build_pipeline(
-            database=database, machine=machine, home=paths.ava_home().resolve()
+            database=database, machine=machine, home=paths.meiva_home().resolve()
         ),
     )
     code = 0

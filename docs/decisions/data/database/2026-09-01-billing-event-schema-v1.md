@@ -1,8 +1,8 @@
-# Ava billing event schema v1
+# Meiva billing event schema v1
 
 ## Decision
 
-Every completed provider LLM call emits one separate `ava.billing.call` OTel
+Every completed provider LLM call emits one separate `meiva.billing.call` OTel
 span. The v1 ledger attributes are centralized in `shared/lm/billing.py` and
 use the reviewed pricing catalog rather than provider-reported fees.
 
@@ -17,6 +17,6 @@ changing the traced provider instrumentation.
   billing event, preserving the distinction between unknown usage and zero use.
 - Models absent from the pricing catalog emit `cost=0.0` and `unpriced=true`;
   catalog prices remain the sole accounting authority.
-- All trace resources carry `service.line=ava` and a production or development
+- All trace resources carry `service.line=meiva` and a production or development
   environment identity, allowing billing spans to be grouped consistently with
   the rest of the process trace.

@@ -1,15 +1,15 @@
 from ._registry import Hook, HookName, make_hook_runner
 
-# ava:ref agent/hooks/docs/plugin-registration.ava.okf.md#plugin-hook-layers
-# ava:ref agent/hooks/docs/plugin-registration.ava.okf.md#builtin-plugins-test-fixture
+# meiva:ref agent/hooks/docs/plugin-registration.meiva.okf.md#plugin-hook-layers
+# meiva:ref agent/hooks/docs/plugin-registration.meiva.okf.md#builtin-plugins-test-fixture
 BUILTIN_PLUGINS: tuple[str, ...] = (
-    "ava_fleet",
-    "ava_code",
-    "ava_syntax_fix",
-    "ava_sdk_reminder",
-    "ava_silent_idle",
-    "ava_memory",
-    "ava_to_user",
+    "meiva_fleet",
+    "meiva_code",
+    "meiva_syntax_fix",
+    "meiva_sdk_reminder",
+    "meiva_silent_idle",
+    "meiva_memory",
+    "meiva_to_user",
 )
 
 __all__ = [

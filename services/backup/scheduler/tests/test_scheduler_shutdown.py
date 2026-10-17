@@ -37,7 +37,7 @@ def postgres_base(tmp_path: Path) -> Iterator[Path]:
         assert not Path(pgdata.read_text()).exists()
 
 
-# ava:ref services/backup/scheduler/docs/timing-and-exit.ava.okf.md#shutdown-harness-processes
+# meiva:ref services/backup/scheduler/docs/timing-and-exit.meiva.okf.md#shutdown-harness-processes
 def _block(root: Path, mode: str) -> None:
     if mode == "stubborn":
         signal.signal(signal.SIGTERM, signal.SIG_IGN)
@@ -77,7 +77,7 @@ def _backup_patches(root: Path, mode: str) -> contextlib.ExitStack:
     stack = contextlib.ExitStack()
     for patcher in (
         patch.object(backup, "backup_dir", return_value=root / "artifacts"),
-        patch.object(backup, "dump_source", return_value="postgresql://ava@127.0.0.1:1/test"),
+        patch.object(backup, "dump_source", return_value="postgresql://meiva@127.0.0.1:1/test"),
         patch.object(backup, "pg_tool", return_value=Path("pg_dump")),
         patch.object(backup, "db_size_breakdown", return_value="test"),
         patch.object(backup, "run_with_progress", run),
@@ -154,9 +154,9 @@ def _operation_harness(root: Path, mode: str, postgres_base: Path):
             kind=kind,
             env={
                 **env,
-                "AVA_TEST_BACKUP_ROOT": str(root),
-                "AVA_TEST_BACKUP_MODE": mode,
-                "AVA_TEST_BACKUP_POSTGRES_BASE": str(postgres_base),
+                "MEIVA_TEST_BACKUP_ROOT": str(root),
+                "MEIVA_TEST_BACKUP_MODE": mode,
+                "MEIVA_TEST_BACKUP_POSTGRES_BASE": str(postgres_base),
             },
             secrets=secrets,
             stop=stop,
@@ -199,7 +199,7 @@ def exercise_daemon(root: Path, mode: str, postgres_base: Path) -> None:
         patch.object(daemon, "start_health_server", AsyncMock(return_value=object())),
         patch.object(daemon, "stop_health_server", AsyncMock()),
         patch.object(daemon, "is_due", return_value=True),
-        patch.object(worker, "ava_home", return_value=root),
+        patch.object(worker, "meiva_home", return_value=root),
         patch.object(worker, "run_operation", _operation_harness(root, mode, postgres_base)),
         patch.object(daemon, "load_local_dump_restore_success", return_value=None),
         patch.object(daemon, "local_dump_restore_due", return_value=True),
@@ -228,7 +228,7 @@ def _run_daemon(postgres_base: Path) -> None:
             daemon.run(
                 config=config,
                 image=LoadedCommit(Path(), None),
-                runtime=Path(os.environ["AVA_HOME"]) / "run",
+                runtime=Path(os.environ["MEIVA_HOME"]) / "run",
                 clock=Clock(clock_config_from_boot(config), timers=SYSTEM_TIMERS),
             )
         )
@@ -282,7 +282,7 @@ def _kill_harness_processes(tmp_path: Path, process: subprocess.Popen[str]) -> N
     process.communicate(timeout=5)
 
 
-# ava:ref services/backup/scheduler/docs/timing-and-exit.ava.okf.md#shutdown-harness-processes
+# meiva:ref services/backup/scheduler/docs/timing-and-exit.meiva.okf.md#shutdown-harness-processes
 def _assert_sigterm_reaps_job_before_scheduler_exits(
     tmp_path: Path, mode: str, postgres_base: Path
 ) -> None:
@@ -332,13 +332,13 @@ def test_killed_restore_uses_parent_owned_postgres_base(
 
     assert Path((tmp_path / "pgdata").read_text()).is_relative_to(postgres_base)
 
-    assert not list(postgres_base.glob("ava-pg-*"))
+    assert not list(postgres_base.glob("meiva-pg-*"))
 
 
 async def test_restore_job_accepts_clean_foreground_postgres_exit(
     tmp_path: Path, postgres_base: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    monkeypatch.setattr(worker, "ava_home", lambda: tmp_path)
+    monkeypatch.setattr(worker, "meiva_home", lambda: tmp_path)
     config = ConfigBoot()
     config.view.data_plane.pg_throwaway_base = str(postgres_base)
     run = _operation_harness(tmp_path, "roundtrip", postgres_base)

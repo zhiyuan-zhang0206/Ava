@@ -1,7 +1,7 @@
 """Task status — the shared lifecycle state of a task in the registry.
 
 Single source of truth for the three states: the SDK validation
-(ava.tasks create/update/list), the gateway wire schemas and PATCH validation,
+(meiva.tasks create/update/list), the gateway wire schemas and PATCH validation,
 the `agent_tasks.status` DB CHECK (tests/contracts/test_db_check_enum_sync.py locks
 db/schema.sql to this enum), and the OpenAPI enum the frontend types are
 generated from all reference this one StrEnum, so none of them can drift.

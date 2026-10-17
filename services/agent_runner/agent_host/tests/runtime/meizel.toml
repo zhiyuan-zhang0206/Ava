@@ -8,7 +8,7 @@ exports = ["host_support.py", "hosted_resources.py", "shutdown", "test_resource_
 
 [debt.env-patch]
 "test_agent_host_background_loops.py#patch.dict os.environ" = 1
-"test_agent_host_identity_probe.py#monkeypatch.setenv os.environ.AVA_HOME" = 1
+"test_agent_host_identity_probe.py#monkeypatch.setenv os.environ.MEIVA_HOME" = 1
 
 [debt.first-party-patch]
 "host_support.py#monkeypatch.setattr base.agents.incarnation.hosted_force.original_host_force" = 1

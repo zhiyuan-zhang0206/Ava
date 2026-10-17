@@ -208,7 +208,7 @@
 <div id="app">
   <div id="toolbar">
     <h1>OKF Knowledge Graph</h1>
-    <span class="sub">D3 force layout — Ava Project Concept Map</span>
+    <span class="sub">D3 force layout — Meiva Project Concept Map</span>
     <div class="spacer"></div>
     <label>Type
       <select id="typeFilter">
@@ -730,7 +730,7 @@ window.GRAPH_DATA = /*__GRAPH_DATA_JSON__*/;
 
   function inlineMd(s) {
     let t = escapeHtml(s);
-    // Wikilinks: [[target.ava.okf.md|display]] or [[target.ava.okf.md]]
+    // Wikilinks: [[target.meiva.okf.md|display]] or [[target.meiva.okf.md]]
     t = t.replace(/\[\[([^\]|]+?)(?:\|([^\]]+?))?\]\]/g, (match, target, display) => {
       const targetId = resolveWikilinkId(target.trim());
       const label = display ? escapeHtml(display.trim()) : escapeHtml(target.trim());
@@ -752,8 +752,8 @@ window.GRAPH_DATA = /*__GRAPH_DATA_JSON__*/;
     for (const [id] of nodeById) {
       if (id.endsWith('/' + base) || id === base) return id;
     }
-    // Try without .ava.okf.md
-    const alt = target.replace(/\.ava\.okf\.md$/, '.ava.okf.md');
+    // Try without .meiva.okf.md
+    const alt = target.replace(/\.meiva\.okf\.md$/, '.meiva.okf.md');
     if (alt !== target && nodeById.has(alt)) return alt;
     return null;
   }

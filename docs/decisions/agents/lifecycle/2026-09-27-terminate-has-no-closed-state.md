@@ -7,7 +7,7 @@ The original decision remains recorded here.
 ## Context
 
 Task #3911 (PR #2823) gave termination a second, stronger form: `terminate
---final` / `kill --final` / `ava.agents.terminate(final=True)` stamped
+--final` / `kill --final` / `meiva.agents.terminate(final=True)` stamped
 `agents_meta.closed_at`, and every automatic resurrection path — delivery
 chat, compact, the delivery watchdog's terminated-owner retry, hosted-turn
 recovery, the billing batch — refused a closed agent, while the claim node's
@@ -34,18 +34,18 @@ resurrection path must consult.
   subject only to the gates that remain (wake suppression, the recovery
   breaker, the system-notice rule, the force-terminate fence, the billing
   whitelist's streak / reason / termination-source checks).
-- **`kill_all_shell_sessions` instead.** `ava agents terminate|kill
-  --kill-all-shell-sessions`, `ava.agents.terminate(...,
+- **`kill_all_shell_sessions` instead.** `meiva agents terminate|kill
+  --kill-all-shell-sessions`, `meiva.agents.terminate(...,
   kill_all_shell_sessions=True)`, and the `kill_all_shell_sessions` field of
   `POST /api/agents/{id}/terminate` kill every shell session the agent owns on
   its home machine — explicit shells and watchers alike. The enumeration is
   the existing `ops.cluster_status.agent_shell_sessions` rule
   (`…-agent-<id>-shell-<sid>[-<name>]`), so another agent's sessions and the
-  agent's own process are never touched. `ava.ui.serve` page servers also run
+  agent's own process are never touched. `meiva.ui.serve` page servers also run
   in agent shells, labeled `page-<slug>`; the kill spares them (a page keeps
   its own lifecycle). The label is one grammar with one owner,
   `shared.sessions.page_session`: the page-server daemon builds the names
-  with it, and `ava.shell.sessions` now refuses the `page-` label for ordinary
+  with it, and `meiva.shell.sessions` now refuses the `page-` label for ordinary
   shells so the label names page sessions exactly. It is an owner-level kill:
   no per-session notice. Without the option, sessions are left alone as
   before.
@@ -114,12 +114,12 @@ resurrection path must consult.
 
 - The `agents_meta.closed_at` column (and its schema comment) stays in this
   change: code simply stops reading and writing it, per the expand-contract
-  rule (`shared/migrations/reset-generations.ava.okf.md`). Its DROP is a
+  rule (`shared/migrations/reset-generations.meiva.okf.md`). Its DROP is a
   separate later migration, after this code is deployed everywhere.
 - Agents closed before this change become ordinary terminated agents on
   deploy: the next message to one resurrects it, and a stale stamp stays in
   the column until the DROP. An operator who wants one to stay quiet can run
-  `ava agents terminate <id> --kill-all-shell-sessions` on it (the
+  `meiva agents terminate <id> --kill-all-shell-sessions` on it (the
   already-terminated form) and make sure nobody else writes to it.
 - Peer, user and watcher messages still wake a terminated agent. The option
   only removes the agent's own sessions as a source; anyone else who writes
@@ -127,7 +127,7 @@ resurrection path must consult.
 - `terminate --kill-all-shell-sessions` followed by a plain `kill` kills no
   session: the force superseded the graceful request. Pass the option on the
   `kill` as well.
-- The kill covers shell sessions only. Page servers (`ava.ui.serve`) keep
+- The kill covers shell sessions only. Page servers (`meiva.ui.serve`) keep
   their own lifecycle and are not affected. A user shell created before this
   change with a `page-` name is spared like a page until it ends (a shell
   session lives at most 24 hours).

@@ -7,7 +7,7 @@ from scripts.lint import no_os_environ, turn_scoped_config
 
 
 def test_the_env_launcher_reads_every_alias_the_registry_owns(tmp_path: Path) -> None:
-    alias = "AVA_DB_URL"
+    alias = "MEIVA_DB_URL"
     assert alias in no_os_environ.settings_managed_aliases()
     target = tmp_path / "test_x.py"
     target.write_text(

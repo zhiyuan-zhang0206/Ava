@@ -18,8 +18,8 @@ _PROBE = Path(__file__).with_name("child_gateway_httpx_probe.py")
 def test_gateway_entry_imports_httpx_in_a_fresh_process(tmp_path: Path) -> None:
     home = tmp_path / "home"
     home.mkdir()
-    env = {key: value for key, value in os.environ.items() if not key.startswith("AVA_")}
-    env.update(AVA_HOME=str(home), AVA_CONFIG_FETCH="skip", AVA_PROCESS_PROFILE="gateway")
+    env = {key: value for key, value in os.environ.items() if not key.startswith("MEIVA_")}
+    env.update(MEIVA_HOME=str(home), MEIVA_CONFIG_FETCH="skip", MEIVA_PROCESS_PROFILE="gateway")
     proc = subprocess.run(  # noqa: S603 — fixed argv, sys.executable is trusted
         [sys.executable, "-X", "utf8", str(_PROBE)],
         cwd=_REPO_ROOT,

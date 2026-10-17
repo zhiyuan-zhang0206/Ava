@@ -1,11 +1,11 @@
 """`ServiceEndpoints`: where each health daemon of a unit listens and records its pid.
 
 A daemon's endpoint is a fact of the unit: the healthz port (the fixed port table, or the unit's
-`AVA_<NAME>_HEALTH_PORT` override) and the pidfile under `$AVA_HOME/run`. A composition root
+`MEIVA_<NAME>_HEALTH_PORT` override) and the pidfile under `$MEIVA_HOME/run`. A composition root
 builds the table from its config owner and runtime directory (`ServiceEndpoints.from_boot`)
 and hands a daemon its own row
 (`endpoints.of("labeler")`) and a supervisor, probe or command the table; nothing below the root
-reads the settings or `AVA_HOME` for a port or pidfile; the `ambient-endpoint` rule bans building
+reads the settings or `MEIVA_HOME` for a port or pidfile; the `ambient-endpoint` rule bans building
 the table outside the roots a package names.
 
 Legacy roots still use `from_settings` until their config inputs are explicit. Both factories
@@ -21,7 +21,7 @@ from pathlib import Path
 from base.config import ConfigBoot, get_field
 from base.host.env.health_ports import health_port
 from base.host.env.registry import health_port_env_aliases
-from base.paths import ava_home, run_dir
+from base.paths import meiva_home, run_dir
 
 
 @dataclass(frozen=True)
@@ -45,8 +45,8 @@ class ServiceEndpoints:
 
     @classmethod
     def from_settings(cls) -> ServiceEndpoints:
-        """The table as the live settings and `AVA_HOME` describe it now."""
-        return cls._from_fields(get_field, runtime=run_dir(ava_home()))
+        """The table as the live settings and `MEIVA_HOME` describe it now."""
+        return cls._from_fields(get_field, runtime=run_dir(meiva_home()))
 
     @classmethod
     def from_boot(cls, config: ConfigBoot, *, runtime: Path) -> ServiceEndpoints:

@@ -63,7 +63,7 @@ def _restart_stop(
     command_runtime: CommandRuntime,
     **kwargs: Any,
 ) -> int:
-    """The stop leg of `ava restart`: no prompt; the data plane and browser stay."""
+    """The stop leg of `meiva restart`: no prompt; the data plane and browser stay."""
     return entry.do_stop(
         Path("/unused"),
         require_confirmation=False,
@@ -98,11 +98,11 @@ def test_keeping_the_pty_sessions_service_preserves_unselected_process_and_real_
 
     monkeypatch.setattr(command, "close_terminals", closed)
     # Bootstrap and spawned interpreters consume the raw home before Settings.
-    monkeypatch.setitem(os.environ, "AVA_HOME", str(home))
+    monkeypatch.setitem(os.environ, "MEIVA_HOME", str(home))
     monkeypatch.setenv("HOME", str(home))
     orchestration = launch("unowned-test-process", term="ignore")
-    name = "ava-agent-987-shell-1"
-    assert new(name, home, {"AVA_HOME": str(home)})
+    name = "meiva-agent-987-shell-1"
+    assert new(name, home, {"MEIVA_HOME": str(home)})
     identity = pty_reaper.track_session(name)
     deadline = time.monotonic() + 5
     while psutil.Process(identity.pid).children(recursive=True):
@@ -139,8 +139,8 @@ def test_smooth_restart_replaces_services_and_closes_shells_but_keeps_data_plane
     *,
     command_runtime: CommandRuntime,
 ) -> None:
-    """`ava restart` (smooth) stops and restarts the application services, closes the
-    persistent shells as `ava stop` does (a busy session's owner gets its notice) and
+    """`meiva restart` (smooth) stops and restarts the application services, closes the
+    persistent shells as `meiva stop` does (a busy session's owner gets its notice) and
     leaves the browser, the permissions helper and the data plane alone, on a gateway
     host where a full stop would take each of them down."""
     import cli.commands.lifecycle.start as start_commands
@@ -148,11 +148,11 @@ def test_smooth_restart_replaces_services_and_closes_shells_but_keeps_data_plane
     from cli.commands.lifecycle import _start_readiness_preflight, service_stop
 
     dependencies(monkeypatch, machine=command_runtime.machine)
-    monkeypatch.setitem(os.environ, "AVA_HOME", str(home))
+    monkeypatch.setitem(os.environ, "MEIVA_HOME", str(home))
     monkeypatch.setenv("HOME", str(home))
     monkeypatch.setattr(command_runtime.machine, "role", lambda: frozenset({"gateway"}))
     unowned = launch("unowned-test-process", term="ignore")
-    name = "ava-agent-987-shell-2056-smooth"
+    name = "meiva-agent-987-shell-2056-smooth"
     busy_session(home, name, jobs.TERM_OK, pty_reaper)
 
     events: list[str] = []
@@ -248,7 +248,7 @@ def test_root_stop_refusal_keeps_hold_without_force(
     command_runtime: CommandRuntime,
 ) -> None:
     dependencies(monkeypatch, machine=command_runtime.machine)
-    service = launch("ava-worker", term="ignore")
+    service = launch("meiva-worker", term="ignore")
     before = psutil.Process(service.pid).create_time()
 
     def refuse(**kwargs: object) -> None:
@@ -283,7 +283,7 @@ def test_full_stop_closes_real_idle_terminal_after_drain(
     """The services phase keeps the pty-sessions service; the terminals phase closes
     the session through it; only then is the service itself stopped."""
     dependencies(monkeypatch, machine=command_runtime.machine)
-    monkeypatch.setitem(os.environ, "AVA_HOME", str(home))
+    monkeypatch.setitem(os.environ, "MEIVA_HOME", str(home))
     monkeypatch.setenv("HOME", str(home))
     root_stops: list[tuple[bool, list[str]]] = []
 
@@ -302,8 +302,8 @@ def test_full_stop_closes_real_idle_terminal_after_drain(
         assert machine is command_runtime.machine
 
     monkeypatch.setattr(command, "announce_stopping", announce)
-    name = "ava-agent-987-shell-2"
-    assert new(name, home, {"AVA_HOME": str(home)})
+    name = "meiva-agent-987-shell-2"
+    assert new(name, home, {"MEIVA_HOME": str(home)})
     pty_reaper.track_session(name)
     assert (
         entry.cmd_stop(
@@ -544,7 +544,7 @@ def test_explicit_force_stops_host_and_closes_terminals_unless_their_service_is_
         del machine
         return frozenset({"agent-runner"})
 
-    monkeypatch.setitem(os.environ, "AVA_HOME", str(home))
+    monkeypatch.setitem(os.environ, "MEIVA_HOME", str(home))
     monkeypatch.setenv("HOME", str(home))
     monkeypatch.setattr(_repo_commands, "roles_or_none", read_roles)
 
@@ -558,7 +558,7 @@ def test_explicit_force_stops_host_and_closes_terminals_unless_their_service_is_
         command, "pause_agents", MagicMock(side_effect=AssertionError("force fabricated a drain"))
     )
     root_calls = record_root_stops(monkeypatch)
-    name = "ava-agent-987-shell-2057-force"
+    name = "meiva-agent-987-shell-2057-force"
     busy_session(home, name, jobs.TERM_OK, pty_reaper)
     if how == "stop":
         rc = entry.cmd_stop(
@@ -617,7 +617,7 @@ def test_stop_reports_a_data_plane_failure_without_restarting_anything(
 ) -> None:
     """The 2026-09-12 shape through the real stop() flow: the services phase ran and
     the data-plane phase failed. The stop fails loudly and leaves the decision to
-    the operator: no `ava start` child is launched and the journal carries no
+    the operator: no `meiva start` child is launched and the journal carries no
     restore verdict."""
     _stop_with_gateway_data_plane(monkeypatch, command_runtime=command_runtime)
 
@@ -625,7 +625,7 @@ def test_stop_reports_a_data_plane_failure_without_restarting_anything(
         raise RuntimeError("maintenance kept its hold; processes did not exit: [2465]")
 
     def _no_child(*_args: object, **_kw: object) -> None:
-        raise AssertionError("a failed stop must not spawn a compensating `ava start`")
+        raise AssertionError("a failed stop must not spawn a compensating `meiva start`")
 
     finished: list[dict[str, object]] = []
 
@@ -657,7 +657,7 @@ def test_stop_reports_a_data_plane_failure_without_restarting_anything(
     assert rc == 1
     err = capsys.readouterr().err
     assert "Stop incomplete" in err
-    assert "Retry the command, or use ava start to resume." in err
+    assert "Retry the command, or use meiva start to resume." in err
     assert "compensating" not in err
     assert len(finished) == 1 and "compensated" not in finished[0]
 
@@ -673,7 +673,7 @@ def test_stop_refused_inside_an_exec_domain(
 ) -> None:
     """Issue #2331: an exec-domain stop is SIGKILLed mid-drain with the call's process
     group, and a stop (a restart's stop leg too) closes this unit's persistent
-    terminals — the refusal points at a shell no ava session hosts."""
+    terminals — the refusal points at a shell no meiva session hosts."""
     dependencies(monkeypatch, machine=command_runtime.machine)
     monkeypatch.setattr(proc, "hosting_exec_domain", lambda: "agent.execution.child")
 

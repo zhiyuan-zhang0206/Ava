@@ -1,4 +1,4 @@
-"""`ava schedules` — manage gateway-supervised schedules (thin client over the gateway).
+"""`meiva schedules` — manage gateway-supervised schedules (thin client over the gateway).
 
 A schedule is a persistent session (a `script` + the `command` that runs it) the
 gateway's ScheduleManager keeps alive in a pty session. This is the
@@ -62,7 +62,7 @@ def _mutation_headers() -> dict[str, str]:
 
 
 def cmd_schedules_ls() -> int:
-    """`ava schedules ls` — list every schedule (id / enabled / status / name).
+    """`meiva schedules ls` — list every schedule (id / enabled / status / name).
 
     Disabled schedules are listed too; `status` is the ScheduleManager's live
     supervision state, `enabled` is the desired state stored on the row."""
@@ -89,7 +89,7 @@ def cmd_schedules_ls() -> int:
 
 
 def cmd_schedules_get(identifier: str) -> int:
-    """`ava schedules get <name-or-id>` — the full schedule including its script."""
+    """`meiva schedules get <name-or-id>` — the full schedule including its script."""
     row = _fetch(identifier)
     if row is None:
         return 1
@@ -109,7 +109,7 @@ def cmd_schedules_create(
     *,
     disabled: bool = False,
 ) -> int:
-    """`ava schedules create --name N (--script S | --script-file F) [...]`.
+    """`meiva schedules create --name N (--script S | --script-file F) [...]`.
 
     Exactly one of --script / --script-file supplies the body (`--script-file -`
     reads stdin, the natural form for a heredoc). The gateway `compile()`-checks
@@ -160,7 +160,7 @@ def cmd_schedules_update(
     *,
     enabled: bool | None,
 ) -> int:
-    """`ava schedules update <name-or-id> [--name N] [--script S | --script-file F] ...`.
+    """`meiva schedules update <name-or-id> [--name N] [--script S | --script-file F] ...`.
 
     Partial update — only the flags passed change (PUT with an exclude-unset
     body). A script/command change is snapshotted into `schedule_versions` and,
@@ -217,7 +217,7 @@ def cmd_schedules_update(
 
 
 def cmd_schedules_delete(identifier: str, *, force: bool = False) -> int:
-    """`ava schedules delete <name-or-id> [--force]`.
+    """`meiva schedules delete <name-or-id> [--force]`.
 
     Prompts unless --force. The gateway kills the now-orphaned session and
     removes the schedule's work dir; its run history goes with the row."""
@@ -270,17 +270,17 @@ def _control(identifier: str, verb: str) -> int:
 
 
 def cmd_schedules_start(identifier: str) -> int:
-    """`ava schedules start <name-or-id>` — enable + launch the session now."""
+    """`meiva schedules start <name-or-id>` — enable + launch the session now."""
     return _control(identifier, "start")
 
 
 def cmd_schedules_stop(identifier: str) -> int:
-    """`ava schedules stop <name-or-id>` — disable + kill the session now."""
+    """`meiva schedules stop <name-or-id>` — disable + kill the session now."""
     return _control(identifier, "stop")
 
 
 def cmd_schedules_restart(identifier: str) -> int:
-    """`ava schedules restart <name-or-id>` — relaunch on the current script,
+    """`meiva schedules restart <name-or-id>` — relaunch on the current script,
     clearing crash backoff. 409 if the schedule is disabled (use `start`)."""
     return _control(identifier, "restart")
 
@@ -289,7 +289,7 @@ def cmd_schedules_restart(identifier: str) -> int:
 
 
 def cmd_schedules_logs(identifier: str, lines: int) -> int:
-    """`ava schedules logs <name-or-id> [--lines N]` — recent output.
+    """`meiva schedules logs <name-or-id> [--lines N]` — recent output.
 
     Source is the live session capture when a session is up, the session's
     PTY transcript file when it is gone (a finished/crashed runner's output
@@ -321,7 +321,7 @@ def cmd_schedules_logs(identifier: str, lines: int) -> int:
 
 
 def cmd_schedules_runs(identifier: str, limit: int) -> int:
-    """`ava schedules runs <name-or-id> [--limit N]` — run history, newest first."""
+    """`meiva schedules runs <name-or-id> [--limit N]` — run history, newest first."""
     from base.host.net.http_dial import get as dial_get
 
     schedule_id = _resolve_id(identifier)
@@ -357,14 +357,14 @@ def cmd_schedules_runs(identifier: str, limit: int) -> int:
 
 
 def cmd_schedules_provision(*, database_factory: DatabaseFactory) -> int:
-    """`ava schedules provision` — bring the built-in schedules in line with this
+    """`meiva schedules provision` — bring the built-in schedules in line with this
     checkout's schedules/manifest.json: create the missing ones (product schedules —
     self-evolution, memory — enabled; cluster-operator schedules, none today,
     would be present but disabled) and resync the `script` / `command` of
     existing ones whose DB snapshot differs from the repo template (a live session is
     relaunched onto it by the schedule-manager; a stopped one picks it up when started).
 
-    Unlike the other `ava schedules` verbs this writes the DB directly instead
+    Unlike the other `meiva schedules` verbs this writes the DB directly instead
     of going through the gateway API: it is an initialization/restore action
     that must also work while the gateway is down (and the schedule-manager runs
     the same provision at every start). Idempotent — `enabled` and `description` of an

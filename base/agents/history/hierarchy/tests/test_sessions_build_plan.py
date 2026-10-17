@@ -43,9 +43,9 @@ def _turns(tag: str, count: int, *, first_hour: int) -> list[BaseMessage]:
                 content=f"{tag}{i}",
                 id=f"{tag}h{i}",
                 additional_kwargs={
-                    "ava_msg_type": "inbound",
-                    "ava_source": "user",
-                    "ava_created_at": stamp,
+                    "meiva_msg_type": "inbound",
+                    "meiva_source": "user",
+                    "meiva_created_at": stamp,
                 },
             )
         )
@@ -54,7 +54,7 @@ def _turns(tag: str, count: int, *, first_hour: int) -> list[BaseMessage]:
             AIMessage(
                 content="ok",
                 id=f"{tag}a{i}",
-                additional_kwargs={"ava_created_at": stamp},
+                additional_kwargs={"meiva_created_at": stamp},
                 usage_metadata={
                     "input_tokens": tokens,
                     "output_tokens": 10,
@@ -138,7 +138,7 @@ def test_coverage_is_none_partial_or_full_by_the_level_one_spans() -> None:
 
 
 def test_a_run_of_framework_notes_alone_is_not_missing() -> None:
-    note = HumanMessage(content="n", id="note", additional_kwargs={"ava_msg_type": "system_note"})
+    note = HumanMessage(content="n", id="note", additional_kwargs={"meiva_msg_type": "system_note"})
     messages = [*_turns("s", 2, first_hour=0), note]
     history = FullHistory(messages, (SystemMessage(content="head"),), (0,))
     (session,) = _sessions(history)

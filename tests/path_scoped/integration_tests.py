@@ -7,19 +7,19 @@ import psycopg
 import pytest
 from fastapi.testclient import TestClient
 
-from ava.gateway_client import use_client
 from base.cluster.machine import MachineIdentity
 
-# The provider-key mock and the in-process spawn stand-in are defined once (the ava and
+# The provider-key mock and the in-process spawn stand-in are defined once (the meiva and
 # gateway tests take them too); imported here so they register for this module's paths.
 from base.config.tests.api_keys import mock_api_keys as mock_api_keys
 from base.packages.tests.model_catalog import model_catalog as model_catalog
+from meiva.gateway_client import use_client
 
-# ava.self.AGENT_ID is set by tests/fixtures/env_bootstrap.py (=1), no override here.
+# meiva.self.AGENT_ID is set by tests/fixtures/env_bootstrap.py (=1), no override here.
 from tests.fixtures.gateway_config import gateway_test_client
 from tests.path_scoped.gateway_tests import local_spawn_in_process as local_spawn_in_process
 
-# DB/Redis env (AVA_DB_URL / AVA_REDIS_URL) for spawned-subprocess inheritance is
+# DB/Redis env (MEIVA_DB_URL / MEIVA_REDIS_URL) for spawned-subprocess inheritance is
 # synced by the `provisioned_db` / `provisioned_redis` session fixtures when a
 # test pulls them (via db_conn / provisioned_redis) — no import-time capture here,
 # which would otherwise freeze the unreachable sentinel before provisioning runs.

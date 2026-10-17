@@ -11,7 +11,7 @@ Do not claim this target without measurements from real model runs.
 
 ## Prior art
 
-Ava already has a once-per-window soft reminder, a hard automatic
+Meiva already has a once-per-window soft reminder, a hard automatic
 summarization fallback, immutable PluginContributions, SectionFn builders,
 manifest admission, and plugin activation telemetry. Reuse those mechanisms.
 
@@ -51,7 +51,7 @@ priority registry or background service is needed.
   bookmark. Non-empty sections are attributed to their plugin and use the
   existing activation event.
 - The core reminder explicitly directs brief preparation followed by
-  `ava.self.compact(summary)` before further substantive work. It includes
+  `meiva.self.compact(summary)` before further substantive work. It includes
   the configured shared document when workspace guidance is enabled.
 - Remove peer-inbound deferral. Keep the hard threshold and the exemption
   allowing a freshly committed summary its first normal generation.

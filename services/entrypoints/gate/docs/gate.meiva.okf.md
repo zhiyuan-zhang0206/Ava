@@ -1,0 +1,54 @@
+---
+type: doc
+title: Fleet UI Gate
+description: Root-owned HTTP entry for authentication, maintenance projection, and frontend proxying.
+tags:
+- services
+- gateway
+---
+
+# Fleet UI Gate
+
+`services/entrypoints/gate/daemon.py` owns the public `frontend` port slot and proxies the
+Next.js app on the separate `app` slot. The canonical `gate` service spec has
+gateway capability, needs no database, and runs as an ordinary child of
+[[services/supervision/meiva_root/docs/meiva_root.meiva.okf.md|root]]. Selection, readiness, restart, and
+stop use the same lifecycle as the other application services. Full planned
+application downtime includes the entry listener.
+
+After argument parsing, the daemon captures its loaded image once and owns a
+non-exempt `ProcessDbGate` for `gate`. Its lazy database factory retains that
+image's version reader; the process event pipeline and logging producer share
+the same factory/pipeline and read machine identity through `machine_name`.
+HTTP business behavior still needs no database. Startup/construction failures
+and serving exit stop the owned pipeline with a two-second observation budget,
+after closing any constructed HTTP server. Cleanup faults retain the original
+failure with notes; unfinished telemetry is explicitly reported as degraded,
+without claiming that its worker terminated.
+
+`GET /__meiva/healthz` returns the serving Gate's name, home, and PID independently
+of login state, gateway availability, and app availability. It accepts only GET.
+The roster wraps that protocol check with captured root ownership and native
+listener ancestry before and after the request. An unrelated listener, an
+unknown process birth, or an unobservable root cannot certify readiness.
+`meiva status` reports Gate in its ordinary root/probe service table.
+
+For product requests, auth forwards the session cookie to `/api/auth/check`; an
+authenticated response permits proxying the app. A gateway or app transport
+failure renders Service unavailable; Gate does not guess whether the cause is a
+transition, a service, or the host. Gate keeps no update state: a release
+transition stops Gate with the rest of root, so no listener exists to describe
+it.
+The login and unavailable pages are dependency-free static assets loaded at
+boot. The login page also redeems the one-time `#ticket=` fragment of the link
+`meiva start` prints (clearing it from the address bar first), and reloads into the
+app once the gateway sets the session cookie; a refused ticket leaves the
+password form usable. Next.js navigation request headers and response security headers cross
+the proxy. Normal root startup loads the candidate code and static assets.
+
+The loopback product tests exercise auth, the unavailable projection, proxy
+behavior, and health independently of dependencies. The native child test exercises real
+Gate startup, root IPC ownership, restart, stop, and rejection of a foreign
+listener. It does not prove macOS helper ancestry or a complete cluster rollout.
+
+Optional private HTTPS/HTTP2 entry and browser acceptance are in [Gate entry operations](operations.md).

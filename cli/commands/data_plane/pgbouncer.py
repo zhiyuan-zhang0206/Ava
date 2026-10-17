@@ -5,10 +5,10 @@ Postgres connections; see `agent/db/__init__.py`).
 PgBouncer is the third per-cluster data-plane process — a peer of this cluster's
 own Postgres and Redis (`cluster_instance.py`) — brought up on the cluster's own
 `pgbouncer` port (a registry-record fact; the port is no longer materialized in
-`.env` — AVA_DB_URL carries it) after schema preparation and group grants whenever
-`AVA_PGBOUNCER_ENABLED` (ON by default: past ~50 agents pooling is the density
+`.env` — MEIVA_DB_URL carries it) after schema preparation and group grants whenever
+`MEIVA_PGBOUNCER_ENABLED` (ON by default: past ~50 agents pooling is the density
 path). Setting it false is a kill-switch: nothing here runs, converge rewrites
-AVA_DB_URL to the direct Postgres port, and every consumer talks to Postgres
+MEIVA_DB_URL to the direct Postgres port, and every consumer talks to Postgres
 directly through the one URL.
 
 Auth — always authenticated, whatever the cluster secret (docs/decisions/
@@ -17,7 +17,7 @@ Auth — always authenticated, whatever the cluster secret (docs/decisions/
 - **client → pgbouncer**: `auth_type = scram-sha-256` against a `userlist.txt`
   (0600) rendered by `base.host.db_authority.delivery.render_userlist`: exactly the
   delivered write generation's two logins with their stored SCRAM verifiers,
-  plus the operator admin-console entry `ava_pooler_admin` (a userlist-only
+  plus the operator admin-console entry `meiva_pooler_admin` (a userlist-only
   name, never a PostgreSQL role). No plaintext password, no owner entry.
 - **pgbouncer → postgres**: over the owner-only unix socket with SCRAM
   pass-through — the userlist verifier equals `pg_authid.rolpassword`, so the
@@ -211,8 +211,8 @@ def pid_is_our_pooler(pid: int) -> bool:
     other is the single rule that reads both, and it is exactly the resolution
     pgbouncer performed to find its own config.
 
-    Compared as a resolved path, never as a substring: `~/.ava` is a prefix of
-    `~/.ava-preview`, and matching pooler processes by substring is how a
+    Compared as a resolved path, never as a substring: `~/.meiva` is a prefix of
+    `~/.meiva-preview`, and matching pooler processes by substring is how a
     co-located cluster's tooling reaches the wrong home — what `pkill -f
     pgbouncer.ini` did to production on 2026-08-06.
 
@@ -312,7 +312,7 @@ def ensure_pgbouncer(
     ONLY the paths that (re)start a pooler. After any (re)start the pooler must
     prove it listens on the reachable address too.
 
-    Only called when AVA_PGBOUNCER_ENABLED (gated by the caller in
+    Only called when MEIVA_PGBOUNCER_ENABLED (gated by the caller in
     `complete_gateway_data_plane`)."""
     binary = pooler.pgbouncer_bin()
     if not Path(binary).exists() and shutil.which(binary) is None:
@@ -320,8 +320,8 @@ def ensure_pgbouncer(
         # to direct — the operator asked for pooling): install it, then retry.
         how = "brew install pgbouncer" if is_macos() else "sudo apt-get install -y pgbouncer"
         print(
-            f"  ✗ AVA_PGBOUNCER_ENABLED is set but pgbouncer is not installed ({binary!r}). "
-            f"Install it (`{how}`) and retry, or unset AVA_PGBOUNCER_ENABLED to run direct.",
+            f"  ✗ MEIVA_PGBOUNCER_ENABLED is set but pgbouncer is not installed ({binary!r}). "
+            f"Install it (`{how}`) and retry, or unset MEIVA_PGBOUNCER_ENABLED to run direct.",
             file=sys.stderr,
         )
         return 1
@@ -341,7 +341,7 @@ def ensure_pgbouncer(
         )
         # A running pooler whose files are unchanged and whose public listener
         # verifies is reloaded, never waited on: a transient blip on the private
-        # network must not hold `ava start` hostage behind a serving pooler (P1).
+        # network must not hold `meiva start` hostage behind a serving pooler (P1).
         if public and not changed:
             process = psutil.Process(pid)
             if not owner.live():
@@ -360,7 +360,7 @@ def ensure_pgbouncer(
                 f"  ✗ reachable bind address {machine.host()!r} is not assigned to any "
                 f"local interface after {int(BIND_WAIT_TIMEOUT_S)}s — the degraded "
                 "pgbouncer cannot be restarted into a healthy double bind. On reboot "
-                "this means the private network has not come up yet; retry `ava start` "
+                "this means the private network has not come up yet; retry `meiva start` "
                 "once it is.",
                 file=sys.stderr,
             )
@@ -373,7 +373,7 @@ def ensure_pgbouncer(
             print(
                 f"  ✗ pgbouncer is NOT listening on the reachable address "
                 f"{machine.host()!r} — it degraded to loopback-only (task #1288) and "
-                "remote agent-runners cannot reach the pooled AVA_DB_URL. Reload cannot "
+                "remote agent-runners cannot reach the pooled MEIVA_DB_URL. Reload cannot "
                 "re-bind it; restarting the pooler",
                 file=sys.stderr,
             )
@@ -390,15 +390,15 @@ def ensure_pgbouncer(
 def _launch_pooler(listen_port: int, admin_password: str, *, machine: MachineIdentity) -> int:
     if not wait_for_reachable_bind(machine=machine):
         # Fail fast BEFORE starting: a pooler born now would degrade to loopback-only
-        # and the public AVA_DB_URL path would be silently dead (the 2026-08-16
-        # outage shape). The boot retry keeps re-running `ava start`, so this only
+        # and the public MEIVA_DB_URL path would be silently dead (the 2026-08-16
+        # outage shape). The boot retry keeps re-running `meiva start`, so this only
         # needs to be true once the private network is actually up.
         print(
             f"  ✗ reachable bind address {machine.host()!r} is not assigned to any "
             f"local interface after {int(BIND_WAIT_TIMEOUT_S)}s — pgbouncer would "
             "silently degrade to loopback-only and every remote agent-runner would "
-            "lose the pooled AVA_DB_URL. On reboot this means the private network has "
-            "not come up yet; retry `ava start` once it is.",
+            "lose the pooled MEIVA_DB_URL. On reboot this means the private network has "
+            "not come up yet; retry `meiva start` once it is.",
             file=sys.stderr,
         )
         return 1
@@ -436,8 +436,8 @@ def _launch_pooler(listen_port: int, admin_password: str, *, machine: MachineIde
         print(
             f"  ✗ pgbouncer started but is NOT listening on the reachable address "
             f"{machine.host()!r} — it degraded to loopback-only (see "
-            f"{_logfile_path()}). Every remote agent-runner's pooled AVA_DB_URL is "
-            "dead. Retry `ava start` once the private network is up; the watchdog "
+            f"{_logfile_path()}). Every remote agent-runner's pooled MEIVA_DB_URL is "
+            "dead. Retry `meiva start` once the private network is up; the watchdog "
             "healthcheck will keep re-attempting.",
             file=sys.stderr,
         )
@@ -512,11 +512,11 @@ def ensure_pgbouncer_step(ctx: ConvergeCtx) -> None:
     """Converge step: reconcile the one DB URL with the pooler toggle, and
     preflight the binary. Gateway-only.
 
-    AVA_DB_URL's port is decided by AVA_PGBOUNCER_ENABLED at URL generation, so
-    converge (which runs before the data-plane bring-up on every `ava start` /
+    MEIVA_DB_URL's port is decided by MEIVA_PGBOUNCER_ENABLED at URL generation, so
+    converge (which runs before the data-plane bring-up on every `meiva start` /
     the fleet update) keeps the `.env` value in sync, idempotently:
 
-    1. Normalize AVA_DB_URL's port: the pooler listener (the record's `pgbouncer` port)
+    1. Normalize MEIVA_DB_URL's port: the pooler listener (the record's `pgbouncer` port)
        when the toggle is on, the direct Postgres port (the record's `postgres` port)
        when off. Only a URL currently carrying the OTHER port of this cluster is
        rewritten — the direct value becomes the pooler port on an enabled
@@ -527,9 +527,9 @@ def ensure_pgbouncer_step(ctx: ConvergeCtx) -> None:
        install command; the data-plane bring-up then fail-fasts on the same
        condition, so a deliberately-enabled pooler never silently degrades to
        direct. The install itself lives in the provision scripts
-       (`brew install pgbouncer` / apt), not here, so `ava start` never triggers
+       (`brew install pgbouncer` / apt), not here, so `meiva start` never triggers
        a heavyweight package install."""
-    converge_pgbouncer(data_plane_config_from_settings(), ctx.ava_home)
+    converge_pgbouncer(data_plane_config_from_settings(), ctx.meiva_home)
 
 
 def converge_pgbouncer(config: DataPlaneConfig, home: Path) -> None:
@@ -549,7 +549,7 @@ def converge_pgbouncer(config: DataPlaneConfig, home: Path) -> None:
     if rec is None:
         return
     env_path = home / ".env"
-    current = (dotenv_values(env_path).get("AVA_DB_URL") or "").strip()
+    current = (dotenv_values(env_path).get("MEIVA_DB_URL") or "").strip()
     normalized = _normalized_db_url(
         current,
         pg_port=rec.ports["postgres"],
@@ -558,7 +558,7 @@ def converge_pgbouncer(config: DataPlaneConfig, home: Path) -> None:
     )
     if normalized:
         upsert_env(
-            env_path, {"AVA_DB_URL": normalized}, audit=EnvWriteAudit(site="converge_pgbouncer")
+            env_path, {"MEIVA_DB_URL": normalized}, audit=EnvWriteAudit(site="converge_pgbouncer")
         )
     if not config.pgbouncer_enabled:
         return

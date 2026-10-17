@@ -32,7 +32,7 @@ from base.clock import Clock
 from base.cluster import session_name
 from base.db.transaction import write_transaction
 from base.deploy.schedule_timing import SCHEDULE_STALL_ALERT_AFTER_S
-from base.paths import ava_home
+from base.paths import meiva_home
 from base.sessions.backend import get_shell_backend
 from base.sessions.env_forwarding import forward_env_dict
 from base.sessions.protocol import SessionBackend
@@ -297,9 +297,9 @@ class ScheduleManager:
         live: set[int] = set()
         backend = get_shell_backend()
         generation = current_generation()
-        prefix = session_name("schedule-")  # ava-schedule-
+        prefix = session_name("schedule-")  # meiva-schedule-
         names = backend.list_sessions(prefix=prefix)
-        home = ava_home()
+        home = meiva_home()
         _log.debug(
             "schedule session scan backend=%s settings_home=%s record_dir=%s names=%s",
             type(backend).__name__,
@@ -392,18 +392,18 @@ class ScheduleManager:
         # socket (never argv — issue #974). The service submits the command once
         # the login shell is ready.
         env = forward_env_dict()
-        env["AVA_SCHEDULE_ID"] = str(schedule_id)
+        env["MEIVA_SCHEDULE_ID"] = str(schedule_id)
         # The runner's cron math is timezone-DEFINED: it must fire on the
         # CLUSTER's clock, not on whatever ambient env the session happens to
         # carry. forward_env_dict deliberately excludes cluster-scope keys (a
         # child is expected to re-source .env at boot), but a unit .env that
-        # misses AVA_TIMEZONE silently left the runner on the field default
+        # misses MEIVA_TIMEZONE silently left the runner on the field default
         # America/Los_Angeles — 2026-08-21: schedule #3 fired at PT midnight
         # instead of Shanghai midnight after the 08-12 timezone ruling. Pin the
         # gateway's own resolved timezone into the spawn env so the fire time is
         # deterministic; dotenv_boot's authority pass still lets a declared .env
         # value override it (and never drops it — base/dotenv_boot._force_also).
-        env["AVA_TIMEZONE"] = Clock.from_settings().timezone
+        env["MEIVA_TIMEZONE"] = Clock.from_settings().timezone
         # `cd` first: the login shell's own profile can move the cwd the
         # daemon forked with (macOS path_helper rebuilds PATH; a profile `cd`
         # would strand the relative runner path). The `; exit $?` tail makes
@@ -416,7 +416,7 @@ class ScheduleManager:
         )
         # No shell-TTL row is written here (deliberate exemption, task
         # #2614): agent_shell_ttls rows key on an agent id, and schedule
-        # sessions have none (ava-schedule-<id> is allocated outside the
+        # sessions have none (meiva-schedule-<id> is allocated outside the
         # per-agent session counter). The ScheduleManager is their reclaimer
         # — reconcile reaps disabled/deleted schedules — and a registered 24h
         # deadline would make the TTL reaper kill a resident schedule every

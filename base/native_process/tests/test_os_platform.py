@@ -71,7 +71,7 @@ class TestPtyMax:
 class TestEnsureLineBufferedStdio:
     def test_pipe_stdout_streams_before_exit(self) -> None:
         """The regression: a CLI whose stdout is a PIPE block-buffers its own
-        `print()` output, so a detached `ava ... | tee` log shows the parent's lines
+        `print()` output, so a detached `meiva ... | tee` log shows the parent's lines
         only at exit — after the unbuffered output of every child it spawned. Run a
         child that prints and then blocks, and assert the line is readable while it
         is still alive."""

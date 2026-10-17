@@ -26,7 +26,7 @@ def test_dry_run_reports_rotation_without_writing(
 ) -> None:
     from cli.commands.observability.logs import cmd_logs_rotate
 
-    log = _dated_file(tmp_path / "ava-gateway.out.log", b"gateway", _NOW - timedelta(days=1))
+    log = _dated_file(tmp_path / "meiva-gateway.out.log", b"gateway", _NOW - timedelta(days=1))
 
     rc = cmd_logs_rotate(dry_run=True, size_mib=64, logs_path=tmp_path, now=_NOW)
 
@@ -42,7 +42,7 @@ def test_copytruncate_preserves_path_and_inode_and_archives_content(
     from cli.commands.observability.logs import cmd_logs_rotate
 
     log = _dated_file(
-        tmp_path / "ava-otel-collector.out.log", b"retry spam", _NOW - timedelta(days=1)
+        tmp_path / "meiva-otel-collector.out.log", b"retry spam", _NOW - timedelta(days=1)
     )
     inode = log.stat().st_ino
 
@@ -61,7 +61,7 @@ def test_existing_daily_archive_makes_rotation_idempotent(
 ) -> None:
     from cli.commands.observability.logs import cmd_logs_rotate
 
-    log = _dated_file(tmp_path / "ava-gateway.out.log", b"live", _NOW - timedelta(days=1))
+    log = _dated_file(tmp_path / "meiva-gateway.out.log", b"live", _NOW - timedelta(days=1))
     archive = _dated_file(_archive(log), b"first", _NOW)
 
     rc = cmd_logs_rotate(dry_run=False, size_mib=64, logs_path=tmp_path, now=_NOW)
@@ -75,7 +75,7 @@ def test_existing_daily_archive_makes_rotation_idempotent(
 def test_size_threshold_rotates_a_same_day_file(tmp_path: Path) -> None:
     from cli.commands.observability.logs import cmd_logs_rotate
 
-    log = _dated_file(tmp_path / "ava-gateway.out.log", b"", _NOW)
+    log = _dated_file(tmp_path / "meiva-gateway.out.log", b"", _NOW)
     with log.open("r+b") as stream:
         stream.truncate(1 << 20)
     os.utime(log, (_NOW.timestamp(), _NOW.timestamp()))
@@ -89,7 +89,7 @@ def test_utc_day_change_rotates_a_small_file(tmp_path: Path) -> None:
     from cli.commands.observability.logs import cmd_logs_rotate
 
     log = _dated_file(
-        tmp_path / "ava-ops.out.log",
+        tmp_path / "meiva-ops.out.log",
         b"x",
         datetime(2026, 9, 6, 23, 59, tzinfo=UTC),
     )
@@ -104,7 +104,7 @@ def test_prior_utc_day_keeps_an_empty_file(
 ) -> None:
     from cli.commands.observability.logs import cmd_logs_rotate
 
-    log = _dated_file(tmp_path / "ava-ops.out.log", b"", _NOW - timedelta(days=1))
+    log = _dated_file(tmp_path / "meiva-ops.out.log", b"", _NOW - timedelta(days=1))
 
     assert cmd_logs_rotate(dry_run=False, size_mib=64, logs_path=tmp_path, now=_NOW) == 0
     assert not _archive(log).exists()
@@ -178,7 +178,7 @@ def test_io_error_is_reported_and_sets_failure_exit_code(
 ) -> None:
     from cli.commands.observability import logs
 
-    log = _dated_file(tmp_path / "ava-gateway.out.log", b"gateway", _NOW - timedelta(days=1))
+    log = _dated_file(tmp_path / "meiva-gateway.out.log", b"gateway", _NOW - timedelta(days=1))
 
     def deny_copy(_source: str | Path, _archive: str | Path) -> None:
         raise PermissionError("denied")

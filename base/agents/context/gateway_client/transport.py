@@ -8,7 +8,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any, Protocol, cast
 
-from base.agents.context import AvaContext
+from base.agents.context import MeivaContext
 from base.agents.context.clients import GatewayHandle
 from base.agents.messages.delivery.retry import GatewayResponse, network_errors, retryable_response
 from base.api_contracts import contracts
@@ -27,7 +27,7 @@ __all__ = [
     "raise_from_response",
 ]
 
-# httpx stays off the `import ava` path: every function that needs it imports it in its body, and
+# httpx stays off the `import meiva` path: every function that needs it imports it in its body, and
 # the annotations below are structural (`TransportResponse`, `TransportTimeout`) or the client
 # alias owned by `base.agents.context.clients`.
 
@@ -70,15 +70,15 @@ class GatewayTransportInputs:
     memory_deadline_reader: Callable[[], float]
 
 
-def _inputs(context: AvaContext) -> GatewayTransportInputs:
+def _inputs(context: MeivaContext) -> GatewayTransportInputs:
     return context.clients.get(GatewayTransportInputs)
 
 
-def gateway_http(context: AvaContext) -> GatewayHandle:
+def gateway_http(context: MeivaContext) -> GatewayHandle:
     """The bound context's gateway client, built on first use so importing the SDK in a no-config
     context does not require the gateway URL to be resolvable until an actual call is made. Its
     timeout is `Settings.gateway_client_http_timeout_seconds` (env override
-    `AVA_GATEWAY_HTTP_TIMEOUT_SECONDS`): most gateway ops are near-instant, but spawn does real
+    `MEIVA_GATEWAY_HTTP_TIMEOUT_SECONDS`): most gateway ops are near-instant, but spawn does real
     server-side work (launch the new process + poll until it claims its row), so the budget must
     comfortably exceed the server's confirm window, otherwise a read timeout on a spawn that DID
     succeed triggers a retry that re-POSTs the non-idempotent create and yields a phantom-twin
@@ -89,14 +89,14 @@ def gateway_http(context: AvaContext) -> GatewayHandle:
 # Gateway cold start ~0.6s (measured). Default 3 retries, base interval 1s —
 # bounded exponential backoff 1s → 2s → 4s → 8s cap (see `retry_delay_seconds`),
 # a much larger window than the restart time and well within the 10s timeout.
-# env override: `AVA_GATEWAY_MAX_RETRIES` / `AVA_GATEWAY_RETRY_DELAY_SECONDS`.
+# env override: `MEIVA_GATEWAY_MAX_RETRIES` / `MEIVA_GATEWAY_RETRY_DELAY_SECONDS`.
 
 
-def request_max_retries(context: AvaContext) -> int:
+def request_max_retries(context: MeivaContext) -> int:
     return _inputs(context).max_retries_reader()
 
 
-def base_retry_delay_s(context: AvaContext) -> float:
+def base_retry_delay_s(context: MeivaContext) -> float:
     return _inputs(context).retry_delay_reader()
 
 
@@ -115,7 +115,7 @@ _RETRY_MAX_DELAY_S = 8.0
 JITTER_SPAN_S = 5.0
 
 
-def agent_jitter_seconds(context: AvaContext) -> float:
+def agent_jitter_seconds(context: MeivaContext) -> float:
     """Deterministic per-agent offset in [0, JITTER_SPAN_S); 0 when no agent id.
 
     The heartbeat daemon's per-agent due-time jitter pattern
@@ -136,7 +136,7 @@ def agent_jitter_seconds(context: AvaContext) -> float:
     return JITTER_SPAN_S * (ident % 1000) / 1000.0
 
 
-def retry_delay_seconds(attempt: int, context: AvaContext) -> float:
+def retry_delay_seconds(attempt: int, context: MeivaContext) -> float:
     """Sleep before retry `attempt` (0-based): bounded exponential backoff
     plus the deterministic per-agent jitter offset."""
     base = min(base_retry_delay_s(context) * _RETRY_BACKOFF_FACTOR**attempt, _RETRY_MAX_DELAY_S)
@@ -236,7 +236,7 @@ def _request_with_retry(
     attempts: int,
     *,
     retryable: bool = True,
-    context: AvaContext,
+    context: MeivaContext,
 ) -> TransportResponse:
     """Execute one route's policy while keeping its final wire response intact."""
     import httpx
@@ -303,7 +303,7 @@ def post(
     idempotent: bool | None = None,
     idempotency_key: str | None = None,
     max_retries: int | None = None,
-    context: AvaContext,
+    context: MeivaContext,
 ) -> TransportResponse:
     """Unified POST wrapper + transient-failure retry + failure → GatewayUnavailable conversion.
 
@@ -383,7 +383,7 @@ def get(
     params: dict[str, Any] | None = None,
     timeout: TransportTimeout | None = None,
     max_retries: int | None = None,
-    context: AvaContext,
+    context: MeivaContext,
 ) -> TransportResponse:
     """Unified GET wrapper + transient-failure retry + failure → GatewayUnavailable conversion.
 
@@ -413,7 +413,7 @@ def patch(
     json: dict[str, Any] | None = None,
     *,
     idempotency_key: str | None = None,
-    context: AvaContext,
+    context: MeivaContext,
 ) -> TransportResponse:
     """Unified PATCH wrapper + transient-failure retry + failure → GatewayUnavailable conversion.
 

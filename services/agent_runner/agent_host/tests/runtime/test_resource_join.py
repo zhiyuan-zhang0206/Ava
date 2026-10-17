@@ -15,7 +15,6 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 
 import services.agent_runner.agent_host.host as agent_host_host
-from ava.sdk_surface.installation import Installation
 from base.agents.context.clients import ClientSet
 from base.agents.sdk import call_policy
 from base.clock import SYSTEM_TIMERS, Timers
@@ -26,6 +25,7 @@ from base.db.code_version_gate import ProcessDbGate
 from base.events.live.bus import EventBus
 from base.lm.catalog import ModelCatalog
 from base.packages.composer_commands import CommandCatalog
+from meiva.sdk_surface.installation import Installation
 from services.agent_runner.agent_host.tests.host_policy import configured_machine, configured_policy
 
 from ... import daemon
@@ -128,7 +128,7 @@ def exercise_unfinished_main() -> None:
         clients: ClientSet,
         on_clients_owned: Callable[[], None],
     ) -> None:
-        assert home == Path(os.environ["AVA_HOME"])
+        assert home == Path(os.environ["MEIVA_HOME"])
         assert timers is SYSTEM_TIMERS
         on_clients_owned()
         host = AgentHost(
@@ -174,14 +174,14 @@ def test_unfinished_actual_task_reaches_existing_hard_exit(tmp_path: Path) -> No
     marker = tmp_path / "join.txt"
     home = tmp_path / "home"
     home.mkdir()
-    (home / ".env").write_text("AVA_MACHINE_NAME=resource-join-test\n")
+    (home / ".env").write_text("MEIVA_MACHINE_NAME=resource-join-test\n")
     env = os.environ.copy()
     env.update(
-        AVA_HOME=str(home),
+        MEIVA_HOME=str(home),
         RESOURCE_JOIN_MARKER=str(marker),
-        AVA_MACHINE_NAME="resource-join-test",
+        MEIVA_MACHINE_NAME="resource-join-test",
     )
-    env.pop("AVA_PERMISSIONS_HELPER_PID", None)
+    env.pop("MEIVA_PERMISSIONS_HELPER_PID", None)
     started = time.monotonic()
     result = subprocess.run(  # noqa: S603 -- fixed interpreter and repository-owned helper
         [

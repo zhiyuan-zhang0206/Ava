@@ -1,11 +1,11 @@
 [project]
-name = "ava"
+name = "meiva"
 version = "0.1.5"
 description = "minimal code-as-action agent"
 readme = "docs/introduction.md"
 license = "Apache-2.0"
 license-files = ["LICENSE"]
-authors = [{ name = "Ava contributors" }]
+authors = [{ name = "Meiva contributors" }]
 keywords = ["agent", "llm", "code-as-action", "langgraph", "anthropic"]
 classifiers = [
     "Development Status :: 3 - Alpha",
@@ -79,20 +79,20 @@ dependencies = [
 ]
 
 [project.scripts]
-# `uv sync` installs `.venv/bin/ava` — cluster ops CLI (start/stop/status/update/...).
+# `uv sync` installs `.venv/bin/meiva` — cluster ops CLI (start/stop/status/update/...).
 # Implementation in `cli/main.py` (argparse entry), settings-free domain builders
-# and adapters, and `cli/commands/` (cmd_* implementations). Decoupled from the `ava/`
+# and adapters, and `cli/commands/` (cmd_* implementations). Decoupled from the `meiva/`
 # SDK — the agent is unaware of docker / cron.
-ava = "cli.main:entry"
+meiva = "cli.main:entry"
 
 [project.urls]
-Homepage = "https://github.com/zhiyuan-zhang0206/Ava"
-Repository = "https://github.com/zhiyuan-zhang0206/Ava"
-Issues = "https://github.com/zhiyuan-zhang0206/Ava/issues"
+Homepage = "https://github.com/zhiyuan-zhang0206/Meiva"
+Repository = "https://github.com/zhiyuan-zhang0206/Meiva"
+Issues = "https://github.com/zhiyuan-zhang0206/Meiva/issues"
 
 [build-system]
 # hatchling is the default minimal builder for the uv / PEP 621 stack. `[tool.uv] package
-# = true` makes `[project.scripts]` take effect and install the `ava` CLI entry point.
+# = true` makes `[project.scripts]` take effect and install the `meiva` CLI entry point.
 requires = ["hatchling"]
 build-backend = "hatchling.build"
 
@@ -103,8 +103,8 @@ build-backend = "hatchling.build"
 packages = [
     # meizel:roles BEGIN names application
     "agent",
-    "ava",
-    "ava_builtins",
+    "meiva",
+    "meiva_builtins",
     "base",
     "cli",
     "gateway",
@@ -157,9 +157,9 @@ cache-dir = ".cache/ruff"
 # No vendored third-party Python ships in-tree today. When some does, exclude it
 # here: vendored payload is kept byte-identical to upstream so a future sync can
 # diff it directly, and reformatting or relinting it would turn every upstream
-# comparison into pure noise. Ava-authored prose beside it is still reviewed
+# comparison into pure noise. Meiva-authored prose beside it is still reviewed
 # normally; only the untouched upstream payload is exempt. Inventory and the
-# license bar a pack must clear: ava_builtins/skills/VENDORED.md.
+# license bar a pack must clear: meiva_builtins/skills/VENDORED.md.
 
 [tool.ruff.lint]
 external = ["S112"]  # checked by a separate pre-commit Ruff invocation; keep its noqa reasons valid
@@ -218,7 +218,7 @@ ignore = [
 check-typed-exception = true
 
 [tool.ruff.lint.flake8-tidy-imports.banned-api]
-# Graph-run dependencies belong to the existing Runtime[AvaContext], not a
+# Graph-run dependencies belong to the existing Runtime[MeivaContext], not a
 # second implicit ContextVar context. Outside a graph run, pass the caller's
 # context explicitly; get_runtime() is not a process-wide service locator.
 # contextvars allowlist lock (user ruling 2026-08-27, audit #3607): contextvar
@@ -227,7 +227,7 @@ check-typed-exception = true
 # telemetry / retry-policy readers sit outside node signatures, so a blanket
 # ban is not possible. New uses need a written justification in the PR
 # description before joining the per-file-ignores allowlist below.
-"contextvars" = { msg = "Use LangGraph Runtime[AvaContext] for graph-run dependencies and explicit parameters outside a graph run. Do not create a second implicit context. contextvars is restricted to existing mechanism owners; see docs/conventions/python-conventions.md." }
+"contextvars" = { msg = "Use LangGraph Runtime[MeivaContext] for graph-run dependencies and explicit parameters outside a graph run. Do not create a second implicit context. contextvars is restricted to existing mechanism owners; see docs/conventions/python-conventions.md." }
 
 [tool.ruff.lint.per-file-ignores]
 # `tests/*` is the top-level tests directory; `**/tests/*` every package's own
@@ -244,36 +244,36 @@ check-typed-exception = true
 # FBT: a boolean positional in a test is the value-under-test (e.g.
 # `validate("browser_enabled", True)`), not a real boolean-trap call site.
 # .agents/skills (the kernel-contributor project skills) carry the same kind of
-# runnable reference CLIs (e.g. ava-self-development's changelog generator).
+# runnable reference CLIs (e.g. meiva-self-development's changelog generator).
 ".agents/skills/*/reference/*.py" = ["ERA001", "T20", "B904", "F841", "RUF059", "PLW1510", "S110", "S112", "S603", "C401", "PLR0915", "N806"]
 # Skill scripts are runnable CLIs the agent invokes via bash: print() is their
 # stdout contract (T20); they drive the OS through hardcoded subprocess commands
 # (open / screencapture / osascript / pbcopy) writing to a /tmp scratch dir, so
 # the subprocess/temp-file security lints are noise (S603, S108); boolean flags
 # and best-effort subprocess.run are fine here (FBT, PLW1510, PTH, ANN).
-"ava_builtins/skills/*/scripts/*.py" = ["ERA001", "T20", "S603", "S108", "FBT", "PLW1510", "PTH", "ANN"]
+"meiva_builtins/skills/*/scripts/*.py" = ["ERA001", "T20", "S603", "S108", "FBT", "PLW1510", "PTH", "ANN"]
 # These three skills' scripts/ moved out of a former reference/*.py or
 # skill_support/** path (path_imports fix, Rule 6) unchanged: same relaxation
 # their content had there, so the move itself does not force an unrelated
 # style/complexity cleanup onto code nobody otherwise touched. Additive to the
 # base scripts/*.py entry above, not a replacement.
-"ava_builtins/skills/coordination/ava-dynamic-workflow/scripts/*.py" = ["DTZ005", "N806"]
-"ava_builtins/skills/platform/ava-self-evolution/scripts/*.py" = ["S112", "RUF059", "PLR0915", "PLW0603"]
-"ava_builtins/skills/platform/ava-guide/external-agents/scripts/*.py" = ["PLR0915"]
+"meiva_builtins/skills/coordination/meiva-dynamic-workflow/scripts/*.py" = ["DTZ005", "N806"]
+"meiva_builtins/skills/platform/meiva-self-evolution/scripts/*.py" = ["S112", "RUF059", "PLR0915", "PLW0603"]
+"meiva_builtins/skills/platform/meiva-guide/external-agents/scripts/*.py" = ["PLR0915"]
 # A skill's references/ holds genuine reference material — mostly prose, but
 # occasionally a Python snippet the agent reads and adapts rather than runs in
-# place (e.g. ava-dynamic-workflow's orchestrator templates, string-patched
+# place (e.g. meiva-dynamic-workflow's orchestrator templates, string-patched
 # and launched through an API, not executed as a file). Not the maintained
 # live path, so the same broad relaxation as .agents/skills/*/reference/*.py
 # above applies.
-"ava_builtins/skills/*/references/*.py" = ["ERA001", "T20", "B904", "F841", "RUF059", "PLW1510", "S110", "S112", "S603", "C401", "PLR0915", "N806", "ANN201", "DTZ005", "PTH123"]
+"meiva_builtins/skills/*/references/*.py" = ["ERA001", "T20", "B904", "F841", "RUF059", "PLW1510", "S110", "S112", "S603", "C401", "PLR0915", "N806", "ANN201", "DTZ005", "PTH123"]
 # Project skills under .agents/skills/ ship the same kind of runnable CLI
 # scripts — same exemptions apply.
 ".agents/skills/*/scripts/*.py" = ["ERA001", "T20", "S603", "S108", "S310", "FBT", "PLW1510", "PTH", "ANN"]
 # Same intent for skill reference files bundled inside a plugin's skill package
-# (a plugin can ship its own skill tree under ava_builtins/plugins/<name>/skills/...).
-"ava_builtins/plugins/*/skills/**/reference/*.py" = ["ERA001", "T20", "B904", "F841", "RUF059", "PLW1510", "S110", "S112", "S603", "C401", "PLR0915", "N806"]
-"ava_builtins/plugins/*/skills/**/scripts/*.py" = ["ERA001", "T20", "S603", "S108", "FBT", "PLW1510", "PTH", "ANN"]
+# (a plugin can ship its own skill tree under meiva_builtins/plugins/<name>/skills/...).
+"meiva_builtins/plugins/*/skills/**/reference/*.py" = ["ERA001", "T20", "B904", "F841", "RUF059", "PLW1510", "S110", "S112", "S603", "C401", "PLR0915", "N806"]
+"meiva_builtins/plugins/*/skills/**/scripts/*.py" = ["ERA001", "T20", "S603", "S108", "FBT", "PLW1510", "PTH", "ANN"]
 "scripts/**" = ["ANN", "T20"]
 # The weekly dependency audit calls fixed https upstream URLs and fixed audit-tool
 # argv (uvx / npm / gh) — every site is a literal with static arguments, so the
@@ -283,16 +283,16 @@ check-typed-exception = true
 # The typed S110 findings in scripts/tests were outside the retired lint's
 # production scan; preserve that boundary.
 "scripts/codegen/gen_config_lite_table.py" = ["S110"]
-"ava/mcps/tests/test_daemon.py" = ["S110"]
+"meiva/mcps/tests/test_daemon.py" = ["S110"]
 "agent/graph/claim/tests/test_core.py" = ["S110"]
 "base/deploy/schema/tests/test_migration_reset.py" = ["S110"]
 "tests/integration/test_grafana_native_runtime.py" = ["S110"]
 # T20 exemptions — print() is legitimate here: cli/ writes to the user's
-# terminal; ava/ and plugins/ print() is agent-facing dump (help() / context
+# terminal; meiva/ and plugins/ print() is agent-facing dump (help() / context
 # injection), the SDK's documented output channel.
 "cli/*" = ["T20"]
-"ava/*" = ["T20"]
-"ava_builtins/plugins/*" = ["T20"]
+"meiva/*" = ["T20"]
+"meiva_builtins/plugins/*" = ["T20"]
 # ops CLI runs cron / curl — all hardcoded commands + static args;
 # S603 (subprocess untrusted input) is meaningless.
 "cli/commands/*.py" = ["S603"]
@@ -310,20 +310,20 @@ check-typed-exception = true
 # Pre-push selectors run only fixed repo-local commands — git queries and
 # scripts/hooks/prepush-*.sh — with repo-owned path arguments, never a shell;
 # S603 (untrusted input) is inapplicable. The contract lives in
-# scripts/provision/docs/prepush-selection.ava.okf.md.
+# scripts/provision/docs/prepush-selection.meiva.okf.md.
 "scripts/provision/prepush_frontend.py" = ["S603"]
 # The inspector-widget surface's exception names read as their refusal events
 # (DuplicateInspectWidget, the sibling of the metric face's DuplicateMetric);
 # the structured-comment gate leaves no inline-suppression slot for that
 # rationale, so the Error-suffix rule is silenced here. Contract:
-# base/packages/plugins/docs/inspector-widgets.ava.okf.md.
+# base/packages/plugins/docs/inspector-widgets.meiva.okf.md.
 "base/packages/plugins/surface/inspector.py" = ["N818"]
 # brew_prefix resolves the Homebrew prefix through a fixed argv; the optional
 # formula name is a local literal, not external input.
 "base/host/brew_pin.py" = ["S603"]
-# ava_syntax_fix uses fullwidth chars in docstrings as examples of what the fixer targets,
+# meiva_syntax_fix uses fullwidth chars in docstrings as examples of what the fixer targets,
 # and carries Chinese notes from data analysis of real error corpora.
-"ava_builtins/plugins/ava_syntax_fix/*" = ["RUF001", "RUF002", "RUF003"]
+"meiva_builtins/plugins/meiva_syntax_fix/*" = ["RUF001", "RUF002", "RUF003"]
 # CJK regex explanation comment — legitimate.
 "scripts/lint/agent_docstrings.py" = ["RUF003"]
 
@@ -334,17 +334,17 @@ check-typed-exception = true
 # SDK async tasks must not share active call frames or borrowed identity.
 "base/agents/sdk/telemetry.py" = ["TID251"]
 "base/packages/plugins/context.py" = ["TID251"]
-"ava/sdk_surface/help.py" = ["TID251"]
-"ava/sdk_surface/discovery.py" = ["TID251"]
+"meiva/sdk_surface/help.py" = ["TID251"]
+"meiva/sdk_surface/discovery.py" = ["TID251"]
 "services/agent_runner/agent_host/runtime.py" = ["TID251"]
 # An operator CLI: its report on stdout is the contract.
 "services/derived/memory_indexer/memory_search_reconcile.py" = ["T201"]
 # tests may import contextvars to exercise the propagation contracts
-"ava/tests/test_turn_identity_ava.py" = ["TID251"]
+"meiva/tests/test_turn_identity_meiva.py" = ["TID251"]
 "agent/graph/tests/test_turn_scoped_retry.py" = ["TID251"]
 
 [tool.ruff.lint.isort]
-known-first-party = ["ava", "cli", "base", "runtime"]
+known-first-party = ["meiva", "cli", "base", "runtime"]
 
 [tool.ruff.format]
 quote-style = "double"
@@ -363,8 +363,8 @@ testpaths = [
     # meizel:roles BEGIN testpaths tests application tooling templates
     "tests",
     "agent/**/tests",
-    "ava/**/tests",
-    "ava_builtins/**/tests",
+    "meiva/**/tests",
+    "meiva_builtins/**/tests",
     "base/**/tests",
     "cli/**/tests",
     "gateway/**/tests",
@@ -422,25 +422,25 @@ filterwarnings = [
 
 [tool.coverage.run]
 # Must match the CI shards' --cov= flags (ci.yml backend-shard / backend-serial).
-# agent/ava/gateway/base/ui is the historical set; cli joined 2026-08-25
+# agent/meiva/gateway/base/ui is the historical set; cli joined 2026-08-25
 # (tech audit P1 — measured 82% standalone with tests/cli).
-# ops/services/ava_builtins joined 2026-08-29 (tech audit 2026-08-24 finding
+# ops/services/meiva_builtins joined 2026-08-29 (tech audit 2026-08-24 finding
 # #10 follow-up, Task #1570): measured into the same coverage data, but gated
 # separately by scripts/ci/coverage_gates.py's per-risk-domain minimum line
 # floors instead of the 85% combined gate — their standalone coverage (ops 48%
-# via tests/ops; services and ava_builtins lower) would take the combined
+# via tests/ops; services and meiva_builtins lower) would take the combined
 # line-rate below threshold even though their test suites DO run in every CI
 # shard. They stay high-incident domains (deploy/backup/watchdog/ops), so the
 # floors are the gate, not the exclusion.
 # Skill reference/scripts dirs are omitted from measurement: they are
 # standalone scripts the test suite mostly never imports (installed skill
-# copies), so measuring them would drag the ava_builtins floor toward dead
+# copies), so measuring them would drag the meiva_builtins floor toward dead
 # lines instead of executable ones.
 source = [
     # meizel:roles BEGIN names application frontend
     "agent",
-    "ava",
-    "ava_builtins",
+    "meiva",
+    "meiva_builtins",
     "base",
     "cli",
     "gateway",
@@ -456,8 +456,8 @@ source = [
 omit = [
     "*/__main__.py",
     "*/tests/*",
-    "ava_builtins/skills/*/*/scripts/*",
-    "ava_builtins/skills/*/*/references/*",
+    "meiva_builtins/skills/*/*/scripts/*",
+    "meiva_builtins/skills/*/*/references/*",
 ]
 
 [tool.coverage.report]
@@ -507,8 +507,8 @@ venv = ".venv"
 include = [
     # meizel:roles BEGIN names application tooling tests
     "agent",
-    "ava",
-    "ava_builtins",
+    "meiva",
+    "meiva_builtins",
     "base",
     "cli",
     "gateway",
@@ -525,12 +525,12 @@ exclude = [
     # `.claude/worktrees` is the actual location of the current worktree.
     ".claude/worktrees",
     # A skill's references/ holds agent-facing examples the agent reads and
-    # adapts, not importable code — they cite plugin-provided `ava.*` surface
-    # (e.g. `ava.self.log`) absent from a bare `import ava`. Mirrors the ruff
+    # adapts, not importable code — they cite plugin-provided `meiva.*` surface
+    # (e.g. `meiva.self.log`) absent from a bare `import meiva`. Mirrors the ruff
     # per-file-ignores for the same paths. scripts/ is NOT excluded: it holds
     # the skill's real, maintained CLI entry points, and those are checked.
-    "ava_builtins/skills/*/*/references",
-    "ava_builtins/plugins/*/skills/**/reference",
+    "meiva_builtins/skills/*/*/references",
+    "meiva_builtins/plugins/*/skills/**/reference",
 ]
 # Libraries with incomplete third-party stubs — temporarily lenient.
 reportMissingTypeStubs = false
@@ -551,7 +551,7 @@ reportMissingParameterType = "warning"
 reportUnknownLambdaType = "warning"
 reportMissingTypeArgument = "warning"
 # defensive isinstance/issubclass at dispatch entry points (e.g. plugin author passed a non-
-# BaseModel / env-loaded factory return / plugin-tampered ava.state_update) is a
+# BaseModel / env-loaded factory return / plugin-tampered meiva.state_update) is a
 # fail-fast guard, pulling "caller error" forward to an entrypoint TypeError, not dead code.
 # pyright statically over-narrows the guarded value (it can't see the runtime-dynamic source) and
 # flags every such guard as "unnecessary" — all 18 current findings are false positives of exactly
@@ -561,7 +561,7 @@ reportUnnecessaryIsInstance = "none"
 # A package's own tests (`<pkg>/**/tests/`) are held to the tests rung below wherever they sit:
 # reportUnknownMemberType and reportUnknownArgumentType at "error", the other five at "warning".
 # pyright takes the FIRST environment whose root contains a file, and a root is a plain directory
-# (no globs). So a tests directory under base/, ops/, services/, ava/, scripts/ or ava_builtins/
+# (no globs). So a tests directory under base/, ops/, services/, meiva/, scripts/ or meiva_builtins/
 # needs its own entry, listed HERE, above the base/ops/services entries: without one it inherits
 # the package's seven "error" rules (base/ops/services) or the global "warning" (the rest).
 # cli/, gateway/ and agent/ already gate exactly the two rules, so they need none.
@@ -573,121 +573,6 @@ reportUnnecessaryIsInstance = "none"
 # Two changes that add entries collide only where their roots are neighbors in this order;
 # resolve by running the script again.
 # BEGIN GENERATED pyright tests environments (scripts/codegen/gen_pyright_test_environments.py; edit nothing between the markers)
-[[tool.pyright.executionEnvironments]]
-root = "ava/agents/tests"
-reportUnknownMemberType = "error"
-reportUnknownArgumentType = "error"
-
-[[tool.pyright.executionEnvironments]]
-root = "ava/gateway_client/tests"
-reportUnknownMemberType = "error"
-reportUnknownArgumentType = "error"
-
-[[tool.pyright.executionEnvironments]]
-root = "ava/mcps/tests"
-reportUnknownMemberType = "error"
-reportUnknownArgumentType = "error"
-
-[[tool.pyright.executionEnvironments]]
-root = "ava/sdk_surface/tests"
-reportUnknownMemberType = "error"
-reportUnknownArgumentType = "error"
-
-[[tool.pyright.executionEnvironments]]
-root = "ava/shell/coding_tools/tests"
-reportUnknownMemberType = "error"
-reportUnknownArgumentType = "error"
-
-[[tool.pyright.executionEnvironments]]
-root = "ava/shell/tests"
-reportUnknownMemberType = "error"
-reportUnknownArgumentType = "error"
-
-[[tool.pyright.executionEnvironments]]
-root = "ava/tests"
-reportUnknownMemberType = "error"
-reportUnknownArgumentType = "error"
-
-[[tool.pyright.executionEnvironments]]
-root = "ava_builtins/plugins/ava_code/tests"
-reportUnknownMemberType = "error"
-reportUnknownArgumentType = "error"
-
-[[tool.pyright.executionEnvironments]]
-root = "ava_builtins/plugins/ava_fleet/task_maintenance/tests"
-reportUnknownMemberType = "error"
-reportUnknownArgumentType = "error"
-
-[[tool.pyright.executionEnvironments]]
-root = "ava_builtins/plugins/ava_fleet/tests"
-reportUnknownMemberType = "error"
-reportUnknownArgumentType = "error"
-
-[[tool.pyright.executionEnvironments]]
-root = "ava_builtins/plugins/ava_memory/skills/scripts/tests"
-reportUnknownMemberType = "error"
-reportUnknownArgumentType = "error"
-
-[[tool.pyright.executionEnvironments]]
-root = "ava_builtins/plugins/ava_memory/tests"
-reportUnknownMemberType = "error"
-reportUnknownArgumentType = "error"
-
-[[tool.pyright.executionEnvironments]]
-root = "ava_builtins/plugins/ava_silent_idle/tests"
-reportUnknownMemberType = "error"
-reportUnknownArgumentType = "error"
-
-[[tool.pyright.executionEnvironments]]
-root = "ava_builtins/plugins/ava_syntax_fix/tests"
-reportUnknownMemberType = "error"
-reportUnknownArgumentType = "error"
-
-[[tool.pyright.executionEnvironments]]
-root = "ava_builtins/plugins/ava_to_user/tests"
-reportUnknownMemberType = "error"
-reportUnknownArgumentType = "error"
-
-[[tool.pyright.executionEnvironments]]
-root = "ava_builtins/plugins/lm_google/tests"
-reportUnknownMemberType = "error"
-reportUnknownArgumentType = "error"
-
-[[tool.pyright.executionEnvironments]]
-root = "ava_builtins/plugins/tests"
-reportUnknownMemberType = "error"
-reportUnknownArgumentType = "error"
-
-[[tool.pyright.executionEnvironments]]
-root = "ava_builtins/skills/coordination/ava-being-a-long-running-agent/tests"
-reportUnknownMemberType = "error"
-reportUnknownArgumentType = "error"
-
-[[tool.pyright.executionEnvironments]]
-root = "ava_builtins/skills/coordination/ava-dynamic-workflow/tests"
-reportUnknownMemberType = "error"
-reportUnknownArgumentType = "error"
-
-[[tool.pyright.executionEnvironments]]
-root = "ava_builtins/skills/platform/ava-guide/external-agents/tests"
-reportUnknownMemberType = "error"
-reportUnknownArgumentType = "error"
-
-[[tool.pyright.executionEnvironments]]
-root = "ava_builtins/skills/platform/ava-self-evolution/tests"
-reportUnknownMemberType = "error"
-reportUnknownArgumentType = "error"
-
-[[tool.pyright.executionEnvironments]]
-root = "ava_builtins/skills/tests"
-reportUnknownMemberType = "error"
-reportUnknownArgumentType = "error"
-
-[[tool.pyright.executionEnvironments]]
-root = "ava_builtins/tests"
-reportUnknownMemberType = "error"
-reportUnknownArgumentType = "error"
-
 [[tool.pyright.executionEnvironments]]
 root = "base/agents/context/gateway_client/tests"
 reportUnknownMemberType = "error"
@@ -995,6 +880,121 @@ reportUnknownArgumentType = "error"
 
 [[tool.pyright.executionEnvironments]]
 root = "base/tests"
+reportUnknownMemberType = "error"
+reportUnknownArgumentType = "error"
+
+[[tool.pyright.executionEnvironments]]
+root = "meiva/agents/tests"
+reportUnknownMemberType = "error"
+reportUnknownArgumentType = "error"
+
+[[tool.pyright.executionEnvironments]]
+root = "meiva/gateway_client/tests"
+reportUnknownMemberType = "error"
+reportUnknownArgumentType = "error"
+
+[[tool.pyright.executionEnvironments]]
+root = "meiva/mcps/tests"
+reportUnknownMemberType = "error"
+reportUnknownArgumentType = "error"
+
+[[tool.pyright.executionEnvironments]]
+root = "meiva/sdk_surface/tests"
+reportUnknownMemberType = "error"
+reportUnknownArgumentType = "error"
+
+[[tool.pyright.executionEnvironments]]
+root = "meiva/shell/coding_tools/tests"
+reportUnknownMemberType = "error"
+reportUnknownArgumentType = "error"
+
+[[tool.pyright.executionEnvironments]]
+root = "meiva/shell/tests"
+reportUnknownMemberType = "error"
+reportUnknownArgumentType = "error"
+
+[[tool.pyright.executionEnvironments]]
+root = "meiva/tests"
+reportUnknownMemberType = "error"
+reportUnknownArgumentType = "error"
+
+[[tool.pyright.executionEnvironments]]
+root = "meiva_builtins/plugins/lm_google/tests"
+reportUnknownMemberType = "error"
+reportUnknownArgumentType = "error"
+
+[[tool.pyright.executionEnvironments]]
+root = "meiva_builtins/plugins/meiva_code/tests"
+reportUnknownMemberType = "error"
+reportUnknownArgumentType = "error"
+
+[[tool.pyright.executionEnvironments]]
+root = "meiva_builtins/plugins/meiva_fleet/task_maintenance/tests"
+reportUnknownMemberType = "error"
+reportUnknownArgumentType = "error"
+
+[[tool.pyright.executionEnvironments]]
+root = "meiva_builtins/plugins/meiva_fleet/tests"
+reportUnknownMemberType = "error"
+reportUnknownArgumentType = "error"
+
+[[tool.pyright.executionEnvironments]]
+root = "meiva_builtins/plugins/meiva_memory/skills/scripts/tests"
+reportUnknownMemberType = "error"
+reportUnknownArgumentType = "error"
+
+[[tool.pyright.executionEnvironments]]
+root = "meiva_builtins/plugins/meiva_memory/tests"
+reportUnknownMemberType = "error"
+reportUnknownArgumentType = "error"
+
+[[tool.pyright.executionEnvironments]]
+root = "meiva_builtins/plugins/meiva_silent_idle/tests"
+reportUnknownMemberType = "error"
+reportUnknownArgumentType = "error"
+
+[[tool.pyright.executionEnvironments]]
+root = "meiva_builtins/plugins/meiva_syntax_fix/tests"
+reportUnknownMemberType = "error"
+reportUnknownArgumentType = "error"
+
+[[tool.pyright.executionEnvironments]]
+root = "meiva_builtins/plugins/meiva_to_user/tests"
+reportUnknownMemberType = "error"
+reportUnknownArgumentType = "error"
+
+[[tool.pyright.executionEnvironments]]
+root = "meiva_builtins/plugins/tests"
+reportUnknownMemberType = "error"
+reportUnknownArgumentType = "error"
+
+[[tool.pyright.executionEnvironments]]
+root = "meiva_builtins/skills/coordination/meiva-being-a-long-running-agent/tests"
+reportUnknownMemberType = "error"
+reportUnknownArgumentType = "error"
+
+[[tool.pyright.executionEnvironments]]
+root = "meiva_builtins/skills/coordination/meiva-dynamic-workflow/tests"
+reportUnknownMemberType = "error"
+reportUnknownArgumentType = "error"
+
+[[tool.pyright.executionEnvironments]]
+root = "meiva_builtins/skills/platform/meiva-guide/external-agents/tests"
+reportUnknownMemberType = "error"
+reportUnknownArgumentType = "error"
+
+[[tool.pyright.executionEnvironments]]
+root = "meiva_builtins/skills/platform/meiva-self-evolution/tests"
+reportUnknownMemberType = "error"
+reportUnknownArgumentType = "error"
+
+[[tool.pyright.executionEnvironments]]
+root = "meiva_builtins/skills/tests"
+reportUnknownMemberType = "error"
+reportUnknownArgumentType = "error"
+
+[[tool.pyright.executionEnvironments]]
+root = "meiva_builtins/tests"
 reportUnknownMemberType = "error"
 reportUnknownArgumentType = "error"
 
@@ -1309,17 +1309,17 @@ reportUnknownMemberType = "error"
 reportUnknownArgumentType = "error"
 
 [[tool.pyright.executionEnvironments]]
-root = "services/supervision/ava_root/tests"
-reportUnknownMemberType = "error"
-reportUnknownArgumentType = "error"
-
-[[tool.pyright.executionEnvironments]]
-root = "services/supervision/ava_root_glue/tests"
-reportUnknownMemberType = "error"
-reportUnknownArgumentType = "error"
-
-[[tool.pyright.executionEnvironments]]
 root = "services/supervision/healthchecks/tests"
+reportUnknownMemberType = "error"
+reportUnknownArgumentType = "error"
+
+[[tool.pyright.executionEnvironments]]
+root = "services/supervision/meiva_root/tests"
+reportUnknownMemberType = "error"
+reportUnknownArgumentType = "error"
+
+[[tool.pyright.executionEnvironments]]
+root = "services/supervision/meiva_root_glue/tests"
 reportUnknownMemberType = "error"
 reportUnknownArgumentType = "error"
 
@@ -1362,7 +1362,7 @@ reportUnknownArgumentType = "error"
 
 # Ladder rung: raise the reportUnknown*/reportMissing* family to "error" on the highest-signal core
 # layers, gating merge there while the rest of the tree stays at the global "warning". These three
-# roots carried 234 findings on origin/main, all fixed. Expand outward (gateway / agent / ava …) by
+# roots carried 234 findings on origin/main, all fixed. Expand outward (gateway / agent / meiva …) by
 # adding roots here once each layer is annotated.
 [[tool.pyright.executionEnvironments]]
 root = "base"
@@ -1430,7 +1430,7 @@ reportUnknownMemberType = "error"
 reportUnknownArgumentType = "error"
 
 [[tool.pyright.executionEnvironments]]
-root = "tests/components/ava"
+root = "tests/components/meiva"
 reportUnknownMemberType = "error"
 reportUnknownArgumentType = "error"
 
@@ -1488,12 +1488,12 @@ reportUnknownArgumentType = "error"
 # is always on pyright's implicit search path); only the parent-reaching case
 # needs extraPaths.
 [[tool.pyright.executionEnvironments]]
-root = "ava_builtins/skills/integrations/web-ai"
-extraPaths = ["ava_builtins/skills/integrations/web-ai/scripts"]
+root = "meiva_builtins/skills/integrations/web-ai"
+extraPaths = ["meiva_builtins/skills/integrations/web-ai/scripts"]
 
 [[tool.pyright.executionEnvironments]]
-root = "ava_builtins/skills/integrations/web-sources"
-extraPaths = ["ava_builtins/skills/integrations/web-sources/scripts"]
+root = "meiva_builtins/skills/integrations/web-sources"
+extraPaths = ["meiva_builtins/skills/integrations/web-sources/scripts"]
 
 [tool.mutmut]
 # Mutation testing exploratory config (mutmut).
@@ -1509,11 +1509,11 @@ also_copy = [
     "base",
     "agent",
     "gateway",
-    "ava",
+    "meiva",
     "cli",
     "services",
     "scripts",
-    "ava_builtins",
+    "meiva_builtins",
     "db",
     "migrations",
 ]

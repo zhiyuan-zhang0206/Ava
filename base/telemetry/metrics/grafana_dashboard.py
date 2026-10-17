@@ -1,7 +1,7 @@
-"""Grafana dashboard rendering — the metric registry into the ava-ops-main JSON.
+"""Grafana dashboard rendering — the metric registry into the meiva-ops-main JSON.
 
 Task #3697 slice S1 (parent #3689): the single shipped dashboard
-(``deploy/lgtm/config/grafana/provisioning/dashboards/ava-ops-main.json``)
+(``deploy/lgtm/config/grafana/provisioning/dashboards/meiva-ops-main.json``)
 becomes a render of the metric registries — every panel comes from a
 registered ``MetricSpec`` (core definitions in ``base/telemetry/metrics/core/*``, plugin
 definitions in each plugin's ``metrics.py``), and slice S3 writes the render
@@ -50,7 +50,7 @@ from base.telemetry.metrics.plugin_metrics import MetricSpec, render_targets, re
 # depend on the uid); never change them without a user ruling.
 
 _COLUMNS = 24
-_DASHBOARD_UID = "ava-ops-main"
+_DASHBOARD_UID = "meiva-ops-main"
 _DEFAULT_RANGE = {"from": "now-24h", "to": "now"}
 
 _LOKI = {"type": "loki", "uid": "loki"}
@@ -506,12 +506,12 @@ def render_dashboard(
         "preload": True,
         "refresh": "10m",
         "schemaVersion": 39,
-        "tags": ["ava", "ops", "grafana-embed"],
+        "tags": ["meiva", "ops", "grafana-embed"],
         "templating": {"list": []},
         "time": dict(_DEFAULT_RANGE),
         "timepicker": {},
         "timezone": "Asia/Shanghai",
-        "title": "Ava Ops",
+        "title": "Meiva Ops",
         "uid": _DASHBOARD_UID,
         "version": 6,
     }

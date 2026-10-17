@@ -3,7 +3,7 @@
 
 Output: `<out>/index.html` — inline CSS and JS, no CDN, no build step, so the
 served page opens offline. Serve it with
-`ava.ui.serve(<out>, name="trace-<agent>-<short-id>")`.
+`meiva.ui.serve(<out>, name="trace-<agent>-<short-id>")`.
 
 Sections: header, waterfall timeline (click a bar for its attributes), node
 sequence, LLM span table, event stream, and the turn content when present.
@@ -18,9 +18,9 @@ import os
 from pathlib import Path
 
 # The LGTM host's Grafana. Loopback is the single-box default; set
-# AVA_GRAFANA_URL when the stack lives on another machine, so the link in the
+# MEIVA_GRAFANA_URL when the stack lives on another machine, so the link in the
 # report is one the reader can actually open.
-_GRAFANA = os.environ.get("AVA_GRAFANA_URL", "http://localhost:3003")
+_GRAFANA = os.environ.get("MEIVA_GRAFANA_URL", "http://localhost:3003")
 
 
 def _esc(text: object) -> str:
@@ -240,7 +240,7 @@ def main() -> int:
     page = out_dir / "index.html"
     page.write_text(render(data), encoding="utf-8")
     print(f"wrote {page}")
-    print("serve it with: ava.ui.serve(<out>, name='trace-<agent>-<short-id>')")
+    print("serve it with: meiva.ui.serve(<out>, name='trace-<agent>-<short-id>')")
     return 0
 
 

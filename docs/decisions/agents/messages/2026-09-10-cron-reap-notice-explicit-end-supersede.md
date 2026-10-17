@@ -19,7 +19,7 @@ schedule live and double-firing until the older end passes. Issues #2060 /
    notice for the owner in the SAME transaction as the mark
    (`UPDATE ... RETURNING name` + system inbound): "Watcher schedule <name>
    was reclaimed after its TTL expired. Re-register it with
-   ava.watcher.cron() if it is still needed." — same caliber as every other
+   meiva.watcher.cron() if it is still needed." — same caliber as every other
    TTL reclamation notice. The owner is terminated at mark time, so the
    notice is inserted WITHOUT the live-owner gate: it stays a pending
    inbound and delivers on the agent's next resurrect through any channel,

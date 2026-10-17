@@ -22,10 +22,10 @@ from cli.start_runtime import StartRuntime
 from services.supervision.roster import service_spec
 from services.supervision.roster.service_spec import ServiceSpec
 
-_ROOT_SOCKET_NAME = "ava-root.sock"
+_ROOT_SOCKET_NAME = "meiva-root.sock"
 _ROOT_STDOUT_LOG = "root.stdout.log"
 _ROOT_STDERR_LOG = "root.stderr.log"
-_WIRING_REF = "services.supervision.ava_root_glue.glue:build_wiring"
+_WIRING_REF = "services.supervision.meiva_root_glue.glue:build_wiring"
 
 # Root binds IPC after spawning its units.
 _ROOT_READY_TIMEOUT_S = 30.0
@@ -45,9 +45,9 @@ def complete_boot_start(*, helper: HelperFactory | None, host: Host) -> None:
         return
     from base.host.system.boot_unit import in_boot_unit, publish_root_ready
     from base.native_process.root_control.client import native_identity
-    from base.paths import ava_home
+    from base.paths import meiva_home
 
-    home = ava_home()
+    home = meiva_home()
     if not in_boot_unit(host=host):
         return
     snapshot = root_status(root_client())
@@ -72,13 +72,13 @@ def service_extra_env(spec: ServiceSpec, *, remote_data_plane: bool) -> dict[str
     extra = service_environment(spec.session) if spec.session in BACKENDS else {}
     marker = service_spec.profile_marker(spec)
     if marker is not None:
-        extra["AVA_PROCESS_PROFILE"] = marker
+        extra["MEIVA_PROCESS_PROFILE"] = marker
     cls = service_spec.db_access(spec)
     delivery = db_delivery(cls, remote_data_plane=remote_data_plane) if cls is not None else {}
     if delivery:
         extra.update(delivery)
     elif marker == "agent":
-        extra["AVA_DB_URL"] = runner_db_url_projection()
+        extra["MEIVA_DB_URL"] = runner_db_url_projection()
     if (api := service_spec.api_access(spec)) is not None:
         extra.update(api_delivery(api, remote_data_plane=remote_data_plane))
     if spec.plugin_config is not None:
@@ -105,9 +105,9 @@ def root_tree_roster(
 def root_client(*, timeout: float = 5.0) -> Any:
     """A blocking client bound to this cluster's root control socket."""
     from base.native_process.root_control.client import RootClient
-    from base.paths import ava_home, root_run_dir
+    from base.paths import meiva_home, root_run_dir
 
-    return RootClient(root_run_dir(ava_home()) / _ROOT_SOCKET_NAME, timeout=timeout)
+    return RootClient(root_run_dir(meiva_home()) / _ROOT_SOCKET_NAME, timeout=timeout)
 
 
 def root_status(client: Any) -> dict[str, Any] | None:
@@ -151,7 +151,7 @@ def require_root_owner(status: dict[str, Any], *, helper: HelperFactory | None) 
 
     from base.native_process.ownership import OwnedProcess
     from base.native_process.root_control.client import native_identity
-    from base.paths import ava_home, root_run_dir
+    from base.paths import meiva_home, root_run_dir
 
     root = native_identity(status.get("root"))
     if not root.live():
@@ -168,7 +168,7 @@ def require_root_owner(status: dict[str, Any], *, helper: HelperFactory | None) 
     keeper = helper().root_status()
     if (
         keeper.get("pid") != root.pid
-        or keeper.get("run_dir") != str(root_run_dir(ava_home()))
+        or keeper.get("run_dir") != str(root_run_dir(meiva_home()))
         or psutil.Process(root.pid).ppid() != helper_process.pid
         or not helper_process.live()
         or not root.live()
@@ -187,8 +187,8 @@ def root_argv(run_dir: Path, manifests: Path, runtime: StartRuntime | None = Non
         _WIRING_REF,
     ]
     if runtime is not None:
-        return runtime.module_argv("services.supervision.ava_root", *arguments)
-    return [sys.executable, "-m", "services.supervision.ava_root", *arguments]
+        return runtime.module_argv("services.supervision.meiva_root", *arguments)
+    return [sys.executable, "-m", "services.supervision.meiva_root", *arguments]
 
 
 def root_child_env() -> dict[str, str]:
@@ -205,7 +205,7 @@ def tree_manifest(
     roles: MachineRoles,
 ) -> dict[str, object]:
     """Prepare launch inputs without changing any running generation's seed."""
-    from services.supervision.ava_root_glue.manifests import build_manifest
+    from services.supervision.meiva_root_glue.manifests import build_manifest
 
     remote = data_plane_config_from_settings().is_remote
     return build_manifest(
@@ -270,7 +270,7 @@ def await_root_status(
         if proc is not None and proc.poll() is not None:
             tail = _log_tail(run_dir / _ROOT_STDERR_LOG)
             raise RootDriverError(
-                f"ava-root exited before serving (rc={proc.returncode}); log tail:\n{tail}"
+                f"meiva-root exited before serving (rc={proc.returncode}); log tail:\n{tail}"
             )
         status = root_status(client)
         if status is not None:
@@ -278,7 +278,7 @@ def await_root_status(
         poll_sleep(READY_POLL_INTERVAL_S)
     tail = _log_tail(run_dir / _ROOT_STDERR_LOG)
     raise RootDriverError(
-        f"ava-root did not become ready within {timeout_s:.0f}s; log tail:\n{tail}"
+        f"meiva-root did not become ready within {timeout_s:.0f}s; log tail:\n{tail}"
     )
 
 
@@ -316,7 +316,7 @@ def seed_via_helper(
             return
         if state == "conflict":
             raise RootDriverError(
-                f"another ava-root owns {run_dir}; the keeper rests in conflict and will not "
+                f"another meiva-root owns {run_dir}; the keeper rests in conflict and will not "
                 "spawn (resolve the conflict first)"
             )
         if state == "exited":
@@ -332,7 +332,7 @@ def seed_via_helper(
         except Exception as exc:
             raise RootDriverError(f"root_status over the helper failed: {exc}") from exc
     raise RootDriverError(
-        f"the helper did not bring ava-root up within {_ROOT_READY_TIMEOUT_S:.0f}s "
+        f"the helper did not bring meiva-root up within {_ROOT_READY_TIMEOUT_S:.0f}s "
         f"(keeper state={wire.get('state')})"
     )
 
@@ -359,13 +359,13 @@ def bring_up_root(
         seed_via_helper(run_dir, repo, manifests, env, runtime, helper=helper)
         return await_root_status(client, run_dir)
     proc = spawn_direct(run_dir, repo, manifests, env, runtime, retained_children=retained_children)
-    print(f"  + ava-root spawned directly (pid {proc.pid})")
+    print(f"  + meiva-root spawned directly (pid {proc.pid})")
     return await_root_status(client, run_dir, proc=proc)
 
 
 def changed_units(manifest: dict[str, object], status: dict[str, Any]) -> set[str]:
     """A running root may be reused only for the exact requested launch inputs."""
-    from services.supervision.ava_root.manifest import UnitManifest
+    from services.supervision.meiva_root.manifest import UnitManifest
 
     units = root_units(status)
     desired = [
@@ -413,7 +413,7 @@ def stop_root_process(
         if not alive and root_status(client) is None:
             return
         poll_sleep(READY_POLL_INTERVAL_S)
-    raise RootDriverError(f"ava-root at {run_dir} did not stop within {timeout_s:.0f}s")
+    raise RootDriverError(f"meiva-root at {run_dir} did not stop within {timeout_s:.0f}s")
 
 
 def reconcile_units(
@@ -429,7 +429,7 @@ def reconcile_units(
     whose recorded intent is stopped: `intent` is the supervisor's policy fact
     and `state` its observed process state (task #4872). The OS boot job's
     retried start is not an operator: with ``honor_restart_budget`` it leaves a
-    unit down whose ava-root restart budget is spent.
+    unit down whose meiva-root restart budget is spent.
     """
     units = root_units(status)
     health = cast("dict[str, dict[str, Any]]", status.get("health") or {})
@@ -442,7 +442,7 @@ def reconcile_units(
             continue
         if unit.get("state") != "running" or unit.get("intent") != "running":
             reason = unit.get("last_error") or unit.get("last_exit") or unit.get("state")
-            print(f"  ↑ ava-root unit {session_name(spec.session)} ({reason}) — bringing it up")
+            print(f"  ↑ meiva-root unit {session_name(spec.session)} ({reason}) — bringing it up")
             try:
                 _call_ok(client.up(spec.session), f"up {spec.session}")
             except RootDriverError as exc:
@@ -461,7 +461,7 @@ def _classify_units(roster: tuple[ServiceSpec, ...], status: dict[str, Any]) -> 
         name = session_name(spec.session)
         unit = units.get(spec.session)
         if unit is None:
-            print(f"  ✗ {name}: missing from the ava-root tree", file=sys.stderr)
+            print(f"  ✗ {name}: missing from the meiva-root tree", file=sys.stderr)
             failed.append(name)
             continue
         if unit.get("state") != "running" and unit.get("last_error"):
@@ -486,7 +486,7 @@ def require_same_generation(
         raise RootDriverError(
             "requested services change the immutable root generation: "
             + ", ".join(sorted(changed))
-            + "; run ava stop before starting with changed services or configuration"
+            + "; run meiva stop before starting with changed services or configuration"
         )
 
 
@@ -507,9 +507,9 @@ def admit_live_start(
         return False
     require_root_owner(status, helper=helper)
     manifest = tree_manifest(roster, repo, roles=roles)
-    from base.paths import ava_home
+    from base.paths import meiva_home
 
-    manifest["launch_digest"] = launch_digest(repo, root_child_env(), home=ava_home())
+    manifest["launch_digest"] = launch_digest(repo, root_child_env(), home=meiva_home())
     require_same_generation(manifest, status, roster, reconcile=reconcile)
     return True
 
@@ -526,18 +526,18 @@ def ensure_root_service_tree(
     honor_restart_budget: bool = False,
 ) -> LaunchOutcome:
     """Reuse an identical generation; changing its inputs requires prior stop."""
-    from base.paths import ava_home, root_manifests_path, root_run_dir
-    from services.supervision.ava_root_glue.manifests import write_manifest
+    from base.paths import meiva_home, root_manifests_path, root_run_dir
+    from services.supervision.meiva_root_glue.manifests import write_manifest
 
-    run_dir = root_run_dir(ava_home())
+    run_dir = root_run_dir(meiva_home())
     if runtime is not None:
         runtime.validate()
     env = root_child_env()
     manifest = tree_manifest(roster, repo, roles=roles)
     from cli.commands.lifecycle.start_generation import launch_digest
 
-    manifest["launch_digest"] = launch_digest(repo, env, home=ava_home())
-    manifests = root_manifests_path(ava_home())
+    manifest["launch_digest"] = launch_digest(repo, env, home=meiva_home())
+    manifests = root_manifests_path(meiva_home())
     client = root_client()
     try:
         status = root_status(client)
@@ -570,7 +570,7 @@ def ensure_root_service_tree(
             require_same_generation(manifest, status, roster, reconcile=reconcile)
         status = reconcile_units(roster, client, status, honor_restart_budget=honor_restart_budget)
     except RootDriverError as exc:
-        print(f"  ✗ ava-root tree bring-up failed: {exc}", file=sys.stderr)
+        print(f"  ✗ meiva-root tree bring-up failed: {exc}", file=sys.stderr)
         return LaunchOutcome(roster, tuple(session_name(spec.session) for spec in roster))
     return _classify_units(roster, status)
 
@@ -608,9 +608,9 @@ def launch_service_tree(
 
 def require_root_absent() -> None:
     from base.native_process.root_control import instance_lock
-    from base.paths import ava_home, root_run_dir
+    from base.paths import meiva_home, root_run_dir
 
-    run_dir = root_run_dir(ava_home())
+    run_dir = root_run_dir(meiva_home())
     fd = instance_lock.acquire_instance_lock(run_dir)
     instance_lock.release_instance_lock(fd)
 
@@ -672,7 +672,7 @@ def stop_root_service_tree(
     leaves the root running to host it. Raises `RootDriverError` when the
     tree cannot be brought down; the caller's phase accounting reports it.
     """
-    from base.paths import ava_home, root_run_dir
+    from base.paths import meiva_home, root_run_dir
 
     deadline = time.monotonic() + timeout_s
     client = root_client(timeout=timeout_s)
@@ -680,14 +680,14 @@ def stop_root_service_tree(
     if status is None:
         require_root_absent()
         stop_dormant_helper_root(deadline, helper=helper)
-        print("  ava-root: no live owner or retained service custody")
+        print("  meiva-root: no live owner or retained service custody")
         return
     units = root_units(status)
     require_root_owner(status, helper=helper)
     preserved = set(units) & preserve
     stop_ids = sorted(set(units) - preserved)
     if not stop_ids and preserved:
-        print("  ava-root: every unit is preserved — tree left running")
+        print("  meiva-root: every unit is preserved — tree left running")
         return
     for unit_id in stop_ids:
         remaining_s = deadline - time.monotonic()
@@ -696,15 +696,15 @@ def stop_root_service_tree(
         client = root_client(timeout=remaining_s)
         response = client.force_down(unit_id) if force else client.down(unit_id)
         _call_ok(response, f"down {unit_id}")
-        print(f"  ✓ ava-root unit {session_name(unit_id)} stopped")
+        print(f"  ✓ meiva-root unit {session_name(unit_id)} stopped")
     if preserved:
         return
-    print(f"  ava-root: stopping the whole tree ({len(stop_ids)} unit(s)) and the root")
+    print(f"  meiva-root: stopping the whole tree ({len(stop_ids)} unit(s)) and the root")
     stop_root_process(
-        root_run_dir(ava_home()),
+        root_run_dir(meiva_home()),
         client,
         status,
         timeout_s=max(0.0, deadline - time.monotonic()),
         helper=helper,
     )
-    print("  ✓ ava-root stopped (tree down, root exited)")
+    print("  ✓ meiva-root stopped (tree down, root exited)")

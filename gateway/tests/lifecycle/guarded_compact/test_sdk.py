@@ -10,14 +10,14 @@ from psycopg.types.json import Jsonb
 from psycopg_pool import AsyncConnectionPool
 
 from agent.tests.claim.test_inbound_ownership import agent_row
-from ava.agents import compaction
-from ava.gateway_client import use_client
 from base.agents.incarnation.resources import ResourceBirth
 from base.api_contracts.agent_contract import GatewayUnavailable
 from base.config import settings
 from base.db.code_version_gate import ProcessDbGate
 from base.host.net.tests.retry_waits import retry_waits as retry_waits
 from base.lm.catalog import ModelCatalog
+from meiva.agents import compaction
+from meiva.gateway_client import use_client
 from services.agent_runner.agent_host.tests.guarded_compact_support import make_host
 from tests.fixtures.gateway_config import gateway_test_client
 

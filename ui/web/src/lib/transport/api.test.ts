@@ -706,7 +706,7 @@ describe("uploadFiles", () => {
   }
 
   beforeEach(() => {
-    // ava:ref ui/web/src/docs/frontend-state/api-requests.ava.okf.md#upload-transport-fixture
+    // meiva:ref ui/web/src/docs/frontend-state/api-requests.meiva.okf.md#upload-transport-fixture
     function FakeXHR() {
       inst = makeXhr();
       return inst;

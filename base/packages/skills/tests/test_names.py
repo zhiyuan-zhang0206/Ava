@@ -12,11 +12,11 @@ from base.packages.skills.names import (
 @pytest.mark.parametrize(
     ("name", "expected"),
     [
-        ("ava-goal", "ava_goal"),
-        ("ava_goal", "ava_goal"),
+        ("meiva-goal", "meiva_goal"),
+        ("meiva_goal", "meiva_goal"),
         ("write-a-pr-description", "write_a_pr_description"),
-        ("ava-memory:consolidation", "ava_memory.consolidation"),
-        ("ava-memory.consolidation", "ava_memory.consolidation"),
+        ("meiva-memory:consolidation", "meiva_memory.consolidation"),
+        ("meiva-memory.consolidation", "meiva_memory.consolidation"),
         ("gmail", "gmail"),
     ],
 )
@@ -25,14 +25,16 @@ def test_match_key_folds_every_spelling_of_one_name(name: str, expected: str) ->
 
 
 def test_match_key_is_idempotent() -> None:
-    assert match_key(match_key("ava-memory:consolidation")) == match_key("ava-memory:consolidation")
+    assert match_key(match_key("meiva-memory:consolidation")) == match_key(
+        "meiva-memory:consolidation"
+    )
 
 
 @pytest.mark.parametrize(
     ("name", "expected"),
     [
-        ("ava_goal", "ava-goal"),
-        ("ava-goal", "ava-goal"),
+        ("meiva_goal", "meiva-goal"),
+        ("meiva-goal", "meiva-goal"),
         ("web_ai.deep_research", "web-ai.deep-research"),
     ],
 )
@@ -41,7 +43,7 @@ def test_display_name_renders_the_canonical_dash_form(name: str, expected: str) 
 
 
 def test_display_name_leaves_namespace_dots_alone() -> None:
-    assert display_name("ava_memory.consolidation") == "ava-memory.consolidation"
+    assert display_name("meiva_memory.consolidation") == "meiva-memory.consolidation"
 
 
 def test_find_prefers_an_exact_hit() -> None:
@@ -49,12 +51,12 @@ def test_find_prefers_an_exact_hit() -> None:
 
 
 def test_find_maps_an_inbound_spelling_onto_the_real_one() -> None:
-    assert find("ava-goal", ["ava_goal", "gmail"]) == "ava_goal"
-    assert find("ava_goal", ["ava-goal", "gmail"]) == "ava-goal"
+    assert find("meiva-goal", ["meiva_goal", "gmail"]) == "meiva_goal"
+    assert find("meiva_goal", ["meiva-goal", "gmail"]) == "meiva-goal"
 
 
 def test_find_returns_none_when_nothing_matches() -> None:
-    assert find("nope", ["ava-goal", "gmail"]) is None
+    assert find("nope", ["meiva-goal", "gmail"]) is None
 
 
 def test_find_returns_none_on_an_ambiguous_pool() -> None:
@@ -62,17 +64,19 @@ def test_find_returns_none_on_an_ambiguous_pool() -> None:
 
 
 def test_identity_constructors_fold_every_spelling() -> None:
-    for spelling in ("ava-code", "ava_code"):
+    for spelling in ("meiva-code", "meiva_code"):
         ident = SkillIdentity.from_dir(spelling)
-        assert ident.key == "ava_code"
-        assert ident.display == "ava-code"
-    assert SkillIdentity.from_cli("ava-memory:consolidation").key == "ava_memory.consolidation"
-    assert SkillIdentity.from_cli("ava-memory:consolidation").display == "ava-memory:consolidation"
+        assert ident.key == "meiva_code"
+        assert ident.display == "meiva-code"
+    assert SkillIdentity.from_cli("meiva-memory:consolidation").key == "meiva_memory.consolidation"
+    assert (
+        SkillIdentity.from_cli("meiva-memory:consolidation").display == "meiva-memory:consolidation"
+    )
     assert SkillIdentity.from_frontmatter("web_ai.deep_research").key == "web_ai.deep_research"
 
 
 def test_identity_verify_accepts_fold_equal_pair() -> None:
-    SkillIdentity.from_dir("ava_code").verify(SkillIdentity.from_frontmatter("ava-code"))
+    SkillIdentity.from_dir("meiva_code").verify(SkillIdentity.from_frontmatter("meiva-code"))
 
 
 def test_identity_verify_raises_on_mismatch() -> None:
@@ -81,6 +85,6 @@ def test_identity_verify_raises_on_mismatch() -> None:
 
 
 def test_identity_equality_and_hash_are_by_key() -> None:
-    assert SkillIdentity.from_dir("ava-code") == SkillIdentity.from_cli("ava_code")
-    assert len({SkillIdentity.from_dir("ava-code"), SkillIdentity.from_cli("ava_code")}) == 1
-    assert SkillIdentity.from_dir("ava-code") != SkillIdentity.from_dir("ava-fleet")
+    assert SkillIdentity.from_dir("meiva-code") == SkillIdentity.from_cli("meiva_code")
+    assert len({SkillIdentity.from_dir("meiva-code"), SkillIdentity.from_cli("meiva_code")}) == 1
+    assert SkillIdentity.from_dir("meiva-code") != SkillIdentity.from_dir("meiva-fleet")

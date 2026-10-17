@@ -1,14 +1,14 @@
 """OTel Collector sidecar install — pinned binary download + config generation.
 
 One collector per machine (task #1266): every agent on the host sends OTLP to
-its local receiver (127.0.0.1, on AVA_TELEMETRY_OTLP_PORT — default the
+its local receiver (127.0.0.1, on MEIVA_TELEMETRY_OTLP_PORT — default the
 standard 4318). A gateway collector fans out to its loopback
 Tempo/Loki/Prometheus backends; a pure runner collector relays each signal to
 the gateway collector's authenticated private-address receiver. Every machine
 mirrors its local traces to JSONL. This module is the converge step's engine —
 idempotent: an already-installed, version-matching binary is a no-op; the
 config is regenerated on every converge so fan-out/retention setting changes
-propagate on the next `ava start`.
+propagate on the next `meiva start`.
 
 The CONTRIB distribution is required, not core: the file exporter (JSONL
 mirror) and the file_storage extension (filelog read offsets) live in
@@ -143,7 +143,7 @@ def _endpoint(url: str, what: str) -> str:
     return f"{parts.hostname}:{parts.port}"
 
 
-def _postgres_receiver_block(ava_home: Path, db_url: str) -> str:
+def _postgres_receiver_block(meiva_home: Path, db_url: str) -> str:
     """The receiver for this home's own Postgres: its socket, the monitoring role.
 
     Everything comes from the home's registry record and identity; nothing is
@@ -153,13 +153,13 @@ def _postgres_receiver_block(ava_home: Path, db_url: str) -> str:
     from base.cluster.authority import MONITOR_ROLE
     from base.cluster.dataplane.pg_admin import pg_socket_path
 
-    record = get_record(ava_home)
+    record = get_record(meiva_home)
     if record is None:
         raise RuntimeError(
             "cannot build the otel-collector postgres receiver: no registry record "
-            f"for home {ava_home}"
+            f"for home {meiva_home}"
         )
-    socket_dir = pg_socket_path(ava_home).as_posix().lstrip("/")
+    socket_dir = pg_socket_path(meiva_home).as_posix().lstrip("/")
     return _POSTGRES_RECEIVER_BLOCK.format(
         pg_endpoint=_yaml_quote(f"{socket_dir}:{record.ports['postgres']}"),
         pg_user=_yaml_quote(MONITOR_ROLE),
@@ -168,7 +168,7 @@ def _postgres_receiver_block(ava_home: Path, db_url: str) -> str:
     )
 
 
-def _data_plane_receivers(roles: MachineRoles | None, ava_home: Path) -> tuple[str, str]:
+def _data_plane_receivers(roles: MachineRoles | None, meiva_home: Path) -> tuple[str, str]:
     """(receiver block, pipeline-list fragment) for this unit's own data plane.
 
     Empty pair on anything that does not own Postgres+Redis: a pure
@@ -193,7 +193,7 @@ def _data_plane_receivers(roles: MachineRoles | None, ava_home: Path) -> tuple[s
     blocks: list[str] = []
     receivers: list[str] = []
     if settings.observability.telemetry_otlp_enabled and not settings.data_plane.is_remote:
-        blocks.append(_postgres_receiver_block(ava_home, settings.data_plane.db_url))
+        blocks.append(_postgres_receiver_block(meiva_home, settings.data_plane.db_url))
         receivers.append("postgresql")
     # Redis always authenticates with its admin password and stays observable
     # in every posture.
@@ -210,7 +210,7 @@ def _data_plane_receivers(roles: MachineRoles | None, ava_home: Path) -> tuple[s
 def gateway_otlp_endpoint_problem(endpoint: str) -> str | None:
     """Why `endpoint` cannot serve as the published gateway OTLP ingress, or None.
 
-    The one validity definition for `AVA_GATEWAY_OTLP_ENDPOINT`: the relay
+    The one validity definition for `MEIVA_GATEWAY_OTLP_ENDPOINT`: the relay
     build below raises when it reads a problem, and the hold watchdog's
     pre-attempt gate (task #4080) reads it BEFORE spending its bounded
     completion attempt — a gateway that has not published the ingress yet must
@@ -233,7 +233,7 @@ def gateway_otlp_endpoint_problem(endpoint: str) -> str | None:
         or parts.fragment
     ):
         return (
-            "the published AVA_GATEWAY_OTLP_ENDPOINT must be a non-loopback "
+            "the published MEIVA_GATEWAY_OTLP_ENDPOINT must be a non-loopback "
             "http://host:port ingress with no credentials or path"
         )
     return None
@@ -247,7 +247,7 @@ def gateway_otel_ingress_endpoint() -> str:
     if gateway_otlp_endpoint_problem(endpoint) is not None:
         raise RuntimeError(
             "cannot build runner OTLP relay: gateway bootstrap must publish "
-            "AVA_GATEWAY_OTLP_ENDPOINT as its non-loopback HTTP ingress with "
+            "MEIVA_GATEWAY_OTLP_ENDPOINT as its non-loopback HTTP ingress with "
             "an explicit port; update the gateway first, then restart this runner"
         )
     return endpoint.rstrip("/")
@@ -262,7 +262,7 @@ def station_otel_ingress_endpoint(*, database_factory: DatabaseFactory) -> str:
     if not base:
         raise RuntimeError(
             "cannot build the remote-station OTLP relay without a valid "
-            "AVA_OBSERVABILITY_URL (scheme://host, no port, no path)"
+            "MEIVA_OBSERVABILITY_URL (scheme://host, no port, no path)"
         )
     from base.telemetry.station_endpoint import resolve_station_target
 
@@ -278,9 +278,9 @@ def telemetry_bearer() -> str | None:
     """
     from base.config import settings
     from base.host.db_authority.unit import telemetry_bearer as resolve
-    from base.paths import ava_home
+    from base.paths import meiva_home
 
-    return resolve(ava_home().resolve(), settings.data_plane.cluster_secret)
+    return resolve(meiva_home().resolve(), settings.data_plane.cluster_secret)
 
 
 def _cluster_bearer() -> str:
@@ -288,7 +288,7 @@ def _cluster_bearer() -> str:
     if not token:
         raise RuntimeError(
             "cannot build split-cluster OTLP relay without a telemetry token (the "
-            "gateway's AVA_CLUSTER_SECRET, or an API-bearing unit capability); "
+            "gateway's MEIVA_CLUSTER_SECRET, or an API-bearing unit capability); "
             "remote ingress must fail closed"
         )
     return f"Bearer {token}"
@@ -334,7 +334,7 @@ def _remote_receiver_fragments(
         # meaningful address — fail closed, whichever roles it carries.
         raise RuntimeError(
             "cannot expose authenticated OTLP ingress: reachable host is "
-            "wildcard; set AVA_MACHINE_HOST to this host's exact "
+            "wildcard; set MEIVA_MACHINE_HOST to this host's exact "
             "private address"
         )
     if not token or is_loopback_host(host):
@@ -377,7 +377,7 @@ def _otlp_exporters(roles: MachineRoles | None, *, database_factory: DatabaseFac
     Three shapes (docs/conventions/data/reachability-and-credentials.md):
     - a pure agent-runner relays every signal to its gateway's authenticated
       OTLP ingress (`otlp/remote` on the gateway sidecar);
-    - a unit that consumes a remote observatory (`AVA_OBSERVABILITY_URL` set)
+    - a unit that consumes a remote observatory (`MEIVA_OBSERVABILITY_URL` set)
       relays every signal to the station's single bearer-authenticated OTLP
       ingress — never dials the station's loopback-bound native backends
       directly;
@@ -407,7 +407,7 @@ def _otlp_exporters(roles: MachineRoles | None, *, database_factory: DatabaseFac
 
 def generate_config(
     repo: Path,
-    ava_home: Path,
+    meiva_home: Path,
     roles: MachineRoles | None,
     *,
     database_factory: DatabaseFactory,
@@ -421,10 +421,10 @@ def generate_config(
     loki_base, prom_base = lgtm_fanout_bases(
         remote=roles != frozenset({"agent-runner"}), database_factory=database_factory
     )
-    data_plane_block, data_plane_pipeline = _data_plane_receivers(roles, ava_home)
+    data_plane_block, data_plane_pipeline = _data_plane_receivers(roles, meiva_home)
     substitutions = {
-        "AVA_HOME": str(ava_home),
-        "CLUSTER_LABEL": home_label(ava_home),
+        "MEIVA_HOME": str(meiva_home),
+        "CLUSTER_LABEL": home_label(meiva_home),
         "MACHINE_NAME": _ottl_quote(machine.name()),
         # Kept as named generation inputs for small downstream/custom templates;
         # the shipped template consumes the role-specific OTLP_EXPORTERS block.
@@ -445,7 +445,7 @@ def generate_config(
 def lgtm_fanout_bases(*, remote: bool = True, database_factory: DatabaseFactory) -> tuple[str, str]:
     """The gateway collector's LGTM fan-out base URLs (loki, prometheus).
 
-    Two-state on AVA_OBSERVABILITY_URL (task #1791, A3): empty (default) keeps
+    Two-state on MEIVA_OBSERVABILITY_URL (task #1791, A3): empty (default) keeps
     the per-service settings URLs, whose defaults are this host's loopback
     backends; non-empty points the fan-out at the remote observatory station
     (base URL + the service's own port). The runner relay path is unaffected —
@@ -499,7 +499,7 @@ def write_config(path: Path, rendered: str) -> None:
 
 def ensure_otel_collector(
     repo: Path,
-    ava_home: Path,
+    meiva_home: Path,
     roles: MachineRoles | None,
     *,
     database_factory: DatabaseFactory,
@@ -523,7 +523,7 @@ def ensure_otel_collector(
             file=sys.stderr,
         )
         return
-    dest_dir = otel_collector_dir(ava_home)
+    dest_dir = otel_collector_dir(meiva_home)
     dest_dir.mkdir(parents=True, exist_ok=True)
     binary = dest_dir / collector_artifact.binary_name()
     marker = dest_dir / collector_artifact.VERSION_MARKER
@@ -542,8 +542,10 @@ def ensure_otel_collector(
             f"  · otel-collector: otelcol-contrib {collector_artifact.OTELCOL_CONTRIB_VERSION} present"
         )
     write_config(
-        otel_collector_config(ava_home),
-        generate_config(repo, ava_home, roles, database_factory=database_factory, machine=machine),
+        otel_collector_config(meiva_home),
+        generate_config(
+            repo, meiva_home, roles, database_factory=database_factory, machine=machine
+        ),
     )
 
 
@@ -551,25 +553,25 @@ def ensure_otel_collector_step(ctx: ConvergeCtx) -> None:
     """Install a pure-runner relay or the designated LGTM host's collector.
 
     A gateway home is skipped only when it is neither the LGTM host nor opted
-    into an explicit ``AVA_TELEMETRY_OTLP_ENDPOINT`` override — same rule as
+    into an explicit ``MEIVA_TELEMETRY_OTLP_ENDPOINT`` override — same rule as
     the roster gate (``services.supervision.roster.spec``) and the sidecar healthcheck.
     """
     if (
         ctx.roles is not None
         and "gateway" in ctx.roles
         and not collector_allowed_for_home(
-            ctx.ava_home, machine=ctx.machine, unit_home=ctx.ava_home
+            ctx.meiva_home, machine=ctx.machine, unit_home=ctx.meiva_home
         )
     ):
         print(
             "  ! otel-collector: collector skipped — this gateway home is not "
             "the observability station ("
-            f"{ctx.ava_home / 'lgtm-host'} is absent and the observability-station "
+            f"{ctx.meiva_home / 'lgtm-host'} is absent and the observability-station "
             "capability is not declared); telemetry export is unavailable; set "
-            "AVA_TELEMETRY_OTLP_ENDPOINT to use an explicit collector",
+            "MEIVA_TELEMETRY_OTLP_ENDPOINT to use an explicit collector",
             file=sys.stderr,
         )
-        residual = otel_collector_config(ctx.ava_home)
+        residual = otel_collector_config(ctx.meiva_home)
         if residual.exists():
             print(
                 f"  ! otel-collector: stale/residual config remains at {residual}; "
@@ -579,7 +581,7 @@ def ensure_otel_collector_step(ctx: ConvergeCtx) -> None:
         return
     ensure_otel_collector(
         ctx.repo,
-        ctx.ava_home,
+        ctx.meiva_home,
         ctx.roles,
         database_factory=ctx.database_factory,
         machine=ctx.machine,

@@ -103,7 +103,7 @@ def fork_shell(cwd: str, env: dict[str, str], cols: int, rows: int) -> tuple[int
             # so the only channel is raw fd 2, the pty slave the user's
             # terminal reads. Already gone: nothing left to report on.
             with contextlib.suppress(OSError):
-                os.write(2, f"ava: could not start the login shell: {exc!r}\n".encode())
+                os.write(2, f"meiva: could not start the login shell: {exc!r}\n".encode())
             os._exit(127)
     os.set_inheritable(master, False)  # noqa: FBT003 — positional-only
     return pid, master

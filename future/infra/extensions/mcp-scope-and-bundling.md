@@ -4,10 +4,10 @@
 > remaining work is **formalizing per-machine scope** as a first-class category.
 >
 > Landed — all three **sources**, merged by one loader
-> (`ava/mcps/config.py:load_mcp_config`, read by both the in-process tool surface
-> and the connection daemon): built-in `ava_builtins/mcps/<name>/.mcp.json`,
+> (`meiva/mcps/config.py:load_mcp_config`, read by both the in-process tool surface
+> and the connection daemon): built-in `meiva_builtins/mcps/<name>/.mcp.json`,
 > plugin-bundled `.mcp.json`, the installed registry package (`type="mcp"`,
-> `ava mcp install` → `$AVA_HOME/mcps/<name>/`), and the machine `mcp.json` on top
+> `meiva mcp install` → `$MEIVA_HOME/mcps/<name>/`), and the machine `mcp.json` on top
 > (machine overrides a plugin default). Also landed: **per-agent** scope, the
 > default — one daemon per agent (`agent/mcp_daemon.py`, socket keyed by `agent_id`).
 >
@@ -43,13 +43,13 @@ the two non-categories below, only two scopes remain:
 
 ## Why there is a daemon at all (context)
 
-The per-agent scope above is shaped by Ava's sandbox model: each `execute_code`
+The per-agent scope above is shaped by Meiva's sandbox model: each `execute_code`
 turn is a **fresh subprocess that dies when the turn ends**. If MCP connections
 lived in that subprocess, every turn would cold-start every server (≈250ms each
 + the server's own warm-up — a heavy server startup is far worse). So each agent process
 spawns **one long-lived daemon subprocess** that holds the connections; the
 per-turn exec subprocesses talk to it over a Unix socket
-(`agent/mcp_daemon.py`, `ava/mcps/_daemon.py`) instead of starting servers
+(`agent/mcp_daemon.py`, `meiva/mcps/_daemon.py`) instead of starting servers
 themselves. The daemon is connection-persistence infrastructure, not optional.
 
 The **per-machine** scope needs the same idea one level up: a daemon **not** keyed
@@ -59,7 +59,7 @@ per-agent daemon cannot express.
 ## Why "ephemeral MCP" is not a category
 
 A stateless, cheap capability (web search, a fetch, time) is **an SDK function /
-HTTP call, not an MCP** — `ava.web.search` is just a request. There is no server
+HTTP call, not an MCP** — `meiva.web.search` is just a request. There is no server
 to keep warm, so there is nothing to scope. If you would wrap it as an MCP, you
 wouldn't. Drop it.
 
@@ -104,23 +104,23 @@ An MCP declaration carries `{source, scope}` — not just a config dict:
 
 - **source** — where the config comes from. **Landed:** the machine `mcp.json`
   and plugin-bundled `.mcp.json` (declared like CC's, at the plugin root) are
-  merged by `ava/mcps/config.py:load_mcp_config` — machine overrides a plugin's
-  same-named default — which both `ava/mcps/__init__.py:_load_config` (in-process) and
-  `ava/mcps/_daemon.py:load_config` (the daemon) now delegate to. **Also
-  landed:** `ava plugins install` can now *deliver* a plugin-bundled `.mcp.json`
-  into `~/.ava/plugins/<name>/` (`cli/commands/extensions/_claude_code_plugin.py`, alongside any
+  merged by `meiva/mcps/config.py:load_mcp_config` — machine overrides a plugin's
+  same-named default — which both `meiva/mcps/__init__.py:_load_config` (in-process) and
+  `meiva/mcps/_daemon.py:load_config` (the daemon) now delegate to. **Also
+  landed:** `meiva plugins install` can now *deliver* a plugin-bundled `.mcp.json`
+  into `~/.meiva/plugins/<name>/` (`cli/commands/extensions/_claude_code_plugin.py`, alongside any
   bundled agents) — feeding the existing plugin source, no new loader path.
   **Landed (2026-07-19):** a standalone installed registry package (`type="mcp"`)
-  as a third source. `ava mcp install <git-url|local-dir>` lands a self-contained
-  package (own `.mcp.json` + `pyproject.toml`) under `$AVA_HOME/mcps/<name>/`,
+  as a third source. `meiva mcp install <git-url|local-dir>` lands a self-contained
+  package (own `.mcp.json` + `pyproject.toml`) under `$MEIVA_HOME/mcps/<name>/`,
   runs `uv sync` to build its isolated `.venv`, and registers it in
   `base/packages/extensions/install_registry.py`. `load_mcp_config` scans it as the installed layer
   (`_installed_mcp_paths`, registry-gated), between plugin and machine. The
   package's command is a relative `.venv/bin/python -m <module>` spawned with
   cwd = the package dir (`installed_mcp_dir`), so its deps stay out of core — no
   `uv run` (a resident wrapper). Discord was the first server moved out this way
-  (as a standalone package), removing `discord-py` from core deps — removed entirely on 2026-08-12 (user ruling: no longer maintained). `ava mcp
-  install` mirrors `ava plugins install` (shared `cli/commands/extensions/_pkg_source.py`).
+  (as a standalone package), removing `discord-py` from core deps — removed entirely on 2026-08-12 (user ruling: no longer maintained). `meiva mcp
+  install` mirrors `meiva plugins install` (shared `cli/commands/extensions/_pkg_source.py`).
 - **scope** — `agent` (default; current per-agent daemon) | `machine` (a new
   machine-level daemon: socket not keyed by `agent_id`, shared, ref-counted by
   connected agents). No `identity` field — single-identity assumption.
@@ -145,14 +145,14 @@ above relies on.
   when the last agent disconnects), socket location, and the in-process →
   machine-daemon connect path.
   - **Update (2026-05-31):** the first machine-scope consumer — a shared headed
-    browser — landed WITHOUT an Ava-built MCP daemon. The shared singleton was the
+    browser — landed WITHOUT an Meiva-built MCP daemon. The shared singleton was the
     **browser process**, run as a runner-owned `ServiceSpec` (`browser`,
-    opt-in `AVA_BROWSER_ENABLED`); agents reached it through an ordinary per-agent
+    opt-in `MEIVA_BROWSER_ENABLED`); agents reached it through an ordinary per-agent
     `chrome-devtools-mcp` (stdio) attaching via `--browserUrl`. So "machine scope"
     reduced to the existing long-running-session + converge primitives, not a new
     daemon. See `services/desktop/browser/daemon.py` + `cli/commands/_repo.py` (`browser`) +
     `cli/commands/lifecycle/converge_host.py:ensure_browser` (writes/removes the attach plugin
-    `$AVA_HOME/plugins/ava_chrome/.mcp.json` gated on `AVA_BROWSER_ENABLED`, so the
+    `$MEIVA_HOME/plugins/meiva_chrome/.mcp.json` gated on `MEIVA_BROWSER_ENABLED`, so the
     MCP is contributed only where the browser runs).
   - **Update (later): sharing the browser process was not enough — the *upstream*
     had to be shared too, and that forced a hand-built machine-level daemon.**
@@ -177,21 +177,21 @@ above relies on.
     reference implementation rather than a special case.
 
     **Update (2026-08-03):** the generic machine-scope daemon now exists — the
-    shared MCP daemon (`ava/mcps/_daemon.py`, ops roster session "mcp-daemon",
+    shared MCP daemon (`meiva/mcps/_daemon.py`, ops roster session "mcp-daemon",
     per-connection session isolation) plus a `"shared"` server spec. Chrome's
     per-agent bridge process is gone (the wrapper module itself still exists at
     `services/desktop/browser/mcp_wrapper.py` and remains the command chrome's `.mcp.json`
     declares): the daemon dials
-    the browser-mcp service's line protocol in-process (`ava/mcps/_browser.py`),
+    the browser-mcp service's line protocol in-process (`meiva/mcps/_browser.py`),
     keeping per-connection page affinity because each connection owns its socket.
     Stateless servers (x) declare `"shared": true` for one daemon-wide
     stdio child serialized per server.
   - **Update (2026-05-31, later):** chrome's config moved off the converge-written
-    file into a first-class **built-in `mcps/` folder** — `<repo>/ava_builtins/mcps/<name>/.mcp.json`,
+    file into a first-class **built-in `mcps/` folder** — `<repo>/meiva_builtins/mcps/<name>/.mcp.json`,
     auto-scanned by `load_mcp_config` as the lowest-precedence source (symmetric
     with built-in `skills/` + `plugins/`). converge no longer writes it; it just
     sheds the legacy file. A declarative **`requires`** precondition on a server
-    entry (e.g. `{"display": true}`, `ava/mcps/config.py:assert_requirements`) is
+    entry (e.g. `{"display": true}`, `meiva/mcps/config.py:assert_requirements`) is
     checked before connect and yields a clear capability error on incapable hosts
     instead of an opaque "connection refused". The runtime **`register_mcp_source`**
     leg (plugins contributing MCP configs at runtime, symmetric with Layer H

@@ -1,7 +1,7 @@
 """Priority — the shared stakes axis of tasks and notices.
 
 Single source of truth for the four P0..P3 rungs: the SDK validation
-(ava.tasks / ava.ui.notify), the gateway wire schemas (TaskRow / NoticeItem /
+(meiva.tasks / meiva.ui.notify), the gateway wire schemas (TaskRow / NoticeItem /
 the snapshot), and the OpenAPI enum the frontend types are generated from all
 reference this one enum, so none of them can drift.
 """
@@ -19,7 +19,7 @@ class Priority(StrEnum):
 
 
 # Default reminder interval (seconds) per priority rung — applied by
-# ava.tasks.create() when no explicit remind_interval_seconds is given: the
+# meiva.tasks.create() when no explicit remind_interval_seconds is given: the
 # higher the stakes, the tighter the leash on an unattended task. An explicit
 # interval always wins. Reminders stay capped at 24h and cannot be disabled.
 DEFAULT_REMIND_INTERVAL_SECONDS: dict[Priority, int] = {

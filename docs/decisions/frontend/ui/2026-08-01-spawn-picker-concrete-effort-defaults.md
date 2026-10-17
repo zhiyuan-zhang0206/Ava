@@ -32,7 +32,7 @@ one fails fast), using the vendor-documented defaults already recorded in
 
 | family | default |
 |---|---|
-| deepseek-v4-pro / -flash | `max` (already pinned; Ava is not an auto-promoted harness) |
+| deepseek-v4-pro / -flash | `max` (already pinned; Meiva is not an auto-promoted harness) |
 | claude-sonnet-5 / opus-5 / fable-5 | `high` (Anthropic's documented default; closest concrete rung to adaptive — NOT the floor) |
 | claude-haiku-4-5-20251001 | `none` (extended thinking defaults OFF) |
 | gemini-3.1-pro-preview | `high` (documented `thinking_level=high`, cannot drop to minimal) |
@@ -46,7 +46,7 @@ one fails fast), using the vendor-documented defaults already recorded in
 `GET /api/models` publishes the per-model tuning layer as
 `reasoning_effort_default` (resolved via the registry layering with the
 explicit-env layer excluded — the picker shows the MODEL's default, while a
-cluster-wide `AVA_REASONING_EFFORT` pin stays operator policy visible in the
+cluster-wide `MEIVA_REASONING_EFFORT` pin stays operator policy visible in the
 config panel's per-model view).
 
 Consequences, accepted:
@@ -56,10 +56,10 @@ Consequences, accepted:
 - Spawning claude adaptive models from the UI now sends an explicit
   `effort: "high"` instead of omitting the field (provider adaptive). `high` is
   the documented default, so this is a pin, not a downgrade. Operators who want
-  adaptive back can pin `AVA_REASONING_EFFORT=""` cluster-wide, or edit the
+  adaptive back can pin `MEIVA_REASONING_EFFORT=""` cluster-wide, or edit the
   registry value.
 - The `""` state remains expressible everywhere it matters: as an explicit
-  `AVA_REASONING_EFFORT=""` config pin, and in the frontend's legacy fallback
+  `MEIVA_REASONING_EFFORT=""` config pin, and in the frontend's legacy fallback
   (a model with a ladder but no concrete default keeps the "Effort: default"
   option — no catalog model today).
 

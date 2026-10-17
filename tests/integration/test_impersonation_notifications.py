@@ -17,7 +17,7 @@ from agent.graph.claim.node import claim_node
 from agent.ownership.hosted import admit_hosted_runtime, apply_hosted_lifecycle
 from agent.state import BaseAgentState
 from base.agents import impersonation as leases
-from base.agents.context import AvaContext
+from base.agents.context import MeivaContext
 from base.agents.context.identity import AgentIdentity
 from base.agents.impersonation.maintenance import remind_expiring_impersonations
 from base.agents.impersonation.tests.impersonation_support import recorded_tree
@@ -39,7 +39,7 @@ from ops.agents.wake import resurrect_agent
 from ops.lifecycle.termination import enqueue_termination_inbounds, force_terminate_transaction
 
 
-def test_reminder_commands_are_bare_ava(
+def test_reminder_commands_are_bare_meiva(
     db_conn: psycopg.Connection,
     database: Database,
     event_bus: EventBus,
@@ -95,8 +95,8 @@ def test_reminder_commands_are_bare_ava(
     ).fetchone()
     assert reminder is not None
     content: str = reminder[0]
-    assert f"\nava impersonate renew 0 --agent {agent_id} --ttl 300\n" in content
-    assert f"\nava impersonate release 0 --agent {agent_id} --summary ..." in content
+    assert f"\nmeiva impersonate renew 0 --agent {agent_id} --ttl 300\n" in content
+    assert f"\nmeiva impersonate release 0 --agent {agent_id} --summary ..." in content
     assert "-m cli" not in content
     assert ".venv" not in content
     assert sys.executable not in content
@@ -210,7 +210,7 @@ async def _terminate_native(
     aops_pool: AsyncConnectionPool,
     owner: RuntimeIncarnation,
     session: dict[str, Any],
-    runtime: Runtime[AvaContext],
+    runtime: Runtime[MeivaContext],
     mode: str,
     database_gate: ProcessDbGate,
     *,
@@ -288,7 +288,7 @@ async def test_termination_notices_precede_resurrection_in_native_claim(
         local_machine=local_machine,
     )
     runtime = Runtime(
-        context=AvaContext(
+        context=MeivaContext(
             ops_pool=aops_pool,
             event_publisher=MagicMock(),
             agent=AgentSlices.resolve(
@@ -336,7 +336,7 @@ async def test_termination_notices_precede_resurrection_in_native_claim(
     update = cast(dict[str, Any], resumed.update)
     assert isinstance(update, dict)
     messages = cast(list[BaseMessage], update["messages"])
-    assert [message.additional_kwargs["ava_note_tag"] for message in messages] == [
+    assert [message.additional_kwargs["meiva_note_tag"] for message in messages] == [
         "impersonation",
         "lifecycle_terminate",
         "lifecycle_resurrect",
@@ -527,7 +527,7 @@ async def test_terminal_relay_start_delivers_interruption_best_effort(
     )
     assert result == (1 if transport_dead else 0)
     assert len(emitted) == 1
-    assert f"Ava impersonation lease {session['session_id']}" in emitted[0]
+    assert f"Meiva impersonation lease {session['session_id']}" in emitted[0]
     assert session["id"] in emitted[0]
     assert "Ended at:" in emitted[0]
     assert "does not end or cancel any newer" in emitted[0]
@@ -607,8 +607,8 @@ async def test_running_relay_delivers_termination_once_without_reserving_input(
         emit=adapters.resolve_adapter("claude", None).send,
     )
     assert len(emitted) == 2
-    assert emitted[0].startswith("Handoff brief\n\nAva control active:")
-    assert f"Ava impersonation lease {session['session_id']}" in emitted[1]
+    assert emitted[0].startswith("Handoff brief\n\nMeiva control active:")
+    assert f"Meiva impersonation lease {session['session_id']}" in emitted[1]
     assert session["id"] in emitted[1]
     assert "Ended at:" in emitted[1]
     assert "does not end or cancel any newer" in emitted[1]

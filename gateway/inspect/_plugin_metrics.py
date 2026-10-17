@@ -7,7 +7,7 @@ The inspector surface of the plugin metric system (W13, PR #1374): build the
 metric registry **in process** — the shipped plugin ``metrics.py`` modules
 imported under their plugin context plus the core definition modules (task
 #180 PR D: the generator that used to write
-$AVA_HOME/state/plugin_metrics.json did not survive the archive->public port,
+$MEIVA_HOME/state/plugin_metrics.json did not survive the archive->public port,
 and a stale snapshot is indistinguishable from a live one — the file is
 gone), keep the metrics whose `output` includes "inspector", render each
 template for the requested agent, re-validate the rendered query (the metric
@@ -51,7 +51,7 @@ from gateway.inspect.schemas import MetricPoint, PluginMetricResult
 
 # The shipped-plugin metrics directory — every ENABLED plugin dir with a metrics.py is part of the
 # in-process registry (the generator's import set, task #180 PR D).
-PLUGINS_DIR = Path(__file__).resolve().parents[2] / "ava_builtins" / "plugins"
+PLUGINS_DIR = Path(__file__).resolve().parents[2] / "meiva_builtins" / "plugins"
 
 # The inspector's fixed recent window: the templates' `$__timeFilter(ts)` /
 # `$__timeGroup(ts, $__interval)` render to this window (24h in 1h buckets =
@@ -101,7 +101,7 @@ def load_plugin_metrics() -> list[MetricSpec]:
     snapshot's two sections read.
 
     Task #180 PR D: this replaces the generator's state snapshot
-    ($AVA_HOME/state/plugin_metrics.json) — the generator did not survive the
+    ($MEIVA_HOME/state/plugin_metrics.json) — the generator did not survive the
     archive->public port, so the snapshot froze while its consumers kept
     reading it. No file means no staleness; module caching makes the imports free
     and each call rebuilds the registry from the declarations.
@@ -115,7 +115,7 @@ def load_plugin_metrics() -> list[MetricSpec]:
         data_registry.load_declaration(
             path.parent.name,
             lambda name=path.parent.name: importlib.import_module(
-                f"ava_builtins.plugins.{name}.metrics"
+                f"meiva_builtins.plugins.{name}.metrics"
             ),
             (path.parent, data_registry.METRICS_KEY),
         )

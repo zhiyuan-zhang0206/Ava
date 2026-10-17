@@ -1,12 +1,12 @@
 """IM Bridge Weixin adapter — Tencent iLink personal-bot API (WeChat official personal bot).
 
 Long-polls ``ilink/bot/getupdates`` (35s window, continuation token persisted
-under ``$AVA_HOME/state/im_bridge``) for inbound, ``ilink/bot/sendmessage``
+under ``$MEIVA_HOME/state/im_bridge``) for inbound, ``ilink/bot/sendmessage``
 (2000-char segmentation) for outbound. Every outbound message echoes the
 peer's cached ``context_token`` (disk-backed), which iLink requires for session
 continuity. Credentials come from the QR login CLI
 (``python -m services.entrypoints.im_bridge.adapters.weixin_login --login``) and persist to
-``$AVA_HOME/state/im_bridge/weixin_account.json`` (chmod 600). Unconfigured,
+``$MEIVA_HOME/state/im_bridge/weixin_account.json`` (chmod 600). Unconfigured,
 ``start()`` logs its "unconfigured, skip" message and returns — the daemon keeps serving
 other channels. Error hygiene: nothing from an httpx exception (which can
 embed the request URL) ever reaches a caller, so a traceback cannot leak the
@@ -32,7 +32,7 @@ import httpx
 
 from base.host.private_storage import write_private_bytes
 from base.log import logger
-from base.paths import ava_home
+from base.paths import meiva_home
 from services.entrypoints.im_bridge.ingress.identity import (
     poll_result_codes,
     poll_update_fields,
@@ -111,8 +111,8 @@ class _SessionExpiredError(Exception):
 
 
 def _state_dir() -> Path:
-    """``$AVA_HOME/state/im_bridge`` — shared state root for every adapter."""
-    path = ava_home() / "state" / "im_bridge"
+    """``$MEIVA_HOME/state/im_bridge`` — shared state root for every adapter."""
+    path = meiva_home() / "state" / "im_bridge"
     path.mkdir(parents=True, exist_ok=True)
     return path
 

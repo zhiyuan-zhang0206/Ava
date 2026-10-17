@@ -1,4 +1,4 @@
-# ava:ref scripts/codegen/sdk_surface/docs/provenance.ava.okf.md#static-declarations
+# meiva:ref scripts/codegen/sdk_surface/docs/provenance.meiva.okf.md#static-declarations
 
 from __future__ import annotations
 
@@ -77,13 +77,13 @@ def _marker(tree: ast.Module) -> ast.Assign | ast.AnnAssign | None:
         if isinstance(node, ast.Assign | ast.AnnAssign):
             targets = node.targets if isinstance(node, ast.Assign) else [node.target]
             if any(
-                isinstance(target, ast.Name) and target.id == "__all_for_ava__"
+                isinstance(target, ast.Name) and target.id == "__all_for_meiva__"
                 for target in targets
             ):
                 declarations.append(node)
     if not declarations:
         return None
-    if len(declarations) != 1 or bindings.Scope(tree, "").stores["__all_for_ava__"] != 1:
+    if len(declarations) != 1 or bindings.Scope(tree, "").stores["__all_for_meiva__"] != 1:
         raise ValueError("SDK surface is not one unconditional declaration")
     return declarations[0]
 
@@ -93,7 +93,7 @@ def _marker_reference(
 ) -> bool:
     if not isinstance(node, ast.Name) or node.id in seen:
         return False
-    if node.id == "__all_for_ava__":
+    if node.id == "__all_for_meiva__":
         return True
     value = scope.value(node)
     return _marker_reference(value, scope, seen | {node.id}) if value is not node else False
@@ -116,14 +116,14 @@ def _marker_mutated(tree: ast.Module) -> bool:
             return True
         if (
             isinstance(node, ast.Name)
-            and node.id == "__all_for_ava__"
+            and node.id == "__all_for_meiva__"
             and isinstance(node.ctx, ast.Del)
         ):
             return True
     return False
 
 
-# ava:ref scripts/codegen/sdk_surface/docs/provenance.ava.okf.md#canonical-markers
+# meiva:ref scripts/codegen/sdk_surface/docs/provenance.meiva.okf.md#canonical-markers
 def declared_names(tree: ast.Module) -> tuple[str, ...] | None:
     marker = _marker(tree)
     if marker is None:
@@ -238,7 +238,7 @@ class _Sources:
 
     def plugins(self, exposed: str) -> list[_Candidate]:
         candidates: list[_Candidate] = []
-        for path in sorted((self.index.repo_root / "ava_builtins/plugins").glob("*/plugin.py")):
+        for path in sorted((self.index.repo_root / "meiva_builtins/plugins").glob("*/plugin.py")):
             rel = path.relative_to(self.index.repo_root).as_posix()
             module = rel.removesuffix(".py").replace("/", ".")
             source = self.source(module)
@@ -375,7 +375,7 @@ def _module_property(module: str, path: str, tree: ast.Module, name: str) -> _De
     )
 
 
-# ava:ref scripts/codegen/sdk_surface/docs/provenance.ava.okf.md#property-help-owner
+# meiva:ref scripts/codegen/sdk_surface/docs/provenance.meiva.okf.md#property-help-owner
 def _property_documentation_name(tree: ast.Module, path: str, name: str) -> str | None:
     if bindings.Scope(tree, path).stores[name] != 1:
         return None
@@ -418,7 +418,7 @@ def _namespace_candidate(
     arguments = _arguments(call, ("name", "module", "expand"))
     if arguments is None or (name := _literal_name(arguments.get("name"))) is None:
         return None
-    prefix = f"ava.{name}"
+    prefix = f"meiva.{name}"
     if exposed != prefix and not exposed.startswith(prefix + "."):
         return None
     children = tuple(exposed[len(prefix) :].split(".")[1:])
@@ -433,7 +433,7 @@ def _member_candidate(
     if arguments is None:
         return None
     namespace, name = (_literal_name(arguments.get(key)) for key in ("namespace", "name"))
-    if namespace is None or name is None or exposed != f"ava.{namespace}.{name}":
+    if namespace is None or name is None or exposed != f"meiva.{namespace}.{name}":
         return None
     expression = arguments.get("fn")
     target = scope.origin(expression) if expression is not None else ""
@@ -491,7 +491,7 @@ def _contribution_candidates(
 def _resolve_plugin(sources: _Sources, exposed: str, candidate: _Candidate) -> _Definition:
     declaration = candidate.declaration
     if candidate.namespace:
-        if sources.origin("ava", exposed.split(".")[1]) is not None:
+        if sources.origin("meiva", exposed.split(".")[1]) is not None:
             raise _UnprovedError(
                 declaration.path, declaration.line, "Plugin namespace conflicts with a core binding"
             )
@@ -504,7 +504,7 @@ def _resolve_plugin(sources: _Sources, exposed: str, candidate: _Candidate) -> _
             )
         return sources.walk(target.module, candidate.children)[0]
     namespace = exposed.split(".")[1]
-    parent, _ = sources.walk("ava", (namespace,))
+    parent, _ = sources.walk("meiva", (namespace,))
     if not parent.namespace:
         raise _UnprovedError(
             declaration.path,
@@ -528,14 +528,14 @@ def _resolve_plugin(sources: _Sources, exposed: str, candidate: _Candidate) -> _
     return origin
 
 
-# ava:ref scripts/codegen/sdk_surface/docs/provenance.ava.okf.md#static-declarations
+# meiva:ref scripts/codegen/sdk_surface/docs/provenance.meiva.okf.md#static-declarations
 def query(index: ModuleSourceLookup, exposed_path: str) -> MemberProof | Unknown:
     parts = exposed_path.split(".")
-    if parts[0] != "ava" or not all(part.isidentifier() for part in parts):
-        raise ValueError("SDK query requires an exact ava namespace or member path")
+    if parts[0] != "meiva" or not all(part.isidentifier() for part in parts):
+        raise ValueError("SDK query requires an exact meiva namespace or member path")
     sources = _Sources(index)
     try:
-        sources.names("ava")
+        sources.names("meiva")
         candidates = sources.plugins(exposed_path)
         if len(candidates) > 1:
             return Unknown(exposed_path, "", 0, "Multiple plugins declare this SDK path")
@@ -544,7 +544,7 @@ def query(index: ModuleSourceLookup, exposed_path: str) -> MemberProof | Unknown
             origin = _resolve_plugin(sources, exposed_path, candidates[0])
             availability = Availability.PLUGIN
         else:
-            origin, declaration = sources.walk("ava", tuple(parts[1:]))
+            origin, declaration = sources.walk("meiva", tuple(parts[1:]))
             availability = Availability.STATIC
         return MemberProof(
             exposed_path,

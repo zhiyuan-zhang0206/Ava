@@ -1,4 +1,4 @@
-"""Built-in schedules — the version-controlled schedules that ship with Ava.
+"""Built-in schedules — the version-controlled schedules that ship with Meiva.
 
 Policy (user ruling 2026-08-11, pre-open-source): product schedules
 (self-evolution, memory) are built in AND start by default; cluster-operator
@@ -25,7 +25,7 @@ not in the manifest and are never read or written here. Both operations are
 idempotent: a second provision with an unchanged checkout changes nothing.
 
 Called from the gateway lifespan at boot (a fresh install comes up with its
-built-ins) and from ``ava schedules provision`` (manual restore). Both call
+built-ins) and from ``meiva schedules provision`` (manual restore). Both call
 sites run it against their own DB connection; the gateway's reconcile loop
 launches any newly created enabled schedule within a poll tick.
 """
@@ -41,7 +41,7 @@ from typing import Any, cast
 from base.paths import repo_root
 
 # The manifest ships in the repo checkout every deployed unit runs from
-# ($AVA_HOME/source on prod), so repo_root() resolves it in prod and in dev
+# ($MEIVA_HOME/source on prod), so repo_root() resolves it in prod and in dev
 # worktrees alike.
 MANIFEST_PATH = repo_root() / "schedules" / "manifest.json"
 
@@ -57,7 +57,7 @@ class ManifestError(ValueError):
 
 @dataclass(frozen=True)
 class BuiltinSchedule:
-    """One manifest entry — a schedule that ships with Ava."""
+    """One manifest entry — a schedule that ships with Meiva."""
 
     name: str
     klass: str  # "product" | "operator"
@@ -160,7 +160,7 @@ def provision_builtin_schedules(conn: Any, *, path: Path | None = None) -> Provi
     result = ProvisionResult()
     for sched in manifest:
         # The manifest names a template file; the DB stores the script text
-        # (the runner materializes it to $AVA_HOME/schedules/<id>/).
+        # (the runner materializes it to $MEIVA_HOME/schedules/<id>/).
         script_text = (manifest_path / sched.script).read_text()
         with conn.cursor() as cur:
             cur.execute(

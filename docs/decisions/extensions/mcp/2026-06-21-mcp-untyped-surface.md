@@ -2,8 +2,8 @@
 
 ## Context
 
-MCP tools are called as `ava.mcps.<server>.<tool>(...)`. Each tool's
-`input_schema` is stored as a JSON Schema dict in `ToolInfo` (`ava/mcps.py`),
+MCP tools are called as `meiva.mcps.<server>.<tool>(...)`. Each tool's
+`input_schema` is stored as a JSON Schema dict in `ToolInfo` (`meiva/mcps.py`),
 rendered into the callable's `__doc__`, and reachable as raw JSON. The call path
 (`_call_text` / `_call_raw`) forwards `**kwargs` to the server with no
 client-side validation.
@@ -13,10 +13,10 @@ use them for type checking, schema validation (wrong type / missing required
 field), IDE autocomplete, and richer introspection — citing that today there is
 none of those.
 
-The load-bearing fact for the decision: the caller of `ava.mcps.chrome.navigate(...)`
+The load-bearing fact for the decision: the caller of `meiva.mcps.chrome.navigate(...)`
 is the **model**, writing Python inside `execute_code(code=...)` and reading the
-`help()` text. It has no LSP, no IDE, no autocomplete. `help(ava.mcps.chrome)`
-renders each tool through `_format_signature` (`ava/__init__.py`); because the
+`help()` text. It has no LSP, no IDE, no autocomplete. `help(meiva.mcps.chrome)`
+renders each tool through `_format_signature` (`meiva/__init__.py`); because the
 callable is `def call(**kwargs: Any)`, the agent sees `def navigate(**kwargs: Any):`
 followed by the full JSON Schema in the docstring. The only thing actually lost
 is that the signature line reads `(**kwargs)` instead of the real parameter
@@ -32,7 +32,7 @@ loop already works: the MCP server rejects a bad call with a precise error, and
 
 The one real gap — the `(**kwargs)` signature line — is closed with a
 **display-only** `inspect.Signature` synthesized from the JSON Schema
-(`_schema_to_signature` in `ava/mcps.py`), attached as `call.__signature__`. It
+(`_schema_to_signature` in `meiva/mcps.py`), attached as `call.__signature__`. It
 does **no** validation and is never consulted on the call path; the body stays
 `(**kwargs)` → `_call_text`. Required vs optional is conveyed only by the
 presence or absence of a default. `help()` now renders

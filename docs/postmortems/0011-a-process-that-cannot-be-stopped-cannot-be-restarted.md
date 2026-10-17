@@ -2,9 +2,9 @@
 
 **Date:** 2026-10-04
 **Anchors:** `services/computer/mcp_daemon.py` (`_LoopWatchdog`, `_dump_and_exit`,
-`_guard_loop_liveness`, `_bounded_cleanup`, `AVA_COMPUTER_LOOP_STALL_S`,
-`AVA_COMPUTER_SHUTDOWN_DRAIN_S`), `services/computer/ocr.py` (runs through
-`base.host.proc.run_bounded`); supervisor side: `services/ava_root/{health,stopping}.py`.
+`_guard_loop_liveness`, `_bounded_cleanup`, `MEIVA_COMPUTER_LOOP_STALL_S`,
+`MEIVA_COMPUTER_SHUTDOWN_DRAIN_S`), `services/computer/ocr.py` (runs through
+`base.host.proc.run_bounded`); supervisor side: `services/meiva_root/{health,stopping}.py`.
 Host-side records (supervisor log, unit output.log, diagnostic reports) are not
 in this repo `(summarized)`; the wall-clock windows below are from that log.
 
@@ -120,7 +120,7 @@ must complete the *wait*, not merely request cancellation.
 
 - **Loop-liveness watchdog** (`services/computer/mcp_daemon.py`): the loop
   re-beats on each tick; a thread that sees no beat for
-  `AVA_COMPUTER_LOOP_STALL_S` (default 180s) writes a reason line, dumps all
+  `MEIVA_COMPUTER_LOOP_STALL_S` (default 180s) writes a reason line, dumps all
   thread stacks to stderr (the root captures the unit's `output.log`), and
   exits(1). The blocked-loop wedge degrades to a crash the supervisor
   restarts on its normal path.
@@ -128,7 +128,7 @@ must complete the *wait*, not merely request cancellation.
   handlers, then wait for them with `asyncio.wait(..., timeout=drain_s)` —
   whose own timer completes the wait, where `gather`'s cancellation could not
   — and bound `server.wait_closed()` with the remaining budget. Past
-  `AVA_COMPUTER_SHUTDOWN_DRAIN_S` (default 5s, deliberately below the root's
+  `MEIVA_COMPUTER_SHUTDOWN_DRAIN_S` (default 5s, deliberately below the root's
   10s stop window): dump every thread's stack and exit for a restart. The
   half-down this incident spent ~15 minutes in now ends in seconds, with the
   forensics that were missing.

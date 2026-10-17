@@ -22,7 +22,7 @@ def _ctx(
     machine_config = ConfigBoot()
     return cv.ConvergeCtx(
         repo=Path("/repo"),
-        ava_home=home,
+        meiva_home=home,
         roles=frozenset({"agent-runner"}),
         config=machine_config,
         database_factory=operator_database,
@@ -84,7 +84,7 @@ def test_skips_on_single_box(
     machine_config = ConfigBoot()
     ctx = cv.ConvergeCtx(
         repo=Path("/repo"),
-        ava_home=tmp_path,
+        meiva_home=tmp_path,
         roles=frozenset({"gateway", "agent-runner"}),
         config=machine_config,
         database_factory=operator_database,

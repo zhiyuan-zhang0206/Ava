@@ -28,7 +28,7 @@ import pytest
 from fastapi import FastAPI, HTTPException
 from fastapi.testclient import TestClient
 
-import ava_builtins.plugins as shipped_plugins
+import meiva_builtins.plugins as shipped_plugins
 from base.db import Database
 from base.packages.plugins import enable_config
 from base.telemetry.metrics.plugin_metrics import MetricSpec
@@ -488,7 +488,7 @@ def test_in_process_loader_imports_shipped_metrics() -> None:
     plugin_specs = [s for s in specs if s.plugin != "core"]
     core_specs = [s for s in specs if s.plugin == "core"]
     # the shipped plugin metrics (11, including recall-filter latency panels)
-    assert {s.plugin for s in plugin_specs} == {"ava_fleet", "ava_memory", "ava_syntax_fix"}
+    assert {s.plugin for s in plugin_specs} == {"meiva_fleet", "meiva_memory", "meiva_syntax_fix"}
     assert len(plugin_specs) == 11
     # core section follows, plugin section first (old snapshot order)
     assert [s.plugin for s in specs].index("core") == len(plugin_specs)
@@ -500,19 +500,19 @@ def test_in_process_loader_imports_shipped_metrics() -> None:
 def test_a_disabled_plugins_metrics_are_not_loaded(monkeypatch: pytest.MonkeyPatch) -> None:
     """Metrics follow the enable rule the widgets already follow: a disabled shipped plugin
     contributes none (the per-agent inspector panel), read per request."""
-    shipped = _plugin_metrics.PLUGINS_DIR / "ava_fleet" / "metrics.py"
+    shipped = _plugin_metrics.PLUGINS_DIR / "meiva_fleet" / "metrics.py"
     assert shipped in _plugin_metrics.plugin_metric_modules()
     real_load = enable_config.load_for_runtime
 
     def _fleet_disabled(known: set[str]) -> enable_config.PluginsConfig:
         config = real_load(known)
-        entries = {**config.plugins, "ava_fleet": enable_config.PluginEntry(enabled=False)}
+        entries = {**config.plugins, "meiva_fleet": enable_config.PluginEntry(enabled=False)}
         return enable_config.PluginsConfig(plugins=entries)
 
     monkeypatch.setattr(enable_config, "load_for_runtime", _fleet_disabled)
 
     assert shipped not in _plugin_metrics.plugin_metric_modules()
-    assert "ava_fleet" not in {s.plugin for s in _plugin_metrics.load_plugin_metrics()}
+    assert "meiva_fleet" not in {s.plugin for s in _plugin_metrics.load_plugin_metrics()}
 
 
 def _fixture_plugin(
@@ -523,13 +523,13 @@ def _fixture_plugin(
     plugin_dir = root / name
     plugin_dir.mkdir()
     (plugin_dir / "__init__.py").write_text("", encoding="utf-8")
-    (plugin_dir / "ava-plugin.json").write_text(
+    (plugin_dir / "meiva-plugin.json").write_text(
         json.dumps(
             {
                 "apiVersion": 2,
                 "name": name,
                 "version": "1.0.0",
-                "engines": {"ava": ">=2026.10.1"},
+                "engines": {"meiva": ">=2026.10.1"},
                 "contributions": {"metrics": [metric or f"{name}_one"]},
             }
         ),
@@ -573,7 +573,7 @@ def fixture_plugins_dir(
     monkeypatch.setattr(shipped_plugins, "__path__", [*shipped_path, str(tmp_path)])
 
     def _forget_fixture_modules() -> None:
-        for module_name in [m for m in sys.modules if m.startswith("ava_builtins.plugins.fx_")]:
+        for module_name in [m for m in sys.modules if m.startswith("meiva_builtins.plugins.fx_")]:
             del sys.modules[module_name]
 
     request.addfinalizer(_forget_fixture_modules)

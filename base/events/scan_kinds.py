@@ -1,5 +1,5 @@
 # ruff: noqa: T201  # CLI tool — printing the inventory is the point.
-"""scan_kinds.py — Reproducible event-name inventory for the Ava event registry.
+"""scan_kinds.py — Reproducible event-name inventory for the Meiva event registry.
 
 Regenerates the raw material behind base/events/registry.md:
 
@@ -14,7 +14,7 @@ Regenerates the raw material behind base/events/registry.md:
      not persisted).
 
 Usage:
-    python base/events/scan_kinds.py [--repo ~/Ava]
+    python base/events/scan_kinds.py [--repo ~/Meiva]
 
 Stdlib-only. Output is a
 de-duplicated event-name inventory grouped by mechanism. base/events/registry.md
@@ -263,7 +263,7 @@ def scan_label_only_calls(repo: Path) -> list[LabelOnlyCall]:
 
 def main() -> int:
     ap = argparse.ArgumentParser(description=(__doc__ or "").split("\n\n")[0])
-    ap.add_argument("--repo", default=str(Path.home() / "Ava"))
+    ap.add_argument("--repo", default=str(Path.home() / "Meiva"))
     args = ap.parse_args()
 
     event_kinds, event_type_kinds, sse_roles = scan_code(Path(args.repo))

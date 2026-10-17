@@ -1,4 +1,4 @@
-"""`ava mcp` + `ava memory` — MCP server management and memory-pool operations.
+"""`meiva mcp` + `meiva memory` — MCP server management and memory-pool operations.
 
 Builders plus their `_h_*` handlers. Handlers lazy-import their `cmd_*`
 implementation from ``cli.commands`` so parser building never loads Settings (see
@@ -16,7 +16,7 @@ def _h_mcp_add(args: argparse.Namespace) -> int:
 
     if args.command is None and (args.arg or args.env):
         print(
-            "ava: --arg/--env belong to --command; pass --command or drop them",
+            "meiva: --arg/--env belong to --command; pass --command or drop them",
             file=sys.stderr,
         )
         return 2
@@ -124,8 +124,8 @@ def _env_pair(value: str) -> str:
 
 
 def add_mcp_parser(sub: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
-    # `ava mcp` — manage MCP servers: install/uninstall out-of-core packages
-    # (under $AVA_HOME/mcps/) and edit the machine config ($AVA_HOME/mcp.json,
+    # `meiva mcp` — manage MCP servers: install/uninstall out-of-core packages
+    # (under $MEIVA_HOME/mcps/) and edit the machine config ($MEIVA_HOME/mcp.json,
     # the cross-vendor `mcpServers` shape Claude Code / Codex also consume).
     mcp_p = sub.add_parser("mcp", help="manage MCP servers")
     mcp_sub = mcp_p.add_subparsers(dest="mcp_cmd", required=True)
@@ -200,7 +200,7 @@ def add_mcp_parser(sub: argparse._SubParsersAction[argparse.ArgumentParser]) -> 
 
 
 def add_memory_parser(sub: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
-    """`ava memory` — memory pool operations.
+    """`meiva memory` — memory pool operations.
 
     init          Initialize the memory pool and plugin-owned templates
     refresh       Trigger gateway memory index refresh

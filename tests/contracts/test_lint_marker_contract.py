@@ -11,7 +11,7 @@ import pytest
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 _MESSAGE_KWARGS = _REPO_ROOT / "base" / "agents" / "messages" / "kwargs.py"
 _MARKERS_TS = _REPO_ROOT / "ui" / "web" / "src" / "components" / "timeline" / "markers.tsx"
-_SYSTEM_NOTE_WRITER_DIRS = ("agent", "ava_builtins", "demos")
+_SYSTEM_NOTE_WRITER_DIRS = ("agent", "meiva_builtins", "demos")
 
 
 def _note_tag_members() -> set[str]:
@@ -110,7 +110,7 @@ def test_system_note_writers_use_notetag_values() -> None:
 
 
 def test_send_system_note_default_tag_is_live_notetag_value() -> None:
-    from ava.agents import send_system_note
+    from meiva.agents import send_system_note
 
     default = inspect.signature(send_system_note).parameters["tag"].default
     assert isinstance(default, str)
@@ -118,7 +118,7 @@ def test_send_system_note_default_tag_is_live_notetag_value() -> None:
 
 
 def test_send_system_note_rejects_unknown_notetag_before_gateway() -> None:
-    from ava.agents import peers
+    from meiva.agents import peers
 
     with pytest.raises(ValueError) as exc_info:
         peers.validate_system_note(

@@ -93,7 +93,7 @@ const VIEW: ConfigView = {
       restart_required: "all",
       writable: true,
       sensitive: false,
-      env_var: "AVA_LOG_LEVEL",
+      env_var: "MEIVA_LOG_LEVEL",
       remote_writable: false,
       per_agent: true,
       can_enable: null,
@@ -111,7 +111,7 @@ const VIEW: ConfigView = {
       restart_required: "",
       writable: true,
       sensitive: false,
-      env_var: "AVA_MAX_RETRIES",
+      env_var: "MEIVA_MAX_RETRIES",
       remote_writable: false,
       per_agent: true,
       can_enable: null,
@@ -129,7 +129,7 @@ const VIEW: ConfigView = {
       restart_required: "",
       writable: true,
       sensitive: false,
-      env_var: "AVA_ENABLE_COMPACT",
+      env_var: "MEIVA_ENABLE_COMPACT",
       remote_writable: false,
       per_agent: false,
       can_enable: null,
@@ -147,7 +147,7 @@ const VIEW: ConfigView = {
       restart_required: "",
       writable: true,
       sensitive: true,
-      env_var: "AVA_API_KEY",
+      env_var: "MEIVA_API_KEY",
       remote_writable: false,
       per_agent: false,
       can_enable: null,
@@ -165,7 +165,7 @@ const VIEW: ConfigView = {
       restart_required: "",
       writable: false,
       sensitive: false,
-      env_var: "AVA_BUILD_SHA",
+      env_var: "MEIVA_BUILD_SHA",
       remote_writable: false,
       per_agent: false,
       can_enable: null,
@@ -183,7 +183,7 @@ const VIEW: ConfigView = {
       restart_required: "gateway",
       writable: true,
       sensitive: false,
-      env_var: "AVA_HOST_LABEL",
+      env_var: "MEIVA_HOST_LABEL",
       remote_writable: true,
       per_agent: false,
       can_enable: null,
@@ -201,7 +201,7 @@ const VIEW: ConfigView = {
       restart_required: "",
       writable: true,
       sensitive: false,
-      env_var: "AVA_BROWSER_ENABLED",
+      env_var: "MEIVA_BROWSER_ENABLED",
       remote_writable: true,
       per_agent: false,
       can_enable: false,
@@ -219,7 +219,7 @@ const VIEW: ConfigView = {
       restart_required: "agent",
       writable: true,
       sensitive: false,
-      env_var: "AVA_NUDGE_CADENCE",
+      env_var: "MEIVA_NUDGE_CADENCE",
       remote_writable: false,
       per_agent: true,
       choices: ["once_per_compaction", "every_time"],
@@ -238,7 +238,7 @@ const VIEW: ConfigView = {
       restart_required: "gateway",
       writable: false,
       sensitive: false,
-      env_var: "AVA_GATEWAY_PORT",
+      env_var: "MEIVA_GATEWAY_PORT",
       remote_writable: false,
       per_agent: false,
       can_enable: null,
@@ -275,7 +275,7 @@ const RESOLVED: ResolvedConfigView = {
   fields: [
     {
       name: "auto_compact_fraction",
-      env_var: "AVA_AUTO_COMPACT_FRACTION",
+      env_var: "MEIVA_AUTO_COMPACT_FRACTION",
       description: "Force-compact ceiling",
       field_type: "float",
       choices: null,
@@ -290,7 +290,7 @@ const RESOLVED: ResolvedConfigView = {
     },
     {
       name: "max_retries",
-      env_var: "AVA_MAX_RETRIES",
+      env_var: "MEIVA_MAX_RETRIES",
       description: "Retry count",
       field_type: "int",
       choices: null,
@@ -305,7 +305,7 @@ const RESOLVED: ResolvedConfigView = {
     },
     {
       name: "llm_retry_max_attempts",
-      env_var: "AVA_LLM_RETRY_MAX_ATTEMPTS",
+      env_var: "MEIVA_LLM_RETRY_MAX_ATTEMPTS",
       description: "Retry attempts",
       field_type: "int",
       choices: null,
@@ -396,11 +396,11 @@ describe("ConfigPage render", () => {
     expect(screen.getByText("Display & general")).toBeTruthy();
     expect(screen.getByText("Connection")).toBeTruthy();
 
-    expect(screen.getByTitle("AVA_LOG_LEVEL")).toBeTruthy();
+    expect(screen.getByTitle("MEIVA_LOG_LEVEL")).toBeTruthy();
 
     expect(inGroups("MAX RETRIES")).toHaveLength(1);
     expect(screen.queryByText("log_level")).toBeNull();
-    expect(screen.queryByText("AVA_LOG_LEVEL")).toBeNull();
+    expect(screen.queryByText("MEIVA_LOG_LEVEL")).toBeNull();
   });
 
   it("HIDDEN_ENV_VARS: transport micro-tuning is dropped from the panel", async () => {
@@ -421,7 +421,7 @@ describe("ConfigPage render", () => {
           restart_required: "",
           writable: false,
           sensitive: false,
-          env_var: "AVA_GATEWAY_MAX_RETRIES",
+          env_var: "MEIVA_GATEWAY_MAX_RETRIES",
           remote_writable: false,
           per_agent: false,
           can_enable: null,
@@ -432,7 +432,7 @@ describe("ConfigPage render", () => {
     vi.spyOn(api, "getConfig").mockResolvedValue(viewWithHiddenField);
     await renderSettled();
     expect(screen.queryByText("GATEWAY MAX RETRIES")).toBeNull();
-    expect(screen.queryByTitle("AVA_GATEWAY_MAX_RETRIES")).toBeNull();
+    expect(screen.queryByTitle("MEIVA_GATEWAY_MAX_RETRIES")).toBeNull();
   });
 
   it("field appears under its display-group header", async () => {
@@ -482,7 +482,7 @@ describe("ConfigPage render", () => {
     fireEvent.click(screen.getByTestId("edit-api_key"));
     const input = screen.getByTestId<HTMLInputElement>("input-api_key");
     expect(input.getAttribute("type")).toBe("password");
-    expect(screen.getByLabelText("Replace AVA_API_KEY")).toBe(input);
+    expect(screen.getByLabelText("Replace MEIVA_API_KEY")).toBe(input);
     expect(input.value).toBe("");
 
     fireEvent.change(input, { target: { value: "sk-NEW" } });
@@ -508,7 +508,7 @@ describe("ConfigPage render", () => {
     await renderSettled();
     expect(screen.getAllByText("CLI-only").length).toBeGreaterThan(0);
     expect(screen.queryByTestId("edit-build_sha")).toBeNull();
-    expect(within(screen.getByTitle("AVA_BUILD_SHA").closest("[id^='config-field-']")!).queryByText(/read-only/i)).toBeNull();
+    expect(within(screen.getByTitle("MEIVA_BUILD_SHA").closest("[id^='config-field-']")!).queryByText(/read-only/i)).toBeNull();
   });
 
   it("distinguishes editable values from runtime fields read-only on this machine", async () => {
@@ -527,7 +527,7 @@ describe("ConfigPage render", () => {
     fireEvent.change(screen.getByLabelText("Machine"), {
       target: { value: AGENT_RUNNER },
     });
-    const hostLabel = await screen.findByTitle("AVA_HOST_LABEL");
+    const hostLabel = await screen.findByTitle("MEIVA_HOST_LABEL");
     await waitFor(() => expect(screen.queryByTestId("edit-host_label")).toBeNull());
     const hostRow = hostLabel.closest<HTMLElement>("[id^='config-field-']")!;
     expect(within(hostRow).getByText("Runtime")).toBeTruthy();
@@ -551,7 +551,7 @@ describe("ConfigPage render", () => {
           restart_required: "all" as const,
           writable: true,
           sensitive: true,
-          env_var: "AVA_CLUSTER_SECRET",
+          env_var: "MEIVA_CLUSTER_SECRET",
           remote_writable: false,
           per_agent: false,
           can_enable: null,
@@ -673,7 +673,7 @@ describe("ConfigPage bool toggle (putConfig + write result)", () => {
   it("splits owners and retains a committed restart when another owner fails", async () => {
     vi.spyOn(api, "getConfig").mockResolvedValue({
       ...VIEW,
-      fields: VIEW.fields.map((field) => ({ ...field, owner: field.name === "enable_compact" ? "ava_fleet" : null })),
+      fields: VIEW.fields.map((field) => ({ ...field, owner: field.name === "enable_compact" ? "meiva_fleet" : null })),
     });
     const put = vi.spyOn(api, "putConfig").mockResolvedValueOnce(OK_RESULT(["log_level"], ["all"])).mockRejectedValueOnce(new Error("Fleet image changed"));
     await renderSettled();
@@ -1017,7 +1017,7 @@ describe("Fix 2 — capability reason hidden on non-editable rows", () => {
           restart_required: "",
           writable: false,
           sensitive: false,
-          env_var: "AVA_CLUSTER_FLAG",
+          env_var: "MEIVA_CLUSTER_FLAG",
           remote_writable: false,
           per_agent: false,
           can_enable: false,

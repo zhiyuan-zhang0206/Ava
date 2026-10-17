@@ -23,8 +23,7 @@ from agent.graph._init_context import init_context_node
 from agent.graph.hooks import compact
 from agent.graph.llm_errors import LlmLedger
 from agent.state import AgentState, ContextReset
-from ava.tests.fixtures.pin_agent import hosted_resources as hosted_resources
-from base.agents.context import AvaContext
+from base.agents.context import MeivaContext
 from base.clock import Clock
 from base.config import settings
 from base.db import Database, create_agent
@@ -41,7 +40,8 @@ from base.packages.plugins.extensions import (
     ExtensionRegistry,
     PluginContributions,
 )
-from base.paths import ava_home, skills_dir
+from base.paths import meiva_home, skills_dir
+from meiva.tests.fixtures.pin_agent import hosted_resources as hosted_resources
 
 
 def _config(tid: int) -> RunnableConfig:
@@ -54,10 +54,10 @@ def _runtime(
     *,
     resources: HostedTurnResources | None = None,
     database_gate: ProcessDbGate,
-) -> Runtime[AvaContext]:
+) -> Runtime[MeivaContext]:
     """`ops_pool=None` takes the container path."""
     return Runtime(
-        context=AvaContext(
+        context=MeivaContext(
             hosted_resources=resources,
             ops_pool=ops_pool,
             llm=AsyncMock(),
@@ -77,7 +77,7 @@ def _runtime(
 def _note(tag: str) -> HumanMessage:
     return HumanMessage(
         content=f"NOTE-{tag}",
-        additional_kwargs={"ava_msg_type": "system_note", "ava_note_tag": tag},
+        additional_kwargs={"meiva_msg_type": "system_note", "meiva_note_tag": tag},
     )
 
 
@@ -86,7 +86,7 @@ def _fake_notes(monkeypatch: pytest.MonkeyPatch, *tags: str) -> list[HumanMessag
     depend on which layers happen to be enabled in the test environment."""
     notes = [_note(t) for t in tags]
 
-    def fake_notes(_extensions: ExtensionRegistry, _ctx: AvaContext) -> list[HumanMessage]:
+    def fake_notes(_extensions: ExtensionRegistry, _ctx: MeivaContext) -> list[HumanMessage]:
         return list(notes)
 
     monkeypatch.setattr(_init_context, "context_notes", fake_notes)
@@ -94,7 +94,7 @@ def _fake_notes(monkeypatch: pytest.MonkeyPatch, *tags: str) -> list[HumanMessag
 
 
 def _tags(msgs: list[AnyMessage]) -> list[str | None]:
-    return [m.additional_kwargs.get("ava_note_tag") for m in msgs]  # pyright: ignore[reportUnknownMemberType]
+    return [m.additional_kwargs.get("meiva_note_tag") for m in msgs]  # pyright: ignore[reportUnknownMemberType]
 
 
 @pytest.fixture
@@ -136,7 +136,7 @@ async def test_a_plugin_declaration_reaches_the_head_through_the_context_registr
     def plugin_section(_slices: AgentSlices, *, catalog: ModelCatalog) -> str:
         return "## Declared by a plugin"
 
-    def plugin_note(_ctx: AvaContext) -> HumanMessage:
+    def plugin_note(_ctx: MeivaContext) -> HumanMessage:
         return _note("declared")
 
     registry = ExtensionRegistry(
@@ -313,7 +313,7 @@ async def test_established_head_records_what_the_capability_index_lists(
     scan, so the same act has to record what that snapshot covered — otherwise
     nothing downstream can tell that a skill installed later is missing from it.
     """
-    d = skills_dir(ava_home())
+    d = skills_dir(meiva_home())
     (d / "alpha").mkdir(parents=True)
     (d / "alpha" / "SKILL.md").write_text(
         "---\nname: alpha\ndescription: Alpha desc\n---\n\nBODY\n", encoding="utf-8"
@@ -328,7 +328,7 @@ async def test_established_head_records_what_the_capability_index_lists(
     )
 
     prompt = str(cmd.update["messages"][0].content)  # type: ignore[index]
-    assert "- `ava.skills.alpha` — Alpha desc" in prompt
+    assert "- `meiva.skills.alpha` — Alpha desc" in prompt
     assert cmd.update["capabilities"].indexed == {"alpha"}  # type: ignore[index]
 
 
@@ -349,7 +349,7 @@ async def test_a_skill_installed_after_establishment_reaches_the_next_turn(
     """
     from agent.graph.hooks.framework import framework_hooks
 
-    d = skills_dir(ava_home())
+    d = skills_dir(meiva_home())
     (d / "alpha").mkdir(parents=True)
     (d / "alpha" / "SKILL.md").write_text(
         "---\nname: alpha\ndescription: Alpha desc\n---\n\nBODY\n", encoding="utf-8"
@@ -382,7 +382,7 @@ async def test_a_skill_installed_after_establishment_reaches_the_next_turn(
 
     assert update is not None
     (note,) = update["messages"]
-    assert "- `ava.skills.beta` — Beta desc" in note.content  # pyright: ignore[reportUnknownMemberType]
+    assert "- `meiva.skills.beta` — Beta desc" in note.content  # pyright: ignore[reportUnknownMemberType]
     assert update["capabilities"].indexed == {"alpha", "beta"}  # pyright: ignore[reportUnknownMemberType]
 
 
@@ -407,7 +407,7 @@ async def test_a_compaction_in_the_same_pass_keeps_its_summary_and_its_head(
     from agent.hooks import make_hook_runner
     from base.lm.context_budget import ContextBudget
 
-    d = skills_dir(ava_home())
+    d = skills_dir(meiva_home())
     (d / "alpha").mkdir(parents=True)
     (d / "alpha" / "SKILL.md").write_text(
         "---\nname: alpha\ndescription: Alpha desc\n---\n\nBODY\n", encoding="utf-8"
@@ -503,7 +503,7 @@ async def test_a_compaction_in_the_same_pass_keeps_its_summary_and_its_head(
     assert isinstance(msgs[0], SystemMessage)
     # The rebuilt index carries the skill the deferred note would have named —
     # which is why deferring costs nothing.
-    assert "- `ava.skills.beta` — Beta desc" in str(msgs[0].content)  # pyright: ignore[reportUnknownArgumentType, reportUnknownMemberType]
+    assert "- `meiva.skills.beta` — Beta desc" in str(msgs[0].content)  # pyright: ignore[reportUnknownArgumentType, reportUnknownMemberType]
     # And the compaction's summary made it into the new window.
     assert summary_text in str(msgs[-1].content)  # pyright: ignore[reportUnknownArgumentType, reportUnknownMemberType]
 
@@ -523,7 +523,7 @@ def test_parked_tail_survives_the_checkpoint_round_trip() -> None:
     parked = ContextReset(
         tail=[
             HumanMessage(
-                content="the summary", additional_kwargs={"ava_msg_type": "compact_summary"}
+                content="the summary", additional_kwargs={"meiva_msg_type": "compact_summary"}
             ),
             HumanMessage(content="a chat co-batched with the compact"),
         ],
@@ -538,7 +538,7 @@ def test_parked_tail_survives_the_checkpoint_round_trip() -> None:
     ]
     # The kwargs are what the timeline classifies the summary by — a bare
     # HumanMessage would render as a user turn.
-    assert restored.tail[0].additional_kwargs["ava_msg_type"] == "compact_summary"
+    assert restored.tail[0].additional_kwargs["meiva_msg_type"] == "compact_summary"
     assert restored.resume == "before_llm"
 
 

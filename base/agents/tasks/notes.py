@@ -2,7 +2,7 @@
 implementation for the two writers.
 
 An agent's task notes are appended by the SDK task registry
-(`ava_builtins/plugins/ava_fleet/task_registry.py`) and by the gateway when a
+(`meiva_builtins/plugins/meiva_fleet/task_registry.py`) and by the gateway when a
 machine pause reassigns a task to the drain owner
 (`gateway/cluster/machine_pause.py`). Both build the same line, and both used
 to build it by hand from `datetime.now(UTC).astimezone()` — the *writing

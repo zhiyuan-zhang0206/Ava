@@ -5,7 +5,7 @@ from typing import Literal, NotRequired, TypedDict
 from base.events.vocabulary import LLM_ERROR_FAMILY, EventSpec, telemetry_event
 
 
-# ava:ref base/events/docs/llm-payloads.ava.okf.md#usage-time-price-snapshot
+# meiva:ref base/events/docs/llm-payloads.meiva.okf.md#usage-time-price-snapshot
 class LlmUsage(TypedDict):
     model: str
     calls: int
@@ -45,7 +45,7 @@ class LlmRetry(TypedDict):
     duration_seconds: float
 
 
-# ava:ref base/events/docs/llm-payloads.ava.okf.md#provider-error-dimensions
+# meiva:ref base/events/docs/llm-payloads.meiva.okf.md#provider-error-dimensions
 class LlmProviderError(TypedDict):
     error_class: str
     provider: str

@@ -1,4 +1,4 @@
-"""Provider-account guard — health-probe checks 9-10 (`ava cluster health-probe`).
+"""Provider-account guard — health-probe checks 9-10 (`meiva cluster health-probe`).
 
 Two alert-only checks on the LLM provider account the fleet bills to, added
 after the 2026-09-18 outage: the DeepSeek balance hit zero around 05:02, every
@@ -7,7 +7,7 @@ the first signal anyone acted on was the owner waking up.
 
 9. **Balance runway** — reads the account balance and fails while it sits
    below a configurable minimum, so a top-up lands *before* the account runs
-   dry. The Grafana billing rule (`ava-ops-llm-billing-quota`) reports the
+   dry. The Grafana billing rule (`meiva-ops-llm-billing-quota`) reports the
    first post-arrears rejection — already too late; this check is the
    pre-arrears signal.
 10. **Blocked agents** — fails while at least N agents are halted by
@@ -131,7 +131,7 @@ def balance_failure() -> str | None:
         )
     return (
         "account balance below the configured minimum "
-        f"(AVA_PROVIDER_GUARD_BALANCE_MIN_CNY=\u00a5{minimum:g}); top up the "
+        f"(MEIVA_PROVIDER_GUARD_BALANCE_MIN_CNY=\u00a5{minimum:g}); top up the "
         "provider account before it runs dry"
     )
 
@@ -204,7 +204,7 @@ def blocked_agents_failure(*, database_factory: DatabaseFactory) -> str | None:
     )
     return (
         "multiple agents are halted by permanent provider rejections "
-        f"(threshold AVA_PROVIDER_GUARD_BLOCKED_AGENTS_MIN="
+        f"(threshold MEIVA_PROVIDER_GUARD_BLOCKED_AGENTS_MIN="
         f"{guard.provider_guard_blocked_agents_min}); automatic recovery stays off "
         "until a turn succeeds — resolve the provider cause, then revive the "
         "affected agents"

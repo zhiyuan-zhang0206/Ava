@@ -21,8 +21,8 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Ava",
-  description: "Ava agent web UI",
+  title: "Meiva",
+  description: "Meiva agent web UI",
 };
 
 // Declares both schemes the console supports; the browser follows

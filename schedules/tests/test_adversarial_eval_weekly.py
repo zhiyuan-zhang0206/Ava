@@ -266,8 +266,8 @@ def test_stale_batch_marker_is_indexed_alerted_and_its_workers_terminated(
         return 999
 
     statuses = {agent.agent_id: agent.status for agent in agents}
-    monkeypatch.setattr(schedule.ava.agents, "get_status", statuses.__getitem__)
-    monkeypatch.setattr(schedule.ava.agents, "terminate", terminate)
+    monkeypatch.setattr(schedule.meiva.agents, "get_status", statuses.__getitem__)
+    monkeypatch.setattr(schedule.meiva.agents, "terminate", terminate)
     monkeypatch.setattr(schedule, "ensure_agent", alert_owner)
 
     schedule._recover_stale_batch(marker, tmp_path, fallback_week="2026-35")
@@ -306,8 +306,8 @@ def test_worker_sweep_terminates_only_workers_outside_the_current_batch(
             next_cursor=None,
         )
 
-    monkeypatch.setattr(schedule.ava.agents, "list_agents", list_agents)
-    monkeypatch.setattr(schedule.ava.agents, "terminate", terminate)
+    monkeypatch.setattr(schedule.meiva.agents, "list_agents", list_agents)
+    monkeypatch.setattr(schedule.meiva.agents, "terminate", terminate)
 
     schedule._sweep_leftover_workers({102})
 
@@ -356,12 +356,14 @@ def test_batch_owns_scenario_http_server_until_exit(
     monkeypatch.setattr(schedule, "_prepare_case", prepare_case)
     monkeypatch.setattr(schedule, "audit_case", Mock(return_value=AuditResult(1.0, "ok")))
     monkeypatch.setattr(
-        schedule.ava.agents,
+        schedule.meiva.agents,
         "list_agents",
         Mock(return_value=SimpleNamespace(agents=[], next_cursor=None)),
     )
-    monkeypatch.setattr(schedule.ava.agents, "get_status", Mock(return_value=schedule.S.TERMINATED))
-    monkeypatch.setattr(schedule.ava.agents, "get_last_message", Mock(return_value="done"))
+    monkeypatch.setattr(
+        schedule.meiva.agents, "get_status", Mock(return_value=schedule.S.TERMINATED)
+    )
+    monkeypatch.setattr(schedule.meiva.agents, "get_last_message", Mock(return_value="done"))
 
     if failure is None:
         scoreboard_path = schedule.run_weekly_batch()

@@ -21,12 +21,12 @@ and alerting stay with the rollout targets.
 - The default roster read renders from snapshots no older than 180 s. A host with a
   missing or stale snapshot is dialed inline; a host whose last attempt failed is
   rendered offline once the failure count reaches the machine-offline threshold.
-- `?fresh=true` dials everything. `ava cluster status` and `cli.fleet_update` use it:
+- `?fresh=true` dials everything. `meiva cluster status` and `cli.fleet_update` use it:
   they decide what to do from the answer.
 - The fresh read dials in parallel, each dial under the same total deadline
   (`status_probe_timeout_seconds`), so a blackholed host costs one budget, not one per host.
 - A gateway that predates this change ignores `?fresh=true` and dials inline as before, so
-  the newer `ava cluster status` and `cli.fleet_update` work against it.
+  the newer `meiva cluster status` and `cli.fleet_update` work against it.
 - `MachineStatus.observed_at` says how old the rendered status is.
 - The gateway keeps no failure memory and runs no recovery thread. The three
   `status_probe_*` timing settings are removed.

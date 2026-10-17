@@ -38,7 +38,7 @@ describe("app-ui locale + autofill", () => {
   it("zh system locale renders the setup screen in Chinese", () => {
     const w = loadPage("zh-CN");
     const doc = w.document;
-    expect(doc.querySelector("[data-i18n='connectTitle']")!.textContent).toBe("\u8fde\u63a5\u5230 Ava");
+    expect(doc.querySelector("[data-i18n='connectTitle']")!.textContent).toBe("\u8fde\u63a5\u5230 Meiva");
     expect(doc.documentElement.lang).toBe("zh-CN");
     expect(doc.getElementById("server")!.getAttribute("placeholder")).toBe("\u4e3b\u673a\u6216 http://\u4e3b\u673a:\u7aef\u53e3");
     expect(doc.getElementById("setup-submit")!.textContent).toBe("\u8fde\u63a5");
@@ -49,7 +49,7 @@ describe("app-ui locale + autofill", () => {
   it("en system locale keeps the English defaults", () => {
     const w = loadPage("en-US");
     const doc = w.document;
-    expect(doc.querySelector("[data-i18n='connectTitle']")!.textContent).toBe("Connect to Ava");
+    expect(doc.querySelector("[data-i18n='connectTitle']")!.textContent).toBe("Connect to Meiva");
     expect(doc.documentElement.lang).toBe("en");
     expect(doc.getElementById("server")!.getAttribute("placeholder")).toBe("host or http://host:port");
   });

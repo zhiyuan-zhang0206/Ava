@@ -392,7 +392,7 @@ def _run_demo_preview(args: argparse.Namespace, preview: Path, *, open_url: UrlO
         stdout=subprocess.DEVNULL,
         stderr=subprocess.STDOUT,
         text=True,
-        env=inherited_process_env({"AVA_DEV_ORIGINS": "127.0.0.1"}),
+        env=inherited_process_env({"MEIVA_DEV_ORIGINS": "127.0.0.1"}),
         start_new_session=True,
     )
     try:
@@ -439,9 +439,9 @@ def run_host(
     if not args.base_url:
         raise ValueError("--base-url is required")
     assert_gate_origin(args.base_url, open_url=open_url)
-    cookie_value = inherited_process_env().get("AVA_VISUAL_GATE_COOKIE_FILE")
+    cookie_value = inherited_process_env().get("MEIVA_VISUAL_GATE_COOKIE_FILE")
     if not cookie_value:
-        raise ValueError("AVA_VISUAL_GATE_COOKIE_FILE is required")
+        raise ValueError("MEIVA_VISUAL_GATE_COOKIE_FILE is required")
     cookie_file = resolved_cookie_file(Path(cookie_value).resolve())
     health_base = args.health_url or args.base_url.rstrip("/")
     session_precheck(health_base, cookie_file, open_url=open_url)

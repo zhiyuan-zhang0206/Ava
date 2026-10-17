@@ -7,7 +7,7 @@ and needs no release process and no bump discipline (task #2915 design §5.5
 v3 — the hand-maintained `[project].version` was rejected as the gate source;
 it survives only as the checkout-less fallback).
 
-The gates compare against the bare `YYYY.M.D` string — `engines.ava` ranges
+The gates compare against the bare `YYYY.M.D` string — `engines.meiva` ranges
 via `base.packages.plugins.manifest.range_allows` plus the `requires_commit` ancestor
 check. Prefer the display form only where a human reads it (status output,
 log lines).
@@ -95,8 +95,8 @@ def parse_version(raw: str) -> Version | None:
 
 
 def host_version_from_repo(repo: Path) -> str:
-    """The Ava version this checkout carries (`[project].version` in its
-    pyproject.toml) — the host version `engines.ava` is checked against."""
+    """The Meiva version this checkout carries (`[project].version` in its
+    pyproject.toml) — the host version `engines.meiva` is checked against."""
     pyproject = repo / "pyproject.toml"
     if not pyproject.is_file():
         raise HostVersionError(f"cannot determine host version: no pyproject.toml in {repo}")

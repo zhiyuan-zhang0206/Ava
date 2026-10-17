@@ -1,5 +1,5 @@
-# ava:ref services/derived/insights/docs/insights.ava.okf.md#insights-service-ownership
-# ava:ref services/derived/insights/docs/insights.ava.okf.md#daemon-live-clock-owner
+# meiva:ref services/derived/insights/docs/insights.meiva.okf.md#insights-service-ownership
+# meiva:ref services/derived/insights/docs/insights.meiva.okf.md#daemon-live-clock-owner
 from __future__ import annotations
 
 import asyncio
@@ -27,7 +27,7 @@ from base.host.exit_codes import hard_exit as _hard_exit
 from base.native_process.code_version import CodeVersion
 from base.native_process.loaded_commit import LoadedCommit
 from base.packages.plugin_providers import build_model_catalog
-from base.paths import ava_home, insights_pidfile, insights_socket
+from base.paths import insights_pidfile, insights_socket, meiva_home
 from base.telemetry import build_pipeline
 from base.telemetry.process_logging import init_gateway_process
 from services.derived.insights.app import build_app
@@ -111,7 +111,7 @@ def main() -> None:
     config = ConfigBoot()
     config.boot()
     machine = machine_from_boot(config)
-    process_home = ava_home().resolve()
+    process_home = meiva_home().resolve()
     assert_schema_current(config.view.data_plane.db_url)
     version = CodeVersion(image)
     gate = ProcessDbGate(version=version.get, process="insights")
@@ -137,7 +137,7 @@ def main() -> None:
 
     runner = asyncio.Runner()
     try:
-        runner.run(run(home=ava_home(), config=config, database=database))
+        runner.run(run(home=meiva_home(), config=config, database=database))
     except KeyboardInterrupt:
         signal.signal(signal.SIGTERM, signal.SIG_IGN)
         _log.info("[insights] interrupted, shutting down")

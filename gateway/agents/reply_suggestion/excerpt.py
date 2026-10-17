@@ -1,4 +1,4 @@
-# ava:ref gateway/agents/docs/reply-suggestion/reply-suggestion.ava.okf.md#excerpt-budget-priority
+# meiva:ref gateway/agents/docs/reply-suggestion/reply-suggestion.meiva.okf.md#excerpt-budget-priority
 from __future__ import annotations
 
 from collections.abc import Sequence

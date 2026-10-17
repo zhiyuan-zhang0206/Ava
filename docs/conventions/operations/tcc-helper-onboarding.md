@@ -1,6 +1,6 @@
 # TCC helper onboarding (one-pass grants)
 
-How to get every AvaPermissionsHelper TCC grant in place in one sitting -- and
+How to get every MeivaPermissionsHelper TCC grant in place in one sitting -- and
 why it must happen before the helper-spawn backend is enabled on a host.
 
 The grants a helper needs (Desktop / Documents / Downloads folder rows, the
@@ -14,9 +14,9 @@ verdict matrix.
 
 ## Why before the flip
 
-`AVA_PERMISSIONS_HELPER_SPAWN` (host scope, default off) routes service,
+`MEIVA_PERMISSIONS_HELPER_SPAWN` (host scope, default off) routes service,
 agent, and pty-sessions service spawns through the helper so their TCC attribution lands on
-`com.ava.permissions-helper`. Enabling it while a grant is still missing flips
+`com.meiva.permissions-helper`. Enabling it while a grant is still missing flips
 that access from the already-granted python identity to an ungranted helper
 identity: dialogs at best, silent denials at worst. Complete this onboarding
 first (per host), then flip.
@@ -37,7 +37,7 @@ venv and the user present:
 
 - Every trigger is a child process spawned through the helper
   (`base.host.permissions_helper.client.spawn_process`), so tccd attributes the
-  request to `com.ava.permissions-helper`. The inventory probe uses the same
+  request to `com.meiva.permissions-helper`. The inventory probe uses the same
   helper-spawned `TCCAccessPreflight` pattern as
   `scripts/host_ops/tcc/verify-spawn-chain.sh`: zero dialogs, repeatable.
 - The interactive run waits for each dialog decision (default 90s per item,
@@ -60,7 +60,7 @@ venv and the user present:
   `icloud` (experimental -- evidence levels in the trigger-method archive
   below). `fda` and `devtools` are never attempted, by decision.
 
-The panel (`AvaPermissionsHelper.app`, shown on a socket-less launch) drives
+The panel (`MeivaPermissionsHelper.app`, shown on a socket-less launch) drives
 the same tool: *Check status* runs `--check`; *Fill missing grants* runs it
 with `--fill-pending --confirm-user-present` -- the click is the user-present
 attestation, and there is no automatic fill path (a launch only checks). A
@@ -94,7 +94,7 @@ are never attempted, by decision.
 
 - **Documents can not be triggered through the helper file APIs.** The
   helper's `file_list` / `file_read` path whitelist covers only `~/Desktop`,
-  `~/Downloads` and `~/.ava/incoming`; asking for `~/Documents` fails with
+  `~/Downloads` and `~/.meiva/incoming`; asking for `~/Documents` fails with
   `outside whitelist` before tccd sees a request (and a wrapper that catches
   exceptions as "request-logged" will misreport it as registered). The tool
   therefore triggers every folder through a spawned child that directly
@@ -215,7 +215,7 @@ Per-machine rebuild/reinstall flow gains one step, inserted before the flip:
    `--check`; add `--fill-pending --confirm-user-present` to also attempt the
    extended groups (`appdata` / `media` / `icloud`) that still lack their
    grant (experimental methods -- see the archive).
-4. Flip the backend: `ava config set permissions_helper_spawn=true --machine
+4. Flip the backend: `meiva config set permissions_helper_spawn=true --machine
    <host>` (official config API), restart the host's spawn-related services,
    then verify with `scripts/host_ops/tcc/verify-spawn-chain.sh` (PASS = the probe's
    requests attributed to the helper; the per-service preflight results it

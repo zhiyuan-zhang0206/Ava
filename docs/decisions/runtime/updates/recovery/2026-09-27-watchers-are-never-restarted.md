@@ -2,10 +2,10 @@
 
 ## Context
 
-`ava.watcher.at/cron/launch` spawns a watcher as a PTY shell session running
+`meiva.watcher.at/cron/launch` spawns a watcher as a PTY shell session running
 a generated script. Since issue #1014 (the fix landed as R1's `agent_watchers`
 registry, task #1021), every spawn wrote a row recording "this watcher should
-exist"; the agent's boot reconcile (`ava.watcher.reconcile`, called from
+exist"; the agent's boot reconcile (`meiva.watcher.reconcile`, called from
 `agent/_process_boot.py`) read that registry on every runtime build and
 rebuilt any row whose session had died — re-spawning a live cron from its
 stored expression, or marking a missed one-shot and alerting its owner.
@@ -39,36 +39,36 @@ Two separate problems were tangled in the old design:
    session at all?** The registry existed so the reconcile technically had a
    "what am I rebuilding, and from what payload" ledger. Once rebuilding is
    off the table, a watcher is *by definition* nothing but an
-   `ava.shell.sessions` session running a generated script — the same object
+   `meiva.shell.sessions` session running a generated script — the same object
    the SDK already lists, captures, renews, and kills. Keeping a parallel
    ledger for it is dead weight the moment it stops being read for a rebuild.
 
 ## Decision
 
-1. **Nothing ever re-spawns a watcher.** `ava.watcher.reconcile` and the boot
+1. **Nothing ever re-spawns a watcher.** `meiva.watcher.reconcile` and the boot
    reconcile that called it (`agent/_process_boot.py`, wired from
    `services/agent_host/host.py` / `daemon.py`) are deleted outright, along
    with the host-boot forced-wake that existed only to drive that reconcile
    (`AgentHost.watcher_boot_wakes`, `_watcher_recovery_pending`,
    `_schedule_watcher_recovery`). A watcher whose session ends for any
-   reason — its pty host crashed, `ava stop`, a release closing terminals, a
+   reason — its pty host crashed, `meiva stop`, a release closing terminals, a
    machine reboot, an update — simply stays gone. The agent decides on its
    own whether and how to re-create it, the next time it has reason to look.
 2. **A watcher carries no database record.** `shared/daemon/schedules/watcher_registry.py`
    (the `agent_watchers` table's API) and `gateway/watcher_ttl.py` (its
    TTL-reclaim and terminated-owner-reclaim helpers) are deleted, along with
-   every write into `agent_watchers`: `ava.watcher._spawn`'s registration
+   every write into `agent_watchers`: `meiva.watcher._spawn`'s registration
    (`register_watcher` / `register_cron_atomic` / `register_cron_renewal`),
    the generated bootstrap's clean-exit row delete, and
-   `ava.shell.sessions.kill` / `kill_all`'s row delete. A watcher is now
+   `meiva.shell.sessions.kill` / `kill_all`'s row delete. A watcher is now
    exactly what it always structurally was — a shell session with a
    generated script and a TTL — and nothing more. Registration-time cron
    twin dedupe/supersede (#1825's atomic reuse, #2061's twin-supersede) goes
-   with it: calling `ava.watcher.cron()` again with the same expression no
+   with it: calling `meiva.watcher.cron()` again with the same expression no
    longer replaces or renews anything, it starts a second, independent
    session. If an agent wants exactly one live copy of a schedule, it kills
-   the old session itself (`ava.shell.sessions.kill`) — visible and listable
-   through the same `ava.shell.sessions` surface as any other session, with
+   the old session itself (`meiva.shell.sessions.kill`) — visible and listable
+   through the same `meiva.shell.sessions` surface as any other session, with
    `renew()` now applying to a watcher's TTL exactly as it would to a plain
    shell's.
 3. **A watcher's session is reclaimed by the same TTL path as any other
@@ -87,22 +87,22 @@ Two separate problems were tangled in the old design:
      timeout watchdog): the shell layer's existing completion notice fires,
      respecting the `notify` policy, and the session (with no row to delete
      any more) simply closes.
-   - *The owner agent kills it itself* (`ava.shell.sessions.kill` /
+   - *The owner agent kills it itself* (`meiva.shell.sessions.kill` /
      `kill_all`): no extra message — the call already returned its result to
      the same turn that made the decision.
    - *The platform reclaims it*: at its TTL deadline (the gateway TTL
-     reaper, point 3 above), or a **normal** `ava stop` / update force-closes
+     reaper, point 3 above), or a **normal** `meiva stop` / update force-closes
      a busy terminal (`cli/commands/_temporary_stop.py`'s existing durable
      closure notice for a busy session, unchanged and unaffected by this PR
      — verified nothing watcher-specific ever excluded a watcher session from
      it). Either of these sends a message.
    - *The pty host is killed with no orchestrated closer* — an external
      SIGKILL, a machine power loss, a crash nothing durably recorded, but
-     also `ava stop --force` (`cli/commands/stop.py:_stop_terminals_force`,
+     also `meiva stop --force` (`cli/commands/stop.py:_stop_terminals_force`,
      which kills every session directly with no notice path at all) and a
      Windows unit's stop (`cli/commands/_temporary_stop.py`'s Windows branch
      returns before the notice-capture step): **no message in any of
-     these.** The session is simply absent from `ava.shell.sessions.list()`
+     these.** The session is simply absent from `meiva.shell.sessions.list()`
      on the agent's next check. This is an accepted gap, not a deferred
      feature — see Alternatives rejected.
 5. **The generated bootstrap's orphan guard and timeout watchdog are
@@ -140,7 +140,7 @@ Two separate problems were tangled in the old design:
   dedupe's own machinery (the advisory-lock schedule key, the twin-supersede
   kill loop, the `generation`/`exclude_session` plumbing) has no remaining
   job. An agent that registers the same cron twice now simply has two
-  sessions, exactly as if it had called `ava.shell.sessions.new()` twice —
+  sessions, exactly as if it had called `meiva.shell.sessions.new()` twice —
   visible and resolvable through the one surface that already handles it.
 - **Auto-restore a watcher on the owner's next turn regardless of
   idempotency** — the whole point of this change: a script's side effects up
@@ -149,10 +149,10 @@ Two separate problems were tangled in the old design:
 
 ## Consequences
 
-- `ava.watcher` shrinks to spawn-only: `at`/`cron`/`launch` create a session
+- `meiva.watcher` shrinks to spawn-only: `at`/`cron`/`launch` create a session
   and generated script; nothing reads them back except the session itself.
-  `ava/_watcher_reconcile.py` and `ava/_watcher_reexports.py` are deleted in
-  full; `ava/watcher.py` loses its dedupe, supersede, and registry-write
+  `meiva/_watcher_reconcile.py` and `meiva/_watcher_reexports.py` are deleted in
+  full; `meiva/watcher.py` loses its dedupe, supersede, and registry-write
   paths.
 - The `agent_watchers` table, its CHECK constraints, and the runner-role
   grants in `shared/cluster/provision.py` are **left in place** by this PR —
@@ -175,23 +175,23 @@ Two separate problems were tangled in the old design:
   not an oversight: the LLM decides what a resurrect-by-watcher-wake means
   each time, exactly as it decides everything else that used to be
   code-level judgment in the old design (Context, above). An agent that does
-  not want to be woken again kills its watchers (`ava.shell.sessions.kill`)
+  not want to be woken again kills its watchers (`meiva.shell.sessions.kill`)
   before terminating.
 - A watcher's `notify` completion policy behaves exactly as it did before:
   an explicit `notify="always"`/`"failure"` is baked into the shell command
   at spawn, while an omitted `notify` is resolved against the agent's
   `completion_notice_policy` by the gateway at delivery time, not at spawn
-  (`ava/shell/background.py:notified_line`). It was never truly a registry
+  (`meiva/shell/background.py:notified_line`). It was never truly a registry
   fact (the registry only stored it to hand to a future rebuild), so
   removing the registry write changes nothing about how a watcher's own
   completion notice behaves.
 - The crash/reboot-with-no-closer gap (point 4) means a watcher can vanish
   with zero record, same as an ordinary shell session can. Anyone who needs
   to notice a specific watcher's disappearance must poll
-  `ava.shell.sessions.list()` for it, or design their watcher's absence to
+  `meiva.shell.sessions.list()` for it, or design their watcher's absence to
   be discoverable some other way — this platform makes no promise otherwise
   for any session kind today.
-- Registering `ava.watcher.cron()` a second time with an unchanged schedule
+- Registering `meiva.watcher.cron()` a second time with an unchanged schedule
   now yields two independent, simultaneously-firing sessions rather than one
   superseded/reused session — a documented behavior change for anything
   that relied on the old dedupe (nothing in this repo's shipped skills or

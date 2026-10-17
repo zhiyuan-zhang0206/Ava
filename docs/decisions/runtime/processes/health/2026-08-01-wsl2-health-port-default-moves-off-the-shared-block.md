@@ -4,13 +4,13 @@
 
 [2026-07-31-a-health-port-belongs-to-a-unit.md](2026-07-31-a-health-port-belongs-to-a-unit.md)
 fixed the 2026-07-26 WSL2/native-Windows collision by making a health port a
-per-unit fact: the operator states a co-located unit's own block with `ava
-enroll --health-port-base <N>`, and `ava start` refuses to launch onto a port
+per-unit fact: the operator states a co-located unit's own block with `meiva
+enroll --health-port-base <N>`, and `meiva start` refuses to launch onto a port
 another unit already answers on. Omitting the flag leaves every daemon on the
 shared default (`shared.daemon_health.DEFAULT_PORTS`, 8102-8109).
 
-Issue #1152: the win/wsl pair on a Windows laptop (`C:\Users\ava\.ava` +
-`/home/ava/.ava`) still sits on that shared default today — the collision is
+Issue #1152: the win/wsl pair on a Windows laptop (`C:\Users\meiva\.meiva` +
+`/home/meiva/.meiva`) still sits on that shared default today — the collision is
 latent because WSL2's default NAT networking does not forward Windows'
 loopback into the distro, so the pre-bind gate reads clean on both sides. It
 stops being latent the moment WSL2 switches to *mirrored* networking
@@ -23,7 +23,7 @@ until something breaks.
 
 ## Decision
 
-`ava enroll`, when `--health-port-base` is omitted, checks two things before
+`meiva enroll`, when `--health-port-base` is omitted, checks two things before
 falling through to the shared default:
 
 1. Does this unit's `.env` already carry a health-port block (a prior explicit
@@ -67,8 +67,8 @@ port block with this unit's health ports. Placed one slot past `BLOCK_MAX`
 instead, where the allocator never scans (asserted by
 `test_wsl_default_health_port_base_cannot_collide_with_a_birthed_cluster`).
 
-**Detect co-location at `ava start` and shift ports only then.** By the time
-`ava start` runs, the daemons are about to bind — moving ports at that point
+**Detect co-location at `meiva start` and shift ports only then.** By the time
+`meiva start` runs, the daemons are about to bind — moving ports at that point
 needs the same kind of live reallocation the 2026-07-31 decision ruled out,
 and it still would not help whichever unit of the pair starts first, since
 there is nothing yet to detect against.
@@ -97,7 +97,7 @@ loopback namespace with something else.
 - The reserved base is one fixed value. A hypothetical *third* co-located unit
   (two WSL2 distros on one box, WSL2 + a container) collides on it exactly as
   today's shared default collides on 8100s for a second unit — caught by the
-  same `ava start` pre-bind gate, unchanged from the 2026-07-31 decision.
+  same `meiva start` pre-bind gate, unchanged from the 2026-07-31 decision.
   `--health-port-base` remains the only way to pick a base beyond "the shared
   default" or "the WSL2 default".
 - **Found and fixed along the way:** `write_bootstrap_env` replaces a unit's
@@ -108,8 +108,8 @@ loopback namespace with something else.
   twice, first with the flag, then without): the second call silently dropped
   the block the first call wrote. This contradicted the 2026-07-31 decision's
   stated consequence ("an already-enrolled runner keeps whatever ports its
-  `.env` holds"), which held for `ava start`'s refresh
-  (`materialize_cluster_env`, upsert-only) but not for a second `ava enroll`
+  `.env` holds"), which held for `meiva start`'s refresh
+  (`materialize_cluster_env`, upsert-only) but not for a second `meiva enroll`
   call. `run_enroll` now reads any existing block before the replace and
   restores it verbatim when this call states nothing new — closing the gap for
   every platform, not only WSL2.

@@ -14,7 +14,7 @@ budget must and must not buy**:
 - a gateway that comes back inside the budget is waited for, not declined;
 - a gateway that is genuinely down still fails, inside the bound, so `INCOMPLETE` stays
   fast and legible rather than becoming slow;
-- the healthy path pays nothing — a budget that taxes every good `ava start` would be a
+- the healthy path pays nothing — a budget that taxes every good `meiva start` would be a
   bad trade even when it is correct;
 - a status the gateway *chose* to send is still terminal on the first dial.
 """
@@ -91,7 +91,7 @@ def test_a_dead_gateway_still_fails_and_inside_the_bound(preflight) -> None:
 
 
 def test_a_reachable_gateway_costs_one_dial_and_no_sleep(preflight) -> None:
-    """Every healthy `ava start` and every healthy self-update runs this. It must be
+    """Every healthy `meiva start` and every healthy self-update runs this. It must be
     one probe and zero waiting, exactly as before the budget existed."""
     rc, clock = preflight([SERVING])
 

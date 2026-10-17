@@ -25,7 +25,7 @@ class Component:
     services: tuple[str, ...]
 
 
-# ava:ref scripts/host_ops/docs/fleet-update-keep.ava.okf.md#component-keep-decision
+# meiva:ref scripts/host_ops/docs/fleet-update-keep.meiva.okf.md#component-keep-decision
 COMPONENTS: tuple[Component, ...] = (
     Component(
         name="pty-sessions",
@@ -35,9 +35,9 @@ COMPONENTS: tuple[Component, ...] = (
     ),
     Component(
         name="browser",
-        dirs=("services/desktop/browser", "ava_builtins/mcps/chrome"),
+        dirs=("services/desktop/browser", "meiva_builtins/mcps/chrome"),
         watch=(
-            "ava/mcps/_browser.py",
+            "meiva/mcps/_browser.py",
             "services/supervision/healthchecks/browser.py",
             "services/supervision/healthchecks/browser_mcp.py",
         ),
@@ -56,7 +56,7 @@ def _under(path: str, directory: str) -> bool:
     return path == directory or path.startswith(directory + "/")
 
 
-# ava:ref scripts/host_ops/docs/fleet-update-keep.ava.okf.md#component-roots-and-watch
+# meiva:ref scripts/host_ops/docs/fleet-update-keep.meiva.okf.md#component-roots-and-watch
 def roots_at(files: frozenset[str], component: Component) -> list[str]:
     return sorted(
         f
@@ -119,7 +119,7 @@ def _changed(repo: Path, old: str, new: str) -> list[str]:
     return [path for path in done.stdout.split("\0") if path]
 
 
-# ava:ref scripts/host_ops/docs/fleet-update-keep.ava.okf.md#scratch-worktree-cleanup
+# meiva:ref scripts/host_ops/docs/fleet-update-keep.meiva.okf.md#scratch-worktree-cleanup
 def _worktree(repo: Path, parent: Path, name: str, revision: str) -> Path:
     target = parent / name
     done = subprocess.run(
@@ -150,7 +150,7 @@ def _dismantle(repo: Path, parent: Path) -> None:
     shutil.rmtree(parent, ignore_errors=True)
 
 
-# ava:ref scripts/host_ops/docs/fleet-update-keep.ava.okf.md#keep-decision-fail-closed
+# meiva:ref scripts/host_ops/docs/fleet-update-keep.meiva.okf.md#keep-decision-fail-closed
 def decide(repo: Path, old: str, new: str) -> dict[str, object]:
     old_sha, new_sha = _rev(repo, old), _rev(repo, new)
     changed = _changed(repo, old_sha, new_sha)
@@ -170,7 +170,7 @@ def decide(repo: Path, old: str, new: str) -> dict[str, object]:
             )
             keep_services.extend(component.services)
     else:
-        scratch = Path(tempfile.mkdtemp(prefix="ava-fleet-update-keep-"))
+        scratch = Path(tempfile.mkdtemp(prefix="meiva-fleet-update-keep-"))
         try:
             old_root = _worktree(repo, scratch, "old", old_sha)
             new_root = _worktree(repo, scratch, "new", new_sha)

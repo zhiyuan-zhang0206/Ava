@@ -1,8 +1,8 @@
 """Locations and bounds shared by the pty-sessions service and its clients.
 
-Everything lives under ``$AVA_HOME/run/``: the service's unix socket
+Everything lives under ``$MEIVA_HOME/run/``: the service's unix socket
 (``pty-sessions.sock``), its instance lock (``pty-sessions.lock``), its ledger
-(``pty-sessions.json``); transcripts stay at ``$AVA_HOME/logs/<name>.out.log``.
+(``pty-sessions.json``); transcripts stay at ``$MEIVA_HOME/logs/<name>.out.log``.
 Old ``pty-close-notices.json`` files are retained only for inspection.
 """
 
@@ -17,7 +17,7 @@ from pathlib import Path
 # pass their run directory explicitly (the worktree guard) must not pay for it.
 
 # AF_UNIX sun_path bound: 104 bytes on macOS, 108 on Linux. A deeply nested
-# $AVA_HOME (a long worktree path) pushes the natural socket path over it; the
+# $MEIVA_HOME (a long worktree path) pushes the natural socket path over it; the
 # service then lives at a short fixed path keyed by the home, which the service
 # and every client compute identically.
 SUN_PATH_MAX = 100
@@ -42,21 +42,21 @@ RESIZE_MAX = 10000
 
 
 def service_socket_path(run: Path | None = None) -> Path:
-    """The pty-sessions service's unix socket; ``$AVA_HOME/run/pty-sessions.sock``.
+    """The pty-sessions service's unix socket; ``$MEIVA_HOME/run/pty-sessions.sock``.
 
     `run` names the run directory explicitly (a read-only scan that must not create
     the home); the default is this process's own, created on first use.
 
-    A path over the sun_path bound falls back to ``/tmp/ava-pty-<uid>/<digest>.sock``,
+    A path over the sun_path bound falls back to ``/tmp/meiva-pty-<uid>/<digest>.sock``,
     keyed by the run directory. The directory is fixed rather than
     ``tempfile.gettempdir()`` because the service (launched by root) and its clients
     (agent processes with their own TMPDIR) must compute the same path; the service
     creates the directory owner-only (`fallback_dir`).
     """
     if run is None:
-        from base.paths import ava_home, run_dir
+        from base.paths import meiva_home, run_dir
 
-        run = run_dir(ava_home())
+        run = run_dir(meiva_home())
     natural = run / "pty-sessions.sock"
     if len(str(natural)) <= SUN_PATH_MAX:
         return natural
@@ -65,26 +65,26 @@ def service_socket_path(run: Path | None = None) -> Path:
 
 
 def fallback_dir() -> Path:
-    """Where a socket too long for its home lives: ``/tmp/ava-pty-<uid>`` (owner-only)."""
-    return Path("/tmp") / f"ava-pty-{os.getuid()}"  # noqa: S108 — a fixed, uid-keyed, owner-only directory: every process of the user must compute the same path
+    """Where a socket too long for its home lives: ``/tmp/meiva-pty-<uid>`` (owner-only)."""
+    return Path("/tmp") / f"meiva-pty-{os.getuid()}"  # noqa: S108 — a fixed, uid-keyed, owner-only directory: every process of the user must compute the same path
 
 
 def lock_path() -> Path:
     """The service's instance lock (``run/pty-sessions.lock``), held while it runs."""
-    from base.paths import ava_home, run_dir
+    from base.paths import meiva_home, run_dir
 
-    return run_dir(ava_home()) / "pty-sessions.lock"
+    return run_dir(meiva_home()) / "pty-sessions.lock"
 
 
 def ledger_path() -> Path:
     """The service's own ledger of live shell identities (``run/pty-sessions.json``)."""
-    from base.paths import ava_home, run_dir
+    from base.paths import meiva_home, run_dir
 
-    return run_dir(ava_home()) / "pty-sessions.json"
+    return run_dir(meiva_home()) / "pty-sessions.json"
 
 
 def transcript_path(name: str) -> Path:
-    """The session's byte transcript ($AVA_HOME/logs/<name>.out.log)."""
+    """The session's byte transcript ($MEIVA_HOME/logs/<name>.out.log)."""
     from base.paths import logs_dir
 
     return logs_dir() / f"{name}.out.log"

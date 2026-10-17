@@ -1,4 +1,4 @@
-# ava:ref services/derived/insights/docs/insights.ava.okf.md#insights-service-ownership
+# meiva:ref services/derived/insights/docs/insights.meiva.okf.md#insights-service-ownership
 from __future__ import annotations
 
 import os
@@ -43,7 +43,7 @@ def build_app(
             jobs.close()
 
     app = FastAPI(
-        title="ava-insights", docs_url=None, redoc_url=None, openapi_url=None, lifespan=lifespan
+        title="meiva-insights", docs_url=None, redoc_url=None, openapi_url=None, lifespan=lifespan
     )
     app.state.db = db
     app.state.db_pool = pool

@@ -27,12 +27,12 @@ from tests.factories.external_skills import client_home, skill_ctx, skill_source
 from tests.path_scoped.cli_tests import operator_database as operator_database
 from tests.path_scoped.cli_tests import operator_pipeline as operator_pipeline
 
-SKILL = "operating-ava-cluster"
+SKILL = "operating-meiva-cluster"
 
 
 @pytest.fixture(autouse=True)
 def single_operator_skill(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(bridge, "_SKILL_NAMES", ("operating-ava-cluster",))
+    monkeypatch.setattr(bridge, "_SKILL_NAMES", ("operating-meiva-cluster",))
 
 
 def _world(
@@ -44,20 +44,20 @@ def _world(
 ) -> tuple[Path, Path, ConvergeCtx]:
     config, machine = command_config_machine
     repo = tmp_path / "repo"
-    source = repo / "ava_builtins" / "skills" / "platform" / SKILL
+    source = repo / "meiva_builtins" / "skills" / "platform" / SKILL
     source.mkdir(parents=True)
     (source / "SKILL.md").write_text("operator v1\n")
     host_home = tmp_path / "host-home"
     client = host_home / ".codex"
     client.mkdir(parents=True)
-    ava_home = tmp_path / "ava-home"
-    (ava_home / "configs").mkdir(parents=True)
+    meiva_home = tmp_path / "meiva-home"
+    (meiva_home / "configs").mkdir(parents=True)
     return (
         source,
         client,
         ConvergeCtx(
             repo=repo,
-            ava_home=ava_home,
+            meiva_home=meiva_home,
             roles=None,
             config=config,
             database_factory=operator_database,
@@ -77,19 +77,19 @@ def _target(client: Path) -> Path:
 
 def _ledger(context: ConvergeCtx) -> dict[str, Any]:
     value: object = json.loads(
-        (context.ava_home / "configs" / "external-agent-skills" / "codex.json").read_text()
+        (context.meiva_home / "configs" / "external-agent-skills" / "codex.json").read_text()
     )
     return cast(dict[str, Any], value)
 
 
 def _residues(client: Path) -> list[Path]:
-    return list((client / "skills").glob(f".{SKILL}.ava-*"))
+    return list((client / "skills").glob(f".{SKILL}.meiva-*"))
 
 
 def _remove_by_hand(client: Path, context: ConvergeCtx) -> None:
     for residue in _residues(client):
         shutil.rmtree(residue)
-    ledger_root = context.ava_home / "configs" / "external-agent-skills"
+    ledger_root = context.meiva_home / "configs" / "external-agent-skills"
     for stage in ledger_root.glob(".codex-stage-*"):
         shutil.rmtree(stage)
     (ledger_root / "codex.json").unlink()
@@ -117,7 +117,7 @@ def test_interrupted_stage_publication_is_reported_and_never_resumed(
     def interrupt_after_stage_publish(source_path: Path, destination: Path) -> None:
         nonlocal interrupted
         original_rename(source_path, destination)
-        if destination.name.startswith(f".{SKILL}.ava-stage-") and not interrupted:
+        if destination.name.startswith(f".{SKILL}.meiva-stage-") and not interrupted:
             interrupted = True
             raise SystemExit("process killed after stage publication")
 
@@ -230,7 +230,7 @@ def test_cleanup_root_claim_restores_tree_modified_before_private_isolation(
 
     def swap_before_cleanup_claim(source_path: Path, destination: Path) -> None:
         nonlocal injected
-        if ".ava-previous-" in source_path.name and "-retained-previous-" in destination.name:
+        if ".meiva-previous-" in source_path.name and "-retained-previous-" in destination.name:
             victim = source_path / "SKILL.md"
             victim.unlink()
             victim.symlink_to(outside)
@@ -243,7 +243,7 @@ def test_cleanup_root_claim_restores_tree_modified_before_private_isolation(
 
     assert injected
     assert (_target(client) / "SKILL.md").read_text() == "operator v2\n"
-    previous = next((client / "skills").glob(f".{SKILL}.ava-previous-*"))
+    previous = next((client / "skills").glob(f".{SKILL}.meiva-previous-*"))
     swapped = previous / "SKILL.md"
     assert swapped.is_symlink()
     assert outside.read_text() == "outside\n"
@@ -349,7 +349,7 @@ def test_restart_does_not_adopt_ambiguous_per_file_claim(
 
     def interrupt_after_file_claim(source_path: Path, destination: Path) -> None:
         nonlocal interrupted
-        if ".ava-retained-" in destination.name and not interrupted:
+        if ".meiva-retained-" in destination.name and not interrupted:
             ledger = _ledger(context)
             claiming = [
                 claim
@@ -359,7 +359,7 @@ def test_restart_does_not_adopt_ambiguous_per_file_claim(
             assert len(claiming) == 1
             assert destination.name in claiming[0]["quarantine"]
         original_rename(source_path, destination)
-        if ".ava-retained-" in destination.name and not interrupted:
+        if ".meiva-retained-" in destination.name and not interrupted:
             interrupted = True
             raise SystemExit("process killed after per-file claim")
 
@@ -450,7 +450,7 @@ def test_per_file_claim_failure_is_terminal_after_private_root_claim(
 
     def fail_file_claim(source_path: Path, destination: Path) -> None:
         nonlocal attempts
-        if ".ava-retained-" in destination.name:
+        if ".meiva-retained-" in destination.name:
             attempts += 1
             raise PermissionError("private residue is not writable")
         original_rename(source_path, destination)
@@ -529,7 +529,7 @@ def test_converge_terminally_records_post_verification_replacement(
     def swap_after_verification(path: Path, expected: dict[str, Any]) -> None:
         nonlocal late_replacement
         original_verify(path, expected)
-        if path.name.startswith(".SKILL.md.ava-retained-"):
+        if path.name.startswith(".SKILL.md.meiva-retained-"):
             claimed = path.with_name(f"{path.name}.claimed")
             path.rename(claimed)
             path.symlink_to(outside)
@@ -664,7 +664,7 @@ def test_source_path_component_link_is_fatal_before_copy(
     source.mkdir(parents=True)
     (source / "SKILL.md").write_text("operator\n")
     repo.mkdir()
-    (repo / "ava_builtins").symlink_to(actual_agents, target_is_directory=True)
+    (repo / "meiva_builtins").symlink_to(actual_agents, target_is_directory=True)
     client = client_home(tmp_path)
 
     with pytest.raises(RuntimeError, match="source"):
@@ -717,7 +717,7 @@ def test_cleanup_retains_private_residue_without_path_unlink(
     bridge.converge_external_agent_skill(context, host_home=client.parent)
     assert unlink_attempts == 0
     ledger = json.loads(
-        (context.ava_home / "configs" / "external-agent-skills" / "codex.json").read_text()
+        (context.meiva_home / "configs" / "external-agent-skills" / "codex.json").read_text()
     )
     assert ledger["transaction"] is None
     assert ledger["garbage"] == []
@@ -726,7 +726,7 @@ def test_cleanup_retains_private_residue_without_path_unlink(
 
     bridge.converge_external_agent_skill(context, host_home=client.parent)
     assert (target / "SKILL.md").read_text() == "operator v2\n"
-    assert list(target.parent.glob(f".{SKILL}.ava-*")) == []
+    assert list(target.parent.glob(f".{SKILL}.meiva-*")) == []
 
 
 def test_cleanup_rejects_same_content_hard_link_without_changing_outside_inode(

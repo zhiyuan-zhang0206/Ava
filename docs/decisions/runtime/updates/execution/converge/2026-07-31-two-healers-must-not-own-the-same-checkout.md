@@ -4,10 +4,10 @@
 
 On 2026-07-31 prod's Postgres was ahead of the commit `cluster_pin.target_sha` named.
 (How it got there is #1071/#1073; this entry is about what happened next.) Two
-controllers then held contradictory goals over one file — `~/.ava/source`'s HEAD — and
+controllers then held contradictory goals over one file — `~/.meiva/source`'s HEAD — and
 neither yielded:
 
-- **schema controller**: "code must catch up to the DB" → spawn `ava update`, which
+- **schema controller**: "code must catch up to the DB" → spawn `meiva update`, which
   force-checks-out `origin/main`.
 - **pin controller**: "HEAD must equal `cluster_pin`" → force-check-out back to
   `1a90f95`, which lacks those migrations.
@@ -35,12 +35,12 @@ applied 0 migration(s): []
 
 which reads as absurd — that checkout *does* carry them. The 66-second gap between
 each pair is the explanation: the pin controller's reset landed **while the updater
-was still running**, between its `git checkout` and its trailing `ava start`, so the
+was still running**, between its `git checkout` and its trailing `meiva start`, so the
 start migrated and verified against a tree its own updater had not checked out.
 
 Two amplifiers turned that into a two-hour outage rather than a puzzling log:
 
-- The failing `ava start` returns at its schema-verify step, which is *before* the
+- The failing `meiva start` returns at its schema-verify step, which is *before* the
   step that unlinks `cluster_paused`. So each failed leg left the flag set, and
   `ops.manager` reported `round blocked by pause, roster NOT fully reconciled` and
   revived nothing. `recover_stranded_pause` did lift it — after 600 s, by which time
@@ -66,7 +66,7 @@ and this removes the writer that could move HEAD underneath one.
 
 The **schema** controller is the other half, and it was worse: it consulted *neither*
 signal — the only acting controller that never asked whether a deploy was already
-running — so it could fire an `ava update` into a rollout's Phase B, or into its own
+running — so it could fire an `meiva update` into a rollout's Phase B, or into its own
 previous updater. It now asks both (`_deploy_already_running`). An executing lease
 scopes `DB_DEPENDENT` (nothing was spawned here); a local session scopes `ALL` (that
 updater is about to replace every process). A **settle hold** is deliberately not a
@@ -146,7 +146,7 @@ one, because it would fix constraint 1 by making the existing check see everythi
 because "one intentionally-mid-transition signal" is the principle
 `shared/cluster_lock.py` is built on. Rejected on lifecycle: the lease stays valid
 because the *orchestration process* renews it (`renew_update_lock`, driven from the
-Phase-B poll) and stops renewing when it dies. A detached `ava-updater` is a shell
+Phase-B poll) and stops renewing when it dies. A detached `meiva-updater` is a shell
 pipeline with no such process; it would take a lease nobody renews and nobody reliably
 releases, so a crashed updater would block every deploy for a full `LOCK_TTL_S` and a
 slow one would lose its protection mid-flight — the exact coupling
@@ -169,7 +169,7 @@ threshold nobody can justify. `HEAD == pin` under `CodeBehindSchema` is the *sta
 available on the first round rather than the sixth, from facts both controllers
 already read.
 
-**Clear `cluster_paused` from the failing `ava start` itself.** The most direct
+**Clear `cluster_paused` from the failing `meiva start` itself.** The most direct
 reading of constraint 3, and it is unsafe: the flag exists so the restarter cannot
 respawn an agent onto a checkout that is mid-transition, and a start that fails its
 schema check is precisely a checkout that cannot run. Unpausing there hands the host

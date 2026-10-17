@@ -1,6 +1,6 @@
 # External host inbox delivery
 
-An impersonation relay runs beside the external host on the Ava agent's machine.
+An impersonation relay runs beside the external host on the Meiva agent's machine.
 It subscribes to the agent's existing Redis inbound channel and reads pending
 messages from the database. It pushes each pending message's full content into
 an already-open host conversation, in self-contained envelopes that carry the
@@ -21,7 +21,7 @@ acknowledge messages or renew leases. Process supervision stays with the
 existing owner for each provider, as described below.
 
 This page is the operator and mechanism side. The executor's side of each host
-is its host guide under `ava_builtins/skills/platform/impersonator-guide/reference/`
+is its host guide under `meiva_builtins/skills/platform/impersonator-guide/reference/`
 (`claude_code.md`, `codex.md`, `antigravity.md`, `deepseek_harness.md`).
 
 The relay is part of the takeover, not a manual step. The request records the
@@ -49,7 +49,7 @@ and transport acceptance establish different facts; none establishes host receip
 
 Give the interactive host a live PTY and keep its stdin open through workspace
 trust confirmation. An unattended launch with closed stdin can leave an accepted
-Ava lease active without a usable Codex session.
+Meiva lease active without a usable Codex session.
 
 ### Control plane — no deliverable credential
 
@@ -79,7 +79,7 @@ Connect the interactive TUI to that exact endpoint:
 codex --remote unix:///path/to/private/run/codex.sock -C /path/to/agent/workspace
 ```
 
-The Ava Codex launcher wires this topology itself for every generation:
+The Meiva Codex launcher wires this topology itself for every generation:
 it starts the app server on a private per-generation socket under a private
 per-user temp directory with the hands-off approval and sandbox policy, starts a
 janitor that ends the server when the coding session dies, connects the TUI
@@ -95,7 +95,7 @@ A stale heartbeat degrades delivery while executor authority remains bounded
 by its original TTL. The manual form below remains for diagnostics:
 
 ```sh
-/path/to/checkout/.venv/bin/ava impersonate relay 42 \
+/path/to/checkout/.venv/bin/meiva impersonate relay 42 \
   --session 0 --provider codex --thread-id CODEX_SESSION_UUID \
   --codex-remote unix:///path/to/private/run/codex.sock
 ```
@@ -103,7 +103,7 @@ by its original TTL. The manual form below remains for diagnostics:
 Codex impersonation requires **Steer delivery**. Pending delivery through
 `codex queue` waits for the active turn to finish and does not satisfy that
 contract. A missing control endpoint, rejected input, or transport failure
-stops the relay; messages remain unacknowledged in Ava for the normal handoff.
+stops the relay; messages remain unacknowledged in Meiva for the normal handoff.
 There is no automatic downgrade to Pending.
 
 Use the endpoint of the server that owns the existing conversation. Without
@@ -132,7 +132,7 @@ conversation to another host is a separate handoff, not a relay fallback.
 `--codex-remote` is rejected for non-Codex providers.
 
 Verify receipt on the actual host while it is busy and while idle. Server
-acceptance is not host receipt: only the controller's explicit Ava ACK
+acceptance is not host receipt: only the controller's explicit Meiva ACK
 records that the input reached it. A timeout can follow acceptance, so a failed
 transport must not silently resubmit through a second delivery mechanism.
 
@@ -145,11 +145,11 @@ the live language server process via `psutil`, reads its `--csrf_token` and
 listening `127.0.0.1` TCP ports, and probes `GetUserStatus` to select the
 ConnectRPC HTTP port.
 
-`ava impersonate request --provider antigravity` resolves `--thread-id` from the
+`meiva impersonate request --provider antigravity` resolves `--thread-id` from the
 explicit flag or from `ANTIGRAVITY_CONVERSATION_ID` in the environment, verifies
 that `discover_antigravity_server()` succeeds, and records the cascade ID on the
 lease. At activation, the accepting runtime provisions the scoped relay
-credential and spawns `ava impersonate relay --provider antigravity --thread-id
+credential and spawns `meiva impersonate relay --provider antigravity --thread-id
 <cascade_id> --token-stdin`. Each relay push calls
 `exa.language_server_pb.LanguageServerService/SendUserCascadeMessage` with
 `cascadeId`, `items=[{"text": message}]`, and `clientType=1` (queue-if-busy /
@@ -162,13 +162,13 @@ Ask the existing Claude session, or the subagent taking the lease, to invoke its
 `Monitor` tool with this shape, substituting the executable and identifiers.
 Start it immediately after the request: the activation gate requires its
 heartbeat. The request response carries the scoped `relay_token`; set it as
-`AVA_IMPERSONATION_RELAY_TOKEN` in the Monitor command's environment. If the
+`MEIVA_IMPERSONATION_RELAY_TOKEN` in the Monitor command's environment. If the
 Monitor cannot start (no fresh heartbeat), acceptance rolls back loudly.
 
 ```json
 {
-  "command": "AVA_IMPERSONATION_RELAY_TOKEN=<relay token> /path/to/checkout/.venv/bin/ava impersonate relay 42 --session 0 --provider claude",
-  "description": "Ava agent 42 inbox",
+  "command": "MEIVA_IMPERSONATION_RELAY_TOKEN=<relay token> /path/to/checkout/.venv/bin/meiva impersonate relay 42 --session 0 --provider claude",
+  "description": "Meiva agent 42 inbox",
   "timeout_ms": 1800000
 }
 ```
@@ -202,26 +202,26 @@ the [channel protocol](https://code.claude.com/docs/en/channels-reference).
 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) (`npm
 install -g @deepseek-ai/dsh`; verified with 0.1.5-rc.3) has no external input
 channel into a live session, so its relay is a Cordis plugin inside the dsh
-process: `ava_builtins/skills/platform/ava-guide/external-agents/scripts/ava-relay-dsh/ava-relay.mjs`
+process: `meiva_builtins/skills/platform/meiva-guide/external-agents/scripts/meiva-relay-dsh/meiva-relay.mjs`
 (plain ESM on Node built-ins; dsh developer-preview APIs may change). Load it
 by absolute path with a patch file, either per launch (`dsh --profile web
---patch ava-relay.patch.yml`; launcher flags precede the app's own) or for
+--patch meiva-relay.patch.yml`; launcher flags precede the app's own) or for
 every profile in `$DSH_HOME/cordis.patch.yml`:
 
 ```yaml
 - insert:
-    - id: ava-relay
-      name: /path/to/checkout/ava_builtins/skills/platform/ava-guide/external-agents/scripts/ava-relay-dsh/ava-relay.mjs
+    - id: meiva-relay
+      name: /path/to/checkout/meiva_builtins/skills/platform/meiva-guide/external-agents/scripts/meiva-relay-dsh/meiva-relay.mjs
 ```
 
-The plugin exports `DSH_AVA_RELAY_STUB` — a per-session path in a private
-directory it owns — to every model shell command. `ava impersonate request
+The plugin exports `DSH_MEIVA_RELAY_STUB` — a per-session path in a private
+directory it owns — to every model shell command. `meiva impersonate request
 --provider dsh`, run from that shell tool, refuses before creating a lease when
 the variable is missing, and otherwise writes the scoped relay credential and
 this checkout's interpreter to the stub (0600) instead of printing them: dsh
 uploads session logs with its model requests by default, so the credential
 never enters the model's context. The plugin polls its directory each second,
-consumes the stub once, and runs `ava impersonate relay --provider dsh` as a
+consumes the stub once, and runs `meiva impersonate relay --provider dsh` as a
 background job owned by that session (visible to `job_list`, stopped by
 `job_kill` or session disposal). The relay prints one JSON string per push; the
 plugin steers each into the session — an idle session starts a turn, a busy one
@@ -265,8 +265,8 @@ seconds — the check is pull-based and never depends on wake delivery.
   It subscribes before its first delivery snapshot to close the startup race.
 - Push with an ACK window: every pending inbox row is pushed once with its
   full content in one envelope per batch. Cluster config
-  `AVA_IMPERSONATION_ACK_WINDOW_SECONDS` (default **180**) controls the ACK
-  window, and `AVA_IMPERSONATION_MAX_DELIVERY_ATTEMPTS` (default **2**) counts
+  `MEIVA_IMPERSONATION_ACK_WINDOW_SECONDS` (default **180**) controls the ACK
+  window, and `MEIVA_IMPERSONATION_MAX_DELIVERY_ATTEMPTS` (default **2**) counts
   total attempts including the first submission. Both are positive integers
   configured through the normal config panel/CLI. The request snapshots them
   on the lease; edits apply to new leases, while existing leases and relay
@@ -297,7 +297,7 @@ seconds — the check is pull-based and never depends on wake delivery.
   outstanding set, even when no new message has arrived.
   Repeating an ACK for already-done messages does not publish another wake.
   Treat `kind="cancel"` as a request to stop current work; acknowledge it on receipt (like every message), then stop.
-  Native Ava does not consume cancellation on behalf of the external controller.
+  Native Meiva does not consume cancellation on behalf of the external controller.
 - Reading or successfully submitting a push does not mark a message done. The
   relay reserves each attempt in the database before host submission. Restart
   and credential rotation preserve the attempt count and ACK deadline. Failed
@@ -338,8 +338,8 @@ seconds — the check is pull-based and never depends on wake delivery.
 Steer input reaches the active turn at its next processing opportunity; it
 does not promise to interrupt an in-flight tool. Transport success also
 does not prove that the model processed the message. Keep receipt ACKs in
-Ava, and make actions safe to retry when their completion is ambiguous.
+Meiva, and make actions safe to retry when their completion is ambiguous.
 
-The retired `AVA_IMPERSONATION_REPROVISION_WINDOW_SECONDS` setting is ignored
+The retired `MEIVA_IMPERSONATION_REPROVISION_WINDOW_SECONDS` setting is ignored
 by existing environment and saved-overlay readers; new configuration writes
 reject it. Removing an old host setting is a separate operator action.

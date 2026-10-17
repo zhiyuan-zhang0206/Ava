@@ -23,7 +23,7 @@ from base.host.env.port_table import FIXED_PORTS
 # the `ops` row of `ServiceEndpoints` and registers it (`base/cluster/machines.py`), and the
 # gateway reads that URL back off the machines row. So the gateway does not serve
 # these to runners over /api/bootstrap, and a runner's .env never caches a
-# gateway-served value. `ava start` refuses to launch onto a port another home's
+# gateway-served value. `meiva start` refuses to launch onto a port another home's
 # daemon already answers on. A daemon's healthz URL and pidfile are derived from
 # its name (`base.daemon.health.healthz_url`, `base.paths.pid_path`), not configured.
 
@@ -32,7 +32,7 @@ def health_port_field(name: str, *, capability: str | None = None, writable: boo
     """The `<name>_health_port` field of a standard `/healthz` daemon.
 
     `name` is the daemon's health name (a key of the fixed port table); the
-    alias is `AVA_<NAME>_HEALTH_PORT` and the described default is the table's.
+    alias is `MEIVA_<NAME>_HEALTH_PORT` and the described default is the table's.
     """
     extra: dict[str, Any] = {} if capability is None else {"capability": capability}
     extra |= {
@@ -44,7 +44,7 @@ def health_port_field(name: str, *, capability: str | None = None, writable: boo
     }
     return Field(
         default=None,
-        alias=f"AVA_{name.upper()}_HEALTH_PORT",
+        alias=f"MEIVA_{name.upper()}_HEALTH_PORT",
         description=(
             f"{name.replace('_', ' ').capitalize()} daemon /healthz port override (per unit). "
             f"Unset = default {FIXED_PORTS[name]}."

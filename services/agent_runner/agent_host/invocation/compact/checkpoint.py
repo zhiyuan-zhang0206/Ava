@@ -12,7 +12,7 @@ from base.agents.compaction.models import CompactHeldError, CompactMarker
 from base.agents.history.checkpoint_postgres_walks import HistoryAsyncPostgresSaver
 from base.agents.history.delta_read_compat import wrap_saver_reads_with_delta_reconstruction
 from base.agents.incarnation.native_work_models import NativeWorkTarget
-from base.agents.messages.kwargs import AvaMsgType
+from base.agents.messages.kwargs import MeivaMsgType
 
 
 def cold_reader(saver: AsyncPostgresSaver) -> AsyncPostgresSaver:
@@ -91,10 +91,10 @@ def _replacement_head(messages: list[Any], command: CompactCommand) -> bool:
         isinstance(summary, HumanMessage)
         and summary.id == str(result.message_id)
         and summary.content == compose_summary_message(result.summary)
-        and summary.additional_kwargs.get("ava_compact_id") == str(command.acceptance.command_id)
+        and summary.additional_kwargs.get("meiva_compact_id") == str(command.acceptance.command_id)
         and all(
             isinstance(message, HumanMessage)
-            and message.additional_kwargs.get("ava_msg_type") != AvaMsgType.INBOUND.value
+            and message.additional_kwargs.get("meiva_msg_type") != MeivaMsgType.INBOUND.value
             for message in messages[1:-1]
         )
     )

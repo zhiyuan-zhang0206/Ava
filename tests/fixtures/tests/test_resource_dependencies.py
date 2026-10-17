@@ -49,7 +49,7 @@ def tail_pipeline(database, process_config):
     from base.cluster.machine.boot import machine_from_boot
     machine = machine_from_boot(process_config)
     pipeline = telemetry.build_pipeline(
-        database=lambda: database, machine=machine, home=Path(os.environ["AVA_HOME"])
+        database=lambda: database, machine=machine, home=Path(os.environ["MEIVA_HOME"])
     )
     try:
         yield pipeline
@@ -94,11 +94,11 @@ def test_12_no_data_plane(process_config):
     from psycopg import connect
     from psycopg.conninfo import conninfo_to_dict
     from tests.fixtures.env_bootstrap import UNPROVISIONED_DB_URL, UNPROVISIONED_REDIS_URL
-    assert os.environ["AVA_DB_URL"] == UNPROVISIONED_DB_URL
-    assert os.environ["AVA_REDIS_URL"] == UNPROVISIONED_REDIS_URL
+    assert os.environ["MEIVA_DB_URL"] == UNPROVISIONED_DB_URL
+    assert os.environ["MEIVA_REDIS_URL"] == UNPROVISIONED_REDIS_URL
     assert conninfo_to_dict(settings.data_plane.db_url)["dbname"] == "unprovisioned"
     assert settings.data_plane.redis_url == UNPROVISIONED_REDIS_URL
-    assert UNPROVISIONED_DB_URL in (Path(os.environ["AVA_HOME"]) / ".env").read_text()
+    assert UNPROVISIONED_DB_URL in (Path(os.environ["MEIVA_HOME"]) / ".env").read_text()
     with pytest.raises(pytest.fail.Exception, match="Unrequested Postgres"):
         connect("postgresql://127.0.0.1:1/unused")
 

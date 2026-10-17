@@ -1,4 +1,4 @@
-"""Frontend application readiness. Service recovery belongs to ava-root."""
+"""Frontend application readiness. Service recovery belongs to meiva-root."""
 
 import subprocess
 
@@ -7,7 +7,7 @@ from base.daemon.health import DaemonProbe
 
 
 def _app_port() -> int:
-    """The Next.js app port (AVA_APP_PORT, default entry+1) — NOT the entry
+    """The Next.js app port (MEIVA_APP_PORT, default entry+1) — NOT the entry
     port: the entry is owned by the always-up gate, which answers 200 even
     while the app is down. Probing the entry would make a dead app look
     alive."""

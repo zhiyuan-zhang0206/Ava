@@ -14,7 +14,7 @@ it disposable:
 
 - the envelope parses and carries its exact incarnation attribution;
 - no live process references the request — the direct child and every
-  env-inheriting descendant carry ``AVA_EXEC_REQUEST_FILE``, and a process
+  env-inheriting descendant carry ``MEIVA_EXEC_REQUEST_FILE``, and a process
   whose environment this kernel will not show is never excluded while it looks
   like an ``agent.execution.child`` root born inside the request's own lifetime;
 - the row's stored host identity, when one exists, is not a live process — a
@@ -26,7 +26,7 @@ A timeout alone cannot prove arbitrary user code or its resources ended.
 
 Everything else is retained with diagnostics naming the file, its attribution
 and the disposition commands. Stale evidence is quarantined, never deleted: the
-files move to ``$AVA_HOME/quarantined-exec-requests/<reason>-<stamp>/<agent_id>/``
+files move to ``$MEIVA_HOME/quarantined-exec-requests/<reason>-<stamp>/<agent_id>/``
 beside a JSON receipt recording what was proven and why.
 """
 
@@ -61,7 +61,7 @@ from base.log import logger
 from base.native_process.code_version import CodeVersion
 from base.native_process.loaded_commit import LoadedCommit
 from base.native_process.runtime_incarnation import RuntimeIncarnation
-from base.paths import ava_home, exec_run_dir, quarantined_exec_requests_dir
+from base.paths import exec_run_dir, meiva_home, quarantined_exec_requests_dir
 from base.telemetry import process_name
 
 # The envelope protocol's own ceiling (agent/graph/exec/protocol.py). The
@@ -79,7 +79,7 @@ _BIRTH_FLOOR_SLACK_S = 5.0
 _CHILD_LIFETIME_SLACK_S = 60.0
 
 _EXEC_CHILD_MODULE = "agent.execution.child"
-_REQUEST_REFERENCE_ENV = "AVA_EXEC_REQUEST_FILE"
+_REQUEST_REFERENCE_ENV = "MEIVA_EXEC_REQUEST_FILE"
 
 
 def exec_node_ceiling_s() -> float:
@@ -626,4 +626,4 @@ def _commit(
 
 
 if __name__ == "__main__":
-    raise SystemExit(main(home=ava_home()))
+    raise SystemExit(main(home=meiva_home()))

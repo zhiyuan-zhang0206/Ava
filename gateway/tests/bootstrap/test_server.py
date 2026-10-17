@@ -140,7 +140,7 @@ def test_a_gateway_without_a_cluster_secret_refuses_to_start(
     steps = _stub_process_entry(monkeypatch, tmp_path, gateway=True)
     monkeypatch.setattr(settings.data_plane, "cluster_secret", "")
 
-    with pytest.raises(ClusterSecretMissingError, match="AVA_CLUSTER_SECRET"):
+    with pytest.raises(ClusterSecretMissingError, match="MEIVA_CLUSTER_SECRET"):
         _server.main(build_app=lambda _process: _app())
 
     assert steps == []
@@ -203,7 +203,7 @@ def test_main_and_serve_kwargs_distinguish_reload_factory_from_single_worker(
                 "app": "gateway.app:create_app_from_environment",
                 "factory": True,
                 "reload": True,
-                "reload_dirs": ["gateway", "base", "ava", "agent"],
+                "reload_dirs": ["gateway", "base", "meiva", "agent"],
                 "workers": 1,
             },
         )

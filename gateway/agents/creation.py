@@ -78,7 +78,7 @@ async def create_and_launch_agent(
     """Gateway-side spawn (Task #1236 follow-up): preflight -> create the agent
     ROW in-process -> forward a launch-only op to the target runner.
 
-    The target runner's ops server runs as the least-privilege `ava_runner`
+    The target runner's ops server runs as the least-privilege `meiva_runner`
     role, which by design cannot INSERT agents / agents_meta — so the row is
     created HERE, in the gateway process, as the main data-plane identity. The
     forward op (`kind="spawn-launch"`) validates and wakes the hosted runner.
@@ -270,7 +270,7 @@ def spawn_preflight_blocking(
     # included. The gateway is a pure router: it never introspects its own process
     # role, so a co-located runner is just a registry entry whose ops URL happens
     # to be localhost. An unregistered target raises MachineNotRegistered (404 +
-    # reason via the app's AvaAgentError handler) straight out of lookup_role.
+    # reason via the app's MeivaAgentError handler) straight out of lookup_role.
     if "agent-runner" not in lookup_role(db, target):
         # A proper wire error (carries `reason`) — not a bare HTTPException, whose
         # reason-less body trips the SDK's `raise_from_response` into a confusing
@@ -278,7 +278,7 @@ def spawn_preflight_blocking(
         raise SpawnTargetNotAgentRunner(
             f"spawn target {target!r} has no agent-runner capability; agents run on "
             "agent-runner machines. Pass body.machine = <an agent-runner name> "
-            "(see ava.agents.list_machines())."
+            "(see meiva.agents.list_machines())."
         )
     # A paused machine is deliberately out of the cluster: its ops server may be
     # unreachable and its agents were terminated on pause. Refuse with a precise
@@ -289,7 +289,7 @@ def spawn_preflight_blocking(
     if is_paused(db, target):
         raise MachinePaused(
             f"spawn target {target!r} is paused (temporarily removed from the "
-            "cluster); resume it first with `ava cluster resume <name>` on the "
+            "cluster); resume it first with `meiva cluster resume <name>` on the "
             "gateway, then spawn."
         )
     tail_skills: list[str] | None = None

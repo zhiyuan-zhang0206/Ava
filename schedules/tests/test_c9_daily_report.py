@@ -72,7 +72,7 @@ class _FakeAccounting(SimpleNamespace):
         self.module = module
         self.windows: list[tuple[str, str]] = []
         self.hosts: list[Host] = []
-        self.DEFAULT_REPO = "zhiyuan-zhang0206/Ava"
+        self.DEFAULT_REPO = "zhiyuan-zhang0206/Meiva"
         self.DEFAULT_LEDGER = Path("ledger.jsonl")
         self.entries = [_entry(5811, linux=10, macos=0)]
 
@@ -203,7 +203,7 @@ def test_fire_reconciles_the_claimed_slot_window_and_emits(
     monkeypatch.setattr(accounting.module, "_load_accounting", lambda: accounting)
     slot = datetime(2026, 9, 6, 21, 0, tzinfo=UTC)  # 05:00 cluster
     schedule_id = _insert_schedule(db_conn, created_at=datetime(2026, 9, 6, 20, 0, tzinfo=UTC))
-    monkeypatch.setenv("AVA_SCHEDULE_ID", str(schedule_id))
+    monkeypatch.setenv("MEIVA_SCHEDULE_ID", str(schedule_id))
 
     assert fire_slot_once(
         database,
@@ -250,7 +250,7 @@ def test_fire_reports_failure_without_raising(
     monkeypatch.setattr(module, "_report_failure", failures.append)
     slot = datetime(2026, 9, 6, 21, 0, tzinfo=UTC)
     schedule_id = _insert_schedule(db_conn, created_at=datetime(2026, 9, 6, 20, 0, tzinfo=UTC))
-    monkeypatch.setenv("AVA_SCHEDULE_ID", str(schedule_id))
+    monkeypatch.setenv("MEIVA_SCHEDULE_ID", str(schedule_id))
 
     assert fire_slot_once(
         database,
@@ -286,7 +286,9 @@ def test_report_agent_override_rejects_nonnumeric_value(
     module = _load_schedule_module()
     monkeypatch.setenv(module._REPORT_AGENT_ENV, "not-an-id")
 
-    with pytest.raises(RuntimeError, match="AVA_CI_USAGE_REPORT_AGENT must be a numeric agent id"):
+    with pytest.raises(
+        RuntimeError, match="MEIVA_CI_USAGE_REPORT_AGENT must be a numeric agent id"
+    ):
         module._report_agent()
 
 
@@ -304,8 +306,8 @@ def test_report_failure_uses_exact_label_and_existing_message(
         ]
     )
     send = Mock()
-    monkeypatch.setattr(module.ava.agents, "list_agents", find)
-    monkeypatch.setattr(module.ava.agents, "send_message", send)
+    monkeypatch.setattr(module.meiva.agents, "list_agents", find)
+    monkeypatch.setattr(module.meiva.agents, "send_message", send)
 
     module._report_failure("collector failed")
 

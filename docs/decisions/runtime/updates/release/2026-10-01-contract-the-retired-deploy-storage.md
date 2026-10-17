@@ -62,7 +62,7 @@ Two migrations, each with a paired `.down.sql`, so each rolls back on its own.
 | `deployment_state` outcome columns, `cluster_last_update` | a failed rollout showing only as a commit mismatch, with no statement of what failed | the update script reports its own result and the operator reads it; no process records a result for another to read |
 | `cluster_pin` | cluster drift from the intended commit; the pin controller forcing a checkout back | the script moves every unit to one named commit and never restores a recorded one |
 | `managed_writer_evidence` | publication state | the fence is gone |
-| `host_deploy_state` updater lease, pause anchor, stranded-hold record, `converging` | telling an alert that an updater was alive; scoping a pause window; remembering a pause whose owner died, with an automatic recovery budget | the updater and the pause controller are gone; the maintenance journal's exits are `ava maintenance resume --cancel` and `repair`; the posture row keeps `idle`/`paused` |
+| `host_deploy_state` updater lease, pause anchor, stranded-hold record, `converging` | telling an alert that an updater was alive; scoping a pause window; remembering a pause whose owner died, with an automatic recovery budget | the updater and the pause controller are gone; the maintenance journal's exits are `meiva maintenance resume --cancel` and `repair`; the posture row keeps `idle`/`paused` |
 | `agents_meta.closed_at` | an agent woken by its own sessions after a final terminate | terminate has no closed state; ending the agent's shell sessions is the remedy |
 | `agent_watchers` | rebuilding a killed watcher at the next boot | a watcher is a plain shell session and is never restarted |
 | status `restarting` | the straggler reap's durable kill mark | the reap is gone, and the hosted restart applies without a status of its own |
@@ -72,8 +72,8 @@ Two migrations, each with a paired `.down.sql`, so each rolls back on its own.
 
 - `deployment_state` and its `min_code_version`: the version gate reads and
   raises it.
-- `host_deploy_state` and its `idle`/`paused` posture: `ava stop`, `ava pause`,
-  maintenance and `ava start` write it; the 503 middleware, `ava status` and the
+- `host_deploy_state` and its `idle`/`paused` posture: `meiva stop`, `meiva pause`,
+  maintenance and `meiva start` write it; the 503 middleware, `meiva status` and the
   deploy window read it.
 - `agents_meta.runtime_protocol_version` and the protocol v1 caller gate: whether
   v1 is activated or retired is a separate decision.
@@ -107,7 +107,7 @@ Two migrations, each with a paired `.down.sql`, so each rolls back on its own.
 - Rolling back past these migrations needs the down files first, in reverse
   order and in one transaction, and only then the older code, because older code
   refuses a database that holds a migration it does not know.
-- `ava.agents.AgentStatus` has three members. A script that names
+- `meiva.agents.AgentStatus` has three members. A script that names
   `AgentStatus.RESTARTING` fails on attribute access.
 - The runner role no longer holds grants on `agent_watchers`, and the
   group-grant list no longer names the table or the function.
@@ -122,6 +122,6 @@ migrations needs the down files first) are void: recovery from these migrations
 is fix-forward. The expand-contract ordering the Context describes still
 stands.
 
-Forward link (2026-10-03): `ava pause` was deleted; a stop with a different keep set replaces it. See [delete ava pause](../../../agents/graph/2026-10-03-delete-ava-pause.md).
+Forward link (2026-10-03): `meiva pause` was deleted; a stop with a different keep set replaces it. See [delete meiva pause](../../../agents/graph/2026-10-03-delete-meiva-pause.md).
 
-Forward link (2026-10-04): `ava maintenance` is deleted entirely; the exits are now `ava status` (read) and `ava start`. See [delete ava maintenance](../../../agents/graph/2026-10-04-delete-ava-maintenance.md).
+Forward link (2026-10-04): `meiva maintenance` is deleted entirely; the exits are now `meiva status` (read) and `meiva start`. See [delete meiva maintenance](../../../agents/graph/2026-10-04-delete-meiva-maintenance.md).

@@ -4,7 +4,7 @@ A skill package is data an agent is instructed to *follow*, shipped with
 whatever scripts it bundles. Installing one from a public index is a supply-chain
 event: the ClawHub audit that found ~341 malicious skills delivering a macOS
 stealer is the shape this module exists for. So every package entering
-`$AVA_HOME/skills/` from outside the repo is read first, file by file, and
+`$MEIVA_HOME/skills/` from outside the repo is read first, file by file, and
 matched against a rule table — after any encoded blob it carries is decoded,
 recursively, since base64-wrapping the payload was that campaign's primary
 evasion.
@@ -26,7 +26,7 @@ and `SECURITY.md` apply to everything else here. It matches *known shapes of
 known attacks* in *text this scanner can read*. A clean report means "no rule
 fired", never "this package is safe". Anyone who knows these rules can write a
 package that walks past all of them, and nothing here constrains what a skill
-does once an agent follows it (Ava does not sandbox execution — see
+does once an agent follows it (Meiva does not sandbox execution — see
 `docs/decisions/data/security/2026-07-29-security-model-host-isolation-not-sandbox.md`).
 
 Sibling, deliberately not shared: `base/agents/messages/injection_scan.py` scans content an
@@ -235,8 +235,8 @@ _MARKDOWN_CRITICAL: tuple[Rule, ...] = (
 #
 # Environment-variable names are deliberately NOT here. A skill that reads
 # `ANTHROPIC_API_KEY` and POSTs is usually just calling the API that key is for
-# — Ava's own `ava-guide` and `ava-schedule-writer` do exactly that with
-# `AVA_CLUSTER_SECRET` — so putting them in the co-occurrence rule made the
+# — Meiva's own `meiva-guide` and `meiva-schedule-writer` do exactly that with
+# `MEIVA_CLUSTER_SECRET` — so putting them in the co-occurrence rule made the
 # gate fire on ordinary first-party skills. They match `secret-reference`
 # (notice) instead.
 _CREDENTIAL_STORE = _rx(
@@ -248,10 +248,10 @@ _CREDENTIAL_STORE = _rx(
     r"Library/Application\s+Support/(Google/Chrome|Firefox|BraveSoftware)|"
     r"Local\s+State|Login\s+Data|cookies\.sqlite|"
     r"Exodus|Electrum|\.bitcoin|MetaMask|wallet\.dat|Ledger\s*Live|Trezor|Phantom|Keplr|"
-    # The agent's own secrets file. ClawHavoc read ~/.clawdbot/.env; the Ava
-    # analogue is the cluster secret sitting in $AVA_HOME/.env, which is the
+    # The agent's own secrets file. ClawHavoc read ~/.clawdbot/.env; the Meiva
+    # analogue is the cluster secret sitting in $MEIVA_HOME/.env, which is the
     # single credential a skill has no business reading.
-    r"\.ava/\.env|\.clawdbot/|\.hermes/\.env|\.claude\.json|\.codex/auth|"
+    r"\.meiva/\.env|\.clawdbot/|\.hermes/\.env|\.claude\.json|\.codex/auth|"
     # Telegram Desktop's session dir, NOT ".telegram" — that substring lives
     # inside `api.telegram.org`.
     r"tdata/|Signal/sql"

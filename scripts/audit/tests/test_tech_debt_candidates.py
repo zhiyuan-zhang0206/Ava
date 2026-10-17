@@ -128,9 +128,9 @@ def test_docstring_budget_section_runs_for_real_and_the_scan_is_complete(tmp_pat
 
     Every other test stubs this section's interpreter; here it runs the section's own Python
     against a fixed agent-surface fixture and the scan must still come out complete."""
-    (tmp_path / "ava").mkdir()
-    (tmp_path / "ava/__init__.py").write_text('__all_for_ava__ = ["tools"]\n')
-    (tmp_path / "ava/tools.py").write_text(
+    (tmp_path / "meiva").mkdir()
+    (tmp_path / "meiva/__init__.py").write_text('__all_for_meiva__ = ["tools"]\n')
+    (tmp_path / "meiva/tools.py").write_text(
         '"""Tools.\n\nSecond line.\nThird line.\n"""\n'
         '__all__ = ["fetch"]\n\n\n'
         "def fetch() -> None:\n"
@@ -139,7 +139,7 @@ def test_docstring_budget_section_runs_for_real_and_the_scan_is_complete(tmp_pat
     repo_root = Path(__file__).parents[3]
     result = _run(tmp_path, {"REAL_DOC": "1", "PYTHONPATH": str(repo_root)})
     assert result.returncode == 0, result.stdout + result.stderr
-    assert "ava/tools.py:1: module docstring 4 lines (soft cap 2)" in result.stdout
+    assert "meiva/tools.py:1: module docstring 4 lines (soft cap 2)" in result.stdout
     assert "fetch has a Raises: section" in result.stdout
     assert "=== Scan complete " in result.stdout
     assert "=== Scan incomplete" not in result.stdout

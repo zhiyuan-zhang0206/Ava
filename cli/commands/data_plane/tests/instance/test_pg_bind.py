@@ -45,8 +45,8 @@ def test_start_probes_receive_the_url_hosts(
     (matching the test env's own loopback URL would be vacuous)."""
     data_plane_config = dataclasses.replace(
         data_plane_config,
-        db_url="postgresql://ava:p@10.0.0.7:15433/ava",
-        redis_url="redis://ava:p@10.0.0.7:16380/0",
+        db_url="postgresql://meiva:p@10.0.0.7:15433/meiva",
+        redis_url="redis://meiva:p@10.0.0.7:16380/0",
     )
     seen: dict[str, tuple[int, str]] = {}
 
@@ -88,7 +88,7 @@ def test_start_probes_receive_the_url_hosts(
             with_redis_admin(data_plane_config, "admin"),
             16380,
             "runtime",
-            "ava",
+            "meiva",
             machine=command_machine,
         )
         == 0
@@ -309,7 +309,7 @@ def test_start_pg_launches_with_the_archive_arguments_when_wal_g_is_on(
     assert warned == [True], "a retained postmaster is checked after the start"
 
 
-def test_the_postmaster_inherits_no_ava_authority(
+def test_the_postmaster_inherits_no_meiva_authority(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
     retained_children: list[subprocess.Popen[bytes]],
@@ -318,16 +318,16 @@ def test_the_postmaster_inherits_no_ava_authority(
     data_plane_config: DataPlaneConfig,
 ) -> None:
     """The postmaster is the longest-lived daemon (retained across releases), and
-    the `ava start` that spawns it may hold the delivered gateway login, the
+    the `meiva start` that spawns it may hold the delivered gateway login, the
     generation, the API token, the human secret and the Redis admin password.
     It keeps only the operator's process mechanics."""
     delivered = {
-        "AVA_DB_URL": "postgresql://ava_g0_gateway:gen-password@127.0.0.1:6433/ava",
-        "AVA_DB_GENERATION": "0",
-        "AVA_API_TOKEN": "gateway-api-token-" + "t" * 32,
-        "AVA_CLUSTER_SECRET": "human-" + "h" * 40,
-        "AVA_REDIS_ADMIN_PASSWORD": "redis-admin-" + "r" * 20,
-        "AVA_HOME": str(tmp_path / ".ava-operator"),
+        "MEIVA_DB_URL": "postgresql://meiva_g0_gateway:gen-password@127.0.0.1:6433/meiva",
+        "MEIVA_DB_GENERATION": "0",
+        "MEIVA_API_TOKEN": "gateway-api-token-" + "t" * 32,
+        "MEIVA_CLUSTER_SECRET": "human-" + "h" * 40,
+        "MEIVA_REDIS_ADMIN_PASSWORD": "redis-admin-" + "r" * 20,
+        "MEIVA_HOME": str(tmp_path / ".meiva-operator"),
     }
     for key, value in {**delivered, "PATH": "/usr/bin:/bin", "TZ": "Asia/Shanghai"}.items():
         monkeypatch.setenv(key, value)
@@ -358,7 +358,7 @@ def test_the_postmaster_inherits_no_ava_authority(
     )
     [env] = envs
     assert env["PATH"] == "/usr/bin:/bin" and env["TZ"] == "Asia/Shanghai"
-    assert not [key for key in env if key.startswith("AVA_")]
+    assert not [key for key in env if key.startswith("MEIVA_")]
     assert not set(delivered.values()) & set(env.values())
 
 

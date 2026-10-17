@@ -88,4 +88,4 @@ def emit_log_record(logs: Any, event: Event) -> None:
         body=body,
         attributes=attributes,
     )
-    logs.get_logger("ava.telemetry").emit(record)
+    logs.get_logger("meiva.telemetry").emit(record)

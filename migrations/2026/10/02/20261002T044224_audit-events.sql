@@ -58,10 +58,10 @@ CREATE TRIGGER audit_events_no_truncate
 -- bootstrap applies this before install birth creates them.
 DO $$
 BEGIN
-    IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'ava_runner') THEN
-        GRANT SELECT, INSERT ON audit_events TO ava_runner;
+    IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'meiva_runner') THEN
+        GRANT SELECT, INSERT ON audit_events TO meiva_runner;
     END IF;
-    IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'ava_gateway') THEN
-        REVOKE UPDATE, DELETE ON audit_events FROM ava_gateway;
+    IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'meiva_gateway') THEN
+        REVOKE UPDATE, DELETE ON audit_events FROM meiva_gateway;
     END IF;
 END $$;

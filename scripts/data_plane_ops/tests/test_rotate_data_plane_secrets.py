@@ -17,7 +17,7 @@ _OLD_REDIS_ADMIN = "old-redis-admin"
 _NEW_REDIS_ADMIN = "new-redis-admin"
 _OLD_REDIS_RUNTIME = "old-redis-runtime"
 _NEW_REDIS_RUNTIME = "new-redis-runtime"
-_ENV = f"AVA_REDIS_ADMIN_PASSWORD={_OLD_REDIS_ADMIN}\nAVA_REDIS_PASSWORD={_OLD_REDIS_RUNTIME}\n"
+_ENV = f"MEIVA_REDIS_ADMIN_PASSWORD={_OLD_REDIS_ADMIN}\nMEIVA_REDIS_PASSWORD={_OLD_REDIS_RUNTIME}\n"
 
 
 def _state(scope: str = "both") -> rotate.RotationState:
@@ -29,12 +29,12 @@ def _state(scope: str = "both") -> rotate.RotationState:
         new_redis_password=_NEW_REDIS_RUNTIME,
         redis_port=16380,
         redis_host="127.0.0.1",
-        redis_user="ava",
+        redis_user="meiva",
     )
 
 
 def _patch_gateway_home(monkeypatch: pytest.MonkeyPatch, home: Path) -> None:
-    monkeypatch.setattr(rotate, "ava_home", lambda: home)
+    monkeypatch.setattr(rotate, "meiva_home", lambda: home)
 
     def _record(_home: Path) -> cluster.ClusterRecord:
         return cluster.ClusterRecord(
@@ -46,9 +46,9 @@ def _patch_gateway_home(monkeypatch: pytest.MonkeyPatch, home: Path) -> None:
     monkeypatch.setattr(rotate, "get_record", _record)
     monkeypatch.setattr(settings, "profile", None)
     monkeypatch.setattr(settings.data_plane, "cluster_secret", "")
-    monkeypatch.setattr(settings.data_plane, "db_url", "postgresql://ava@127.0.0.1:16433/ava")
+    monkeypatch.setattr(settings.data_plane, "db_url", "postgresql://meiva@127.0.0.1:16433/meiva")
     monkeypatch.setattr(
-        settings.data_plane, "redis_url", "redis://ava:old-redis-runtime@127.0.0.1:16380/0"
+        settings.data_plane, "redis_url", "redis://meiva:old-redis-runtime@127.0.0.1:16380/0"
     )
 
 
@@ -63,14 +63,14 @@ def test_build_state_mints_fresh_redis_values_even_without_a_bearer(
     assert state.scope == "both"
     assert state.new_redis_admin_password not in {"", state.old_redis_admin_password}
     assert state.new_redis_password not in {"", state.old_redis_password}
-    assert (state.redis_port, state.redis_user) == (16380, "ava")
+    assert (state.redis_port, state.redis_user) == (16380, "meiva")
 
 
 def test_build_state_refuses_a_home_without_redis_credentials(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     _patch_gateway_home(monkeypatch, tmp_path)
-    (tmp_path / ".env").write_text(f"AVA_REDIS_ADMIN_PASSWORD={_OLD_REDIS_ADMIN}\n")
+    (tmp_path / ".env").write_text(f"MEIVA_REDIS_ADMIN_PASSWORD={_OLD_REDIS_ADMIN}\n")
     with pytest.raises(RuntimeError, match="no conversion exists"):
         rotate.build_state()
 
@@ -99,7 +99,7 @@ def test_main_reports_an_agent_context_guard_cleanly(
     assert rotate.main(args) == 1
     err = capsys.readouterr().err
     assert "gateway context" in err
-    assert "unset AVA_PROCESS_PROFILE" in err
+    assert "unset MEIVA_PROCESS_PROFILE" in err
     assert "Traceback" not in err
 
 
@@ -153,7 +153,7 @@ def test_runner_scope_rotates_the_acl_user_of_the_redis_url(
 
     assert acl_calls == [
         (
-            "ava",
+            "meiva",
             {
                 "redis_admin_url": f"redis://default:{_OLD_REDIS_ADMIN}@127.0.0.1:16380",
                 "runtime_password": _NEW_REDIS_RUNTIME,
@@ -179,12 +179,12 @@ def test_write_env_syncs_the_redis_url_with_the_active_passwords(
 
     assert writes == [
         {
-            "AVA_REDIS_ADMIN_PASSWORD": _OLD_REDIS_ADMIN,
-            "AVA_REDIS_PASSWORD": _NEW_REDIS_RUNTIME,
-            "AVA_REDIS_URL": writes[0]["AVA_REDIS_URL"],
+            "MEIVA_REDIS_ADMIN_PASSWORD": _OLD_REDIS_ADMIN,
+            "MEIVA_REDIS_PASSWORD": _NEW_REDIS_RUNTIME,
+            "MEIVA_REDIS_URL": writes[0]["MEIVA_REDIS_URL"],
         }
     ]
-    assert urlsplit(writes[0]["AVA_REDIS_URL"]).password == _NEW_REDIS_RUNTIME
+    assert urlsplit(writes[0]["MEIVA_REDIS_URL"]).password == _NEW_REDIS_RUNTIME
 
 
 def test_preflight_and_verify_probe_the_state_host_as_the_url_user(
@@ -204,9 +204,9 @@ def test_preflight_and_verify_probe_the_state_host_as_the_url_user(
     rotate.verify(state)
     assert probes == [
         ("10.0.0.7", "default", _OLD_REDIS_ADMIN),
-        ("10.0.0.7", "ava", _OLD_REDIS_RUNTIME),
+        ("10.0.0.7", "meiva", _OLD_REDIS_RUNTIME),
         ("10.0.0.7", "default", _NEW_REDIS_ADMIN),
-        ("10.0.0.7", "ava", _NEW_REDIS_RUNTIME),
+        ("10.0.0.7", "meiva", _NEW_REDIS_RUNTIME),
     ]
 
 
@@ -233,7 +233,7 @@ def test_dry_run_never_calls_a_mutating_phase(monkeypatch: pytest.MonkeyPatch) -
 
 
 def test_recovery_state_is_owner_only(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    monkeypatch.setattr(rotate, "ava_home", lambda: tmp_path)
+    monkeypatch.setattr(rotate, "meiva_home", lambda: tmp_path)
     state = _state()
     path = state.save()
 
@@ -252,8 +252,8 @@ def test_a_postgres_era_journal_is_refused_by_name(tmp_path: Path) -> None:
 def test_main_refuses_remote_managed_data_plane(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    monkeypatch.setattr(settings.data_plane, "db_url", "postgresql://ava:pw@10.9.8.7:5432/ava")
-    monkeypatch.setattr(settings.data_plane, "redis_url", "rediss://ava:pw@10.9.8.7:6380/0")
+    monkeypatch.setattr(settings.data_plane, "db_url", "postgresql://meiva:pw@10.9.8.7:5432/meiva")
+    monkeypatch.setattr(settings.data_plane, "redis_url", "rediss://meiva:pw@10.9.8.7:6380/0")
     assert rotate.main(["--scope", "admin"]) == 1
     err = capsys.readouterr().err
     assert "remote-managed" in err

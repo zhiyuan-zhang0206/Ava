@@ -16,8 +16,8 @@ from agent.graph.claim import node
 from agent.graph.claim.node import claim_node_impl
 from agent.nodes import CLAIM
 from agent.state import AttachEntry, AttachState, BaseAgentState
-from base.agents.context import AvaContext
-from base.agents.messages.kwargs import AvaMsgType
+from base.agents.context import MeivaContext
+from base.agents.messages.kwargs import MeivaMsgType
 from base.clock import Clock
 from base.config.tests.configuration import defaults
 from base.db import Database
@@ -33,8 +33,8 @@ def _write_png(path: Path) -> None:
     Image.new("RGB", (1, 1)).save(path)
 
 
-def _context(model_name: str, database_gate: ProcessDbGate) -> AvaContext:
-    return AvaContext(
+def _context(model_name: str, database_gate: ProcessDbGate) -> MeivaContext:
+    return MeivaContext(
         ops_pool=MagicMock(),
         llm=cast("BaseChatModel", SimpleNamespace(model_name=model_name)),
         event_publisher=MagicMock(),
@@ -67,7 +67,7 @@ def test_drain_builds_one_native_image_message(
     assert drain["attach"] == AttachState()
     message = drain["messages"][0]
     assert isinstance(message, HumanMessage)
-    assert cast(Any, message).additional_kwargs["ava_msg_type"] == AvaMsgType.ATTACH.value
+    assert cast(Any, message).additional_kwargs["meiva_msg_type"] == MeivaMsgType.ATTACH.value
     blocks = _blocks(message)
     assert [b["type"] for b in blocks] == ["text", "text", "image_url"]
     assert "Files attached during this turn" in blocks[0]["text"]

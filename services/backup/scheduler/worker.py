@@ -24,7 +24,7 @@ from base.db.config import db_config_from_boot
 from base.native_process.child_env import inherited_process_env
 from base.native_process.code_version import CodeVersion
 from base.native_process.loaded_commit import LoadedCommit
-from base.paths import ava_home
+from base.paths import meiva_home
 from base.telemetry.pipeline_build import build_pipeline
 from services.backup.artifact.names import DUMP_NAME_RE
 from services.backup.scheduler.operation.staging import (
@@ -79,7 +79,7 @@ def _sanitize_restore_drill(work: Path, *, throwaway: ThrowawayConfig) -> None:
 
 
 def dump_kind() -> OperationKind:
-    root = ava_home() / "backups"
+    root = meiva_home() / "backups"
     return OperationKind(
         "logical-dump",
         root / "operations" / "dump",
@@ -88,7 +88,7 @@ def dump_kind() -> OperationKind:
 
 
 def restore_drill_kind(*, throwaway: ThrowawayConfig) -> OperationKind:
-    root = ava_home() / "backups"
+    root = meiva_home() / "backups"
     return OperationKind(
         "logical-restore-drill",
         root / "operations" / "restore-drill",
@@ -266,7 +266,7 @@ def main() -> None:
     config = ConfigBoot()
     config.boot()
     machine = machine_from_boot(config)
-    process_home = ava_home().resolve()
+    process_home = meiva_home().resolve()
     image = LoadedCommit.capture()
     version = CodeVersion(image)
     gate = ProcessDbGate(version=version.get, process="pg-backup-worker")

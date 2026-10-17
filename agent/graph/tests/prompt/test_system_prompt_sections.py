@@ -1,7 +1,7 @@
 """Gating logic for framework-owned system-prompt sections.
 
 `invest_in_the_future_section` is gated by `prompt_invest_future_enabled`
-(AVA_SYSTEM_PROMPT_INVEST_FUTURE). The section renders when it is on, is
+(MEIVA_SYSTEM_PROMPT_INVEST_FUTURE). The section renders when it is on, is
 suppressed when it is off, and defaults on through the per-model floor.
 
 `communication_style_section` is the odd one out: it is selected, not gated —
@@ -92,7 +92,9 @@ def test_invest_in_the_future_section_has_no_platform_words_or_numeric_threshold
     rendered = invest_in_the_future_section(_slices(), catalog=build_model_catalog())
 
     assert re.search(r"\d", rendered) is None
-    assert all(word not in rendered for word in ["CI", "flake", "AVA_", "GitHub", "task_registry"])
+    assert all(
+        word not in rendered for word in ["CI", "flake", "MEIVA_", "GitHub", "task_registry"]
+    )
     assert "Beyond the task at hand" not in rendered
 
 
@@ -191,7 +193,7 @@ def test_keep_it_simple_section_carries_meta_principle(monkeypatch: pytest.Monke
     assert "this meta-principle decides" in rendered
 
 
-# --- CodeAct batching (AVA_SYSTEM_PROMPT_CODEACT, on by default) ---
+# --- CodeAct batching (MEIVA_SYSTEM_PROMPT_CODEACT, on by default) ---
 
 
 def test_codeact_section_defaults_to_on():
@@ -272,7 +274,7 @@ def test_temporal_awareness_invokes_ai_capability_timescale(
 
     rendered = temporal_awareness_section(_slices(), catalog=build_model_catalog())
 
-    assert "ava.skills.ava_workflow.capability_timescale" in rendered
+    assert "meiva.skills.meiva_workflow.capability_timescale" in rendered
     assert "scheduling, estimating, or judging the feasibility" in rendered
 
 
@@ -311,7 +313,7 @@ def test_ui_delivery_section_prefers_ui_over_file_paths(monkeypatch: pytest.Monk
     assert "through the UI" in rendered
     assert "telling the user its path" in rendered
     assert "persistence" in rendered and "other agents" in rendered
-    assert "ava.ui." not in rendered  # example-free: no SDK function names
+    assert "meiva.ui." not in rendered  # example-free: no SDK function names
 
 
 # --- Communication style ---
@@ -327,7 +329,7 @@ def test_communication_style_only_renders_optional_narration(
     rendered = communication_style_section(_slices(), catalog=build_model_catalog())
 
     assert rendered.startswith("# ")
-    assert "`ava.ui.notify`" in rendered
+    assert "`meiva.ui.notify`" in rendered
     assert "Reply in ordinary assistant text" not in rendered
 
 
@@ -413,7 +415,7 @@ def test_off_style_is_absent_from_the_full_system_prompt(monkeypatch: pytest.Mon
     assert "# Talking to the user" not in prompt
 
 
-# --- User tone (AVA_SYSTEM_PROMPT_USER_TONE) ---
+# --- User tone (MEIVA_SYSTEM_PROMPT_USER_TONE) ---
 
 
 @pytest.mark.parametrize(
@@ -519,7 +521,7 @@ def test_user_tone_section_stays_semantic_not_api_specific(
 
     rendered = user_tone_section(_slices(), catalog=build_model_catalog())
 
-    assert "ava.ui." not in rendered
+    assert "meiva.ui." not in rendered
     assert "spawn(" not in rendered
 
 

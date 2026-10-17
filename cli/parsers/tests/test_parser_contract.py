@@ -39,17 +39,17 @@ def test_help_and_errors_keep_argparse_output(
 
 
 def test_omitted_arguments_read_the_process_argv(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(sys, "argv", ["ava", "memory", "search", "text", "--limit", "8"])
+    monkeypatch.setattr(sys, "argv", ["meiva", "memory", "search", "text", "--limit", "8"])
     args = parse_args()
     assert args.query == "text" and args.limit == 8
 
 
 def test_options_keep_command_paths_and_fresh_snapshots() -> None:
     options = command_options()
-    assert options[("ava",)] == {"--help"}
-    assert "--keep-infra" in options[("ava", "stop")]
-    assert "--keep-infra" not in options[("ava", "start")]
-    timeline = ("ava", "agents", "timeline")
+    assert options[("meiva",)] == {"--help"}
+    assert "--keep-infra" in options[("meiva", "stop")]
+    assert "--keep-infra" not in options[("meiva", "start")]
+    timeline = ("meiva", "agents", "timeline")
     fresh_options = command_options()
     assert options[timeline] == fresh_options[timeline] == {"--help", "--limit", "--before"}
     options[timeline].clear()
@@ -58,8 +58,8 @@ def test_options_keep_command_paths_and_fresh_snapshots() -> None:
 
 
 def test_public_queries_do_not_load_settings_or_dispatch(tmp_path: Path) -> None:
-    env = {key: value for key, value in os.environ.items() if not key.startswith("AVA_")}
-    env["AVA_HOME"] = str(tmp_path)
+    env = {key: value for key, value in os.environ.items() if not key.startswith("MEIVA_")}
+    env["MEIVA_HOME"] = str(tmp_path)
     child = subprocess.run(  # noqa: S603 -- fixed interpreter and repository-owned helper
         [
             sys.executable,

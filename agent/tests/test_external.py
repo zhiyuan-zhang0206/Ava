@@ -11,8 +11,8 @@ from langchain_core.messages import HumanMessage, RemoveMessage
 from langgraph.graph.message import REMOVE_ALL_MESSAGES
 from opentelemetry.sdk._logs.export import InMemoryLogRecordExporter
 
-import ava
 import base.agents.impersonation.manifest as impersonation_manifest
+import meiva
 from agent import state as state_module
 from agent.extensions import plugin_state_codec
 from agent.extensions.plugin_state_codec import (
@@ -26,17 +26,17 @@ from agent.tests.impersonation.external_attachment import (
     ExampleState,
 )
 from agent.tests.impersonation.external_attachment import attached_runtime as attached_runtime
-from ava import boot, gateway_client, impersonation
-from ava.impersonation import attachment as attachment_module
-from ava.sdk_surface import agent_identity, process_context
-from ava.sdk_surface import settings as _settings
-from ava.sdk_surface.settings import agent_setting
 from base import telemetry
 from base.config.tests.configuration import defaults
 from base.db import Database
 from base.packages.plugin_providers import build_model_catalog
 from base.telemetry.otlp.tests.external_flush import HANDSHAKE_BOUND_S as _HANDSHAKE_BOUND_S
 from base.telemetry.otlp.tests.external_flush import paused_otlp_record as paused_otlp_record
+from meiva import boot, gateway_client, impersonation
+from meiva.impersonation import attachment as attachment_module
+from meiva.sdk_surface import agent_identity, process_context
+from meiva.sdk_surface import settings as _settings
+from meiva.sdk_surface.settings import agent_setting
 
 
 def _skip_local_capture(event: telemetry.Event, **_kwargs: Any) -> telemetry.Event:
@@ -47,10 +47,10 @@ def test_attach_borrows_identity_even_with_explicit_external_profile(
     attached_runtime: tuple[dict[str, Any], Any, list[dict[str, Any]]],
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setenv("AVA_CALLER_IDENTITY", '{"kind":"external_agent","subject":"codex"}')
+    monkeypatch.setenv("MEIVA_CALLER_IDENTITY", '{"kind":"external_agent","subject":"codex"}')
     with impersonation.attach("lease"):
         assert _borrowed_agent_id() == 405
-        assert ava.self.AGENT_ID == 405
+        assert meiva.self.AGENT_ID == 405
         assert agent_identity.require_agent_id() == 405
         assert agent_identity.require_actor() == "agent:405"
         assert agent_identity.require_actor() == "agent:405"
@@ -87,7 +87,7 @@ def test_expiry_blocks_identity_and_plugin_state_before_new_effects(
     handle = state_module.PluginStateHandle(ExamplePlugin, "sample")
     lease["status"] = "expired"
     for read in (
-        lambda: ava.self.AGENT_ID,
+        lambda: meiva.self.AGENT_ID,
         agent_identity.require_actor,
         handle.read,
         lambda: handle.update({"seen": {"too-late"}}),
@@ -115,7 +115,7 @@ def test_attach_requests_native_plugin_load(
     assert len(calls) == 1
     assert calls[0]["surface"] is False
     assert calls[0]["config"] is None
-    assert calls[0]["machine"] is ava.context.require_machine()
+    assert calls[0]["machine"] is meiva.context.require_machine()
     assert set(calls[0]) == {
         "context",
         "surface",
@@ -167,7 +167,7 @@ def _invalidate_lease(lease: dict[str, Any], invalidated: str) -> str:
 
 
 def _borrowed_agent_id() -> int | None:
-    context = getattr(ava, "context", None)
+    context = getattr(meiva, "context", None)
     lease = None if context is None or context.identity is None else context.identity.lease
     return None if lease is None else lease.agent_id
 
@@ -180,7 +180,7 @@ def _assert_detached() -> None:
 def test_attach_refuses_inside_an_exec_turn(
     attached_runtime: tuple[dict[str, Any], Any, list[dict[str, Any]]],
 ) -> None:
-    ava.state = ExampleState(sample__seen={"prior"})
+    meiva.state = ExampleState(sample__seen={"prior"})
     with pytest.raises(RuntimeError, match="exec turn cannot attach"):
         impersonation.attach("lease")
     assert _borrowed_agent_id() is None
@@ -213,7 +213,7 @@ def test_failed_context_entry_detaches_and_allows_next_attachment(
     monkeypatch.setattr(attachment_module.control, "require_active", require_next)
     with impersonation.attach("next"):
         assert _borrowed_agent_id() == 405
-        assert ava.self.AGENT_ID == 405
+        assert meiva.self.AGENT_ID == 405
     _assert_detached()
 
 
@@ -235,7 +235,7 @@ def test_concurrent_constructor_fails_before_lease_lookup(
     def attach_in_worker() -> None:
         with impersonation.attach("lease"):
             assert _borrowed_agent_id() == 405
-            assert ava.self.AGENT_ID == 405
+            assert meiva.self.AGENT_ID == 405
 
     monkeypatch.setattr(attachment_module.control, "require_active", blocked_require)
     with ThreadPoolExecutor(max_workers=1) as executor:
@@ -253,7 +253,7 @@ def test_concurrent_constructor_fails_before_lease_lookup(
     assert _borrowed_agent_id() is None
     with impersonation.attach("lease"):
         assert _borrowed_agent_id() == 405
-        assert ava.self.AGENT_ID == 405
+        assert meiva.self.AGENT_ID == 405
 
 
 @pytest.mark.parametrize("failure_at", ["lease", "snapshot"])
@@ -279,7 +279,7 @@ def test_constructor_failure_detaches_and_allows_next_attachment(
     assert not staged
     with impersonation.attach("lease"):
         assert _borrowed_agent_id() == 405
-        assert ava.self.AGENT_ID == 405
+        assert meiva.self.AGENT_ID == 405
 
 
 def test_repeated_close_cannot_release_another_attachment(
@@ -290,7 +290,7 @@ def test_repeated_close_cannot_release_another_attachment(
     with impersonation.attach("lease"):
         first.close()
         assert _borrowed_agent_id() == 405
-        assert ava.self.AGENT_ID == 405
+        assert meiva.self.AGENT_ID == 405
         with pytest.raises(RuntimeError, match="already has an external attachment"):
             impersonation.attach("lease")
 
@@ -316,7 +316,7 @@ def test_close_rejects_a_new_sdk_effect_before_it_reaches_the_gateway(
 
     def new_call_during_close() -> None:
         with pytest.raises(RuntimeError, match="closing"):
-            ava.agents.send_message(99, "must not reach gateway")
+            meiva.agents.send_message(99, "must not reach gateway")
 
     def skip_seal(_gate: manifest.LocalCaptureGate) -> None:
         return None
@@ -356,7 +356,7 @@ def test_close_does_not_revoke_an_sdk_call_admitted_before_the_fence(
         return None
 
     monkeypatch.setattr(manifest, "seal_local_participant", skip_seal)
-    worker = Thread(target=lambda: ava.agents.send_message(99, "already admitted"))
+    worker = Thread(target=lambda: meiva.agents.send_message(99, "already admitted"))
     worker.start()
     assert entered.wait(_HANDSHAKE_BOUND_S), "SDK call did not reach its gateway boundary"
     attachment.close()
@@ -402,7 +402,7 @@ def test_close_waits_for_a_dequeued_otlp_record_before_force_flush(
 
     monkeypatch.setattr(telemetry, "sync", no_sync)
     release, exporter = paused_otlp_record
-    ava.context.clients.event_pipeline()
+    meiva.context.clients.event_pipeline()
     attachment = impersonation.attach("lease")
     timer = Timer(0.1, release.set)
     timer.daemon = True
@@ -427,7 +427,7 @@ def test_receipted_journal_entries_are_not_replayed(
         encode_plugin_delta({"messages": [RemoveMessage(id="already-removed")]}, ExampleState)
     ]
     with impersonation.attach("lease"):
-        assert ava.state.messages == []
+        assert meiva.state.messages == []
 
 
 def test_attach_rejects_other_machine_without_binding_identity(
@@ -527,7 +527,7 @@ def test_external_attachment_refuses_to_journal_a_full_history_reset(
     _, snapshot, staged = attached_runtime
     snapshot.messages = [HumanMessage(content="Native history", id="native")]
     attachment = impersonation.attach("lease")
-    ava.state_update = {"messages": [RemoveMessage(id=REMOVE_ALL_MESSAGES)]}
+    meiva.state_update = {"messages": [RemoveMessage(id=REMOVE_ALL_MESSAGES)]}
     with pytest.raises(ValueError, match=r"REMOVE_ALL.*native compaction"):
         attachment.close()
     assert not staged
@@ -538,16 +538,16 @@ def test_external_attachment_refuses_to_journal_a_full_history_reset(
 def test_attachment_reuses_clients_and_restores_original_context(
     attached_runtime: tuple[dict[str, Any], Any, list[dict[str, Any]]],
 ) -> None:
-    original = getattr(ava, "context", None)
+    original = getattr(meiva, "context", None)
     assert original is not None
     with impersonation.attach("lease"):
-        assert ava.context.clients is original.clients
-        assert ava.context.identity is not None
-        assert ava.context.identity.lease is not None
-        assert ava.context.identity.lease.agent_id == 405
-        assert ava.context.sql is ava.DB
-        assert ava.context.redis is ava.REDIS
-    assert getattr(ava, "context", None) is original
+        assert meiva.context.clients is original.clients
+        assert meiva.context.identity is not None
+        assert meiva.context.identity.lease is not None
+        assert meiva.context.identity.lease.agent_id == 405
+        assert meiva.context.sql is meiva.DB
+        assert meiva.context.redis is meiva.REDIS
+    assert getattr(meiva, "context", None) is original
 
 
 def test_external_controls_stay_out_of_native_prompt(
@@ -563,9 +563,9 @@ def test_external_controls_stay_out_of_native_prompt(
         agent_id=None,
         catalog=build_model_catalog(),
     )
-    assert "impersonation" not in ava.__all_for_ava__
-    assert "ava.impersonation.attach" not in prompt
-    assert "## ava.impersonation" not in prompt
+    assert "impersonation" not in meiva.__all_for_meiva__
+    assert "meiva.impersonation.attach" not in prompt
+    assert "## meiva.impersonation" not in prompt
 
 
 def test_close_preserves_flush_error_when_receipt_cleanup_also_fails(

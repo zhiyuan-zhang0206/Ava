@@ -50,7 +50,7 @@ def test_public_probe_is_a_noop_for_loopback_only_bind(
     monkeypatch.setattr(base_pooler, "admin_reachable", _fail_admin_dial)
 
     assert (
-        base_pooler.pgbouncer_public_listener_reachable(6433, "ava_main", machine=probe_machine)
+        base_pooler.pgbouncer_public_listener_reachable(6433, "meiva_main", machine=probe_machine)
         is True
     )
 
@@ -75,7 +75,7 @@ def test_public_probe_accepts_the_exact_reachable_host_in_the_socket_table(
     monkeypatch.setattr(base_pooler, "admin_reachable", _fail_admin_dial)
 
     assert (
-        base_pooler.pgbouncer_public_listener_reachable(6433, "ava_main", machine=probe_machine)
+        base_pooler.pgbouncer_public_listener_reachable(6433, "meiva_main", machine=probe_machine)
         is True
     )
     assert scanned == [6433]
@@ -112,6 +112,6 @@ def test_public_probe_interprets_socket_table_bindings(
     monkeypatch.setattr(base_pooler, "admin_reachable", _fail_admin_dial)
 
     assert (
-        base_pooler.pgbouncer_public_listener_reachable(6433, "ava_main", machine=probe_machine)
+        base_pooler.pgbouncer_public_listener_reachable(6433, "meiva_main", machine=probe_machine)
         is expected
     )

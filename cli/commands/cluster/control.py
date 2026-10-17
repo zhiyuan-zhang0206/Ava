@@ -1,4 +1,4 @@
-"""`ava cluster status` — print the full multi-machine roster (thin client).
+"""`meiva cluster status` — print the full multi-machine roster (thin client).
 
 GETs `/api/cluster/roster` on the gateway, which assembles the
 roster server-side: its own row locally + each agent-runner probed in parallel via
@@ -17,7 +17,7 @@ from base.api_contracts.status import MachineStatus
 from base.cluster.machine import format_capabilities
 
 _CLUSTER_STATUS_PROBE_TIMEOUT_S = 8.0
-# `ava cluster status` reads the *fresh* roster, whose server-side fan-out
+# `meiva cluster status` reads the *fresh* roster, whose server-side fan-out
 # probes every agent-runner in parallel, each bounded by the gateway's
 # `status_probe_timeout_seconds`. A black-holed machine rides that probe to its
 # full bound before the gateway can answer — measured 8.12s of wall against the
@@ -47,7 +47,7 @@ _ROLE_COL_W = 44
 
 
 def cmd_cluster_mark_staging(name: str, *, is_staging: bool) -> int:
-    """`ava cluster mark-staging NAME` / `ava cluster unmark-staging NAME`.
+    """`meiva cluster mark-staging NAME` / `meiva cluster unmark-staging NAME`.
 
     Thin client: POSTs /api/cluster/machines/{name}/staging on the gateway,
     which flips the operator staging flag on the machines row. A staging host
@@ -77,14 +77,14 @@ def cmd_cluster_mark_staging(name: str, *, is_staging: bool) -> int:
 
 
 def cmd_cluster_pause(name: str, *, reason: str | None = None) -> int:
-    """`ava cluster pause NAME [--reason ...]` — temporarily pull a machine
+    """`meiva cluster pause NAME [--reason ...]` — temporarily pull a machine
     out of the cluster.
 
     Thin client: POSTs /api/cluster/machines/{name}/pause on the gateway,
     which drains (reassigns in_progress tasks of the machine's agents to
     the drain owner #405, with a note on each), terminates every live agent on
     the machine and sets the pause latch. From then on the machine is hidden from the roster / cluster
-    panel / `ava.agents.list_machines()`, is not probed (no offline signal),
+    panel / `meiva.agents.list_machines()`, is not probed (no offline signal),
     is skipped by cluster fan-outs and refuses spawns — the cluster shows only
     its active members. The registration row (URL/role) is preserved for resume.
     Exit 1 when the gateway reports no such machine or refuses (own gateway).
@@ -120,13 +120,13 @@ def cmd_cluster_pause(name: str, *, reason: str | None = None) -> int:
     )
     print(
         "  hidden from roster/probe/fan-out/spawn until resumed: "
-        f"`ava cluster resume {name}` (run on the gateway host)"
+        f"`meiva cluster resume {name}` (run on the gateway host)"
     )
     return 0
 
 
 def cmd_cluster_resume(name: str) -> int:
-    """`ava cluster resume NAME` — restore a paused machine as a normal
+    """`meiva cluster resume NAME` — restore a paused machine as a normal
     cluster member.
 
     Thin client: POSTs /api/cluster/machines/{name}/resume on the gateway,
@@ -158,20 +158,20 @@ def cmd_cluster_resume(name: str) -> int:
         print(f"{name}: was not paused (no-op)")
     print(
         f"  machine-side checklist (run ON {name} when it is back online):\n"
-        "    1. `ava start` on the machine — register_self refreshes its dial URL "
+        "    1. `meiva start` on the machine — register_self refreshes its dial URL "
         "(the reachable address may have changed) and clears its stopped_at latch.\n"
         "    2. If its reachable address changed, the gateway's pg_hba must cover the new IP: "
-        "add the machine's new IP/CIDR to the comma-separated AVA_TRUSTED_CIDRS with "
-        "`ava config set AVA_TRUSTED_CIDRS=<ranges>`, then run `ava restart` ON THE GATEWAY "
+        "add the machine's new IP/CIDR to the comma-separated MEIVA_TRUSTED_CIDRS with "
+        "`meiva config set MEIVA_TRUSTED_CIDRS=<ranges>`, then run `meiva restart` ON THE GATEWAY "
         "HOST — its start leg rewrites pg_hba.conf and reloads the retained Postgres.\n"
         "    3. Respawn the agents that lived on it (pause terminated them); "
-        "`ava cluster status` / `ava.agents.list_machines()` shows it again."
+        "`meiva cluster status` / `meiva.agents.list_machines()` shows it again."
     )
     return 0
 
 
 def cmd_cluster_status() -> int:
-    """`ava cluster status` — print the full multi-machine roster.
+    """`meiva cluster status` — print the full multi-machine roster.
 
     Thin client: GET `/api/cluster/roster` on the gateway, which
     assembles the roster server-side (its own row locally + each agent-runner
@@ -204,7 +204,7 @@ def cmd_cluster_status() -> int:
         # pass's last probe, which can be a minute old.
         url = f"{gateway_api_base(access.gateway_url)}/api/cluster/roster?fresh=true"
     except GatewayApiBaseMissing as exc:
-        # Same diagnostic posture as `ava status`'s gateway supplement: a host
+        # Same diagnostic posture as `meiva status`'s gateway supplement: a host
         # that cannot resolve the gateway URL must still say why.
         print(f"✗ cannot resolve gateway URL: {exc}", file=sys.stderr)
         return 1
@@ -235,7 +235,7 @@ def cmd_cluster_status() -> int:
     roster = [MachineStatus.model_validate(m) for m in resp.json()]
 
     if not roster:
-        print("(machines table empty — no host has run `ava start` yet)")
+        print("(machines table empty — no host has run `meiva start` yet)")
         return 0
 
     for line in _render_roster(roster):
@@ -305,9 +305,9 @@ def status_cell(online: bool, identity_mismatch: bool, stopped_at: datetime | No
     A plain 'online' here is what hid the 2026-07-28 runner exclusion — the
     roster read healthy while the update fan-out, which filters on that same
     marker, silently dropped the host. The marker is the wrong one (a live probe
-    outranks a latch nothing but `ava start` clears), so the cell names the
+    outranks a latch nothing but `meiva start` clears), so the cell names the
     contradiction rather than picking a side quietly. The next rollout reconciles
-    it (`_resolve_fanout_targets`); an `ava start` on the host clears it outright.
+    it (`_resolve_fanout_targets`); an `meiva start` on the host clears it outright.
     """
     if identity_mismatch:
         return "MISMATCH"
@@ -335,7 +335,7 @@ def code_cell(running_sha: str | None, head_sha: str | None) -> str:
 def fetch_gateway_cluster_status() -> dict[str, object]:
     """GET `/api/cluster/status` and return the decoded ClusterStatus body.
 
-    Used by `ava status`'s gateway-view supplement. Presents the cluster-secret
+    Used by `meiva status`'s gateway-view supplement. Presents the cluster-secret
     bearer (the endpoint is authenticated, like every `/api/cluster/*`) so a
     healthy-but-authed gateway reads as up instead of a false `401 unreachable`.
     Fails fast (`raise_for_status()`) on any HTTP error rather than masking an
@@ -360,20 +360,20 @@ def _gateway_authority_home(verb: str) -> Path | None:
     """
     from base.config import settings
     from base.host.env.bootstrap import config_source_is_local
-    from base.paths import ava_home
+    from base.paths import meiva_home
 
     if not config_source_is_local() or settings.data_plane.is_remote:
         print(
-            f"✗ ava cluster db-authority {verb}: runs on a gateway home with a local data "
+            f"✗ meiva cluster db-authority {verb}: runs on a gateway home with a local data "
             "plane; a remote-managed plane has no write generation to issue",
             file=sys.stderr,
         )
         return None
-    return ava_home().resolve()
+    return meiva_home().resolve()
 
 
 def cmd_db_authority_issue_unit(*, machine: str, home: str, out: str, ttl_hours: float) -> int:
-    """`ava cluster db-authority issue-unit` — seal one remote unit's database capability.
+    """`meiva cluster db-authority issue-unit` — seal one remote unit's database capability.
 
     Runs on the gateway home. The bundle carries the ACTIVE write generation's
     runner login and (while the API is authenticated) its API admission — the
@@ -381,8 +381,8 @@ def cmd_db_authority_issue_unit(*, machine: str, home: str, out: str, ttl_hours:
     endpoint bootstrap serves, bound to (`machine`, `home`) and expiring after
     `ttl_hours`. It is written 0600 to `out` (never overwritten) and sealed under
     a transport key printed once here; the unit installs it with
-    `ava cluster db-authority install-unit <bundle>` (a first join passes it to
-    `ava init --db-capability`) and that key in AVA_DB_CAPABILITY_KEY.
+    `meiva cluster db-authority install-unit <bundle>` (a first join passes it to
+    `meiva init --db-capability`) and that key in MEIVA_DB_CAPABILITY_KEY.
     Refused on a pure agent-runner, a remote-managed plane and a home without an
     active generation.
     """
@@ -410,48 +410,48 @@ def cmd_db_authority_issue_unit(*, machine: str, home: str, out: str, ttl_hours:
         )
         write_bundle(target, issued.envelope)
     except (AuthorityRefusedError, ValueError, RuntimeError, OSError) as exc:
-        print(f"✗ ava cluster db-authority issue-unit: {exc}", file=sys.stderr)
+        print(f"✗ meiva cluster db-authority issue-unit: {exc}", file=sys.stderr)
         return 1
     expires = datetime.fromtimestamp(issued.expires_at).astimezone().isoformat(timespec="seconds")
     print(
         f"✓ bundle for {unit.describe()} (write generation {issued.generation}, expires "
         f"{expires}) written to {target} (0600)\n"
         f"  transport key (shown once, carry it separately): {issued.transport_key}\n"
-        "  on the unit: export AVA_DB_CAPABILITY_KEY from a non-echoing prompt, then run its\n"
-        "  checkout's `.venv/bin/ava init --db-capability <bundle>` for a first join (init also "
-        "takes --gateway-url, --machine-name and --machine-host), or `ava cluster db-authority "
+        "  on the unit: export MEIVA_DB_CAPABILITY_KEY from a non-echoing prompt, then run its\n"
+        "  checkout's `.venv/bin/meiva init --db-capability <bundle>` for a first join (init also "
+        "takes --gateway-url, --machine-name and --machine-host), or `meiva cluster db-authority "
         "install-unit <bundle>` on an initialized unit; the unit never needs "
-        "AVA_CLUSTER_SECRET; a bare `ava` exists only once the unit's first start has linked it)"
+        "MEIVA_CLUSTER_SECRET; a bare `meiva` exists only once the unit's first start has linked it)"
     )
     return 0
 
 
 def cmd_db_authority_install_unit(*, bundle: str) -> int:
-    """`ava cluster db-authority install-unit` — install a sealed capability on this unit.
+    """`meiva cluster db-authority install-unit` — install a sealed capability on this unit.
 
     Runs on an initialized agent-runner home, with the bundle's transport key in
-    AVA_DB_CAPABILITY_KEY. The bundle must name this unit (machine and home), the
+    MEIVA_DB_CAPABILITY_KEY. The bundle must name this unit (machine and home), the
     endpoint the gateway serves now and a generation not older than the installed
     one; the unit's gateway answers the bundle's own API token before anything is
     written, and the bundle file is deleted once installed. After a write-generation
     rotation: stop the unit, install the new bundle, start it. Refused on a gateway
-    home (it keeps its own ledger) and on a home `ava init` has not initialized.
+    home (it keeps its own ledger) and on a home `meiva init` has not initialized.
     """
     from base.host.db_authority.model import AuthorityRefusedError
     from base.host.env.bootstrap import BootstrapFetchError
-    from base.paths.home import resolve_ava_home
+    from base.paths.home import resolve_meiva_home
     from cli.commands.cluster.unit_join import join_gateway
     from cli.start_identity import require_initialized, stored_values
 
-    home = resolve_ava_home().resolve()
+    home = resolve_meiva_home().resolve()
     try:
         admitted = require_initialized(home)
     except (RuntimeError, ValueError, OSError) as exc:
-        print(f"✗ ava cluster db-authority install-unit: {exc}", file=sys.stderr)
+        print(f"✗ meiva cluster db-authority install-unit: {exc}", file=sys.stderr)
         return 1
     if "gateway" in admitted.roles:
         print(
-            "✗ ava cluster db-authority install-unit: a gateway unit keeps its own "
+            "✗ meiva cluster db-authority install-unit: a gateway unit keeps its own "
             "write-generation ledger; install-unit is for agent-runner units",
             file=sys.stderr,
         )
@@ -459,6 +459,6 @@ def cmd_db_authority_install_unit(*, bundle: str) -> int:
     try:
         join_gateway(stored_values(home), home, bundle)
     except (AuthorityRefusedError, BootstrapFetchError, ValueError, RuntimeError, OSError) as exc:
-        print(f"✗ ava cluster db-authority install-unit: {exc}", file=sys.stderr)
+        print(f"✗ meiva cluster db-authority install-unit: {exc}", file=sys.stderr)
         return 1
     return 0

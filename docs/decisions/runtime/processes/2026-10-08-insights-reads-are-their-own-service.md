@@ -15,7 +15,7 @@ coming, all CPU-bound and cache-heavy.
 
 `services/derived/insights` is a root unit of its own. It owns every insights read route
 and the checkpoint-history cache (`HistoryViewCache`); the gateway keeps no copy. It serves
-HTTP with uvicorn on a Unix socket (`$AVA_HOME/run/insights.sock`, mode 0600). It has no
+HTTP with uvicorn on a Unix socket (`$MEIVA_HOME/run/insights.sock`, mode 0600). It has no
 port and no fixed-table slot: `/healthz` answers on the same socket and the roster entry's
 identity probe asks it there (this service, this home, the pid its pidfile records), the
 shape `browser-mcp` already has.

@@ -5,7 +5,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from base.host.private_storage import write_private_bytes
-from base.paths import ava_home
+from base.paths import meiva_home
 
 
 @dataclass(frozen=True)
@@ -18,7 +18,7 @@ class ServiceSelection:
 
 
 def selection_path() -> Path:
-    return ava_home() / "service-selection.json"
+    return meiva_home() / "service-selection.json"
 
 
 def read_selection() -> ServiceSelection:

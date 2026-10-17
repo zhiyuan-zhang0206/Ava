@@ -9,10 +9,10 @@ _USAGE = {"input_tokens": 10, "output_tokens": 5, "total_tokens": 15}
 _TALL_OUTPUT = 'print("\\n".join(f"row {i:03d}" for i in range(300)))'
 
 _SHELL_SETUP = (
-    "import ava\n"
-    'sid = ava.shell.sessions.new("history-probe", ttl=1800)\n'
-    'ava.shell.sessions.send(sid, "seq 1 400")\n'
-    'ava.shell.sessions.send(sid, "for i in $(seq 1 600); do echo tick-$i; sleep 1; done")\n'
+    "import meiva\n"
+    'sid = meiva.shell.sessions.new("history-probe", ttl=1800)\n'
+    'meiva.shell.sessions.send(sid, "seq 1 400")\n'
+    'meiva.shell.sessions.send(sid, "for i in $(seq 1 600); do echo tick-$i; sleep 1; done")\n'
     'print(f"SHELL_SID={sid}")\n'
 )
 

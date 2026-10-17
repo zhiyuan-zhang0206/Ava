@@ -2,7 +2,7 @@
 
 ## Context
 
-Ava's default is to fail fast: an error in an action surfaces to the caller instead of being
+Meiva's default is to fail fast: an error in an action surfaces to the caller instead of being
 papered over (see [fail-fast vs reconcile](2026-07-19-fail-fast-vs-reconcile-boundary.md) and
 [no silent failures](2026-10-04-no-silent-failures.md)).
 
@@ -44,7 +44,7 @@ exposes `snapshot()` and `group_new_page()`, both of which report their own fail
 
 - **Fail the browser call when grouping fails.** Consistent with the default, but it turns a cosmetic
   problem into a tool error for an action that worked, and invites duplicate pages on retry.
-- **Degrade silently (debug log or no log).** Ava already paid for that shape: a failure nobody can see
+- **Degrade silently (debug log or no log).** Meiva already paid for that shape: a failure nobody can see
   is indistinguishable from a feature that works. The warning is what makes the degrade acceptable.
 - **A general "optional feature" switch or fallback framework.** The class is narrow (presentation
   only, with an unaffected action) and one boundary function per feature states it better than a shared

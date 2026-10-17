@@ -1,4 +1,4 @@
-"""mmap-backed shared memory pinning for every PG Ava starts (Task #1263), and
+"""mmap-backed shared memory pinning for every PG Meiva starts (Task #1263), and
 the Postgres session timezone pin (tz audit PR-1).
 
 `pg_shm_args` / `pg_tz_args` feed the `pg_ctl -o` string of both startup paths
@@ -92,11 +92,11 @@ def scratch_pg_root(monkeypatch: pytest.MonkeyPatch, postgres_access: None) -> I
     The Postgres socket path (`.s.PGSQL.<port>`) is capped at 103 bytes, so the
     instance root must be short; teardown force-stops and deletes anything left
     under it."""
-    root = Path(tempfile.mkdtemp(prefix="ava-pg-env-", dir="/tmp"))
+    root = Path(tempfile.mkdtemp(prefix="meiva-pg-env-", dir="/tmp"))
     monkeypatch.setattr(pg_throwaway_base, "default_base", lambda: root)
     monkeypatch.setattr(pg_throwaway_base, "disk_fallback_base", lambda: root)
     yield root
-    for data in root.glob("ava-pg-*/data"):
+    for data in root.glob("meiva-pg-*/data"):
         if (data / "PG_VERSION").is_file():
             subprocess.run(  # noqa: S603 — argv is the resolved pg_ctl path + this test's own dir
                 [pg_tools.pg_tool("pg_ctl"), "-D", str(data), "-m", "immediate", "stop"],
@@ -176,11 +176,11 @@ def test_pg_start_env_carries_only_process_mechanics(monkeypatch: pytest.MonkeyP
     """The postmaster keeps the operator's PATH, home, user, temp dir, timezone
     and locale, never configuration or a credential the caller holds."""
     monkeypatch.setattr(pg_tools, "is_macos", lambda: False)
-    # The raw process environment the spawning `ava start` may hold (Settings
+    # The raw process environment the spawning `meiva start` may hold (Settings
     # is not involved): delivered credentials, `.env` secrets, libpq leftovers.
     held = {
-        "AVA_API_TOKEN": "gateway-api-token-" + "t" * 32,
-        "AVA_CLUSTER_SECRET": "human-" + "h" * 40,
+        "MEIVA_API_TOKEN": "gateway-api-token-" + "t" * 32,
+        "MEIVA_CLUSTER_SECRET": "human-" + "h" * 40,
         "PGPASSWORD": "inherited",
         "TZ": "Asia/Shanghai",
         "LC_CTYPE": "UTF-8",
@@ -211,7 +211,7 @@ def test_throwaway_pg_ctl_start_is_handed_the_built_start_env(
     """Task #3754: the fixture's `pg_ctl start` receives pg_start_env() — the
     postmaster environment is built explicitly instead of inherited from
     whatever process runs the suite."""
-    sentinel = {**os.environ, "AVA_TEST_PG_START_ENV": "1"}
+    sentinel = {**os.environ, "MEIVA_TEST_PG_START_ENV": "1"}
     monkeypatch.setattr(pg_tools, "pg_start_env", lambda: sentinel)
     start_envs: list[object] = []
     real_run = pg_tools.subprocess.run

@@ -342,7 +342,7 @@ async def test_op_arms_do_not_run_on_the_default_executor(
         host=fake_host(),
     )
 
-    assert seen and seen[0].startswith("ava-ops-arm"), f"arm ran on {seen!r}"
+    assert seen and seen[0].startswith("meiva-ops-arm"), f"arm ran on {seen!r}"
 
 
 def test_shutting_the_pool_down_does_not_wait_for_it(

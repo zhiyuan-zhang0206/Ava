@@ -115,7 +115,7 @@ def test_squash_authority_checked_even_without_pending(
             "VALUES ('real-gateway', '/real/home', true)"
         )
     try:
-        monkeypatch.setenv("AVA_HOME", str(tmp_path / "not-the-gateways-home"))
+        monkeypatch.setenv("MEIVA_HOME", str(tmp_path / "not-the-gateways-home"))
         from base.deploy.schema.migrations import MigrationAuthorityMismatch
 
         with psycopg.connect(db_url()) as fresh:

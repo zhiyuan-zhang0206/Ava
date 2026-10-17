@@ -91,7 +91,7 @@ async def test_claim_compact_summary_replaces_messages_with_remove_sentinel(
     database_gate: ProcessDbGate,
     machine_identity: MachineIdentity,
 ):
-    """compact_summary inbound (written by agent ava.compact) → claim returns
+    """compact_summary inbound (written by agent meiva.compact) → claim returns
     Command containing RemoveMessage(REMOVE_ALL_MESSAGES) sentinel + summary.
     The entire history is replaced, leaving no raw tail. Does **not** call LLM."""
     tid = spawn_agent(
@@ -139,7 +139,7 @@ async def test_claim_compact_summary_bumps_compact_version(
 ):
     """Agent-authored compact (claim path) advances compact.version, matching the
     forced path's before_llm hook — this REMOVE_ALL stripped the messages just the
-    same, so Layer 3 subscribers (ava_code's context-file re-injection, the
+    same, so Layer 3 subscribers (meiva_code's context-file re-injection, the
     reminder re-arm) must see it. Without the bump a self-compact is invisible to
     them."""
     tid = spawn_agent(
@@ -223,7 +223,7 @@ async def test_claim_compact_request_emits_live_run_pair_with_durable_anchor(
     """Task #3323: the claim-path compact run (UI Compact / auto-resurrect)
     emits compact_started before the Compaction LLM call and
     compact_finished(success) when the summary is applied — same compact_id —
-    and the summary message carries the durable anchor ava_compact_id."""
+    and the summary message carries the durable anchor meiva_compact_id."""
     tid = spawn_agent(
         catalog=model_catalog,
         authority=config_authority,
@@ -255,7 +255,7 @@ async def test_claim_compact_request_emits_live_run_pair_with_durable_anchor(
     assert finished["status"] == "success"
     assert cmd.goto == "init_context"
     tail = compact_tail(cmd.update)
-    assert tail[0].additional_kwargs["ava_compact_id"] == started["compact_id"]  # pyright: ignore[reportUnknownMemberType]
+    assert tail[0].additional_kwargs["meiva_compact_id"] == started["compact_id"]  # pyright: ignore[reportUnknownMemberType]
 
 
 async def test_claim_two_compact_requests_second_replaces_first(
@@ -305,7 +305,7 @@ async def test_claim_two_compact_requests_second_replaces_first(
     assert llm.bind_tools.return_value.ainvoke.await_count == 2
     tail = compact_tail(cmd.update)
     assert tail[0].content == compose_summary_message("second summary")  # pyright: ignore[reportUnknownMemberType]
-    assert tail[0].additional_kwargs["ava_compact_id"] == pairs[1][0]["compact_id"]  # pyright: ignore[reportUnknownMemberType]
+    assert tail[0].additional_kwargs["meiva_compact_id"] == pairs[1][0]["compact_id"]  # pyright: ignore[reportUnknownMemberType]
 
 
 async def test_claim_compact_summary_supersedes_pending_request_and_closes_it_replaced(
@@ -354,7 +354,7 @@ async def test_claim_compact_summary_supersedes_pending_request_and_closes_it_re
     assert llm.bind_tools.return_value.ainvoke.await_count == 1
     tail = compact_tail(cmd.update)
     assert tail[0].content == compose_summary_message("agent-authored summary")  # pyright: ignore[reportUnknownMemberType]
-    assert "ava_compact_id" not in tail[0].additional_kwargs  # pyright: ignore[reportUnknownMemberType]
+    assert "meiva_compact_id" not in tail[0].additional_kwargs  # pyright: ignore[reportUnknownMemberType]
 
 
 async def test_claim_cancel_beats_pending_compact_and_closes_it_replaced(
@@ -552,7 +552,7 @@ async def test_claim_compact_summary_with_chat_in_same_batch_defers_chat(
     database_gate: ProcessDbGate,
     machine_identity: MachineIdentity,
 ):
-    """A chat sent between the agent's ava.self.compact and claim's wake lands in
+    """A chat sent between the agent's meiva.self.compact and claim's wake lands in
     the same batch as the compact_summary — it must not be lost, and it must NOT
     survive the compact as a raw message. The compact wipes cleanly (tail = the
     summary alone) and the chat row is reverted to pending so the next claim

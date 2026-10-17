@@ -66,7 +66,7 @@ def _worker_probe(credentials_path: str, work_path: str, roots: tuple[str, ...])
     settings.services.backup_offsite_credentials_file = credentials
 
     def _empty_dump(_now: object, *, directory: Path, **_: object) -> Path:
-        artifact = directory / "ava-20261002T030000Z.dump.enc"
+        artifact = directory / "meiva-20261002T030000Z.dump.enc"
         artifact.write_bytes(b"")
         return artifact
 

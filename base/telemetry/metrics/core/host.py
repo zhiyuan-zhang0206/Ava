@@ -1,9 +1,9 @@
 """Core host & data-plane panels — the "Host & data plane" section.
 
 The per-machine gauges the OTel Collector sidecars scrape
-(``job="ava-infra"``: CPU / memory / load / filesystem / disk / network plus
+(``job="meiva-infra"``: CPU / memory / load / filesystem / disk / network plus
 the Postgres and Redis exporters) and the two memory-search export stats
-(``ava_memory_search_stats_*``) — task #3697 S2.
+(``meiva_memory_search_stats_*``) — task #3697 S2.
 
 All PromQL against fixed scrape targets; the multi-series panels (per
 machine, per mountpoint, multi-direction) carry the series palette
@@ -312,14 +312,14 @@ def core_metrics() -> list[MetricSpec]:
             title="Memory search rows",
             description=(
                 "Memory-search store row count (absolute state, 60s sample) into the "
-                "ava_memory_search_stats_rows_ratio gauge (task #2088); thresholds: 30k soft "
+                "meiva_memory_search_stats_rows_ratio gauge (task #2088); thresholds: 30k soft "
                 "warning / 50k backend-switch evaluation / 100k hard cap."
             ),
             event_name="memory_search_stats",
             category="telemetry",
             panel="timeseries",
             query_type="promql",
-            query="max(ava_memory_search_stats_rows_ratio)",
+            query="max(meiva_memory_search_stats_rows_ratio)",
             target_names=["rows"],
             thresholds=[
                 ThresholdStep(color="yellow", value=30000),
@@ -338,7 +338,7 @@ def core_metrics() -> list[MetricSpec]:
             name="core_memory_search_npz_save_duration",
             title="Memory search npz save duration",
             description=(
-                "Duration of the most recent npz save (ava_memory_search_stats_last_save_seconds, "
+                "Duration of the most recent npz save (meiva_memory_search_stats_last_save_seconds, "
                 "task #2088); absent until the first save after boot — a climbing value flags a "
                 "slow save path."
             ),
@@ -347,7 +347,7 @@ def core_metrics() -> list[MetricSpec]:
             unit="s",
             panel="timeseries",
             query_type="promql",
-            query="max(ava_memory_search_stats_last_save_seconds)",
+            query="max(meiva_memory_search_stats_last_save_seconds)",
             target_names=["last_save"],
             field_defaults={"color": {"fixedColor": "purple", "mode": "fixed"}},
             panel_id=2304,

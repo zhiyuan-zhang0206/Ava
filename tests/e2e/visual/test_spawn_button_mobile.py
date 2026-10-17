@@ -12,7 +12,7 @@ in place for the desktop suite to keep using it.
 The test taps the Spawn button on an iPhone-emulated WebKit context and
 asserts the popover dropdown opens.
 
-Target environment is selected by the `AVA_MOBILE_TEST_BASE_URL` env var.
+Target environment is selected by the `MEIVA_MOBILE_TEST_BASE_URL` env var.
 When set, the test hits that URL directly (useful for local repro against
 the deployed prod URL).
 When unset, the test falls back to the session-scoped `frontend_proc` build —
@@ -37,10 +37,10 @@ from playwright.sync_api import Browser, BrowserContext, Page, Playwright, Route
 
 from tests.e2e._ports import FRONTEND_URL
 
-# Override target via env: `AVA_MOBILE_TEST_BASE_URL=https://ava.example.com`
+# Override target via env: `MEIVA_MOBILE_TEST_BASE_URL=https://meiva.example.com`
 # runs the matrix against the deployed bundle. Unset → fall back to the
 # session-scoped frontend_proc build.
-_OVERRIDE_BASE_URL = os.environ.get("AVA_MOBILE_TEST_BASE_URL")
+_OVERRIDE_BASE_URL = os.environ.get("MEIVA_MOBILE_TEST_BASE_URL")
 
 
 # Minimal SystemStatus body — frontend SpawnButton only reads
@@ -183,7 +183,7 @@ def _open_with_status_stub(ctx: BrowserContext, base_url: str) -> Page:
 @pytest.mark.skipif(
     not _OVERRIDE_BASE_URL,
     reason=(
-        "Set AVA_MOBILE_TEST_BASE_URL to a reachable frontend (e.g. the "
+        "Set MEIVA_MOBILE_TEST_BASE_URL to a reachable frontend (e.g. the "
         "deployed prod URL) to run. The default CI image does not ship the "
         "Playwright webkit binary, and the frontend_proc fallback is flaky "
         "under stubbed routes — track as follow-up."
@@ -196,7 +196,7 @@ def test_spawn_popover_opens_on_mobile_tap(
     """Tap the Spawn button on an iPhone-emulated WebKit context and assert
     the 'Spawn on' popover header appears within 2 s.
 
-    Target URL: `AVA_MOBILE_TEST_BASE_URL` env var takes priority. When
+    Target URL: `MEIVA_MOBILE_TEST_BASE_URL` env var takes priority. When
     unset, the test requests the `frontend_proc` fixture to build & serve
     the local bundle (this path is currently flaky under stubbed routes —
     track as a follow-up).

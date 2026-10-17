@@ -1,10 +1,9 @@
-# ava:ref services/agent_runner/agent_host/lifecycle/docs/configuration.ava.okf.md#host-configuration-owner
+# meiva:ref services/agent_runner/agent_host/lifecycle/docs/configuration.meiva.okf.md#host-configuration-owner
 
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
-from ava.sdk_surface.installation import Installation
 from base import paths
 from base.agents.context.clients import ClientSet
 from base.agents.history.hierarchy.group_consumer import UnderstandingReadInputs
@@ -16,8 +15,9 @@ from base.cluster.machine.boot import machine_from_boot
 from base.config import ConfigBoot
 from base.deploy.maintenance import admission
 from base.native_process.loaded_commit import LoadedCommit
-from base.paths.home import resolve_ava_home
+from base.paths.home import resolve_meiva_home
 from base.telemetry.process_logging import init_gateway_process
+from meiva.sdk_surface.installation import Installation
 from services.agent_runner.agent_host.runtime import HostCachePolicy, HostPolicy
 
 __all__ = [
@@ -34,7 +34,7 @@ def boot_process() -> tuple[ConfigBoot, Path]:
     config = ConfigBoot()
     config.boot()
     config.ensure_eager()
-    home = resolve_ava_home()
+    home = resolve_meiva_home()
     return config, home
 
 
@@ -82,12 +82,12 @@ def load_installation(
     producer: Callable[[], Any],
     load_extensions: Callable[..., object],
 ) -> Installation:
-    from ava.sdk_surface.installation import installed
     from base.config import Settings
     from base.config.service_read import ConfigAuthority
     from base.packages.plugin_providers import build_model_catalog
+    from meiva.sdk_surface.installation import installed
 
-    env_path = paths.ava_home() / ".env"
+    env_path = paths.meiva_home() / ".env"
     if config.view.profile is None:
         authority = ConfigAuthority(runtime=config.view, all_domains=config.view, env_path=env_path)
     else:

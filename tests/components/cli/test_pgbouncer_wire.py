@@ -522,4 +522,4 @@ def test_pooled_dial_names_its_process_and_code_version_and_keeps_the_ceiling(
                         }
         finally:
             owner.observe_minimum(0)
-    assert f"ava:{process_name()}:v4321" in names
+    assert f"meiva:{process_name()}:v4321" in names

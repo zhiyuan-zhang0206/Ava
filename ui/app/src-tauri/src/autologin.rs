@@ -1,7 +1,7 @@
 //! Native login — exchange a cluster secret for a short-lived session cookie
 //! without exposing the long-lived secret to remote web code.
 //!
-//! Desktop reads its local cluster secret from `$AVA_HOME/.env`; Android passes
+//! Desktop reads its local cluster secret from `$MEIVA_HOME/.env`; Android passes
 //! a secret held by its Keystore plugin. In both cases Rust sends the password
 //! directly to the gateway, installs only the returned HTTP-only cookie in the
 //! webview store, and loads the console after a successful exchange.
@@ -22,9 +22,9 @@ use tauri::{Url, WebviewWindow};
 
 use crate::urls::Endpoints;
 
-/// Env key carrying the desktop cluster secret in `$AVA_HOME/.env`.
+/// Env key carrying the desktop cluster secret in `$MEIVA_HOME/.env`.
 #[cfg(desktop)]
-const SECRET_KEY: &str = "AVA_CLUSTER_SECRET";
+const SECRET_KEY: &str = "MEIVA_CLUSTER_SECRET";
 
 /// Keep a stalled gateway from pinning the native login helper indefinitely.
 const LOGIN_TIMEOUT: Duration = Duration::from_secs(10);
@@ -194,12 +194,12 @@ fn cookie_for_gateway(header: &str, gateway: &Url) -> Result<Cookie<'static>, Lo
     Ok(builder.build().into_owned())
 }
 
-/// The desktop `.env` path: `$AVA_HOME/.env`, falling back to `~/.ava/.env`.
+/// The desktop `.env` path: `$MEIVA_HOME/.env`, falling back to `~/.meiva/.env`.
 #[cfg(desktop)]
 fn env_file() -> Option<PathBuf> {
-    let home = match env::var("AVA_HOME") {
+    let home = match env::var("MEIVA_HOME") {
         Ok(value) if !value.trim().is_empty() => PathBuf::from(value),
-        _ => dirs_home()?.join(".ava"),
+        _ => dirs_home()?.join(".meiva"),
     };
     Some(home.join(".env"))
 }
@@ -212,7 +212,7 @@ fn dirs_home() -> Option<PathBuf> {
         .map(PathBuf::from)
 }
 
-/// Read the desktop cluster secret from `$AVA_HOME/.env`.
+/// Read the desktop cluster secret from `$MEIVA_HOME/.env`.
 ///
 /// `None` means "no local cluster here" and is normal for a frontend-only
 /// desktop machine. The value is never logged.
@@ -256,7 +256,7 @@ mod tests {
     #[test]
     fn reads_the_secret_line() {
         assert_eq!(
-            parse_secret("AVA_DB_URL=postgresql://x\nAVA_CLUSTER_SECRET=s3cret\n").as_deref(),
+            parse_secret("MEIVA_DB_URL=postgresql://x\nMEIVA_CLUSTER_SECRET=s3cret\n").as_deref(),
             Some("s3cret")
         );
     }
@@ -265,7 +265,7 @@ mod tests {
     #[test]
     fn tolerates_export_prefix_quotes_and_padding() {
         assert_eq!(
-            parse_secret("  export AVA_CLUSTER_SECRET=\"quoted\"  \n").as_deref(),
+            parse_secret("  export MEIVA_CLUSTER_SECRET=\"quoted\"  \n").as_deref(),
             Some("quoted")
         );
     }
@@ -273,33 +273,33 @@ mod tests {
     #[cfg(desktop)]
     #[test]
     fn empty_assignment_is_the_no_auth_cluster_and_yields_nothing() {
-        assert!(parse_secret("AVA_CLUSTER_SECRET=\n").is_none());
-        assert!(parse_secret("AVA_CLUSTER_SECRET=   \n").is_none());
+        assert!(parse_secret("MEIVA_CLUSTER_SECRET=\n").is_none());
+        assert!(parse_secret("MEIVA_CLUSTER_SECRET=   \n").is_none());
     }
 
     #[cfg(desktop)]
     #[test]
     fn a_similarly_named_key_is_not_the_secret() {
-        assert!(parse_secret("AVA_CLUSTER_SECRET_FILE=/tmp/x\n").is_none());
+        assert!(parse_secret("MEIVA_CLUSTER_SECRET_FILE=/tmp/x\n").is_none());
     }
 
     #[cfg(desktop)]
     #[test]
     fn absent_key_yields_nothing() {
-        assert!(parse_secret("AVA_DB_URL=postgresql://x\n").is_none());
+        assert!(parse_secret("MEIVA_DB_URL=postgresql://x\n").is_none());
     }
 
     #[test]
     fn gateway_cookie_keeps_security_flags_and_gets_the_gateway_domain() {
-        let gateway = Url::parse("https://ava.example.com:8000/").unwrap();
+        let gateway = Url::parse("https://meiva.example.com:8000/").unwrap();
         let cookie = cookie_for_gateway(
-            "ava_session=token; HttpOnly; SameSite=Lax; Secure; Path=/; Max-Age=604800",
+            "meiva_session=token; HttpOnly; SameSite=Lax; Secure; Path=/; Max-Age=604800",
             &gateway,
         )
         .unwrap();
-        assert_eq!(cookie.name(), "ava_session");
+        assert_eq!(cookie.name(), "meiva_session");
         assert_eq!(cookie.value(), "token");
-        assert_eq!(cookie.domain(), Some("ava.example.com"));
+        assert_eq!(cookie.domain(), Some("meiva.example.com"));
         assert!(!cookie.domain().unwrap().starts_with('.'));
         assert_eq!(cookie.path(), Some("/"));
         assert_eq!(cookie.http_only(), Some(true));

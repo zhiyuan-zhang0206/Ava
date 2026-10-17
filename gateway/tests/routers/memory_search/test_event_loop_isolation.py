@@ -331,7 +331,7 @@ class TestSemaphoreCancelSafety:
 
 def test_semaphore_sized_from_setting(monkeypatch: pytest.MonkeyPatch) -> None:
     """The query-embed concurrency gate reads `memory_search_max_concurrency`
-    (env AVA_MEMORY_SEARCH_MAX_CONCURRENCY) — a knob, not a hardcoded constant."""
+    (env MEIVA_MEMORY_SEARCH_MAX_CONCURRENCY) — a knob, not a hardcoded constant."""
     import gateway.routers.memory as _gw_memory
     from base.config import settings
 
@@ -350,10 +350,10 @@ class TestMemoryNoteEndpoint:
 type: Memory
 title: Alpha
 description: First note
-tags: [ava-internal, tech-ops]
+tags: [meiva-internal, tech-ops]
 timestamp: '2026-06-18T10:00:00Z'
-ava_agent: '7'
-ava_machine: test-host
+meiva_agent: '7'
+meiva_machine: test-host
 ---
 
 # Alpha
@@ -371,10 +371,10 @@ Body **with** markdown.
         assert body["path"] == "alpha.md"
         assert body["title"] == "Alpha"
         assert body["description"] == "First note"
-        assert body["tags"] == ["ava-internal", "tech-ops"]
+        assert body["tags"] == ["meiva-internal", "tech-ops"]
         assert body["timestamp"] == "2026-06-18T10:00:00Z"
-        assert body["ava_agent"] == "7"
-        assert body["ava_machine"] == "test-host"
+        assert body["meiva_agent"] == "7"
+        assert body["meiva_machine"] == "test-host"
         # The parser contract: body starts right after the closing fence
         # (a leading blank line is normal for a note's body).
         assert body["body"] == "\n# Alpha\n\nBody **with** markdown.\n"

@@ -38,7 +38,7 @@ def test_a_stop_without_an_escalation_says_nothing_extra(
 
 
 def test_pooler_clients_at_the_stop_land_in_the_journal(home: Path) -> None:
-    line = "1 client(s) still connected when the pooler stops: 10.1.2.7:5432 db=ava"
+    line = "1 client(s) still connected when the pooler stops: 10.1.2.7:5432 db=meiva"
     assert status_journal.begin("stop")
 
     assert command.finish_stop(owns_journal=True, notes=[], clients=[line]) == 0

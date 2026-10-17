@@ -2,10 +2,10 @@
 
 ## Context
 
-The `ava_code` plugin persists a per-agent working directory in LangGraph
+The `meiva_code` plugin persists a per-agent working directory in LangGraph
 state. It also changed the Python process cwd when the value was set or restored
 from a checkpoint. That made plugin state a process-global side effect. An agent
-whose logical cwd pointed at an older Ava checkout then launched
+whose logical cwd pointed at an older Meiva checkout then launched
 `python -m agent.exec_child`; Python put that cwd first on `sys.path`, the old
 top-level `agent` package shadowed the installed checkout, and the new
 `agent.exec_child` module could not be found.
@@ -15,13 +15,13 @@ stuck native code without killing the agent. It is not a security sandbox.
 
 ## Decision
 
-`ava.cwd` is logical state owned by the AvaCode plugin. `get()` and `set()` read
-and write that state only. AvaCode's file, shell, and understand wrappers resolve
+`meiva.cwd` is logical state owned by the MeivaCode plugin. `get()` and `set()` read
+and write that state only. MeivaCode's file, shell, and understand wrappers resolve
 relative paths from it explicitly. Neither checkpoint restore nor `set()` calls
 `os.chdir`; bare Python filesystem calls, imports, and user subprocesses keep the
 stable cwd of their Python process.
 
-The core executor does not interpret AvaCode state and adds no cwd field to its
+The core executor does not interpret MeivaCode state and adds no cwd field to its
 IPC protocol. Each disposable child starts from the agent process's stable cwd
 with the same venv. The parent uses list-form `Popen(argv)` for the direct OS
 process-creation path (`exec` / `posix_spawn` on POSIX, `CreateProcess` on
@@ -46,7 +46,7 @@ encoding guarantee that `-I` would otherwise discard with `PYTHONUTF8` and
   path discovery contract.
 - **A new cwd IPC field.** Rejected because it would duplicate state already
   present in the request snapshot and make the core executor interpret an
-  AvaCode plugin concept.
+  MeivaCode plugin concept.
 - **`multiprocessing` spawn, fork, or forkserver.** `spawn` still starts and
   reimports an interpreter while adding pickle and Windows `__main__` bootstrap
   coupling. Fork and forkserver are POSIX-only; fork is unsafe around the
@@ -65,7 +65,7 @@ encoding guarantee that `-I` would otherwise discard with `PYTHONUTF8` and
 
 - One agent's logical cwd cannot alter framework imports or another execution
   flow's relative-path base.
-- AvaCode SDK calls observe a same-turn `set()` immediately through plugin
+- MeivaCode SDK calls observe a same-turn `set()` immediately through plugin
   state. Bare `open`, `Path.cwd`, imports, and user-created subprocesses do not;
   callers that need logical resolution use the SDK wrappers or explicit paths.
 - A stale checkpoint cwd is validated after restore and repaired to the agent

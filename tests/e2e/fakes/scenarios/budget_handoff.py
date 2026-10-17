@@ -14,10 +14,10 @@ def state_file(agent_id: int) -> str:
 def prepare_code(role: str, agent_id: int) -> str:
     root = str(scratch_root("budget"))
     code = (
-        "import json\nimport ava\nfrom pathlib import Path\nfrom uuid import uuid4\n"
+        "import json\nimport meiva\nfrom pathlib import Path\nfrom uuid import uuid4\n"
         "from base.host.atomic_io import write_text_atomic\n"
         f"root = Path({root!r})\n"
-        "aid = ava.self.AGENT_ID\n"
+        "aid = meiva.self.AGENT_ID\n"
         "artifact = root / f'{aid}-draft.txt'\n"
         "artifact.write_text('Verified partial result; remaining work is unfinished.')\n"
         "state = {'status': 'running', 'goal_met': False, 'artifacts': [str(artifact)], "
@@ -26,12 +26,12 @@ def prepare_code(role: str, agent_id: int) -> str:
     )
     if role == "dynamic workflow orchestrator":
         dispatch = (
-            "import json\nimport ava\nfrom pathlib import Path\nfrom uuid import uuid4\n"
+            "import json\nimport meiva\nfrom pathlib import Path\nfrom uuid import uuid4\n"
             "from base.host.atomic_io import write_text_atomic\n"
             f"path = Path({state_file(agent_id)!r})\n"
             "state = json.loads(path.read_text())\n"
             "if state['status'] == 'running':\n"
-            f"    peer = ava.agents.spawn(prompt=state['remaining'].pop(0), config_overlay={{'llm_model': {BUDGET_MODEL!r}}}, idempotency_key=str(uuid4()))\n"
+            f"    peer = meiva.agents.spawn(prompt=state['remaining'].pop(0), config_overlay={{'llm_model': {BUDGET_MODEL!r}}}, idempotency_key=str(uuid4()))\n"
             "    state['peers'].append(peer)\n"
             "    write_text_atomic(path, json.dumps(state))\n"
         )
@@ -46,7 +46,7 @@ def prepare_code(role: str, agent_id: int) -> str:
     else:
         code += (
             "if aid == int((root / 'owner').read_text()):\n"
-            f"    state['peers'] = [ava.agents.spawn(prompt='Preserve a partial result and wait.', config_overlay={{'llm_model': {BUDGET_MODEL!r}}}, idempotency_key=str(uuid4()))]\n"
+            f"    state['peers'] = [meiva.agents.spawn(prompt='Preserve a partial result and wait.', config_overlay={{'llm_model': {BUDGET_MODEL!r}}}, idempotency_key=str(uuid4()))]\n"
             "    write_text_atomic(root / f'{aid}.json', json.dumps(state))\n"
         )
     return code
@@ -55,16 +55,16 @@ def prepare_code(role: str, agent_id: int) -> str:
 def pause_code(owner: int, agent_id: int) -> str:
     path = state_file(agent_id)
     return (
-        "import json\nimport ava\nfrom pathlib import Path\nfrom uuid import uuid4\n"
+        "import json\nimport meiva\nfrom pathlib import Path\nfrom uuid import uuid4\n"
         "from base.host.atomic_io import write_text_atomic\n"
         f"path = Path({path!r})\n"
         "state = json.loads(path.read_text())\n"
         "state.update(status='paused', reason='usage budget reminder', "
         "resume_condition='revised budget or smaller authorized scope')\n"
         "write_text_atomic(path, json.dumps(state))\n"
-        f"if ava.self.AGENT_ID == {owner}:\n"
+        f"if meiva.self.AGENT_ID == {owner}:\n"
         "    for peer in state['peers']:\n"
-        "        ava.agents.send_message(peer, 'Budget handoff: preserve results and pause. ' "
+        "        meiva.agents.send_message(peer, 'Budget handoff: preserve results and pause. ' "
         f"+ 'Owner handoff: {state_file(owner)}')\n"
     )
 
@@ -72,7 +72,7 @@ def pause_code(owner: int, agent_id: int) -> str:
 def _recover_code(role: str, agent_id: int) -> str:
     path = state_file(agent_id)
     code = (
-        "import json\nimport ava\nfrom pathlib import Path\nfrom uuid import uuid4\n"
+        "import json\nimport meiva\nfrom pathlib import Path\nfrom uuid import uuid4\n"
         f"path = Path({path!r})\n"
         "state = json.loads(path.read_text())\n"
     )
@@ -82,7 +82,7 @@ def _recover_code(role: str, agent_id: int) -> str:
         code += (
             "if state['status'] == 'running':\n"
             "    for peer in state['peers']:\n"
-            "        ava.agents.send_message(peer, 'Continue the incomplete goal.')\n"
+            "        meiva.agents.send_message(peer, 'Continue the incomplete goal.')\n"
         )
     return code + (
         "assert state['status'] == 'paused' and not state['goal_met']\n"

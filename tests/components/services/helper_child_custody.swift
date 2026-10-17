@@ -1,4 +1,4 @@
-// Appended to the production child/keeper source by test_ava_root_custody.py.
+// Appended to the production child/keeper source by test_meiva_root_custody.py.
 // The test inserts barriers at existing native calls; production has no hooks.
 let stopEntered = DispatchSemaphore(value: 0)
 let stopRelease = DispatchSemaphore(value: 0)
@@ -69,7 +69,7 @@ func exitWithoutReaping(_ pid: pid_t) throws {
 }
 
 // A root that keeps exiting is restarted only until the keeper's consecutive-failure
-// budget is spent; a fresh seed (the operator's `ava start`) gets a new budget.
+// budget is spent; a fresh seed (the operator's `meiva start`) gets a new budget.
 func runBoundedRestartTest(_ directory: String) throws {
     let seed = RootSeed(
         argv: ["/bin/sh", "-c", "exit 1"], cwd: directory, runDir: directory,
@@ -104,7 +104,7 @@ func runBoundedRestartTest(_ directory: String) throws {
 
 func runCustodyTests() throws {
     let directory = CommandLine.arguments[1]
-    setenv("AVA_PERMISSIONS_HELPER_ROOT_SEED", directory + "/seed.json", 1)
+    setenv("MEIVA_PERMISSIONS_HELPER_ROOT_SEED", directory + "/seed.json", 1)
     if fixtureMode == "crash-after-intent" {
         _ = try requestHelperShutdown(runDir: directory)
         _exit(73)

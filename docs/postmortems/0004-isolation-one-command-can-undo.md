@@ -7,7 +7,7 @@ reconstructed **(summarized)** from three records that survived it. (1) The
 account carried by `scripts/preview/README.md` until PR #179 demoted it — that
 README was the only place the story lived. (2) The same day's redis `requirepass`
 rotation, recorded in
-[`ava-serious-engineering/practices/security`](../.agents/skills/ava-serious-engineering/practices/security/SKILL.md)
+[`meiva-serious-engineering/practices/security`](../.agents/skills/meiva-serious-engineering/practices/security/SKILL.md)
 ("when a rotation happens (redis requirepass, 2026-07-14), record it and
 coordinate every consumer"). (3) The guardrail it bought, which names the outage
 by date in its own docstring: `services/healthchecks/redis_acl.py`. Surviving
@@ -31,7 +31,7 @@ the ordinary way that mistake is made. And one box ran one Redis for every
 cluster on it, so a preview-scoped remedy had production-scoped reach. The
 guardrail is architectural: the
 [per-cluster data plane](../../future/infra/data/embedded-per-cluster-data-plane.md)
-gives every cluster its own Postgres and Redis under its own `$AVA_HOME`. The
+gives every cluster its own Postgres and Redis under its own `$MEIVA_HOME`. The
 same mistake today restarts one cluster's own server and cannot touch a
 neighbour. This incident is the strongest single argument for that design,
 because it is the failure that design *eliminates* rather than mitigates.
@@ -103,7 +103,7 @@ The escape analysis:
 ## Guardrails added
 
 - **The per-cluster data plane** — the real one. Every cluster, production
-  included, runs its own Postgres and Redis under its own `$AVA_HOME` on its own
+  included, runs its own Postgres and Redis under its own `$MEIVA_HOME` on its own
   port block (`cli/commands/_cluster_instance.py`), with `requirepass` set to that
   cluster's own secret; the box-level admin secret that used to provision
   per-cluster ACL users is gone with the shared instance, along with the logical
@@ -119,14 +119,14 @@ The escape analysis:
   `services/watchdog/daemon.py`, ahead of every daemon that would otherwise be
   revived straight into an `AuthenticationError`.
 - **Re-affirm on every bring-up.** `_start_redis` calls `_ensure_redis_acl` on
-  both paths — freshly started *and* already-running — so `ava start` repairs a
+  both paths — freshly started *and* already-running — so `meiva start` repairs a
   dropped ACL rather than assuming a live server is a correct one.
 
 **Still unguarded, deliberately.** The ACL user is *still* in-memory: there is no
 `aclfile`, so a Redis restart still drops it. What changed is the blast radius
 (one cluster) and the repair (automatic, ≤60s, plus every start) — not the
 mechanism. The healthcheck also leaves connection failures alone on purpose: a
-dead server is `ava start`'s job, not a watchdog's. And no mechanism stops an
+dead server is `meiva start`'s job, not a watchdog's. And no mechanism stops an
 operator from restarting the wrong thing; what stops it from mattering is that
 there is no longer a shared thing to restart.
 
@@ -149,10 +149,10 @@ there is no longer a shared thing to restart.
 - **State with no persistence is destroyed by the standard remedy for everything
   else.** In-memory server state and config-file state look identical from the
   outside and behave oppositely under a restart. Persist it, or make re-affirming
-  it automatic and frequent — Ava chose the latter (every start, plus every 60s).
+  it automatic and frequent — Meiva chose the latter (every start, plus every 60s).
 - **A rotated secret that some config still holds is split-brain.** Recorded the
   same day in
-  [`ava-serious-engineering/practices/security`](../.agents/skills/ava-serious-engineering/practices/security/SKILL.md);
+  [`meiva-serious-engineering/practices/security`](../.agents/skills/meiva-serious-engineering/practices/security/SKILL.md);
   it is why the wrong password existed at all.
 
 The first three are condensed in

@@ -33,7 +33,7 @@ from base.cluster import machines as _machines
 from base.cluster.machine import MachineIdentity
 from base.config.service_read import ConfigAuthority
 
-# One definition shared with the ava and integration modules; imported here so it
+# One definition shared with the meiva and integration modules; imported here so it
 # registers for this module's paths.
 from base.config.tests.api_keys import mock_api_keys as mock_api_keys
 from base.db import Database
@@ -85,7 +85,7 @@ def local_spawn_in_process(
         # `POST /api/agents` reads the target's capability from the registry (the same
         # source the forward resolves the ops URL from) for every target, local
         # included — the gateway never introspects its own role. So a co-located
-        # runner must resolve to agent-runner, as `ava start`'s register_self would
+        # runner must resolve to agent-runner, as `meiva start`'s register_self would
         # register the local machine. Names other than the local one fall through to
         # the real registry lookup, so the not-registered (404) and gateway-only (400)
         # guard tests still exercise it; a test wanting a different local capability
@@ -137,7 +137,7 @@ def _local_lifecycle_in_process(
         ) -> dict[str, Any]:
             # The runner's ops daemon dispatches lifecycle_op in-process; mirror
             # that here so a forwarded local terminate/resurrect/restart executes
-            # against the test DB. AvaAgentError raises propagate directly — the
+            # against the test DB. MeivaAgentError raises propagate directly — the
             # same exception types the wire round-trip would reconstruct. model_dump
             # mirrors the daemon serializing the response model onto the wire dict.
             active_catalog = (
@@ -191,7 +191,7 @@ def _local_config_in_process(
     ) -> dict:
         # Mirror dispatch_to_machine's exact signature so positionally-called
         # tests (e.g. cluster_rpc's own unit tests) keep working. None forwards
-        # to the real dispatch, which resolves AVA_CLUSTER_RPC_TIMEOUT_SECONDS
+        # to the real dispatch, which resolves MEIVA_CLUSTER_RPC_TIMEOUT_SECONDS
         # and the retry budget (task #961).
         if kind in ("config_read", "config_write"):
             assert target_machine == machine_identity.name(), (

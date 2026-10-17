@@ -27,7 +27,7 @@ if __name__ == "__main__":
     enter_scratch_home()
 
 
-# ava.self.AGENT_ID stays None here — fine; dump is a build-time tool that
+# meiva.self.AGENT_ID stays None here — fine; dump is a build-time tool that
 # does not exercise the SDK or make any gateway HTTP calls.
 
 

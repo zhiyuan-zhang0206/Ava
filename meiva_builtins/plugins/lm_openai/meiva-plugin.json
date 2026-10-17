@@ -1,0 +1,16 @@
+{
+  "apiVersion": 2,
+  "name": "lm_openai",
+  "version": "1.0.0",
+  "engines": {
+    "meiva": ">=2026.10.1"
+  },
+  "contributions": {
+    "providers": [
+      "gpt-"
+    ],
+    "decisionProviders": [
+      "gpt-"
+    ]
+  }
+}

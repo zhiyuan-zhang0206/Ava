@@ -1,12 +1,12 @@
-"""OS cron registration for the cluster health probe — `ava cluster health-probe-register`
-and `ava cluster health-probe-unregister`.
+"""OS cron registration for the cluster health probe — `meiva cluster health-probe-register`
+and `meiva cluster health-probe-unregister`.
 
 Thin CLI wrappers that delegate to `base.host.system.cron`. The core logic lives in the
 base layer so both the gateway lifespan (primary registration path) and the
 CLI converge step (belt-and-suspenders fallback) can call the same functions
 without violating the import layering.
 
-Called by `ava start` on bring-up (via `cmd_cron_register`) so the cron job
+Called by `meiva start` on bring-up (via `cmd_cron_register`) so the cron job
 is always present when the cluster is running.
 """
 

@@ -19,7 +19,7 @@ import pytest
 
 from base.paths import repo_root
 
-_ENDPOINT = "postgresql://ava@127.0.0.1:6433/ava"
+_ENDPOINT = "postgresql://meiva@127.0.0.1:6433/meiva"
 
 _CHILD = Path(__file__).with_name("child_schedules_verify.py")
 
@@ -32,12 +32,12 @@ def worktree_process(
     home = (tmp_path / "home").resolve()
     home.mkdir(mode=0o700)
     seed_write_generation(home)
-    (home / ".env").write_text(f"AVA_DB_URL={_ENDPOINT}\n")
+    (home / ".env").write_text(f"MEIVA_DB_URL={_ENDPOINT}\n")
     intent = home / "start-intent.json"
     intent.write_text(json.dumps({"home": str(home), "checkout": str(tmp_path / "source")}))
     intent.chmod(0o600)
-    env = {"PATH": "/usr/bin:/bin", "HOME": str(tmp_path), "AVA_HOME": str(home)}
-    env["AVA_CONFIG_FETCH"] = "skip"
+    env = {"PATH": "/usr/bin:/bin", "HOME": str(tmp_path), "MEIVA_HOME": str(home)}
+    env["MEIVA_CONFIG_FETCH"] = "skip"
 
     def run(scenario: str, arg: Path) -> subprocess.CompletedProcess[str]:
         return subprocess.run(
@@ -76,7 +76,7 @@ def test_the_sweep_over_a_rows_file_still_reports_a_red_row(
     worktree_process: Callable[[str, Path], subprocess.CompletedProcess[str]], tmp_path: Path
 ) -> None:
     rows = tmp_path / "rows.json"
-    rows.write_text(json.dumps([[7, "drifted", "import zz_ava_verify_missing\n"]]))
+    rows.write_text(json.dumps([[7, "drifted", "import zz_meiva_verify_missing\n"]]))
     proc = worktree_process("check_rows", rows)
     assert proc.returncode == 1, proc.stdout + proc.stderr
-    assert "RED id=7 name=drifted missing=zz_ava_verify_missing" in proc.stdout
+    assert "RED id=7 name=drifted missing=zz_meiva_verify_missing" in proc.stdout

@@ -1,7 +1,7 @@
-"""`ava mcp install/uninstall/upgrade` — out-of-core MCP package lifecycle.
+"""`meiva mcp install/uninstall/upgrade` — out-of-core MCP package lifecycle.
 
 Sources are local dirs (used in place) and local `file://` git repos (cloned +
-moved). `unit_home` isolates ~/.ava. `uv_sync` is monkeypatched in the bulk of
+moved). `unit_home` isolates ~/.meiva. `uv_sync` is monkeypatched in the bulk of
 tests so the venv build is deterministic + offline; one test exercises the real
 `uv sync` on a zero-dependency package.
 """
@@ -13,7 +13,6 @@ from pathlib import Path
 
 import pytest
 
-from ava.mcps.config import installed_mcp_dir, load_mcp_config
 from base.packages.extensions import install_registry as reg
 from cli.commands.extensions import mcp
 from cli.commands.extensions.mcp import (
@@ -22,6 +21,7 @@ from cli.commands.extensions.mcp import (
     cmd_mcp_uninstall,
     cmd_mcp_upgrade,
 )
+from meiva.mcps.config import installed_mcp_dir, load_mcp_config
 
 
 def _make_mcp_package(
@@ -163,7 +163,7 @@ def _make_pyproject_only_package(root: Path, name: str = "widget") -> Path:
     module = f"{name}_mcp"
     content = (
         f"[project]\n"
-        f'name = "ava-mcp-{name}"\n'
+        f'name = "meiva-mcp-{name}"\n'
         f'version = "0.0.0"\n'
         f'description = "{name} MCP bridge"\n'
         f'requires-python = ">=3.12"\n'
@@ -188,7 +188,7 @@ def test_install_auto_detects_from_pyproject(
     pkg = _make_pyproject_only_package(tmp_path, "widget")
     assert cmd_mcp_install(str(pkg), None, None) == 0
 
-    # Server name derived from pyproject name (stripped "ava-mcp-" prefix)
+    # Server name derived from pyproject name (stripped "meiva-mcp-" prefix)
     r = reg.get("widget")
     assert r is not None and r.type == "mcp"
     dest = unit_home / "mcps" / "widget"
@@ -417,7 +417,7 @@ def test_acquire_dead_local_path_raises_clear_error(tmp_path: Path) -> None:
 
 
 def test_upgrade_dead_source_reports_and_fails(unit_home: Path, tmp_path: Path) -> None:
-    """`ava mcp upgrade` of a package whose local source dir was deleted (the
+    """`meiva mcp upgrade` of a package whose local source dir was deleted (the
     worktree-removal case) prints the recorded-source problem, exit 1."""
     pkg = _make_mcp_package(tmp_path, "orphan", module="orphan_mcp")
     assert cmd_mcp_install(str(pkg), None, None) == 0
@@ -426,7 +426,7 @@ def test_upgrade_dead_source_reports_and_fails(unit_home: Path, tmp_path: Path) 
 
 
 def test_mcp_list_flags_dead_source(unit_home: Path, tmp_path: Path, capsys) -> None:
-    """`ava mcp list` warns that a recorded local source is gone, so the
+    """`meiva mcp list` warns that a recorded local source is gone, so the
     operator sees the upgradeability problem before an upgrade fails."""
     pkg = _make_mcp_package(tmp_path, "orphan2", module="orphan2_mcp")
     assert cmd_mcp_install(str(pkg), None, None) == 0

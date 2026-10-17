@@ -1,8 +1,8 @@
 """OKF knowledge-graph viewer — GET /api/okf/graph.
 
-Serves the D3 force-directed visualization of the repo's `*.ava.okf.md`
-documentation bundle (see `index.ava.okf.md`) as a single self-contained HTML
-page. Rebuilt fresh from the current `.ava.okf.md` tree on every request —
+Serves the D3 force-directed visualization of the repo's `*.meiva.okf.md`
+documentation bundle (see `index.meiva.okf.md`) as a single self-contained HTML
+page. Rebuilt fresh from the current `.meiva.okf.md` tree on every request —
 this route never reads the checked-in `graph_data.json` (a separate,
 manually-refreshed convention used for reviewing doc changes as a diff), so
 the served graph cannot go stale between manual rebuilds.
@@ -32,9 +32,9 @@ _TEMPLATE_NAME = "okf-d3-template.html"
 
 @router.get("/api/okf/graph")
 def get_okf_graph() -> HTMLResponse:
-    """Build the OKF graph from the live `.ava.okf.md` tree and render it
+    """Build the OKF graph from the live `.meiva.okf.md` tree and render it
     into the self-contained D3 template — open directly in a browser tab."""
     repo = repo_root()
     template_text = (repo / "scripts" / "codegen" / _TEMPLATE_NAME).read_text(encoding="utf-8")
-    data = build_graph_data(repo, name="Ava OKF")
+    data = build_graph_data(repo, name="Meiva OKF")
     return HTMLResponse(render_html(data, template_text))

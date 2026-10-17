@@ -36,7 +36,7 @@ def _ctx(
             path.mkdir()
     return ConvergeCtx(
         repo=tmp_path / "repo",
-        ava_home=home,
+        meiva_home=home,
         roles=frozenset({"gateway"}),
         config=command_runtime.config,
         database_factory=operator_database,
@@ -63,13 +63,13 @@ def test_collect_ownership_warnings_names_only_non_user_owned_key_paths(
         producer=operator_pipeline,
         command_runtime=command_runtime,
     )
-    foreign = ctx.ava_home / "source"
+    foreign = ctx.meiva_home / "source"
 
     def path_owner_uid(path: Path) -> int:
         return 0 if path == foreign else 501
 
     def repair_command(path: Path) -> str:
-        return f"sudo chown -R ava:staff {path}"
+        return f"sudo chown -R meiva:staff {path}"
 
     monkeypatch.setattr(_ownership.os, "getuid", lambda: 501)
     monkeypatch.setattr(_ownership, "path_owner_uid", path_owner_uid)
@@ -79,7 +79,7 @@ def test_collect_ownership_warnings_names_only_non_user_owned_key_paths(
 
     assert warnings == [
         f"{foreign}: owned by uid 0, current uid 501; repair with: "
-        f"sudo chown -R ava:staff {foreign}"
+        f"sudo chown -R meiva:staff {foreign}"
     ]
 
 
@@ -97,7 +97,7 @@ def test_collect_ownership_warnings_skips_a_missing_source_tree(
         producer=operator_pipeline,
         command_runtime=command_runtime,
     )
-    (ctx.ava_home / "source").rmdir()
+    (ctx.meiva_home / "source").rmdir()
 
     def path_owner_uid(_path: Path) -> int:
         return 501
@@ -125,7 +125,7 @@ def test_ownership_preflight_prints_and_logs_without_blocking(
     )
 
     def warnings(_ctx: ConvergeCtx) -> list[str]:
-        return ["/home/ava/source: owned by uid 0, current uid 501; repair with: sudo chown"]
+        return ["/home/meiva/source: owned by uid 0, current uid 501; repair with: sudo chown"]
 
     monkeypatch.setattr(_ownership, "collect_ownership_warnings", warnings)
 
@@ -134,7 +134,7 @@ def test_ownership_preflight_prints_and_logs_without_blocking(
     err = capsys.readouterr().err
     assert "OWNERSHIP PREFLIGHT" in err
     assert "start continues" in err
-    log = ctx.ava_home / "logs" / "ownership_preflight.log"
+    log = ctx.meiva_home / "logs" / "ownership_preflight.log"
     assert log.exists()
     assert log.read_text().endswith("repair with: sudo chown\n")
 
@@ -168,6 +168,6 @@ def test_ownership_preflight_never_fails_converge_when_its_scan_errors(
 def test_ownership_preflight_is_a_file_only_converge_step() -> None:
     step = converge_host.CONVERGE_STEPS[0]
 
-    assert step.name == "$AVA_HOME ownership preflight"
+    assert step.name == "$MEIVA_HOME ownership preflight"
     assert step.apply is _ownership.ensure_ownership_preflight
     assert step.requires_unit_config is False

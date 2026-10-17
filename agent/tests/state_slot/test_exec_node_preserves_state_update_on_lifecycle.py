@@ -20,9 +20,9 @@ from agent.tests.test_state_slot import (
 from agent.tests.test_state_slot import (
     reset_state_slot as reset_state_slot,
 )
-from ava.sdk_surface import process_context
 from base.agents.messages.security_finding import SecurityFindingEntry
 from base.db.code_version_gate import ProcessDbGate
+from meiva.sdk_surface import process_context
 
 
 async def test_exec_node_preserves_state_update_on_lifecycle(
@@ -30,10 +30,10 @@ async def test_exec_node_preserves_state_update_on_lifecycle(
 ):
     """Lifecycle (terminate) path: plugin's state_update written before raising still merges.
 
-    Directly raise AgentTermination to avoid `ava.self.terminate()`'s internal db INSERT
-    (test doesn't mock ava.DB)——the invariant for this test is "plugin state_update in lifecycle
+    Directly raise AgentTermination to avoid `meiva.self.terminate()`'s internal db INSERT
+    (test doesn't mock meiva.DB)——the invariant for this test is "plugin state_update in lifecycle
     path still merges into Command", not the full terminate flow."""
-    from ava.self import AgentTermination
+    from meiva.self import AgentTermination
 
     assert AgentTermination is not None  # let import not be removed by ruff
 
@@ -41,9 +41,9 @@ async def test_exec_node_preserves_state_update_on_lifecycle(
         plugin__last_action: str = ""
 
     code = (
-        "import ava\n"
-        "ava.state_update['plugin__last_action'] = 'about-to-terminate'\n"
-        "from ava.self import AgentTermination\n"
+        "import meiva\n"
+        "meiva.state_update['plugin__last_action'] = 'about-to-terminate'\n"
+        "from meiva.self import AgentTermination\n"
         "raise AgentTermination\n"
     )
     state = _State(messages=[ai_message_with_code(code)], halted=False)
@@ -89,9 +89,9 @@ async def test_exec_node_keeps_plugin_notes_after_toolmessage_beside_findings(
 
     code = (
         scan_flagged_code("context-file:/repo/AGENTS.md")
-        + "import ava\n"
+        + "import meiva\n"
         + "from langchain_core.messages import HumanMessage\n"
-        + "ava.state_update['messages'] = [HumanMessage(content='project note', id='p1')]\n"
+        + "meiva.state_update['messages'] = [HumanMessage(content='project note', id='p1')]\n"
     )
     state = state_cls(messages=[ai_message_with_code(code)], halted=False)
     runtime, config = make_runtime_and_config(AsyncMock(), database_gate=database_gate)
@@ -118,15 +118,15 @@ async def test_exec_node_checkpoints_child_attachment(
     HumanMessage and a cleared attach channel — not parked pending entries
     for the claim boundary.
     """
-    from base.agents.messages.kwargs import AvaMsgType
+    from base.agents.messages.kwargs import MeivaMsgType
 
     # The real exec child rejects attach for a text-only model (user ruling
     # 2026-08-28) — boot it with a media-capable model via the per-agent
     # config map the exec path re-emits into the child env (a bare home's
-    # env-authority pass drops an inherited AVA_MODEL).
+    # env-authority pass drops an inherited MEIVA_MODEL).
     image = tmp_path / "render.png"
     image.write_bytes(b"png")
-    code = f"import ava\nava.self.attach({str(image)!r}, label='render result')"
+    code = f"import meiva\nmeiva.self.attach({str(image)!r}, label='render result')"
     state = BaseAgentState(messages=[ai_message_with_code(code)], halted=False)
     runtime, config = make_runtime_and_config(
         AsyncMock(), {"llm_model": "claude-sonnet-5"}, database_gate=database_gate
@@ -141,7 +141,7 @@ async def test_exec_node_checkpoints_child_attachment(
     assert len(messages) == 2
     attach_msg = messages[-1]
     assert isinstance(attach_msg, HumanMessage)
-    assert attach_msg.additional_kwargs["ava_msg_type"] == AvaMsgType.ATTACH.value  # pyright: ignore[reportUnknownMemberType]
+    assert attach_msg.additional_kwargs["meiva_msg_type"] == MeivaMsgType.ATTACH.value  # pyright: ignore[reportUnknownMemberType]
     # Interleaved pack: the notice leads, then the file's own caption line.
     # The exec-node context model here is a bare MagicMock (no media
     # capability), so the pack is caption-only — no media block.
@@ -164,15 +164,15 @@ async def test_exec_node_compact_path_drops_notes_and_findings(
     # The real exec child rejects attach for a text-only model (user ruling
     # 2026-08-28) — boot it with a media-capable model via the per-agent
     # config map the exec path re-emits into the child env (a bare home's
-    # env-authority pass drops an inherited AVA_MODEL).
+    # env-authority pass drops an inherited MEIVA_MODEL).
     image = tmp_path / "render.png"
     image.write_bytes(b"png")
     code = (
         scan_flagged_code("shell.run")
-        + "import ava\n"
+        + "import meiva\n"
         + "from langchain_core.messages import HumanMessage\n"
-        + "ava.state_update['messages'] = [HumanMessage(content='x')]\n"
-        + f"ava.self.attach({str(image)!r})\n"
+        + "meiva.state_update['messages'] = [HumanMessage(content='x')]\n"
+        + f"meiva.self.attach({str(image)!r})\n"
         + "from base.agents.lifecycle import SystemHalt\n"
         + "raise SystemHalt()\n"
     )

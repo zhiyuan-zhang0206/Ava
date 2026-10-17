@@ -1,14 +1,14 @@
-"""skills converge -- repo/plugin skills sync to the single `~/.ava/skills/` load directory.
+"""skills converge -- repo/plugin skills sync to the single `~/.meiva/skills/` load directory.
 
 Uses synthetic repo tree + `unit_home` isolation; asserts disk copy, registry entry, and scanner
-visibility all agree. `ava skill enable/disable/register` registry toggles are also tested here.
+visibility all agree. `meiva skill enable/disable/register` registry toggles are also tested here.
 """
 
 from pathlib import Path
 
 import pytest
 
-import ava.skills as skills_mod
+import meiva.skills as skills_mod
 from base.packages.extensions import install_registry as reg
 from base.paths import home as paths_home
 from cli.commands.extensions.skill import cmd_skill_disable, cmd_skill_enable, cmd_skill_register
@@ -28,8 +28,8 @@ def _write_skill(root: Path, dirname: str, name: str | None = None, body: str = 
 def fake_repo(tmp_path: Path) -> Path:
     """A synthetic source tree: one repo skill + one built-in plugin skill."""
     repo = tmp_path / "repo"
-    _write_skill(repo / "ava_builtins" / "skills", "goal")
-    _write_skill(repo / "ava_builtins" / "plugins" / "superpowers" / "skills", "brainstorming")
+    _write_skill(repo / "meiva_builtins" / "skills", "goal")
+    _write_skill(repo / "meiva_builtins" / "plugins" / "superpowers" / "skills", "brainstorming")
     return repo
 
 
@@ -79,7 +79,7 @@ def test_grouped_repo_skill_converges_flat_and_keeps_its_identity(
     own) keeps its load-dir name, registry row and copy; only `origin_path` follows."""
     converge_skills(fake_repo, unit_home)
     old_hash = _entry("goal").content_hash
-    skills = fake_repo / "ava_builtins" / "skills"
+    skills = fake_repo / "meiva_builtins" / "skills"
     (skills / "coordination").mkdir()
     (skills / "goal").rename(skills / "coordination" / "goal")
 
@@ -99,10 +99,10 @@ def test_grouped_repo_skill_converges_flat_and_keeps_its_identity(
 
 def test_repo_source_change_not_propagated_by_converge(unit_home: Path, fake_repo: Path) -> None:
     """Repo-native sources are bootstrap-only (R5 ruling): a source change is
-    NOT synced by converge — the explicit `ava skill update` owns updates."""
+    NOT synced by converge — the explicit `meiva skill update` owns updates."""
     converge_skills(fake_repo, unit_home)
     old_hash = _entry("goal").content_hash
-    (fake_repo / "ava_builtins" / "skills" / "goal" / "SKILL.md").write_text(
+    (fake_repo / "meiva_builtins" / "skills" / "goal" / "SKILL.md").write_text(
         "---\nname: goal\ndescription: v2\n---\n\n# v2\n", encoding="utf-8"
     )
     result = converge_skills(fake_repo, unit_home)
@@ -116,11 +116,11 @@ def test_repo_source_change_not_propagated_by_converge(unit_home: Path, fake_rep
 def test_repo_copy_user_edit_untouched_by_converge(unit_home: Path, fake_repo: Path) -> None:
     """A user-edited repo-native copy is left alone, silently: converge no
     longer attempts to update repo-native copies at all, so the edit is not a
-    converge concern — a later `ava skill update` replaces it."""
+    converge concern — a later `meiva skill update` replaces it."""
     converge_skills(fake_repo, unit_home)
     copy = unit_home / "skills" / "goal" / "SKILL.md"
     copy.write_text("---\nname: goal\ndescription: MINE\n---\n\nhands off\n", encoding="utf-8")
-    (fake_repo / "ava_builtins" / "skills" / "goal" / "SKILL.md").write_text(
+    (fake_repo / "meiva_builtins" / "skills" / "goal" / "SKILL.md").write_text(
         "---\nname: goal\ndescription: v2\n---\n", encoding="utf-8"
     )
     result = converge_skills(fake_repo, unit_home)
@@ -137,7 +137,7 @@ def test_source_removed_cleans_untouched_copy(unit_home: Path, fake_repo: Path) 
     import shutil
 
     converge_skills(fake_repo, unit_home)
-    shutil.rmtree(fake_repo / "ava_builtins" / "skills" / "goal")
+    shutil.rmtree(fake_repo / "meiva_builtins" / "skills" / "goal")
     result = converge_skills(fake_repo, unit_home)
     assert result.removed == ["goal"]
     assert not (unit_home / "skills" / "goal").exists()
@@ -151,7 +151,7 @@ def test_source_removed_keeps_edited_copy(unit_home: Path, fake_repo: Path) -> N
     (unit_home / "skills" / "goal" / "SKILL.md").write_text(
         "---\nname: goal\ndescription: MINE\n---\n", encoding="utf-8"
     )
-    shutil.rmtree(fake_repo / "ava_builtins" / "skills" / "goal")
+    shutil.rmtree(fake_repo / "meiva_builtins" / "skills" / "goal")
     result = converge_skills(fake_repo, unit_home)
     assert result.removed == []
     assert any("is gone" in w for w in result.warnings)
@@ -211,7 +211,7 @@ def test_lost_registry_row_different_copy_still_warned(unit_home: Path, fake_rep
 def _web_sources_repo(tmp_path: Path) -> Path:
     """A repo with a web-sources skill + local adapter subdirs in the load dir."""
     repo = tmp_path / "repo-ws"
-    _write_skill(repo / "ava_builtins" / "skills", "web-sources")
+    _write_skill(repo / "meiva_builtins" / "skills", "web-sources")
     return repo
 
 
@@ -228,7 +228,7 @@ def test_preserved_subtrees_survive_bootstrap_only(unit_home: Path, tmp_path: Pa
             f"---\nname: {sub}\ndescription: local\n---\n", encoding="utf-8"
         )
         (d / ".preserved").touch()
-    (repo / "ava_builtins" / "skills" / "web-sources" / "SKILL.md").write_text(
+    (repo / "meiva_builtins" / "skills" / "web-sources" / "SKILL.md").write_text(
         "---\nname: web-sources\ndescription: d2\n---\n\nnew content\n",
         encoding="utf-8",
     )
@@ -236,7 +236,7 @@ def test_preserved_subtrees_survive_bootstrap_only(unit_home: Path, tmp_path: Pa
     assert result.updated == []
     assert "web-sources" in result.unchanged
     # Converge left the copy (and the adapters) alone; updating to the new
-    # source is `ava skill update`'s job.
+    # source is `meiva skill update`'s job.
     body = (unit_home / "skills" / "web-sources" / "SKILL.md").read_text(encoding="utf-8")
     assert "new content" not in body
     for sub in ("people", "rmrb"):
@@ -271,7 +271,7 @@ def test_cleanup_keeps_source_vanish_with_preserved_subtree(
     d.mkdir(parents=True)
     (d / "SKILL.md").write_text("---\nname: people\ndescription: local\n---\n", encoding="utf-8")
     (d / ".preserved").touch()
-    shutil.rmtree(repo / "ava_builtins" / "skills" / "web-sources")
+    shutil.rmtree(repo / "meiva_builtins" / "skills" / "web-sources")
     result = converge_skills(repo, unit_home)
     assert result.removed == []
     assert any("preserved local content" in w for w in result.warnings)
@@ -292,14 +292,14 @@ def test_user_install_shadowing_source_kept(unit_home: Path, fake_repo: Path) ->
 
 def test_same_name_repo_beats_plugin(unit_home: Path, tmp_path: Path) -> None:
     repo = tmp_path / "repo2"
-    _write_skill(repo / "ava_builtins" / "skills", "dup", body="repo version\n")
-    _write_skill(repo / "ava_builtins" / "plugins" / "dup" / "skills", "inner")
+    _write_skill(repo / "meiva_builtins" / "skills", "dup", body="repo version\n")
+    _write_skill(repo / "meiva_builtins" / "plugins" / "dup" / "skills", "inner")
     result = converge_skills(repo, unit_home)
     assert any("already provided" in w for w in result.warnings)
     assert "repo version" in (unit_home / "skills" / "dup" / "SKILL.md").read_text(encoding="utf-8")
 
 
-# ─── installed plugins (~/.ava/plugins/<p>/skills/) ─────────────────────────
+# ─── installed plugins (~/.meiva/plugins/<p>/skills/) ─────────────────────────
 
 
 def test_installed_plugin_skills_gate_on_plugin_entry(unit_home: Path, fake_repo: Path) -> None:
@@ -320,7 +320,7 @@ def test_installed_plugin_skills_gate_on_plugin_entry(unit_home: Path, fake_repo
     assert "review" in _loaded_names(unit_home)
 
 
-# ─── ava skill enable / disable / register ──────────────────────────────────
+# ─── meiva skill enable / disable / register ──────────────────────────────────
 
 
 def test_skill_disable_enable_roundtrip(unit_home: Path, fake_repo: Path) -> None:
@@ -390,7 +390,7 @@ def test_dot_dir_untracked_not_warned(unit_home: Path, fake_repo: Path) -> None:
 
 def test_contains_skill_md_any_depth(unit_home: Path, tmp_path: Path) -> None:
     """The shared skill-bearing-tree predicate sees nested-only trees (the
-    ava_code/ava_fleet plugin shape) and ignores SKILL.md-less dirs (audit #8)."""
+    meiva_code/meiva_fleet plugin shape) and ignores SKILL.md-less dirs (audit #8)."""
     from cli.commands.extensions.skill_package import contains_skill_md
 
     nested = tmp_path / "nested"
@@ -411,13 +411,13 @@ def _agents_repo(tmp_path: Path) -> Path:
     """A repo carrying one builtin skill, one .agents project skill, and a
     symlinked builtin mirror inside .agents/skills (the real-world shape)."""
     repo = tmp_path / "repo-agents"
-    _write_skill(repo / "ava_builtins" / "skills", "builtin-a")
+    _write_skill(repo / "meiva_builtins" / "skills", "builtin-a")
     _write_skill(repo / ".agents" / "skills", "project-x")
-    # Builtin mirror: a symlink back to ava_builtins/skills (the open-standard
+    # Builtin mirror: a symlink back to meiva_builtins/skills (the open-standard
     # path exposing builtins to other clients). Converge must not enumerate
     # .agents/skills at all, so the link is irrelevant to the load dir.
     (repo / ".agents" / "skills" / "builtin-a").symlink_to(
-        repo / "ava_builtins" / "skills" / "builtin-a", target_is_directory=True
+        repo / "meiva_builtins" / "skills" / "builtin-a", target_is_directory=True
     )
     return repo
 
@@ -474,30 +474,30 @@ def test_legacy_agents_skill_converge_copy_cleaned_up(unit_home: Path, tmp_path:
 def test_dash_source_row_matches_underscore_registry_entry(
     unit_home: Path, fake_repo: Path
 ) -> None:
-    """A registry row written `ava_goal` (legacy spelling) and a source
-    `ava-goal/` are one skill: converge must match them through the fold, not
+    """A registry row written `meiva_goal` (legacy spelling) and a source
+    `meiva-goal/` are one skill: converge must match them through the fold, not
     raw names, or the row would never be updated (audit 02 #4 bare
     comparison in `_sync_one`)."""
-    _write_skill(fake_repo / "ava_builtins" / "skills", "ava-goal")
+    _write_skill(fake_repo / "meiva_builtins" / "skills", "meiva-goal")
     converge_skills(fake_repo, unit_home)
-    entry = reg.get("ava-goal")
+    entry = reg.get("meiva-goal")
     assert entry is not None
     # Hand-rewrite the row to the legacy underscore spelling, then converge
     # again: the row must be found and updated, not duplicated.
     registry = reg.load()
     for pkg in registry.packages:
-        if pkg.name == "ava-goal":
-            pkg.name = "ava_goal"
+        if pkg.name == "meiva-goal":
+            pkg.name = "meiva_goal"
     reg.save(registry)
     result = converge_skills(fake_repo, unit_home)
     # the legacy-spelled row was FOUND through the fold and kept up to date —
     # no second row was created for the canonical spelling
-    assert "ava-goal" in result.unchanged
+    assert "meiva-goal" in result.unchanged
     assert result.copied == [] and result.updated == []
     rows = reg.load().packages
-    assert len(rows) == 3  # goal + superpowers + ava-goal — no dual-row state
-    assert reg.get("ava-goal") is not None  # dash query finds the underscore row
-    assert len([p for p in rows if p.name in ("ava-goal", "ava_goal")]) == 1
+    assert len(rows) == 3  # goal + superpowers + meiva-goal — no dual-row state
+    assert reg.get("meiva-goal") is not None  # dash query finds the underscore row
+    assert len([p for p in rows if p.name in ("meiva-goal", "meiva_goal")]) == 1
 
 
 def test_cross_source_same_key_conflict_is_reported_not_duplicated(
@@ -506,8 +506,8 @@ def test_cross_source_same_key_conflict_is_reported_not_duplicated(
     """A repo skill `foo-bar/` and a plugin skill `foo_bar/` fold to one key:
     the dual-row state the registry read now refuses. Converge reports the
     conflict instead of writing both rows."""
-    _write_skill(fake_repo / "ava_builtins" / "skills", "foo-bar")
-    _write_skill(fake_repo / "ava_builtins" / "plugins" / "foo_bar" / "skills", "sub")
+    _write_skill(fake_repo / "meiva_builtins" / "skills", "foo-bar")
+    _write_skill(fake_repo / "meiva_builtins" / "plugins" / "foo_bar" / "skills", "sub")
     result = converge_skills(fake_repo, unit_home)
     assert any("already provided" in w for w in result.warnings)
     rows = reg.load().packages
@@ -522,20 +522,20 @@ def test_worktree_repo_refused_for_default_home(
 ) -> None:
     """A worktree checkout's sources must never sync into the prod home's load
     dir: the branch content (possibly unmerged) would silently replace what
-    main ships (observed 2026-08-08 with ava-serious-research)."""
+    main ships (observed 2026-08-08 with meiva-serious-research)."""
 
     monkeypatch.setattr(paths_home, "default_home", lambda: unit_home)
-    repo = tmp_path / "repo" / ".worktrees" / "ava-9999-task"
-    _write_skill(repo / "ava_builtins" / "skills", "goal")
+    repo = tmp_path / "repo" / ".worktrees" / "meiva-9999-task"
+    _write_skill(repo / "meiva_builtins" / "skills", "goal")
     with pytest.raises(RuntimeError, match="worktree"):
         converge_skills(repo, unit_home)
 
 
 def test_worktree_repo_allowed_for_dev_home(unit_home: Path, tmp_path: Path) -> None:
-    """A dev worktree cluster owns its own home (`~/.ava-<dir>`), so syncing
+    """A dev worktree cluster owns its own home (`~/.meiva-<dir>`), so syncing
     its checkout into that home is the normal path and stays allowed."""
-    repo = tmp_path / "repo" / ".worktrees" / "ava-9999-task"
-    _write_skill(repo / "ava_builtins" / "skills", "goal")
+    repo = tmp_path / "repo" / ".worktrees" / "meiva-9999-task"
+    _write_skill(repo / "meiva_builtins" / "skills", "goal")
     dev_home = tmp_path / "dev-home"
     result = converge_skills(repo, dev_home)
     assert result.copied == ["goal"]
@@ -547,9 +547,9 @@ def test_worktree_refusal_overridable_by_env(
 ) -> None:
 
     monkeypatch.setattr(paths_home, "default_home", lambda: unit_home)
-    monkeypatch.setenv("AVA_CONVERGE_ALLOW_WORKTREE", "1")
-    repo = tmp_path / "repo" / ".worktrees" / "ava-9999-task"
-    _write_skill(repo / "ava_builtins" / "skills", "goal")
+    monkeypatch.setenv("MEIVA_CONVERGE_ALLOW_WORKTREE", "1")
+    repo = tmp_path / "repo" / ".worktrees" / "meiva-9999-task"
+    _write_skill(repo / "meiva_builtins" / "skills", "goal")
     result = converge_skills(repo, unit_home)
     assert result.copied == ["goal"]
 
@@ -572,7 +572,7 @@ def test_unmarked_local_subtree_not_preserved(unit_home: Path, tmp_path: Path) -
     skip = reg.preserved_subpaths(unit_home / "skills" / "web-sources")
     assert skip == frozenset()  # no marker, no protection
     assert reg.tree_hash(unit_home / "skills" / "web-sources") != reg.tree_hash(
-        repo / "ava_builtins" / "skills" / "web-sources"
+        repo / "meiva_builtins" / "skills" / "web-sources"
     )
 
 

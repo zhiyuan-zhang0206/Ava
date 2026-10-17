@@ -25,13 +25,13 @@ from agent.graph.llm._retry import Attempt
 from agent.graph.llm.node import llm_attempt, llm_node
 from agent.graph.llm_errors import LlmLedger
 from agent.hooks.tests.fakes import make_fake_ops_pool
-from ava.tests.fixtures.pin_agent import hosted_resources as hosted_resources
-from base.agents.context import AvaContext
+from base.agents.context import MeivaContext
 from base.clock import Clock
 from base.config.tests.configuration import defaults
 from base.host.env.agent_slices import AgentSlices
 from base.lm.catalog import ModelCatalog
 from base.native_process.turn_identity import HostedTurnResources
+from meiva.tests.fixtures.pin_agent import hosted_resources as hosted_resources
 
 
 def _runtime_with_redis(hosted_resources: HostedTurnResources, catalog: ModelCatalog):
@@ -39,7 +39,7 @@ def _runtime_with_redis(hosted_resources: HostedTurnResources, catalog: ModelCat
     reads pending interrupts)."""
     runtime = MagicMock()
     runtime.execution_info = None
-    runtime.context = AvaContext(
+    runtime.context = MeivaContext(
         hosted_resources=hosted_resources,
         ops_pool=make_fake_ops_pool(),
         event_publisher=MagicMock(),

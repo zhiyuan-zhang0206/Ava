@@ -10,7 +10,7 @@ from base.cluster.dataplane.redis_bridge import RedisBridgeEndpoint
 from base.cluster.machine import MachineIdentity
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from base.host.system.tests.fake_commands import fake_host
-from base.paths import ava_home
+from base.paths import meiva_home
 from services.supervision import roster
 from services.supervision.roster import build_services
 from services.supervision.roster import spec as ops_spec
@@ -30,8 +30,8 @@ def test_the_bridge_is_a_gateway_unit_run_by_the_system_interpreter() -> None:
 def test_a_macos_gateway_with_a_private_address_is_not_gated(
     monkeypatch: pytest.MonkeyPatch, machine_identity: MachineIdentity, tmp_path: Path
 ) -> None:
-    monkeypatch.setenv("AVA_HOME", str(tmp_path))
-    home = ava_home()
+    monkeypatch.setenv("MEIVA_HOME", str(tmp_path))
+    home = meiva_home()
     home.mkdir(parents=True, exist_ok=True)
     (home / "start-intent.json").write_text(
         json.dumps(

@@ -20,15 +20,15 @@ class GuideDraftResponse(BaseModel):
 
 @router.post(
     "/api/keyed/v1/guide/draft",
-    description="Spawn an ava-guide agent for a natural-language ops request and return its\nid so the UI can open the conversation. Replays one raw draft intent and its\noriginal birth.",
+    description="Spawn an meiva-guide agent for a natural-language ops request and return its\nid so the UI can open the conversation. Replays one raw draft intent and its\noriginal birth.",
 )
 async def guarded_draft_guide(
     body: GuideDraftRequest, request: Request, key: str = Depends(guarded_draft_key)
 ) -> GuideDraftResponse:
 
     prompt = (
-        "You are an Ava operations assistant. Read and follow ava.skills.ava_guide "
-        "to help with this request — operate the cluster via the `ava` CLI (run / "
+        "You are an Meiva operations assistant. Read and follow meiva.skills.meiva_guide "
+        "to help with this request — operate the cluster via the `meiva` CLI (run / "
         "update / switch tracks, manage MCP servers, install skills or plugins, "
         "manage schedules). Request:\n\n" + body.nl
     )
@@ -36,7 +36,7 @@ async def guarded_draft_guide(
         spawner="user",
         prompt=prompt,
         prompt_source="user",
-        label="ava-guide",
+        label="meiva-guide",
     )
     spawned = await create_and_launch_agent(
         body_obj,

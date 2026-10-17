@@ -30,5 +30,5 @@ def test_self_terminate_marks_agent_terminated(e2e_env: E2EEnv) -> None:
         row = cur.fetchone()
     assert row is not None, "terminate inbound row missing"
     assert row[0] == "self", (
-        f"source should be 'self' (injected by ava.self.terminate), got {row[0]!r}"
+        f"source should be 'self' (injected by meiva.self.terminate), got {row[0]!r}"
     )

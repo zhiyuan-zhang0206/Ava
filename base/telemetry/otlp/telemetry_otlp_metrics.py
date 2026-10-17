@@ -93,7 +93,7 @@ def unit_for(field: str) -> str:
 def strip_unit_suffix(field: str) -> str:
     """Instrument name for a payload field: the unit suffix comes off, because
     the OTel unit supplies it on export — `latency_ms` + unit "ms" would
-    otherwise render as `ava_..._latency_ms_milliseconds_*` in Prometheus
+    otherwise render as `meiva_..._latency_ms_milliseconds_*` in Prometheus
     (the unit stated twice)."""
     for suffix in ("_ms", "_seconds"):
         if field.endswith(suffix):
@@ -118,11 +118,11 @@ def metric_views() -> list[Any]:
             aggregation=llm_aggregation,
             attribute_keys={"machine", "process", "model"},
         )
-        for name in ("ava_llm_usage_latency", "ava_llm_usage_decode")
+        for name in ("meiva_llm_usage_latency", "meiva_llm_usage_decode")
     ]
     views.append(
         View(
-            instrument_name="ava_gateway_event_loop_lag",
+            instrument_name="meiva_gateway_event_loop_lag",
             aggregation=ExplicitBucketHistogramAggregation(list(EVENT_LOOP_LAG_BUCKETS_MS)),
             attribute_keys={"machine", "process"},
         )
@@ -131,7 +131,7 @@ def metric_views() -> list[Any]:
 
 
 def metrics_resource() -> Any:
-    """The metrics-side OTel Resource: `service.name=ava-<process>` (the
+    """The metrics-side OTel Resource: `service.name=meiva-<process>` (the
     bounded process dimension) + a per-process-instance `service.instance.id`.
     Without it every series lands as job="unknown_service" and two same-named
     processes exporting the same counter collide into ONE series with
@@ -153,10 +153,10 @@ def metrics_resource() -> Any:
 
     return Resource.create(
         {
-            "service.namespace": "ava",
-            "service.name": f"ava-{process_name()}",
+            "service.namespace": "meiva",
+            "service.name": f"meiva-{process_name()}",
             "service.instance.id": str(uuid.uuid4()),
-            "service.version": version("ava"),
+            "service.version": version("meiva"),
             "cluster": cluster_label(),
         }
     )

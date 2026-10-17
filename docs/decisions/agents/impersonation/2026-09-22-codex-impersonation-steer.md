@@ -6,7 +6,7 @@ activation or work after the lease has already ended, so Pending is not an
 acceptable substitute for Steer.
 
 The relay therefore fails visibly when Steer is unavailable and leaves the
-unacknowledged inbox to Ava's normal handoff. The CLI rejects a request with no
+unacknowledged inbox to Meiva's normal handoff. The CLI rejects a request with no
 control endpoint before acquiring a lease. We rejected automatic queue fallback:
 durable queue acceptance cannot establish timely host receipt.
 

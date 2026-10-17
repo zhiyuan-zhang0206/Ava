@@ -1,0 +1,56 @@
+"""SDK metering at the `meiva` root: the MCP call funnel and the SDK events a launched child's
+import installs (through its plugin load)."""
+
+from __future__ import annotations
+
+from pathlib import Path
+
+from base.agents.sdk import call_policy
+from meiva.sdk_surface import metering
+
+_CHILD = Path(__file__).parent / "bootstrap" / "child_sdk_probes.py"
+
+
+def test_install_wraps_and_restores_mcp_call_funnel() -> None:
+    """install()/uninstall() wrap the meiva.mcps.call_funnel.call_raw funnel so dynamic MCP tool
+    calls are metered, and restore it on teardown."""
+    import meiva.mcps
+
+    # `meiva` is a process-global singleton and a plugin load installs the recorders
+    # as part of the SDK installation, so any earlier test in this xdist worker
+    # that loaded plugins and left the installation behind would leave the funnel
+    # already wrapped — install() then correctly no-ops and the wrap assertion
+    # below reads as a failure. The shared guards (`tests/fixtures/`) uninstall an
+    # installation a test left behind, so the baseline here is bare.
+    before = meiva.mcps.call_funnel.call_raw
+    ledger = metering.install(call_policy.SamplingPolicyOwner())
+    try:
+        assert meiva.mcps.call_funnel.call_raw is not before
+        assert metering.is_recorder(meiva.mcps.call_funnel.call_raw)
+    finally:
+        metering.uninstall(ledger)
+    assert meiva.mcps.call_funnel.call_raw is before
+
+
+def test_plain_python_import_installs_sdk_events(tmp_path: Path) -> None:
+    import json
+    import os
+    import subprocess
+    import sys
+
+    target = tmp_path / "input.txt"
+    target.write_text("hello")
+    result = subprocess.run(  # noqa: S603 — fixed Python code and an isolated fixture path
+        [sys.executable, str(_CHILD), "plain_import_sdk_events", str(target)],
+        env={**os.environ, "MEIVA_AGENT_ID": "42"},
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=30,
+    )
+    assert result.returncode == 0, result.stderr
+    rows = json.loads(result.stdout)
+    assert len(rows) == 1
+    assert rows[0]["agent_id"] == 42
+    assert rows[0]["attributes"]["fn"] == "files.read"
+    assert rows[0]["attributes"]["sample_rate"] == 1

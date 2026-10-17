@@ -38,8 +38,8 @@ from collections.abc import Callable
 from base.telemetry.delivery.receipts import Event
 from base.telemetry.delivery.reporting import failure_isolated
 
-_CHILD_DEFER_ENV = "AVA_TELEMETRY_OTLP_CHILD_DEFER"
-_CHILD_DEFER_MAX_AGE_ENV = "AVA_TELEMETRY_OTLP_CHILD_DEFER_MAX_AGE_S"
+_CHILD_DEFER_ENV = "MEIVA_TELEMETRY_OTLP_CHILD_DEFER"
+_CHILD_DEFER_MAX_AGE_ENV = "MEIVA_TELEMETRY_OTLP_CHILD_DEFER_MAX_AGE_S"
 # Fallback when the env value is absent/unparseable/non-positive — mirrors the
 # declared field default (locked by
 # base/telemetry/tests/otlp/test_telemetry_otlp_child_defer.py::test_env_defaults_locked_to_settings_fields).
@@ -104,7 +104,7 @@ class ChildDeferral:
         self.completion_idle.set()
 
     def arm(self) -> None:
-        """Arm deferred export; no-op when AVA_TELEMETRY_OTLP_CHILD_DEFER is
+        """Arm deferred export; no-op when MEIVA_TELEMETRY_OTLP_CHILD_DEFER is
         off (the documented revert switch)."""
         if self.active or self._stopped.is_set():
             return

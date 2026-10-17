@@ -15,8 +15,8 @@ from cli.commands.extensions.external_skill_host.filesystem import (
 )
 
 FORMAT = 6
-_MARKER_NAME = ".ava-managed.json"
-SKILL_NAME = "operating-ava-cluster"
+_MARKER_NAME = ".meiva-managed.json"
+SKILL_NAME = "operating-meiva-cluster"
 _HEX = re.compile(r"^[0-9a-f]{64}$")
 _ID = re.compile(r"^[0-9a-f]{32}$")
 
@@ -34,7 +34,7 @@ def ownership_marker(
                 "format": FORMAT,
                 "generation_id": generation_id,
                 "installation_id": installation_id,
-                "owner": "ava",
+                "owner": "meiva",
                 "skill": skill_name,
                 "source_digest": source_digest,
             },
@@ -67,9 +67,9 @@ def parse_record(path: Path) -> dict[str, Any] | None:
     try:
         value: object = json.loads(data)
     except (json.JSONDecodeError, UnicodeDecodeError) as exc:
-        raise ClientConflictError("Ava ownership ledger is invalid") from exc
+        raise ClientConflictError("Meiva ownership ledger is invalid") from exc
     if not isinstance(value, dict):
-        raise ClientConflictError("Ava ownership ledger is invalid")
+        raise ClientConflictError("Meiva ownership ledger is invalid")
     return cast(dict[str, Any], value)
 
 
@@ -126,7 +126,7 @@ def _expected_quarantine(path: object) -> str | None:
         return None
     source_path = Path(path)
     suffix = hashlib.sha256(path.encode()).hexdigest()[:16]
-    return source_path.with_name(f".{source_path.name}.ava-retained-{suffix}").as_posix()
+    return source_path.with_name(f".{source_path.name}.meiva-retained-{suffix}").as_posix()
 
 
 def _valid_claim(
@@ -200,7 +200,7 @@ def _valid_cleanup_item(value: object, *, retained: bool) -> bool:
 
 def _check_installed(installed_value: object) -> None:
     if not isinstance(installed_value, dict):
-        raise ClientConflictError("Ava ownership ledger is invalid")
+        raise ClientConflictError("Meiva ownership ledger is invalid")
     installed = cast(dict[str, Any], installed_value)
     if (
         set(installed) != {"digest", "generation_id", "manifest", "source_digest"}
@@ -209,12 +209,12 @@ def _check_installed(installed_value: object) -> None:
         or not _valid_manifest(installed["manifest"])
         or manifest_digest(installed["manifest"]) != installed["digest"]
     ):
-        raise ClientConflictError("Ava ownership ledger is invalid")
+        raise ClientConflictError("Meiva ownership ledger is invalid")
 
 
 def _check_transaction(transaction_value: object, *, has_installed: bool) -> None:
     if not isinstance(transaction_value, dict):
-        raise ClientConflictError("Ava ownership ledger is invalid")
+        raise ClientConflictError("Meiva ownership ledger is invalid")
     transaction = cast(dict[str, Any], transaction_value)
     if (
         set(transaction)
@@ -236,7 +236,7 @@ def _check_transaction(transaction_value: object, *, has_installed: bool) -> Non
         or (transaction["claim_state"] != "idle" and transaction["stage_state"] != "published")
         or (transaction["claim_state"] != "idle" and not has_installed)
     ):
-        raise ClientConflictError("Ava ownership ledger is invalid")
+        raise ClientConflictError("Meiva ownership ledger is invalid")
 
 
 def load_ledger(path: Path, client_key: str) -> dict[str, Any] | None:
@@ -253,9 +253,9 @@ def load_ledger(path: Path, client_key: str) -> dict[str, Any] | None:
         "garbage",
     }
     if set(record) != required or record["client"] != client_key or record["format"] != FORMAT:
-        raise ClientConflictError("Ava ownership ledger is invalid")
+        raise ClientConflictError("Meiva ownership ledger is invalid")
     if not _valid_id(record["installation_id"]):
-        raise ClientConflictError("Ava ownership ledger is invalid")
+        raise ClientConflictError("Meiva ownership ledger is invalid")
     installed_value: object = record["installed"]
     if installed_value is not None:
         _check_installed(installed_value)
@@ -265,10 +265,10 @@ def load_ledger(path: Path, client_key: str) -> dict[str, Any] | None:
     for key, retained in (("garbage", False), ("retained", True)):
         items: object = record[key]
         if not isinstance(items, list):
-            raise ClientConflictError("Ava ownership ledger is invalid")
+            raise ClientConflictError("Meiva ownership ledger is invalid")
         for item_value in cast(list[object], items):
             if not _valid_cleanup_item(item_value, retained=retained):
-                raise ClientConflictError("Ava ownership ledger is invalid")
+                raise ClientConflictError("Meiva ownership ledger is invalid")
     return record
 
 

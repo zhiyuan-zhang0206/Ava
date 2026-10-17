@@ -6,7 +6,7 @@ non-sensitive Core dependencies. Other contribution faces remain separate.
 It imports no plugin code or agent runtime, so every reader can load it on its own:
 
 - the plugin loader (`base.packages.plugins.loading`) adds it to the registry and the SDK install binds the class;
-- `ava plugins update` merges each plugin's disk image against the declared class;
+- `meiva plugins update` merges each plugin's disk image against the declared class;
 - the gateway builds fresh, non-secret cluster policy from these declarations and authority images;
 - the gateway and ops validate a per-agent config overlay against the declared classes of the ENABLED
   plugins, in processes that never import `plugin.py`.

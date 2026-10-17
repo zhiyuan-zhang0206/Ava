@@ -13,7 +13,7 @@ thread that points back at its parent. The forcing constraints:
   can compact itself by writing its own summary mid-turn. These are mutually exclusive
   modes, not one mode with a flag.
 - Agent-initiated compaction must be a first-class SDK call available at any time
-  (`ava.compact(summary)`), routed through `help(ava)` discovery rather than crammed into
+  (`meiva.compact(summary)`), routed through `help(meiva)` discovery rather than crammed into
   the system prompt fed every turn.
 - A new thread's opening state must be installed **without** triggering a model call (the
   summary is already written; invoking the graph would burn a turn).
@@ -49,11 +49,11 @@ model call. This is why every process that installs thread state (the web/ops pr
 the agent loop) holds a compiled graph instance even though only the loop ever invokes it.
 
 The compaction LLM uses its **own** system prompt — it is not the agent and must emit a
-**text** summary, never Python (no `ava.chat.send` / `ava.stop`). The guidelines are
+**text** summary, never Python (no `meiva.chat.send` / `meiva.stop`). The guidelines are
 repeated as a trailing `HumanMessage` because a system prompt plus a tail human message
 reinforce each other and produce more stable output than either alone.
 
-**Agent-initiated compaction, end to end.** `ava.compact(summary)`:
+**Agent-initiated compaction, end to end.** `meiva.compact(summary)`:
 1. INSERT a `kind='compact'` pending into the current thread with the summary as content.
 2. Publish a `compact_request` event (UI progress feedback).
 3. Raise `SystemHalt` (exit 43).
@@ -72,7 +72,7 @@ semantics.
 **Auto-trigger by rough token estimate.** After each chat turn (post `mark_pending_done`,
 post compact handling), the loop estimates the thread's tokens and, if over the threshold,
 enqueues the agent-compaction prompt as a `chat` pending. The agent picks it up FIFO,
-reviews the context on its own reasoning chain, writes a summary, and calls `ava.compact` —
+reviews the context on its own reasoning chain, writes a summary, and calls `meiva.compact` —
 no forced path. Token count is `total_chars // 4`, deliberately coarse: it overestimates,
 so it triggers early, which is the safe direction. Ordering matters — compact handling runs
 before the token recount, so if the agent just compacted (new messages now flow to the new
@@ -91,11 +91,11 @@ response; agent mode prints `enqueued`, then switches when the tailer receives
 (atomic attribute write, no lock), so a line typed during the switch lands in the new
 thread — the intended behavior.
 
-**SDK shape.** `ava.compact` and `ava.thread_messages` are flat top-level functions backed
+**SDK shape.** `meiva.compact` and `meiva.thread_messages` are flat top-level functions backed
 by underscore-prefixed internal modules (`_compact.py`, `_history.py`) — `compact` is a
 function name and can't collide with a module name. The system prompt lists only the
-high-frequency calls (`ava.chat.send`, `ava.stop`) and points everything else at
-`help(ava)` / `help(ava.X)` (explicitly: don't `import inspect`). Each level carries its
+high-frequency calls (`meiva.chat.send`, `meiva.stop`) and points everything else at
+`help(meiva)` / `help(meiva.X)` (explicitly: don't `import inspect`). Each level carries its
 own docstring; `__all__` marks the public set. This keeps the per-turn system prompt small
 and stops it growing with the SDK.
 

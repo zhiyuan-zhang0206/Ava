@@ -2,8 +2,8 @@
 
 ## Context
 
-Two Ava units share one physical machine's localhost namespace on the `win` box:
-a Windows unit (`C:\Users\ava\.ava`) and a WSL2 unit (`/home/ava/.ava`). WSL2
+Two Meiva units share one physical machine's localhost namespace on the `win` box:
+a Windows unit (`C:\Users\meiva\.meiva`) and a WSL2 unit (`/home/meiva/.meiva`). WSL2
 forwards the Linux unit's listeners onto Windows' localhost, so the Windows
 unit's healthchecks probe `http://localhost:8102/healthz` (restarter) and `:8106`
 (ops) and reach the **other unit's** daemons.
@@ -12,7 +12,7 @@ The identity check `probe_daemon` applies did exactly its job:
 
 ```
 [restarter healthcheck] daemon dead (identity mismatch on http://localhost:8102/healthz:
-  home='/home/ava/.ava' != 'C:\Users\ava\.ava' - another cluster's daemon holds this port)
+  home='/home/meiva/.meiva' != 'C:\Users\meiva\.meiva' - another cluster's daemon holds this port)
 [restarter healthcheck] daemon restart FAILED (identity mismatch ...)
 ```
 
@@ -45,9 +45,9 @@ reported at ERROR naming the occupying home and **not respawned**, exiting
 did not come up", still retried next round).
 
 **The line is drawn at reach, not at wording.** A respawn runs a session kill
-ava-<svc>` on *this cluster's* socket first, so the question is whether the
+meiva-<svc>` on *this cluster's* socket first, so the question is whether the
 occupant is inside that reach. A mismatched `home` or `name`, or a body that is
-not an Ava `/healthz` at all, is out of reach → terminal. A pid our pidfile does
+not an Meiva `/healthz` at all, is out of reach → terminal. A pid our pidfile does
 not record, or a missing pidfile, is reached only *after* home and name matched,
 so it is a stray of this same cluster that kill-session does clear → stays
 `DOWN`, respawned as before. An unreachable port, a 503 from a wedged loop, and
@@ -79,7 +79,7 @@ the respawnable case.
 by removing the detection. This is the 98-minute outage, restored.
 
 **Track the terminal state in a file and back off.** A counter or marker under
-`$AVA_HOME` would let the healthcheck escalate over rounds. Rejected: there is
+`$MEIVA_HOME` would let the healthcheck escalate over rounds. Rejected: there is
 nothing to remember. When the occupant leaves, the next probe reads `DOWN` and
 the normal respawn runs — the state self-clears by construction, and persisting
 it only adds a thing that can be stale.
@@ -97,7 +97,7 @@ scheduler jobs and peer config.
   surface every other healthcheck failure already lands on, and the round now
   costs a single probe instead of ~45s of doomed work.
 - **It is not observed by the alerting path**, and that is unchanged by this
-  work. `ava cluster health-probe`'s per-service check and `ava status` both
+  work. `meiva cluster health-probe`'s per-service check and `meiva status` both
   probe by plain HTTP 2xx (`cli/commands/_probe.py:_probe_service`), which an
   occupant satisfies — so the condition reads *green* there. The health probe is
   also gateway-only, so an agent-runner has no such observer at all. Making

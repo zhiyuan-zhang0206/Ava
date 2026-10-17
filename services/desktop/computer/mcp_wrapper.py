@@ -7,11 +7,11 @@ The tool list passes through verbatim from the daemon (single source of truth).
 `agent_id` is stamped on every request from this process's identity, so the
 audit stream carries the acting agent.
 
-Wired in ava_builtins/mcps/computer_use/.mcp.json as the compatibility command for older daemons
+Wired in meiva_builtins/mcps/computer_use/.mcp.json as the compatibility command for older daemons
 (the MCP daemon's primary path dials the service directly — see
-ava/mcps/_computer.py). Takes no arguments (the socket path is derived from
+meiva/mcps/_computer.py). Takes no arguments (the socket path is derived from
 settings, matching the daemon). The MCP daemon spawns it with cwd pinned to the
-repo root (`ava/mcps/config.py:server_cwd`), so the relative interpreter path
+repo root (`meiva/mcps/config.py:server_cwd`), so the relative interpreter path
 resolves there:
 
     .venv/bin/python -m services.desktop.computer.mcp_wrapper
@@ -28,7 +28,7 @@ from mcp.server.lowlevel import Server
 from mcp.server.stdio import stdio_server
 
 from base.config import ConfigBoot
-from base.paths import ava_home, computer_mcp_socket
+from base.paths import computer_mcp_socket, meiva_home
 from services.desktop.browser.mcp_socket_bridge import (
     ReconnectingLink,
     SocketLink,
@@ -40,7 +40,7 @@ def _agent_id() -> int | None:
     """This process's agent identity (None when running outside an agent)."""
     import os
 
-    raw = os.environ.get("AVA_AGENT_ID")
+    raw = os.environ.get("MEIVA_AGENT_ID")
     try:
         return int(raw) if raw else None
     except ValueError:
@@ -66,7 +66,7 @@ class Link(SocketLink):
 
 async def _connect() -> tuple[asyncio.StreamReader, asyncio.StreamWriter]:
     return await dial_unix_socket(
-        str(computer_mcp_socket(ava_home())), service_label="computer MCP daemon"
+        str(computer_mcp_socket(meiva_home())), service_label="computer MCP daemon"
     )
 
 

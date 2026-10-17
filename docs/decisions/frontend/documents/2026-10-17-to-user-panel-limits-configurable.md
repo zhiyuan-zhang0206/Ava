@@ -59,7 +59,7 @@ the same configured value, and refusals name the configured number.
 
 ## Consequences
 
-Operators change the four values through the config surface (`AVA_TO_USER_MAX_*`
+Operators change the four values through the config surface (`MEIVA_TO_USER_MAX_*`
 in the gateway `.env`); a change takes effect on the ops listeners and gateway
 restart. The soft limit and its reminder are unchanged, and the process profiles
 carry the new domain in all three kinds (the reading functions sit in the

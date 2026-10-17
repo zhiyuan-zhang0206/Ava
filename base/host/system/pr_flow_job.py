@@ -16,7 +16,7 @@ stays cheap.
 
 The job command runs the checkout's own venv python against the checkout's
 `scripts/ci/pull_requests/pr_flow_export.py` (same checkout rule as
-`base.host.system.cron.ava_binary_path`), so a worktree's converge — should the gate
+`base.host.system.cron.meiva_binary_path`), so a worktree's converge — should the gate
 ever pass there — would register its own pair, never prod's.
 
 """
@@ -40,7 +40,7 @@ from base.host.system.hostport import Host
 _HOUR = 0
 _MINUTE = 25
 
-_CRON_MARKER = "# ava-pr-flow"
+_CRON_MARKER = "# meiva-pr-flow"
 
 
 def trunk_token_path() -> Path:
@@ -60,8 +60,8 @@ def _log_file() -> Path:
 
 
 def _python_path(*, host: Host) -> str:
-    """The owning checkout's venv python, beside the venv's `ava` binary."""
-    return str(Path(base.host.system.cron.ava_binary_path(host=host)).parent / "python")
+    """The owning checkout's venv python, beside the venv's `meiva` binary."""
+    return str(Path(base.host.system.cron.meiva_binary_path(host=host)).parent / "python")
 
 
 def _script_path() -> str:
@@ -194,7 +194,7 @@ def register_pr_flow_job(
 ) -> None:
     """Register the daily PR-flow sampler (idempotent).
 
-    Skipped when OS jobs are off (`AVA_OS_JOBS_ENABLED` — the test suite), when
+    Skipped when OS jobs are off (`MEIVA_OS_JOBS_ENABLED` — the test suite), when
     this home is not the default home (`owns_os_jobs`) or when the credential
     gate says this host cannot run the sampler; the skip reason is logged so
     converge output explains the absence.

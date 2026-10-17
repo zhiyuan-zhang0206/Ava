@@ -1,16 +1,16 @@
 # Philosophy
 
-Why Ava is shaped the way it is. `AGENTS.md` "Core principles" is the operational
+Why Meiva is shaped the way it is. `AGENTS.md` "Core principles" is the operational
 list — what to do when writing code. This is the single thread underneath it:
 only the *why* lives here, the *how* stays in AGENTS.md.
 
 ## The bet
 
-Ava bets the model keeps getting stronger. So every layer is built asking: **can
+Meiva bets the model keeps getting stronger. So every layer is built asking: **can
 this scaffolding be stripped later, once the model no longer needs it?**
 (*Removable*: output parsing, retry, middleware, SDK surface, long-term memory.
 *Not removable*: persistence, wake, and — once one is built — an execution
-sandbox; Ava has none today (see [`SECURITY.md`](../../SECURITY.md)), but the
+sandbox; Meiva has none today (see [`SECURITY.md`](../../SECURITY.md)), but the
 bet is that a real isolation boundary stays load-bearing even as the model
 gets stronger, unlike scaffolding built to cover for a weaker model.)
 
@@ -20,7 +20,7 @@ gets stronger, unlike scaffolding built to cover for a weaker model.)
 > machinery to manage it.**
 
 Ambiguity — compatibility judgements, fallback branches, in-between states — has
-to be babysat by machinery. An invariant makes it not exist. Ava picks the latter
+to be babysat by machinery. An invariant makes it not exist. Meiva picks the latter
 every time:
 
 | Axis | Not chosen (manage ambiguity) | Chosen (strong invariant) |

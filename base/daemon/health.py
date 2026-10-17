@@ -79,7 +79,7 @@ from base.daemon.http_transport import RouteHandler as RouteHandler
 from base.daemon.http_transport import start_daemon_http
 from base.daemon.loop_health import LivenessGroup, LoopProgress  # noqa: F401  # pyright: ignore
 from base.native_process.loaded_commit import LoadedCommit
-from base.paths import ava_home
+from base.paths import meiva_home
 
 # Re-export trackers moved to loop_health after this module crossed the 800-line ceiling.
 
@@ -138,7 +138,7 @@ def _healthz_payload(
     ``name``/``pid``/``home`` are the identity triple ``probe_daemon`` checks —
     a probe that only trusted the status code cannot tell this daemon apart from
     any other process that happens to hold the port. ``home`` is the daemon's
-    ``$AVA_HOME``, i.e. its unit identity.
+    ``$MEIVA_HOME``, i.e. its unit identity.
 
     ``sha`` is the commit this daemon froze at its own boot. It is answered by
     the daemon process itself, so unlike any on-disk bookmark it cannot be
@@ -218,8 +218,8 @@ async def start_health_server(
     """
     started_at = time.time()
     pid = os.getpid()
-    # Resolved once at bind time, not per request: ava_home() mkdirs on every call.
-    home = str(ava_home())
+    # Resolved once at bind time, not per request: meiva_home() mkdirs on every call.
+    home = str(meiva_home())
 
     def health_response() -> tuple[int, bytes]:
         current_components = components() if callable(components) else components
@@ -252,12 +252,12 @@ class ProbeVerdict(Enum):
 
     - ``DOWN`` — nothing this unit can identify holds the port (refused, timed
       out, 503, or a stray answering under *this* unit's own home+name).
-      ``respawn_service`` kills this unit's ``ava-<svc>`` session first, so a
+      ``respawn_service`` kills this unit's ``meiva-<svc>`` session first, so a
       respawn is exactly the fix.
     - ``PORT_TAKEN`` — the port answers as something outside this unit's
-      reach: another ``$AVA_HOME``'s daemon, a different daemon kind, or a
-      process that is not an Ava ``/healthz`` at all. This unit cannot kill it
-      (session records live under ``$AVA_HOME/run/sessions``, so a foreign
+      reach: another ``$MEIVA_HOME``'s daemon, a different daemon kind, or a
+      process that is not an Meiva ``/healthz`` at all. This unit cannot kill it
+      (session records live under ``$MEIVA_HOME/run/sessions``, so a foreign
       unit's sessions are in a home this one never touches), so every respawn
       walks into ``[Errno 48]
       Address already in use`` and cannot ever verify. Retrying is not
@@ -355,14 +355,14 @@ def _health_payload(url: str, timeout_s: float) -> dict[str, object] | DaemonPro
 
     The single place that decides how much of a 200 has to be true before any
     identity check even gets to run — shared by ``probe_daemon_identity`` and
-    ``probe_unit_home`` so the two cannot drift on "is this an Ava health endpoint at
+    ``probe_unit_home`` so the two cannot drift on "is this an Meiva health endpoint at
     all". A foreign process on the port can return anything, so the body is parsed
     defensively and the mismatch reported rather than raised out of a cron-invoked
     healthcheck.
 
     Which verdict each failure earns follows ``ProbeVerdict``: an unreachable port
     or a non-2xx is ``DOWN`` (our own daemon, absent or wedged — a respawn is the
-    fix), while a 200 whose body is not an Ava payload at all is ``PORT_TAKEN``
+    fix), while a 200 whose body is not an Meiva payload at all is ``PORT_TAKEN``
     (something we cannot kill answers there, so respawning only walks into the
     bound port).
     """
@@ -418,7 +418,7 @@ def probe_home(url: str, *, timeout_s: float = PROBE_TIMEOUT_S) -> DaemonProbe:
 
 
 def probe_unit_home(url: str, *, timeout_s: float = PROBE_TIMEOUT_S) -> DaemonProbe:
-    """2xx from ``url`` AND a ``home`` matching this unit's ``$AVA_HOME``.
+    """2xx from ``url`` AND a ``home`` matching this unit's ``$MEIVA_HOME``.
 
     The same failure mode ``probe_daemon`` exists for — a 200 only proves
     *something* holds the port — but with the ``name``/``pid`` arms not checked.
@@ -435,7 +435,7 @@ def probe_unit_home(url: str, *, timeout_s: float = PROBE_TIMEOUT_S) -> DaemonPr
       different moments; a ``name`` mismatch is ``PORT_TAKEN``, which is terminal
       (``docs/decisions/runtime/processes/identity/2026-07-29-identity-mismatch-is-terminal.md``), so a runner
       on new code probing a gateway still on old code would read ``name=None`` and
-      terminal-fail a perfectly healthy gateway — the very thing ``ava cluster
+      terminal-fail a perfectly healthy gateway — the very thing ``meiva cluster
       health-probe`` polls with ``--auto-rollback --threshold 3`` armed. **Do not
       add the arm without confirming the payload has rolled out fleet-wide.**
 
@@ -449,7 +449,7 @@ def probe_unit_home(url: str, *, timeout_s: float = PROBE_TIMEOUT_S) -> DaemonPr
     payload = _health_payload(url, timeout_s)
     if isinstance(payload, DaemonProbe):
         return payload
-    got_home, expected_home = payload.get("home"), str(ava_home())
+    got_home, expected_home = payload.get("home"), str(meiva_home())
     if got_home != expected_home:
         return DaemonProbe.port_taken(
             f"identity mismatch on {url}: home={got_home!r} != {expected_home!r} — "
@@ -493,7 +493,7 @@ def probe_daemon_identity(
     """Probe a daemon's ``/healthz`` AND verify the answering process is ours.
 
     HTTP 200 only proves *something* listens on that port. On 2026-07-24 a
-    pytest-leaked restarter daemon — a different ``$AVA_HOME``, but fallen back
+    pytest-leaked restarter daemon — a different ``$MEIVA_HOME``, but fallen back
     to prod's default health port because the test session pinned none —
     answered 200 for 98 minutes while prod's own restarter was dead. The watchdog
     saw green every round, never respawned, and every agent it should have
@@ -501,7 +501,7 @@ def probe_daemon_identity(
     health, so the body's identity is checked too:
 
     - ``name`` — the daemon kind asked for.
-    - ``home`` — the ``$AVA_HOME`` the answering process runs under, i.e. its
+    - ``home`` — the ``$MEIVA_HOME`` the answering process runs under, i.e. its
       unit identity. This is what an impostor from another unit fails, and it is
       the only signal that works for a daemon whose pid legitimately differs from
       its pidfile (a supervisor that forks its server).
@@ -514,12 +514,12 @@ def probe_daemon_identity(
     daemon mid-startup — something else is answering.
 
     **Which not-alive verdict is which** (see ``ProbeVerdict``): the line is
-    whether killing this unit's own ``ava-<svc>`` session — what a respawn
+    whether killing this unit's own ``meiva-<svc>`` session — what a respawn
     does first — can free the port.
 
-    - ``name`` or ``home`` mismatch, or a body that is not an Ava ``/healthz`` at
+    - ``name`` or ``home`` mismatch, or a body that is not an Meiva ``/healthz`` at
       all → ``PORT_TAKEN``. The occupant is not in the session we would kill
-      (session records live under ``$AVA_HOME/run/sessions``, so a foreign
+      (session records live under ``$MEIVA_HOME/run/sessions``, so a foreign
       unit's sessions are in a home this one never touches), so every
       respawn crashes on the bound port and no probe can ever verify it.
     - a ``pid`` that this unit's pidfile does not record, and a missing pidfile,
@@ -549,7 +549,7 @@ def probe_daemon_identity(
             f"identity mismatch on {url}: name={got_name!r} != {name!r} — "
             "a different daemon kind holds this port"
         )
-    expected_home = str(ava_home())
+    expected_home = str(meiva_home())
     if got_home != expected_home:
         return DaemonProbe.port_taken(
             f"identity mismatch on {url}: home={got_home!r} != {expected_home!r} — "

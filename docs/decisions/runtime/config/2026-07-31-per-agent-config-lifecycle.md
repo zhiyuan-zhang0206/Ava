@@ -101,7 +101,7 @@ the single source for what a process runs with.
   mean "change the model for everyone" is no longer one edit.
 - The one-time backfill stamps the CODE defaults of its authoring day, because a
   migration is pure SQL and cannot read a unit's `.env`. A cluster that pins a
-  frozen field in `.env` — most plausibly `AVA_MODEL` — must hand-correct its live
+  frozen field in `.env` — most plausibly `MEIVA_MODEL` — must hand-correct its live
   agents' stamps after upgrading, or they are frozen onto the code default rather
   than onto what they were actually running.
 - `GET /api/models`'s `default` still mirrors `settings.lm.llm_model` and does not

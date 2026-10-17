@@ -9,7 +9,7 @@ if TYPE_CHECKING:
     from langchain_core.messages import BaseMessage
 
 
-class AvaMsgType(StrEnum):
+class MeivaMsgType(StrEnum):
     ATTACH = "attach"
     INBOUND = "inbound"
     SYSTEM_NOTE = "system_note"
@@ -28,7 +28,7 @@ class ExecStatus(StrEnum):
     UNKNOWN = "unknown"
 
 
-# ava:ref base/agents/messages/docs/metadata-contracts.ava.okf.md#notetag-closed-set
+# meiva:ref base/agents/messages/docs/metadata-contracts.meiva.okf.md#notetag-closed-set
 class NoteTag(StrEnum):
     IMPERSONATION = "impersonation"
     SDK_HINT = "sdk_hint"
@@ -59,7 +59,7 @@ class NoteTag(StrEnum):
     TIMEZONE = "timezone"
 
 
-class AvaUsage(TypedDict, total=False):
+class MeivaUsage(TypedDict, total=False):
     model: str
     in_total: int
     out_total: int
@@ -76,42 +76,42 @@ class AvaUsage(TypedDict, total=False):
     unpriced: int
 
 
-class AvaMessageKwargs(TypedDict, total=False):
-    ava_ephemeral_message_id: bool
-    ava_impersonation: dict[str, Any]
-    ava_msg_type: str
-    ava_source: str
-    ava_inbound_id: int
-    ava_inbound_body_start: int
-    ava_created_at: str
-    ava_picked_up_at: str
-    ava_compact_id: str
-    ava_image_urls: list[str]
-    ava_note_tag: str
-    ava_task_id: int
-    ava_exec_ms: int | None
-    ava_exec_status: str
-    ava_exec_started_at: str | None
-    ava_exec_body_start: int
+class MeivaMessageKwargs(TypedDict, total=False):
+    meiva_ephemeral_message_id: bool
+    meiva_impersonation: dict[str, Any]
+    meiva_msg_type: str
+    meiva_source: str
+    meiva_inbound_id: int
+    meiva_inbound_body_start: int
+    meiva_created_at: str
+    meiva_picked_up_at: str
+    meiva_compact_id: str
+    meiva_image_urls: list[str]
+    meiva_note_tag: str
+    meiva_task_id: int
+    meiva_exec_ms: int | None
+    meiva_exec_status: str
+    meiva_exec_started_at: str | None
+    meiva_exec_body_start: int
     sdk_calls: list[dict[str, Any]] | None
-    ava_reasoning_ms_by_block: dict[str, int]
-    ava_code_ms_by_block: dict[str, int]
-    ava_usage: AvaUsage
+    meiva_reasoning_ms_by_block: dict[str, int]
+    meiva_code_ms_by_block: dict[str, int]
+    meiva_usage: MeivaUsage
 
 
-def read_ava_kwargs(msg: BaseMessage) -> AvaMessageKwargs:
-    return cast("AvaMessageKwargs", message_addl_kwargs(msg))
+def read_meiva_kwargs(msg: BaseMessage) -> MeivaMessageKwargs:
+    return cast("MeivaMessageKwargs", message_addl_kwargs(msg))
 
 
-def kwargs_read_time(kwargs: AvaMessageKwargs) -> str | None:
-    return kwargs.get("ava_picked_up_at") or kwargs.get("ava_created_at")
+def kwargs_read_time(kwargs: MeivaMessageKwargs) -> str | None:
+    return kwargs.get("meiva_picked_up_at") or kwargs.get("meiva_created_at")
 
 
 def message_read_time(msg: BaseMessage) -> str | None:
-    return kwargs_read_time(read_ava_kwargs(msg))
+    return kwargs_read_time(read_meiva_kwargs(msg))
 
 
-# ava:ref base/agents/messages/docs/metadata-contracts.ava.okf.md#compact-summary-header-roles
+# meiva:ref base/agents/messages/docs/metadata-contracts.meiva.okf.md#compact-summary-header-roles
 COMPACT_SUMMARY_HEADER = (
     "[system] Your context was just compacted. The following is the summary of "
     "your own prior context:"

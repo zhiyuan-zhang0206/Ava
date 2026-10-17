@@ -7,7 +7,7 @@ cluster secret, so a machine holds no human bearer:
   (``GenerationSecret.api``). The gateway accepts the ACTIVE generation's
   tokens (``acceptance``), never a pending one. A runner's ops server accepts
   the gateway-class token only.
-- The root launcher delivers a service its class token in ``AVA_API_TOKEN``,
+- The root launcher delivers a service its class token in ``MEIVA_API_TOKEN``,
   exactly like its database login, and only while the API is authenticated
   (the gateway's human secret, which every gateway home holds; the unit
   capability's API admission on a remote unit).
@@ -37,7 +37,7 @@ from base.host.net.auth import API_TOKEN_ENV as API_TOKEN_ENV
 from base.host.private_storage import write_private_bytes
 
 _SCHEME = "Bearer "
-_TELEMETRY_LABEL = b"ava-telemetry-ingress/1"
+_TELEMETRY_LABEL = b"meiva-telemetry-ingress/1"
 
 # A caller-owned cache follows atomic ledger replacement on the next read.
 type AcceptanceCache = dict[Path, tuple[tuple[int, int, int], dict[GenerationClass, str]]]

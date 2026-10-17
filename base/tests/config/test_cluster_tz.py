@@ -1,7 +1,7 @@
 """Cluster-timezone resolution + process-wide application tests.
 
 Covers the one-cluster-clock boot hook (Task #1758, user ruling 2026-08-27):
-a process holding an authoritative AVA_TIMEZONE applies it as its own TZ on
+a process holding an authoritative MEIVA_TIMEZONE applies it as its own TZ on
 POSIX; a process without one (settings-lite / bare checkout) is untouched.
 """
 
@@ -54,7 +54,7 @@ def _set_cluster_tz(monkeypatch: pytest.MonkeyPatch, name: str) -> None:
     freshly constructed ``GeneralSettings`` whose fields-set carries the
     timezone. ``model_construct`` skips env reads and validation, which is
     exactly the isolated shape a unit test wants. This is the test-side
-    equivalent of a process that booted with AVA_TIMEZONE in its env / .env /
+    equivalent of a process that booted with MEIVA_TIMEZONE in its env / .env /
     bootstrap.
     """
     monkeypatch.setattr(settings, "general", GeneralSettings.model_construct(timezone=name))
@@ -88,7 +88,7 @@ def test_cluster_tz_none_for_invalid_name(monkeypatch: pytest.MonkeyPatch) -> No
 
 
 def test_apply_sets_tz_and_rezones_posix(monkeypatch: pytest.MonkeyPatch) -> None:
-    """With an authoritative AVA_TIMEZONE, the process wall clock follows the
+    """With an authoritative MEIVA_TIMEZONE, the process wall clock follows the
     cluster zone: os.environ["TZ"] is set and time.localtime() re-resolves to
     it (tm_gmtoff is the observable)."""
     _set_cluster_tz(monkeypatch, "Asia/Shanghai")

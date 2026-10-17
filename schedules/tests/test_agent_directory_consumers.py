@@ -41,7 +41,7 @@ def _directory(monkeypatch: pytest.MonkeyPatch, module: ModuleType, pages: list[
     ) -> Any:
         return fetch(scope=scope, query=query, before_id=before_id, limit=limit)
 
-    monkeypatch.setattr(module.ava.agents, "list_agents", list_agents)
+    monkeypatch.setattr(module.meiva.agents, "list_agents", list_agents)
     return fetch
 
 
@@ -62,9 +62,9 @@ def test_reuses_exact_role_from_later_search_page(
         ],
     )
     resurrect, send, spawn = Mock(), Mock(), Mock()
-    monkeypatch.setattr(module.ava.agents, "resurrect", resurrect)
-    monkeypatch.setattr(module.ava.agents, "send_message", send)
-    monkeypatch.setattr(module.ava.agents, "spawn", spawn)
+    monkeypatch.setattr(module.meiva.agents, "resurrect", resurrect)
+    monkeypatch.setattr(module.meiva.agents, "send_message", send)
+    monkeypatch.setattr(module.meiva.agents, "spawn", spawn)
 
     assert module.ensure_agent("steward", "work") == 200
     resurrect.assert_called_once_with(200, "work")
@@ -83,7 +83,7 @@ def test_spawns_only_after_all_matching_pages_are_exhausted(
     spawn = Mock(return_value=400)
     key = UUID("0eb49ad1-0b9b-4bde-b783-d0c3e4359c33")
     monkeypatch.setattr(module, "uuid4", lambda: key)
-    monkeypatch.setattr(module.ava.agents, "spawn", spawn)
+    monkeypatch.setattr(module.meiva.agents, "spawn", spawn)
 
     assert module.ensure_agent("missing", "work") == 400
     spawn.assert_called_once_with(prompt="work", label="missing", idempotency_key=str(key))
@@ -138,14 +138,14 @@ def test_known_workers_never_enumerate_the_directory(monkeypatch: pytest.MonkeyP
     module = _load("adversarial-eval-weekly-schedule.py")
     fetch = _directory(monkeypatch, module, [])
     status = Mock(side_effect=[module.S.TERMINATED, module.S.IDLING])
-    monkeypatch.setattr(module.ava.agents, "get_status", status)
-    monkeypatch.setattr(module.ava.agents, "get_last_message", Mock(return_value="done"))
+    monkeypatch.setattr(module.meiva.agents, "get_status", status)
+    monkeypatch.setattr(module.meiva.agents, "get_last_message", Mock(return_value="done"))
     assert module._wait_for_workers({10: "first", 20: "second"}) == set()
     assert {call.args[0] for call in status.call_args_list} == {10, 20}
 
     status.side_effect = [module.S.TERMINATED, module.S.RUNNING]
     terminate = Mock()
-    monkeypatch.setattr(module.ava.agents, "terminate", terminate)
+    monkeypatch.setattr(module.meiva.agents, "terminate", terminate)
     module._terminate_live_agents({10, 20})
     terminate.assert_called_once_with(20, force=True)
     fetch.assert_not_called()
@@ -169,7 +169,7 @@ def test_worker_cleanup_searches_only_live_worker_labels(monkeypatch: pytest.Mon
         ],
     )
     terminate = Mock()
-    monkeypatch.setattr(module.ava.agents, "terminate", terminate)
+    monkeypatch.setattr(module.meiva.agents, "terminate", terminate)
     module._sweep_leftover_workers({100})
     terminate.assert_called_once_with(200, force=True)
     assert [call.kwargs["scope"] for call in fetch.call_args_list] == ["live"] * 3

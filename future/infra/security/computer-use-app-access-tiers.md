@@ -7,12 +7,12 @@
 ## Problem
 
 Computer Use has no per-application authorization layer at all. The current
-safety surface is [`computer-mcp.ava.okf.md`](../../../services/docs/agent_runner_side/computer-mcp/computer-mcp.ava.okf.md):
+safety surface is [`computer-mcp.meiva.okf.md`](../../../services/docs/agent_runner_side/computer-mcp/computer-mcp.meiva.okf.md):
 a platform-capability gate (the signed helper must be enabled and capable), a
 single-holder screen lease, one `computer_action` audit event per call, the
-top-left-corner [fail-safe](../../../services/docs/agent_runner_side/computer-mcp/native-input.ava.okf.md)
+top-left-corner [fail-safe](../../../services/docs/agent_runner_side/computer-mcp/native-input.meiva.okf.md)
 and the system capture badge on the operated window
-([observation frames](../../../services/docs/agent_runner_side/computer-mcp/observation-frames.ava.okf.md)).
+([observation frames](../../../services/docs/agent_runner_side/computer-mcp/observation-frames.meiva.okf.md)).
 The same node records that the whitelist, quota and denied-app gates were
 removed on 2026-08-10, leaving "permission division" as a peer convention.
 The comment on `frontmostApp` in

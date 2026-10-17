@@ -1,6 +1,6 @@
 """The shared tail of model calls: build -> invoke -> flatten -> empty-check.
 
-`ava.web.fetch`'s answer step and `ava.understand`'s text/media paths each
+`meiva.web.fetch`'s answer step and `meiva.understand`'s text/media paths each
 used to carry their own copy of "build the chat model, invoke it on a
 HumanMessage, flatten the response, reject an empty answer with the right
 error type". This module is that tail in one place: `extract_text` (pure
@@ -75,7 +75,7 @@ def invoke_response(
     (rate limit, 5xx and typed connection/timeout). UNKNOWN errors propagate
     once unchanged; PERMANENT rejections are never retried. Raw HTTP transport
     is normalized only around the model invocation. A timeout on the
-    wall-clock budget is the caller's concern (ava.understand / ava.web.fetch
+    wall-clock budget is the caller's concern (meiva.understand / meiva.web.fetch
     bound the whole call at the batch layer); this function retries the
     provider error classes that a retry can actually flip.
 
@@ -227,7 +227,7 @@ def answer_text(
 ) -> str:
     """Build `model` at `effort` and answer `prompt` against `material`.
 
-    The shared tail of `ava.web.fetch`'s answer step and `ava.understand`'s
+    The shared tail of `meiva.web.fetch`'s answer step and `meiva.understand`'s
     text path: `build_chat_model(model, reasoning_effort=effort)` then
     `invoke_text`. A build failure (missing API key etc.) raises `error_type` —
     `build_error(model, e)` when given (caller-specific message), else

@@ -28,7 +28,7 @@ from cli.commands.converge.spec import ConvergeCtx
 
 logger = logging.getLogger("cli.converge.redis_bridge")
 
-LABEL = "com.ava.redis-bridge"
+LABEL = "com.meiva.redis-bridge"
 _BOOTOUT_TIMEOUT_S = 10.0
 _BOOTOUT_POLL_INTERVAL_S = 0.25
 
@@ -93,16 +93,16 @@ def retire_launchd_bridge(home: Path) -> None:
 def retire_launchd_redis_bridge(ctx: ConvergeCtx) -> None:
     """Leave the relay to the root supervisor: no standalone launchd job may hold its port."""
     if sys.platform == "darwin":
-        retire_launchd_bridge(ctx.ava_home)
+        retire_launchd_bridge(ctx.meiva_home)
 
 
 def probe_redis_bridge(
     home: Path | None = None, *, machine: MachineIdentity, config: ConfigBoot
 ) -> RedisBridgeStatus:
     """PING Redis through the relay's private-network endpoint."""
-    from base.paths import ava_home
+    from base.paths import meiva_home
 
-    target = (home or ava_home()).expanduser()
+    target = (home or meiva_home()).expanduser()
     try:
         bridge = redis_bridge_endpoint(
             target,

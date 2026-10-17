@@ -1,4 +1,4 @@
-"""`ava plugins` + `ava skill` — package install/toggle lifecycle.
+"""`meiva plugins` + `meiva skill` — package install/toggle lifecycle.
 
 Builders plus their `_h_*` handlers for plugin config updates, external skill
 package installs, and the supply-chain review pair (`scan` / `trust`).
@@ -147,10 +147,10 @@ def _h_skill_trust(args: argparse.Namespace) -> int:
 
 
 def add_plugins_parser(sub: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
-    # `ava plugins` — plugin config update + external skill package install lifecycle.
+    # `meiva plugins` — plugin config update + external skill package install lifecycle.
     plugins_p = sub.add_parser(
         "plugins",
-        help="install + manage Ava plugins (accepts Ava-native skills and Claude Code plugin packages as input formats)",
+        help="install + manage Meiva plugins (accepts Meiva-native skills and Claude Code plugin packages as input formats)",
     )
     plugins_sub = plugins_p.add_subparsers(dest="plugins_cmd", required=True)
 
@@ -159,12 +159,12 @@ def add_plugins_parser(sub: argparse._SubParsersAction[argparse.ArgumentParser])
     )
     plugins_update_p.set_defaults(func=_h_plugins_update)
 
-    # `ava plugins install <url> [--path SUBDIR]` — clone an external package
-    # (bare skill -> ~/.ava/skills/; Claude Code plugin -> ~/.ava/plugins/) and
+    # `meiva plugins install <url> [--path SUBDIR]` — clone an external package
+    # (bare skill -> ~/.meiva/skills/; Claude Code plugin -> ~/.meiva/plugins/) and
     # record it in the install registry.
     plugins_install_p = plugins_sub.add_parser(
         "install",
-        help="install an Ava plugin from a git source (input: Ava-native skill or Claude Code plugin package)",
+        help="install an Meiva plugin from a git source (input: Meiva-native skill or Claude Code plugin package)",
     )
     plugins_install_p.add_argument("url", help="git URL of the source repo")
     plugins_install_p.add_argument(
@@ -189,7 +189,7 @@ def add_plugins_parser(sub: argparse._SubParsersAction[argparse.ArgumentParser])
     plugins_installed_p = plugins_sub.add_parser("installed", help="list install-registry entries")
     plugins_installed_p.set_defaults(func=_h_plugins_installed)
 
-    # `ava plugins inspect [name]` — the read-only catalog: what a plugin CAN
+    # `meiva plugins inspect [name]` — the read-only catalog: what a plugin CAN
     # extend (surfaces + live signatures) and what each installed plugin DID
     # (registration facts, read off the attribution ledger). Loads this
     # machine's enabled plugins to read them, so it is a query, not a lifecycle
@@ -206,7 +206,7 @@ def add_plugins_parser(sub: argparse._SubParsersAction[argparse.ArgumentParser])
     )
     plugins_inspect_p.set_defaults(func=_h_plugins_inspect)
 
-    # `ava plugins verify` — load every enabled plugin the way an agent boot does and exit
+    # `meiva plugins verify` — load every enabled plugin the way an agent boot does and exit
     # non-zero when any is skipped (the loader contains failures; this surfaces them).
     plugins_verify_p = plugins_sub.add_parser(
         "verify",
@@ -230,16 +230,16 @@ def add_plugins_parser(sub: argparse._SubParsersAction[argparse.ArgumentParser])
 
 
 def add_skill_parser(sub: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
-    # `ava skill` — install into + toggle $AVA_HOME/skills/ (the single skill
+    # `meiva skill` — install into + toggle $MEIVA_HOME/skills/ (the single skill
     # load dir). installed (dir on disk) and enabled (scanner loads it) are
-    # orthogonal; removal lives under `ava plugins uninstall`.
+    # orthogonal; removal lives under `meiva plugins uninstall`.
     skill_p = sub.add_parser(
         "skill",
-        help="install / enable / disable / register skills in the load dir ($AVA_HOME/skills/)",
+        help="install / enable / disable / register skills in the load dir ($MEIVA_HOME/skills/)",
     )
     skill_sub = skill_p.add_subparsers(dest="skill_cmd", required=True)
 
-    # `ava skill install <src>` — the Agent Skills standard entry point: any
+    # `meiva skill install <src>` — the Agent Skills standard entry point: any
     # skill folder / skills repo (`skills/`, `.claude/skills/`) installs as
     # published, from a git URL or a local directory.
     skill_install_p = skill_sub.add_parser(
@@ -273,7 +273,7 @@ def add_skill_parser(sub: argparse._SubParsersAction[argparse.ArgumentParser]) -
     )
     skill_install_p.set_defaults(func=_h_skill_install)
 
-    # `ava skill update [name ...]` — the explicit update for repo-native
+    # `meiva skill update [name ...]` — the explicit update for repo-native
     # skills (R5): converge only lands missing copies; updating an existing
     # copy is this command. A differing local copy is replaced (and reported).
     skill_update_p = skill_sub.add_parser(
@@ -285,7 +285,7 @@ def add_skill_parser(sub: argparse._SubParsersAction[argparse.ArgumentParser]) -
     )
     skill_update_p.set_defaults(func=_h_skill_update)
 
-    # `ava skill upgrade <name>` — re-fetch a user-installed skill from its
+    # `meiva skill upgrade <name>` — re-fetch a user-installed skill from its
     # recorded git source (a private skills repo etc.). A differing local
     # copy is replaced (and reported).
     skill_upgrade_p = skill_sub.add_parser(
@@ -309,9 +309,9 @@ def add_skill_parser(sub: argparse._SubParsersAction[argparse.ArgumentParser]) -
 
     skill_register_p = skill_sub.add_parser(
         "register",
-        help="track a dir already under $AVA_HOME/skills/ so the scanner loads it (origin=user)",
+        help="track a dir already under $MEIVA_HOME/skills/ so the scanner loads it (origin=user)",
     )
-    skill_register_p.add_argument("name", help="directory name under $AVA_HOME/skills/")
+    skill_register_p.add_argument("name", help="directory name under $MEIVA_HOME/skills/")
     skill_register_p.add_argument(
         "--accept-risk",
         action="store_true",
@@ -319,7 +319,7 @@ def add_skill_parser(sub: argparse._SubParsersAction[argparse.ArgumentParser]) -
     )
     skill_register_p.set_defaults(func=_h_skill_register)
 
-    # `ava skill scan` / `ava skill trust` — the supply-chain review pair: read
+    # `meiva skill scan` / `meiva skill trust` — the supply-chain review pair: read
     # what the scanner saw, then vouch for the content as a human.
     skill_scan_p = skill_sub.add_parser(
         "scan",

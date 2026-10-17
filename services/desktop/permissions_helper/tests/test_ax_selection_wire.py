@@ -17,7 +17,7 @@ def roundtrip(
     kwargs: dict[str, Any], response: dict[str, Any], *, tree: bool = False
 ) -> tuple[dict[str, Any], Any]:
     requests: list[dict[str, Any]] = []
-    with tempfile.TemporaryDirectory(prefix="ava-ax-wire-", dir="/tmp") as directory:
+    with tempfile.TemporaryDirectory(prefix="meiva-ax-wire-", dir="/tmp") as directory:
         path = Path(directory) / "helper.sock"
         with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as listener:
             listener.bind(str(path))

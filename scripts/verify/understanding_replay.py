@@ -1,4 +1,4 @@
-# ava:ref scripts/verify/docs/understanding-replay.ava.okf.md#preview-entry-admission
+# meiva:ref scripts/verify/docs/understanding-replay.meiva.okf.md#preview-entry-admission
 
 from __future__ import annotations
 
@@ -52,11 +52,11 @@ CLI_DESCRIPTION = """Replay chunk-triggered understanding over an agent's EXISTI
 Run inside the preview container (it refuses anywhere else, so a host checkout can
 never enqueue into the host's own cluster):
 
-    docker exec -w /home/verify/.ava/source ava-preview \\
+    docker exec -w /home/verify/.meiva/source meiva-preview \\
         .venv/bin/python scripts/verify/understanding_replay.py plan   AGENT_ID --ratio 0.25
-    docker exec -w /home/verify/.ava/source ava-preview \\
+    docker exec -w /home/verify/.meiva/source meiva-preview \\
         .venv/bin/python scripts/verify/understanding_replay.py enqueue AGENT_ID --ratio 0.25
-    docker exec -w /home/verify/.ava/source ava-preview \\
+    docker exec -w /home/verify/.meiva/source meiva-preview \\
         .venv/bin/python scripts/verify/understanding_replay.py report AGENT_ID
 
 ## What it does
@@ -65,7 +65,7 @@ never enqueue into the host's own cluster):
 over the stored history, with the threshold `ratio x` the agent model's compact soft
 threshold (`resolve_context_budget(...).soft_compact_tokens`) in place of
 `chunk_threshold`'s default; without `--ratio` the configured
-`AVA_UNDERSTANDING_CHUNK_RATIO` applies, as for the live hook. Every AI message's `usage_metadata.input_tokens` is the
+`MEIVA_UNDERSTANDING_CHUNK_RATIO` applies, as for the live hook. Every AI message's `usage_metadata.input_tokens` is the
 provider-reported figure the live hook reads. A first AI turn records the baseline, a
 chunk fires when the figure has grown by the threshold, and the stretch left after the
 last cut closes the segment (as compaction does). `enqueue` then inserts those chunks into
@@ -112,7 +112,7 @@ DOCKERENV = Path("/.dockerenv")
 def require_preview() -> None:
     if not DOCKERENV.exists():
         sys.exit(
-            "refusing: this tool runs inside the preview container only (docker exec ava-preview ...)"
+            "refusing: this tool runs inside the preview container only (docker exec meiva-preview ...)"
         )
 
 

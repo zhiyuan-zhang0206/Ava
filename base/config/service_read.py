@@ -2,7 +2,7 @@
 
 Composition roots supply both the process-profile runtime and a complete
 read model. File reads use the owner's fixed path, so two roots do not share
-configuration or follow a later change to AVA_HOME. Runtime profile access
+configuration or follow a later change to MEIVA_HOME. Runtime profile access
 remains restricted; only this service's complete read surface crosses domains.
 Invalid file values propagate their owning model's validation error. Repair
 commands use class metadata and candidate validation without constructing an
@@ -162,7 +162,7 @@ class ConfigAuthority:
         if payload["db_url"] != raw:
             from base.log import logger
 
-            logger.debug("current_field_values: serving the delivered runner AVA_DB_URL")
+            logger.debug("current_field_values: serving the delivered runner MEIVA_DB_URL")
 
     def bootstrap_config_values(
         self, *, provider_key_envs: Iterable[str], plugin_cluster_config: str
@@ -197,8 +197,8 @@ class ConfigAuthority:
                 value = value.get_secret_value()
             out[alias] = env_value_text(value)
         _serve_reachable_data_plane_hosts(out, self._reachable_host())
-        out["AVA_DB_URL"] = self.served_db_endpoint(aliases)
-        out["AVA_GATEWAY_OTLP_ENDPOINT"] = self._gateway_otlp_projection(aliases)
+        out["MEIVA_DB_URL"] = self.served_db_endpoint(aliases)
+        out["MEIVA_GATEWAY_OTLP_ENDPOINT"] = self._gateway_otlp_projection(aliases)
         for key_env in provider_key_envs:
             if key_env in aliases and key_env not in out:
                 out[key_env] = aliases[key_env]
@@ -209,12 +209,12 @@ class ConfigAuthority:
         """Read this gateway's required fresh endpoint and strip its password."""
         if aliases is None:
             aliases = self.read_env_aliases()
-        db_url = aliases.get("AVA_DB_URL")
+        db_url = aliases.get("MEIVA_DB_URL")
         if not db_url:
-            raise ValueError("AVA_DB_URL is missing from the gateway config snapshot")
-        served = {"AVA_DB_URL": credential_free(db_url)}
+            raise ValueError("MEIVA_DB_URL is missing from the gateway config snapshot")
+        served = {"MEIVA_DB_URL": credential_free(db_url)}
         _serve_reachable_data_plane_hosts(served, self._reachable_host())
-        return served["AVA_DB_URL"]
+        return served["MEIVA_DB_URL"]
 
     def _reachable_host(self) -> str:
         return self.service_field_value("machine_host").strip() or "localhost"
@@ -223,12 +223,12 @@ class ConfigAuthority:
         """Project gateway ingress without distributing local listener settings."""
         port = int(
             aliases.get(
-                "AVA_TELEMETRY_OTLP_PORT", str(self.service_field_value("telemetry_otlp_port"))
+                "MEIVA_TELEMETRY_OTLP_PORT", str(self.service_field_value("telemetry_otlp_port"))
             )
         )
         if not 1 <= port <= 65535:
-            raise ValueError("AVA_TELEMETRY_OTLP_PORT must be between 1 and 65535")
-        host = aliases.get("AVA_MACHINE_HOST") or self._reachable_host()
+            raise ValueError("MEIVA_TELEMETRY_OTLP_PORT must be between 1 and 65535")
+        host = aliases.get("MEIVA_MACHINE_HOST") or self._reachable_host()
         return url_with_host(f"http://localhost:{port}", host)
 
 
@@ -238,7 +238,7 @@ def _serve_reachable_data_plane_hosts(out: dict[str, str], reachable: str) -> No
 
     if is_loopback_host(reachable):
         return
-    for alias in ("AVA_DB_URL", "AVA_REDIS_URL"):
+    for alias in ("MEIVA_DB_URL", "MEIVA_REDIS_URL"):
         value = out.get(alias)
         if not value:
             continue

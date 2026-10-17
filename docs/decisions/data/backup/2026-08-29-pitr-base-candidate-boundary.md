@@ -29,7 +29,7 @@ and sharing the WAL worker would let a multi-GiB upload delay the RPO-critical
 segment stream. One immutable plain candidate plus bounded buffers keeps the
 disk and scheduling boundaries explicit.
 
-`AVA_PITR_ENABLED` and `AVA_PITR_BASE_BACKUP_ENABLED` remain separate. This
+`MEIVA_PITR_ENABLED` and `MEIVA_PITR_BASE_BACKUP_ENABLED` remain separate. This
 allows WAL archiving to be observed before the weekly service is enabled. The
 first rollout is not protected by this mechanism; existing daily and
 migration-bearing pre-update `pg_dump` artifacts remain unchanged.

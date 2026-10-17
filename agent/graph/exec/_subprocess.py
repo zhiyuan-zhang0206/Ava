@@ -23,14 +23,14 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
-from base.agents.context import AvaContext
+from base.agents.context import MeivaContext
 from base.db import Database
 from base.deploy.release import editable_install
 from base.native_process.exec_domain import KILL_GRACE_S, ExecProcessDomain
 from base.native_process.exec_kill_notice import read_notice
 from base.native_process.process_control import SYSTEM_PROCESS_CONTROL
 from base.native_process.turn_identity import HostedTurnResources
-from base.paths import ava_home, exec_run_dir
+from base.paths import exec_run_dir, meiva_home
 
 from . import _process
 from ._child_boundary import build_child_env, read_result_envelope, result_from_payload
@@ -60,7 +60,7 @@ def _default_editable_guard() -> tuple[str, ...]:
     if source_root is None:
         return ()
     return editable_install.editable_install_violations(
-        source_root, allowed_roots=(Path.home() / "Ava",)
+        source_root, allowed_roots=(Path.home() / "Meiva",)
     )
 
 
@@ -82,7 +82,7 @@ def _editable_guard_failure(
         return None
     output = (
         "exec editable install is invalid and no child was started. "
-        "Do not retry this execute_code call. Ask the operator to run ava converge "
+        "Do not retry this execute_code call. Ask the operator to run meiva converge "
         "on this host and inspect the source records before starting new work.\n\n"
         "Invalid records:\n" + "\n".join(f"- {violation}" for violation in violations)
     )
@@ -105,7 +105,7 @@ def spawn_exec_child(
     birth_config: dict[str, object] | None = None,
 ) -> tuple[subprocess.Popen[bytes], ExecProcessDomain]:
     """Spawn one child. POSIX raw subprocesses stay in its process group;
-    persistent ``ava.shell.sessions`` are backend-hosted and outside it."""
+    persistent ``meiva.shell.sessions`` are backend-hosted and outside it."""
     env = build_child_env(
         agent_id,
         request_path,
@@ -224,7 +224,7 @@ async def finish_failed_run(
 
 
 def _write_request_failure(
-    path: Path, code: str, context: AvaContext, timeout: float, state: dict[str, Any] | None
+    path: Path, code: str, context: MeivaContext, timeout: float, state: dict[str, Any] | None
 ) -> ExecCrashed | None:
     try:
         write_request(
@@ -328,7 +328,7 @@ def retain_late_reader_completion(
 async def run_in_subprocess(
     db: Database,
     code: str,
-    context: AvaContext,
+    context: MeivaContext,
     cancel_event: asyncio.Event,
     timeout: float,
     chunk_publisher: ExecOutputChunkPublisher | None = None,
@@ -381,7 +381,7 @@ async def run_in_subprocess(
 
 async def run_legacy_subprocess(
     code: str,
-    context: AvaContext,
+    context: MeivaContext,
     cancel_event: asyncio.Event,
     timeout: float,
     chunk_publisher: ExecOutputChunkPublisher | None = None,
@@ -405,7 +405,7 @@ async def run_legacy_subprocess(
     """
     agent_id = context.require_identity().agent_id
     if exec_dir is None:
-        exec_dir = exec_run_dir(ava_home())
+        exec_dir = exec_run_dir(meiva_home())
     request_path = make_request_path(exec_dir, agent_id)
     result_path = make_result_path(exec_dir, agent_id)
 

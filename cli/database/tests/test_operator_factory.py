@@ -4,8 +4,8 @@ import pytest
 
 from cli.database import OperatorDatabaseFactory, open_operator_database, operator_database_factory
 
-_ADOPTED = "postgresql://ava_g0_gateway:pw@db.example:5432/ava"
-_OTHER = "postgresql://ava_g1_gateway:pw@db.example:5432/ava"
+_ADOPTED = "postgresql://meiva_g0_gateway:pw@db.example:5432/meiva"
+_OTHER = "postgresql://meiva_g1_gateway:pw@db.example:5432/meiva"
 
 
 def _factory() -> OperatorDatabaseFactory:
@@ -51,7 +51,9 @@ def test_the_refusal_never_prints_either_login() -> None:
     factory.adopt_login(_ADOPTED)
     with pytest.raises(RuntimeError) as refused:
         factory.adopt_login(_OTHER)
-    assert "ava_g0_gateway" not in str(refused.value) and "ava_g1_gateway" not in str(refused.value)
+    assert "meiva_g0_gateway" not in str(refused.value) and "meiva_g1_gateway" not in str(
+        refused.value
+    )
 
 
 def test_one_factory_adopting_leaves_another_on_the_settings() -> None:

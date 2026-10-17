@@ -1,4 +1,4 @@
-//! Ava App — one Tauri application for macOS and Android.
+//! Meiva App — one Tauri application for macOS and Android.
 //!
 //! The app renders no product UI of its own: it loads the cluster's console
 //! over the network and adds only what a browser tab cannot give it — tray

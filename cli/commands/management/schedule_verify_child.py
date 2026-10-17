@@ -1,4 +1,4 @@
-"""The per-script check child of `ava schedules verify` — stdin: one schedule script.
+"""The per-script check child of `meiva schedules verify` — stdin: one schedule script.
 
 Run as `python -m cli.commands.management.schedule_verify_child` from the repo root, in the
 checkout's own venv (the interpreter that would launch the schedule). Stdlib only at module level.
@@ -23,9 +23,9 @@ Three checks; nothing from the script's body runs:
    import check stays green. Only the argument SHAPE is bound (count and keyword names; values are
    placeholders), and a call that cannot be bound statically is skipped, never guessed: `*args` /
    `**kwargs` at the call site, a callee reached through an instance or a local variable, a name the
-   script rebinds, a callable with no introspectable signature. The agent SDK (`ava.*`) is skipped
-   too, names and signatures alike: plugins install its namespaces (`ava.tasks`) and wrap its
-   functions at load time (`ava.agents.spawn(label=...)`), so the static module is neither the
+   script rebinds, a callable with no introspectable signature. The agent SDK (`meiva.*`) is skipped
+   too, names and signatures alike: plugins install its namespaces (`meiva.tasks`) and wrap its
+   functions at load time (`meiva.agents.spawn(label=...)`), so the static module is neither the
    set of names nor the call contract.
 
 Output: the last stdout line is the verdict — `CHILD-OK`, `CHILD-COMPILE-ERROR:<line>:<msg>` (rc 3),
@@ -107,7 +107,7 @@ def _callee_chain(func: ast.expr) -> tuple[str, list[str]] | None:
 
 
 def _is_repo_code(obj: object, root: Path) -> bool:
-    """Defined in the checkout (not the venv), and not in the plugin-wrapped `ava` SDK package."""
+    """Defined in the checkout (not the venv), and not in the plugin-wrapped `meiva` SDK package."""
     try:
         source = inspect.getsourcefile(inspect.unwrap(obj))  # pyright: ignore[reportArgumentType]
     except (TypeError, ValueError):
@@ -117,12 +117,12 @@ def _is_repo_code(obj: object, root: Path) -> bool:
     path = Path(source).resolve()
     if not path.is_relative_to(root) or {".venv", "site-packages"} & set(path.parts):
         return False
-    return path.relative_to(root).parts[0] != "ava"
+    return path.relative_to(root).parts[0] != "meiva"
 
 
 def _is_sdk(target: object) -> bool:
-    """The `ava` SDK package or a submodule: its surface is installed by plugins at load time."""
-    return isinstance(target, types.ModuleType) and target.__name__.split(".")[0] == "ava"
+    """The `meiva` SDK package or a submodule: its surface is installed by plugins at load time."""
+    return isinstance(target, types.ModuleType) and target.__name__.split(".")[0] == "meiva"
 
 
 def _resolve(namespace: dict[str, Any], chain: tuple[str, list[str]]) -> tuple[Any, str | None]:

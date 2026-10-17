@@ -3,7 +3,7 @@
 // /control#skills — this gateway host's installed skills.
 //
 // Read: GET /api/skills returns a SkillsView — every top-level directory in the
-// host's `$AVA_HOME/skills/` load dir correlated with the install registry:
+// host's `$MEIVA_HOME/skills/` load dir correlated with the install registry:
 // name, source layer (core=repo / plugin / machine=user / untracked), and the
 // `enabled` toggle the skill scanner honors. Per-machine (skills aren't a
 // cross-machine matrix like plugins/MCP).

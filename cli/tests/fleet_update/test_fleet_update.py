@@ -147,13 +147,13 @@ def test_the_dry_run_of_down_reports_a_red_without_changing_anything(
 def test_macos_start_is_a_gui_one_shot() -> None:
     script = fleet_update.gui_oneshot("mac", 60)
     job = plistlib.loads(
-        script.split("<<'AVA_FLEET_PLIST'\n")[1].split("\nAVA_FLEET_PLIST")[0].encode()
+        script.split("<<'MEIVA_FLEET_PLIST'\n")[1].split("\nMEIVA_FLEET_PLIST")[0].encode()
     )
     assert 'launchctl bootstrap "gui/$(id -u)"' in script
     assert f'launchctl bootout "gui/$(id -u)/{job["Label"]}"' in script
     assert job["RunAtLoad"] is True and job["KeepAlive"] is False
     assert job["ProgramArguments"][:2] == ["/bin/zsh", "-lc"]
-    assert 'AVA_HOME="$H" "$S/.venv/bin/ava" start' in job["ProgramArguments"][2]
+    assert 'MEIVA_HOME="$H" "$S/.venv/bin/meiva" start' in job["ProgramArguments"][2]
     assert shlex.split(f"zsh -lc {shlex.quote(script)}")[2] == script and 'rm -rf "$D"' in script
 
 
@@ -165,14 +165,14 @@ def test_the_macos_one_shot_start_passes_the_home_and_os_job_gates(
 
     script = fleet_update.gui_oneshot("mac", 60)
     job = plistlib.loads(
-        script.split("<<'AVA_FLEET_PLIST'\n")[1].split("\nAVA_FLEET_PLIST")[0].encode()
+        script.split("<<'MEIVA_FLEET_PLIST'\n")[1].split("\nMEIVA_FLEET_PLIST")[0].encode()
     )
-    assert re.fullmatch(r"com\.ava\.fleet-update\.mac\.\d{8}T\d{6}", job["Label"])
+    assert re.fullmatch(r"com\.meiva\.fleet-update\.mac\.\d{8}T\d{6}", job["Label"])
     command = job["ProgramArguments"][2]
-    assert 'H="$HOME/.ava"; S="$H/source"' in command
-    assert 'AVA_HOME="$H" "$S/.venv/bin/ava" start' in command
+    assert 'H="$HOME/.meiva"; S="$H/source"' in command
+    assert 'MEIVA_HOME="$H" "$S/.venv/bin/meiva" start' in command
 
-    home = default_home / ".ava"
+    home = default_home / ".meiva"
     (home / "source").mkdir(parents=True)
     assert require_own_checkout(["start"], home / "source") is None
     assert cron.owns_os_jobs("autostart")
@@ -183,10 +183,10 @@ def test_the_macos_one_shot_start_passes_the_home_and_os_job_gates(
             imported |= {alias.name.split(".")[0] for alias in node.names}
         elif isinstance(node, ast.ImportFrom):
             imported.add((node.module or "").split(".")[0])
-    assert not {"base", "cli", "gateway", "services", "agent", "ava"} & imported
+    assert not {"base", "cli", "gateway", "services", "agent", "meiva"} & imported
 
 
-_STOP_RETRY = 'retry "ava stop -y --timeout 600"'
+_STOP_RETRY = 'retry "meiva stop -y --timeout 600"'
 
 
 def test_the_first_failure_stops_the_half(
@@ -317,11 +317,11 @@ def test_preflight_refuses(
     assert cluster.effects == []
 
 
-def test_refuses_inside_an_ava_agent(
+def test_refuses_inside_an_meiva_agent(
     env: tuple[Cluster, Callable[..., int]], monkeypatch: pytest.MonkeyPatch
 ) -> None:
     cluster, run = env
-    monkeypatch.setenv("AVA_AGENT_ID", "7")
+    monkeypatch.setenv("MEIVA_AGENT_ID", "7")
     assert run("down") == 2
     assert cluster.effects == []
 
@@ -357,7 +357,7 @@ def test_the_log_carries_no_secret(
     env: tuple[Cluster, Callable[..., int]], tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
     cluster, run = env
-    cluster.output = "AVA_CLUSTER_SECRET=s3cret-a Bearer tok-b postgresql://u:pw-c@h/db"
+    cluster.output = "MEIVA_CLUSTER_SECRET=s3cret-a Bearer tok-b postgresql://u:pw-c@h/db"
     assert run("down") == 0
     logs = list((tmp_path / "logs").iterdir())
     written = "".join(path.read_text() for path in logs) + capsys.readouterr().out
@@ -378,12 +378,12 @@ def test_the_probe_carries_backslashes_in_the_hold_record_unchanged(
 ) -> None:
     if not Path(shell).exists():
         pytest.skip(f"{shell} is not installed")
-    source = tmp_path / ".ava" / "source"
+    source = tmp_path / ".meiva" / "source"
     (source / ".venv" / "bin").mkdir(parents=True)
     git(source, "init", "-q", "--initial-branch=main")
     git(source, "commit", "-q", "--allow-empty", "-m", "base")
     (source / ".git" / "info" / "exclude").write_text(".venv/\n")
-    fake = source / ".venv" / "bin" / "ava"
+    fake = source / ".venv" / "bin" / "meiva"
     fake.write_text(f"#!/bin/sh\ncat <<'EOF'\nnoise line\n{_HOLD_WITH_BACKSLASHES}\nEOF\n")
     fake.chmod(0o755)
     monkeypatch.setenv("HOME", str(tmp_path))
@@ -407,7 +407,7 @@ def test_the_machine_name_is_asked_through_the_hosts_real_shell(
 ) -> None:
     if not Path(shell).exists():
         pytest.skip(f"{shell} is not installed")
-    source = tmp_path / ".ava" / "source"
+    source = tmp_path / ".meiva" / "source"
     (source / "base" / "cluster" / "machine").mkdir(parents=True)
     for package in (
         source / "base",

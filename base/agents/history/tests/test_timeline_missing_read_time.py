@@ -2,7 +2,7 @@ from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, ToolMe
 
 from base.agents.history.timeline import TimelineItem, build_timeline_items
 from base.agents.history.timeline_inputs import TimelineReadInputs
-from base.agents.messages.kwargs import AvaMsgType, NoteTag
+from base.agents.messages.kwargs import MeivaMsgType, NoteTag
 from base.clock import Clock
 from base.config import settings
 
@@ -19,7 +19,10 @@ def test_every_message_shape_without_a_read_time_renders_with_none() -> None:
     items = _render(
         HumanMessage(
             content="hello",
-            additional_kwargs={"ava_msg_type": AvaMsgType.INBOUND.value, "ava_source": "user"},
+            additional_kwargs={
+                "meiva_msg_type": MeivaMsgType.INBOUND.value,
+                "meiva_source": "user",
+            },
         ),
         AIMessage(
             content=[
@@ -31,16 +34,16 @@ def test_every_message_shape_without_a_read_time_renders_with_none() -> None:
         ToolMessage(
             content="out",
             tool_call_id="c1",
-            additional_kwargs={"ava_msg_type": AvaMsgType.EXEC_OUTPUT.value},
+            additional_kwargs={"meiva_msg_type": MeivaMsgType.EXEC_OUTPUT.value},
         ),
         HumanMessage(
             content="note",
             additional_kwargs={
-                "ava_msg_type": AvaMsgType.SYSTEM_NOTE.value,
-                "ava_note_tag": NoteTag.MEMORY.value,
+                "meiva_msg_type": MeivaMsgType.SYSTEM_NOTE.value,
+                "meiva_note_tag": NoteTag.MEMORY.value,
             },
         ),
-        HumanMessage(content="attached", additional_kwargs={"ava_msg_type": "attach"}),
+        HumanMessage(content="attached", additional_kwargs={"meiva_msg_type": "attach"}),
         HumanMessage(content="plain"),
     )
     assert [item.kind for item in items] == [
@@ -61,8 +64,8 @@ def test_an_inbound_without_an_embedded_id_renders_no_inbound_id() -> None:
         HumanMessage(
             content="hello",
             additional_kwargs={
-                "ava_msg_type": AvaMsgType.INBOUND.value,
-                "ava_created_at": "2026-10-13T08:00:00+00:00",
+                "meiva_msg_type": MeivaMsgType.INBOUND.value,
+                "meiva_created_at": "2026-10-13T08:00:00+00:00",
             },
         )
     )
@@ -75,13 +78,13 @@ def test_the_read_time_is_the_pickup_time_else_the_creation_time() -> None:
         HumanMessage(
             content="picked up",
             additional_kwargs={
-                "ava_msg_type": AvaMsgType.INBOUND.value,
-                "ava_created_at": "2026-10-13T08:00:00+00:00",
-                "ava_picked_up_at": "2026-10-13T08:00:05+00:00",
+                "meiva_msg_type": MeivaMsgType.INBOUND.value,
+                "meiva_created_at": "2026-10-13T08:00:00+00:00",
+                "meiva_picked_up_at": "2026-10-13T08:00:05+00:00",
             },
         ),
         AIMessage(
-            content="answer", additional_kwargs={"ava_created_at": "2026-10-13T08:00:09+00:00"}
+            content="answer", additional_kwargs={"meiva_created_at": "2026-10-13T08:00:09+00:00"}
         ),
     )
     assert picked.created_at == "2026-10-13T08:00:05+00:00"
@@ -90,7 +93,9 @@ def test_the_read_time_is_the_pickup_time_else_the_creation_time() -> None:
 
 def test_a_mixed_window_keeps_each_message_its_own_time() -> None:
     stamped, missing = _render(
-        AIMessage(content="old", additional_kwargs={"ava_created_at": "2026-10-13T08:00:00+00:00"}),
+        AIMessage(
+            content="old", additional_kwargs={"meiva_created_at": "2026-10-13T08:00:00+00:00"}
+        ),
         AIMessage(content="older still, never stamped"),
     )
     assert stamped.created_at == "2026-10-13T08:00:00+00:00"

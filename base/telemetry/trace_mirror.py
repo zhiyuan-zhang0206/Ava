@@ -1,7 +1,7 @@
 """Trace mirror hygiene — the disk guards for the sidecar's JSONL mirror.
 
 The local OTel Collector sidecar writes one JSONL span mirror under
-`$AVA_HOME/traces/` (`spans.jsonl` active + rotated backups). The agent-side
+`$MEIVA_HOME/traces/` (`spans.jsonl` active + rotated backups). The agent-side
 passes in this module keep that directory bounded: compression of rotated
 segments (the collector's file exporter cannot compress its own rotations),
 day-based retention, a hard directory cap, and the disk-watermark guard.
@@ -50,7 +50,7 @@ __all__ = [
 #                                          rotation, then a fresh spans.jsonl is born
 #   <any of the above>.gz                — compressed by `gzip_old_mirror` once the
 #                                          file stops being written; consumers
-#                                          (`ava trace ship`, inspect-a-trace) read
+#                                          (`meiva trace ship`, inspect-a-trace) read
 #                                          these transparently
 # Rotated and cut names parse their day from the name; the active file has no day
 # stamp and is therefore never a retention/prune target (the collector's own
@@ -129,7 +129,7 @@ def gzip_old_mirror(grace_seconds: int = 60, *, traces_dir: Path) -> int:
     so this pass — running on each agent start next to the retention prune —
     compresses every mirror file except the ACTIVE `spans.jsonl`. JSONL
     compresses ~5-10x, so the recovery mirror's disk footprint drops
-    accordingly. Consumers read `.jsonl.gz` transparently: `ava trace ship`
+    accordingly. Consumers read `.jsonl.gz` transparently: `meiva trace ship`
     continues from the per-file watermark keyed by the base name (a gzip pass
     never strands unshipped lines), and the inspect-a-trace mirror fetcher
     decompresses on read.
@@ -243,7 +243,7 @@ def enforce_dir_cap(max_mb: int, *, traces_dir: Path) -> int:
 def disk_usage(*, traces_dir: Path) -> tuple[float, int] | None:
     """(usage fraction, free bytes) of the traces dir's data disk.
 
-    The mirror is written to $AVA_HOME/traces, so the data disk is the one that
+    The mirror is written to $MEIVA_HOME/traces, so the data disk is the one that
     matters. A stat failure (exotic filesystem) returns None — the guard must
     never be the reason recording is off.
     """

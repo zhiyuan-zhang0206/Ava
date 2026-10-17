@@ -1,4 +1,4 @@
-"""Two-section chain smoke: launchd -> permissions-helper -> ava-root -> unit."""
+"""Two-section chain smoke: launchd -> permissions-helper -> meiva-root -> unit."""
 
 from __future__ import annotations
 
@@ -45,8 +45,8 @@ from .support import (
 )
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
-DEFAULT_LABEL = "com.ava.test.two-section-chain-smoke"
-BUNDLE_ID = "com.ava.permissions-helper"
+DEFAULT_LABEL = "com.meiva.test.two-section-chain-smoke"
+BUNDLE_ID = "com.meiva.permissions-helper"
 
 _HELPER_WAIT_S = 30.0
 _RESTART_WAIT_S = 20.0
@@ -85,9 +85,9 @@ def main() -> int:  # noqa: PLR0915 - one bounded smoke lifecycle: every phase, 
     if os.getuid() == 0:
         print("FAIL(phase=args): run as the desktop user, not root (launchctl gui domain)")
         return 2
-    if not (REPO_ROOT / "services" / "supervision" / "ava_root").is_dir():
+    if not (REPO_ROOT / "services" / "supervision" / "meiva_root").is_dir():
         print(
-            f"FAIL(phase=args): {REPO_ROOT} does not contain services/supervision/ava_root (stack the root slice)"
+            f"FAIL(phase=args): {REPO_ROOT} does not contain services/supervision/meiva_root (stack the root slice)"
         )
         return 2
 
@@ -117,8 +117,8 @@ def main() -> int:  # noqa: PLR0915 - one bounded smoke lifecycle: every phase, 
     def build_helper() -> Path:
         # ---- build ---------------------------------------------------------
         print(f"workdir: {workdir}")
-        app = workdir / "app" / "AvaPermissionsHelper.app"
-        exe = app / "Contents" / "MacOS" / "AvaPermissionsHelper"
+        app = workdir / "app" / "MeivaPermissionsHelper.app"
+        exe = app / "Contents" / "MacOS" / "MeivaPermissionsHelper"
         shutil.rmtree(app, ignore_errors=True)
         exe.parent.mkdir(parents=True, exist_ok=True)
         shutil.copyfile(
@@ -199,7 +199,7 @@ def main() -> int:  # noqa: PLR0915 - one bounded smoke lifecycle: every phase, 
             "argv": [
                 args.python,
                 "-m",
-                "services.supervision.ava_root",
+                "services.supervision.meiva_root",
                 "--run-dir",
                 str(run_dir),
                 "--manifests",
@@ -217,9 +217,9 @@ def main() -> int:  # noqa: PLR0915 - one bounded smoke lifecycle: every phase, 
             "Label": label,
             "ProgramArguments": [str(exe)],
             "EnvironmentVariables": {
-                "AVA_PERMISSIONS_HELPER_SOCKET": str(helper_sock),
-                "AVA_PERMISSIONS_HELPER_ROOT_SEED": str(seed_path),
-                "AVA_PERMISSIONS_HELPER_SKIP_REGISTRATION": "1",
+                "MEIVA_PERMISSIONS_HELPER_SOCKET": str(helper_sock),
+                "MEIVA_PERMISSIONS_HELPER_ROOT_SEED": str(seed_path),
+                "MEIVA_PERMISSIONS_HELPER_SKIP_REGISTRATION": "1",
             },
             "RunAtLoad": True,
             "KeepAlive": True,

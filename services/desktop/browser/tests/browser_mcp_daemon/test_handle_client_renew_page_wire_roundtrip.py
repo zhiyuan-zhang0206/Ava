@@ -16,7 +16,7 @@ async def test_handle_client_renew_page_wire_roundtrip() -> None:
 
     up = FakeUpstream()
     daemon_ref: list[ChromeMcpDaemon | None] = [new_daemon(up)]
-    sock_path = Path(tempfile.gettempdir()) / f"ava-bmd-{uuid4().hex}.sock"
+    sock_path = Path(tempfile.gettempdir()) / f"meiva-bmd-{uuid4().hex}.sock"
     server = await asyncio.start_unix_server(
         lambda r, w: handle_client(r, w, daemon_ref), path=sock_path
     )

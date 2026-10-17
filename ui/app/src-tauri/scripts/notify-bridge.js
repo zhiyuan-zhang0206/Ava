@@ -21,15 +21,15 @@
 // bridge consumes that per-tap marker and navigates the same window to Inbox.
 (function () {
   if (window.top !== window) return;
-  if (window.__AVA_APP_NOTIFY__) return;
+  if (window.__MEIVA_APP_NOTIFY__) return;
   var started = false;
   var sseOpen = false;
 
   function tryStart() {
-    var cfg = window.__AVA_APP__;
+    var cfg = window.__MEIVA_APP__;
     if (started || !cfg || !cfg.notifications || !cfg.gatewayUrl) return;
     started = true;
-    window.__AVA_APP_NOTIFY__ = true;
+    window.__MEIVA_APP_NOTIFY__ = true;
 
     // Statuses that mean the agent was doing something; the transition out of one
     // of these into `idling` is what "finished" means on the wire.
@@ -47,7 +47,7 @@
       window.__TAURI_INTERNALS__
         .invoke("app_notify", { title: title, body: body })
         .catch(function (error) {
-          console.error("[ava-app] notification failed", error);
+          console.error("[meiva-app] notification failed", error);
         });
     }
 
@@ -57,7 +57,7 @@
       try {
         target = new URL("fleet#inbox", cfg.entryUrl);
       } catch (error) {
-        console.error("[ava-app] could not resolve Inbox deep link", error);
+        console.error("[meiva-app] could not resolve Inbox deep link", error);
         return;
       }
       window.__TAURI_INTERNALS__
@@ -67,7 +67,7 @@
           window.location.href = target.href;
         })
         .catch(function (error) {
-          console.error("[ava-app] notification click check failed", error);
+          console.error("[meiva-app] notification click check failed", error);
         });
     }
 
@@ -84,7 +84,7 @@
 
       // Agent finished: a busy status settled into idling.
       if (seen && BUSY[previous] && snapshot.status === "idling") {
-        notify("Ava — " + agentName(snapshot), "Finished its turn.");
+        notify("Meiva — " + agentName(snapshot), "Finished its turn.");
       }
 
       // Agent needs input: a require-response notice that was not open before.
@@ -99,7 +99,7 @@
         announced.add(notice.id);
         // Seeding pass: adopt what is already open without announcing it.
         if (!seen) continue;
-        notify("Ava — " + agentName(snapshot) + " needs input", notice.title || "");
+        notify("Meiva — " + agentName(snapshot) + " needs input", notice.title || "");
       }
       // Forget this agent's resolved notices so a re-opened one announces again.
       announced.forEach(function (noticeId) {
@@ -152,8 +152,8 @@
 
   tryStart();
   if (!started) {
-    window.addEventListener("ava-app-config", function onConfig() {
-      window.removeEventListener("ava-app-config", onConfig);
+    window.addEventListener("meiva-app-config", function onConfig() {
+      window.removeEventListener("meiva-app-config", onConfig);
       tryStart();
     });
   }

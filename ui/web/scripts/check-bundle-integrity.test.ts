@@ -30,7 +30,7 @@ describe("degradedChunks", () => {
 
 describe("checkBundleIntegrity", () => {
   it("passes on a healthy chunk directory", async () => {
-    const dir = await mkdtemp(path.join(os.tmpdir(), "ava-bundle-integrity-"));
+    const dir = await mkdtemp(path.join(os.tmpdir(), "meiva-bundle-integrity-"));
     try {
       const chunksDir = path.join(dir, ".next", "static", "chunks");
       await mkdir(chunksDir, { recursive: true });
@@ -42,7 +42,7 @@ describe("checkBundleIntegrity", () => {
   });
 
   it("throws on a chunk directory carrying the corpse", async () => {
-    const dir = await mkdtemp(path.join(os.tmpdir(), "ava-bundle-integrity-"));
+    const dir = await mkdtemp(path.join(os.tmpdir(), "meiva-bundle-integrity-"));
     try {
       const chunksDir = path.join(dir, ".next", "static", "chunks");
       await mkdir(chunksDir, { recursive: true });
@@ -56,7 +56,7 @@ describe("checkBundleIntegrity", () => {
   });
 
   it("scans nested chunk directories", async () => {
-    const dir = await mkdtemp(path.join(os.tmpdir(), "ava-bundle-integrity-"));
+    const dir = await mkdtemp(path.join(os.tmpdir(), "meiva-bundle-integrity-"));
     try {
       const chunksDir = path.join(dir, ".next", "static", "chunks");
       const nested = path.join(chunksDir, "app", "control");
@@ -72,7 +72,7 @@ describe("checkBundleIntegrity", () => {
   });
 
   it("throws when the chunk directory has no chunks", async () => {
-    const dir = await mkdtemp(path.join(os.tmpdir(), "ava-bundle-integrity-"));
+    const dir = await mkdtemp(path.join(os.tmpdir(), "meiva-bundle-integrity-"));
     try {
       const chunksDir = path.join(dir, ".next", "static", "chunks");
       await mkdir(chunksDir, { recursive: true });
@@ -85,7 +85,7 @@ describe("checkBundleIntegrity", () => {
 
 describe("CLI entrypoint", () => {
   it("does not run the check when imported", async () => {
-    const tempDir = await mkdtemp(path.join(os.tmpdir(), "ava-bundle-integrity-"));
+    const tempDir = await mkdtemp(path.join(os.tmpdir(), "meiva-bundle-integrity-"));
     try {
       expect(() =>
         execFileSync(
@@ -104,7 +104,7 @@ describe("CLI entrypoint", () => {
   });
 
   it("exits 0 on a healthy directory and 1 on a degraded one", async () => {
-    const dir = await mkdtemp(path.join(os.tmpdir(), "ava-bundle-integrity-"));
+    const dir = await mkdtemp(path.join(os.tmpdir(), "meiva-bundle-integrity-"));
     try {
       const chunksDir = path.join(dir, ".next", "static", "chunks");
       await mkdir(chunksDir, { recursive: true });

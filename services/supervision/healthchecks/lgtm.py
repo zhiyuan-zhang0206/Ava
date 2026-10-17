@@ -19,7 +19,7 @@ from typing import Any
 
 from base.cluster.machine import MachineIdentity
 from base.daemon.health import DaemonProbe
-from base.paths import ava_home
+from base.paths import meiva_home
 
 
 def open_local(request: str | urllib.request.Request, *, timeout: float) -> Any:
@@ -49,8 +49,8 @@ def readiness_probes() -> tuple[tuple[str, str], ...]:
 
 def lgtm_host_marker() -> Path:
     """The machine-identity marker that designates THIS host as the one running
-    the local LGTM backends (`$AVA_HOME/lgtm-host`, operator-created once)."""
-    return ava_home() / "lgtm-host"
+    the local LGTM backends (`$MEIVA_HOME/lgtm-host`, operator-created once)."""
+    return meiva_home() / "lgtm-host"
 
 
 def is_lgtm_host(*, machine: MachineIdentity) -> bool:
@@ -58,7 +58,7 @@ def is_lgtm_host(*, machine: MachineIdentity) -> bool:
     OR the declarative `observability-station` unit capability."""
     from base.telemetry.observability import home_is_observability_station
 
-    home = ava_home()
+    home = meiva_home()
     return home_is_observability_station(home, machine=machine, unit_home=home)
 
 

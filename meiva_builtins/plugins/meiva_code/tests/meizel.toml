@@ -1,0 +1,18 @@
+[uses]
+"meiva_code_plugin" = ["surface_support.py", "test_meiva_code_plugin.py"]
+"test_after_exec_hook.py" = ["surface_support.py"]
+"test_meiva_code_plugin.py" = ["surface_support.py"]
+
+[debt.env-patch]
+"test_meiva_code_plugin.py#monkeypatch.delenv os.environ.MEIVA_AGENT_ID" = 1
+"test_meiva_code_plugin.py#patch.dict os.environ" = 16
+"test_meiva_code_walk.py#patch.dict os.environ" = 10
+
+[debt.first-party-patch]
+"test_after_exec_hook.py#assignment meiva.state" = 1
+"test_after_exec_hook.py#assignment meiva.state_update" = 1
+"test_meiva_code_plugin.py#assignment meiva.state" = 21
+"test_meiva_code_plugin.py#assignment meiva.state_update" = 21
+"test_meiva_code_plugin.py#monkeypatch.setattr base.agents.sdk.call_policy.policy" = 1
+"test_meiva_code_plugin.py#monkeypatch.setattr base.config.settings.sandbox.exec_output_max_chars" = 1
+"test_meiva_code_plugin.py#monkeypatch.setattr base.lm.factory.build_chat_model" = 1

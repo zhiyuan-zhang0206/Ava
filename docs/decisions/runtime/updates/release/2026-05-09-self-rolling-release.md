@@ -2,7 +2,7 @@
 
 ## Context
 
-Ava needs to upgrade its own running fleet to new code on `main` without a
+Meiva needs to upgrade its own running fleet to new code on `main` without a
 human babysitting every rollout. The hard problem is failure: if the new code
 is broken, *something* must still be running the old, known-good code to detect
 the regression and revert it. A naive "upgrade everything, then check" loses the

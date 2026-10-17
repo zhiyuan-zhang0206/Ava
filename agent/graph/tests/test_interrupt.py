@@ -22,7 +22,6 @@ from agent.graph import _init_context, interrupt
 from agent.graph.hooks import compact
 from agent.graph.interrupt import subscribe_interrupt
 from agent.graph.llm_errors import LlmLedger
-from ava.tests.fixtures.pin_agent import hosted_resources as hosted_resources
 from base.agents.incarnation.native_work_models import NativeWorkTarget
 from base.agents.messages.inbound import InterruptReason
 from base.clock import Clock
@@ -44,6 +43,7 @@ from base.native_process.turn_identity import HostedTurnResources
 from base.packages.composer_commands import CommandCatalog
 from base.packages.plugin_providers import build_model_catalog
 from base.packages.plugins.extensions import ExtensionRegistry
+from meiva.tests.fixtures.pin_agent import hosted_resources as hosted_resources
 
 _TIMEOUT_S = 5.0
 
@@ -126,7 +126,7 @@ class TestHasPendingInterrupt:
         assert await has_pending_interrupt(aops_pool, mine, incarnation=None, work=None) is False
 
     async def test_ignores_self_initiated_terminate(self, db_conn, aops_pool: AsyncConnectionPool):
-        # ava.self.terminate() inserts a terminate row source='self' then raises
+        # meiva.self.terminate() inserts a terminate row source='self' then raises
         # AgentTermination in-thread; the in-flight watcher must NOT fire on it
         # (it would inject a KeyboardInterrupt into the self-terminating thread,
         # racing the clean lifecycle exit). claim still dispatches the row.
@@ -473,7 +473,7 @@ async def test_auto_compaction_cancels_at_llm_node_without_replacing_context(
 
     from agent.graph.llm.node import llm_node
     from agent.state import AgentState, CompactState
-    from base.agents.context import AvaContext
+    from base.agents.context import MeivaContext
     from base.lm.context_budget import ContextBudget
 
     tid = create_agent(db_conn)
@@ -512,7 +512,7 @@ async def test_auto_compaction_cancels_at_llm_node_without_replacing_context(
     )
     publisher, model = MagicMock(), MagicMock()
     runtime = Runtime(
-        context=AvaContext(
+        context=MeivaContext(
             hosted_resources=hosted_resources,
             ops_pool=aops_pool,
             llm=model,
@@ -598,7 +598,7 @@ async def test_compaction_returns_through_claim_then_generates_before_compacting
     from agent.graph.hooks.compact import auto_compact_will_fire, compact_reminder
     from agent.graph.llm.node import llm_node
     from agent.state import AgentState, checkpoint_msgpack_allowlist
-    from base.agents.context import AvaContext
+    from base.agents.context import MeivaContext
     from base.agents.tests.units import spawn_agent
     from base.lm.context_budget import ContextBudget
 
@@ -626,7 +626,7 @@ async def test_compaction_returns_through_claim_then_generates_before_compacting
         assert agent_id is None
         return "standing head"
 
-    def no_notes(_extensions: ExtensionRegistry, ctx: AvaContext) -> list[Any]:
+    def no_notes(_extensions: ExtensionRegistry, ctx: MeivaContext) -> list[Any]:
         assert ctx.identity is None
         return []
 
@@ -653,7 +653,7 @@ async def test_compaction_returns_through_claim_then_generates_before_compacting
     )
     config: RunnableConfig = {"configurable": {"thread_id": str(tid)}}
     runtime = Runtime(
-        context=AvaContext(
+        context=MeivaContext(
             hosted_resources=hosted_resources,
             ops_pool=aops_pool,
             llm=model,
@@ -670,7 +670,7 @@ async def test_compaction_returns_through_claim_then_generates_before_compacting
     compacted = await llm_node(state, runtime, config, ledger=LlmLedger())
     assert compacted.goto == "init_context"
     state = apply(state, compacted)
-    state.context_reset.tail[0].additional_kwargs["ava_msg_type"] = marker
+    state.context_reset.tail[0].additional_kwargs["meiva_msg_type"] = marker
     rebuilt = await init_context_node(state, runtime, config)
     assert rebuilt.goto == "claim"
     state = apply(state, rebuilt)

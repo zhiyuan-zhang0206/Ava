@@ -11,12 +11,12 @@ _PROBE = Path(__file__).with_name("child_throwaway_storage.py")
 
 
 def test_ci_throwaway_storage_reaches_separate_clusters_and_cleans_them() -> None:
-    with tempfile.TemporaryDirectory(prefix="ava-ci-pg-", dir="/tmp") as directory:
+    with tempfile.TemporaryDirectory(prefix="meiva-ci-pg-", dir="/tmp") as directory:
         scratch = Path(directory) / "pg"
         scratch.mkdir()
         result = run_bounded(
             [sys.executable, str(_PROBE), str(scratch)],
-            env={**os.environ, "AVA_PG_THROWAWAY_BASE": str(scratch), "TMPDIR": directory},
+            env={**os.environ, "MEIVA_PG_THROWAWAY_BASE": str(scratch), "TMPDIR": directory},
             capture_output=True,
             text=True,
             timeout=30,

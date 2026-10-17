@@ -6,7 +6,7 @@ from langgraph.runtime import Runtime
 from agent.hooks import Hook
 from agent.hooks.tests.fakes import make_fake_ops_pool
 from agent.state import AgentState
-from base.agents.context import AvaContext
+from base.agents.context import MeivaContext
 from base.clock import Clock
 from base.config.tests.configuration import defaults
 from base.db import Database
@@ -20,7 +20,7 @@ class _OkHook(Hook):
     async def __call__(
         self,
         state: AgentState,
-        runtime: Runtime[AvaContext],
+        runtime: Runtime[MeivaContext],
         config: RunnableConfig,
         /,
     ) -> dict | None:
@@ -35,15 +35,15 @@ class _NamedHook(Hook):
     async def __call__(
         self,
         state: AgentState,
-        runtime: Runtime[AvaContext],
+        runtime: Runtime[MeivaContext],
         config: RunnableConfig,
         /,
     ) -> dict | None:
         return None
 
 
-def _runtime(database_gate: ProcessDbGate) -> Runtime[AvaContext]:
-    ctx = AvaContext(
+def _runtime(database_gate: ProcessDbGate) -> Runtime[MeivaContext]:
+    ctx = MeivaContext(
         ops_pool=make_fake_ops_pool(),
         llm=MagicMock(),
         event_publisher=MagicMock(),

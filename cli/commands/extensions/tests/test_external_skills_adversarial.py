@@ -31,7 +31,7 @@ from tests.path_scoped.cli_tests import operator_pipeline as operator_pipeline
 
 @pytest.fixture(autouse=True)
 def single_operator_skill(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(bridge, "_SKILL_NAMES", ("operating-ava-cluster",))
+    monkeypatch.setattr(bridge, "_SKILL_NAMES", ("operating-meiva-cluster",))
 
 
 def test_source_change_after_snapshot_does_not_mix_generations(
@@ -194,7 +194,7 @@ def test_target_appearing_after_claim_is_not_replaced(
     original_rename = bridge.rename_no_replace
 
     def insert_target_then_rename(source_path: Path, destination: Path) -> None:
-        if ".ava-stage-" in source_path.name and destination == target:
+        if ".meiva-stage-" in source_path.name and destination == target:
             destination.symlink_to(outside, target_is_directory=True)
         original_rename(source_path, destination)
 
@@ -236,14 +236,14 @@ def test_late_previous_destination_during_claim_is_not_replaced_or_owned(
         if source_path == target:
             collision = destination
             destination.mkdir()
-            (destination / "user.txt").write_text("not Ava owned\n")
+            (destination / "user.txt").write_text("not Meiva owned\n")
         original_rename(source_path, destination)
 
     monkeypatch.setattr(bridge, "rename_no_replace", collide_with_claim)
 
     bridge.converge_external_agent_skill(context, host_home=client.parent)
     assert collision is not None
-    assert (collision / "user.txt").read_text() == "not Ava owned\n"
+    assert (collision / "user.txt").read_text() == "not Meiva owned\n"
     assert (target / "SKILL.md").read_text() == "operator v1\n"
     ledger = read_ledger(context)
     assert ledger["installed"] == installed_before
@@ -280,13 +280,13 @@ def test_late_target_during_verification_restore_is_not_replaced_or_disowned(
     def reject_claimed_previous(
         root: Path, installation_id: str, generation_id: str, *, skill_name: str = SKILL
     ) -> None:
-        if ".ava-previous-" in root.name:
+        if ".meiva-previous-" in root.name:
             raise bridge.ClientConflictError("claimed copy changed")
         original_verify(root, installation_id, generation_id, skill_name=skill_name)
 
     def collide_with_restore(source_path: Path, destination: Path) -> None:
         nonlocal late_target
-        if ".ava-previous-" in source_path.name and destination == target:
+        if ".meiva-previous-" in source_path.name and destination == target:
             late_target = True
             destination.mkdir()
             (destination / "user.txt").write_text("late user target\n")
@@ -331,9 +331,9 @@ def test_late_target_during_activation_restore_is_not_replaced_or_disowned(
 
     def fail_activation_then_collide_with_restore(source_path: Path, destination: Path) -> None:
         nonlocal late_target
-        if ".ava-stage-" in source_path.name and destination == target:
+        if ".meiva-stage-" in source_path.name and destination == target:
             raise OSError("activation interrupted")
-        if ".ava-previous-" in source_path.name and destination == target:
+        if ".meiva-previous-" in source_path.name and destination == target:
             late_target = True
             destination.mkdir()
             (destination / "user.txt").write_text("late user target\n")
@@ -373,13 +373,13 @@ def test_preexisting_generation_sibling_is_preserved_without_false_ownership(
     installed_before = read_ledger(context)["installed"]
     (source / "SKILL.md").write_text("operator v2\n")
     generation_id = "a" * 32
-    sibling = target.parent / f".{SKILL}.ava-stage-{generation_id}"
+    sibling = target.parent / f".{SKILL}.meiva-stage-{generation_id}"
     sibling.mkdir()
-    (sibling / "user.txt").write_text("not Ava owned\n")
+    (sibling / "user.txt").write_text("not Meiva owned\n")
     monkeypatch.setattr(bridge.uuid, "uuid4", lambda: SimpleNamespace(hex=generation_id))
 
     bridge.converge_external_agent_skill(context, host_home=client.parent)
-    assert (sibling / "user.txt").read_text() == "not Ava owned\n"
+    assert (sibling / "user.txt").read_text() == "not Meiva owned\n"
     assert (target / "SKILL.md").read_text() == "operator v1\n"
     ledger = read_ledger(context)
     assert ledger["installed"] == installed_before
@@ -468,12 +468,12 @@ def test_marker_spoof_without_external_ledger_is_unmanaged(
     target.mkdir(parents=True)
     (target / "SKILL.md").write_text("spoofed user skill\n")
     digest = bridge.tree_digest(target)
-    (target / ".ava-managed.json").write_text(
+    (target / ".meiva-managed.json").write_text(
         json.dumps(
             {
                 "content_sha256": digest,
                 "format": 1,
-                "owner": "ava",
+                "owner": "meiva",
                 "skill": SKILL,
             }
         )
@@ -557,7 +557,7 @@ def test_source_modes_are_materialized_and_recorded(
 
     bridge.converge_external_agent_skill(context, host_home=client.parent)
     assert (target / "SKILL.md").read_text() == "operator v2\n"
-    assert list(target.parent.glob(f".{SKILL}.ava-*")) == []
+    assert list(target.parent.glob(f".{SKILL}.meiva-*")) == []
 
 
 def test_external_filesystem_failure_is_label_only_and_fail_soft(
@@ -645,7 +645,7 @@ def test_cleanup_failure_after_activation_is_retried_without_rollback(
 
     def fail_previous_once(source_path: Path, destination: Path) -> None:
         nonlocal failed
-        if f".{SKILL}.ava-previous-" in source_path.name and not failed:
+        if f".{SKILL}.meiva-previous-" in source_path.name and not failed:
             failed = True
             raise PermissionError("cleanup denied")
         original_rename(source_path, destination)
@@ -655,7 +655,7 @@ def test_cleanup_failure_after_activation_is_retried_without_rollback(
     monkeypatch.setattr(bridge, "rename_no_replace", original_rename)
     bridge.converge_external_agent_skill(context, host_home=client.parent)
     assert (target / "SKILL.md").read_text() == "operator v2\n"
-    assert list(target.parent.glob(f".{SKILL}.ava-*")) == []
+    assert list(target.parent.glob(f".{SKILL}.meiva-*")) == []
     output = capsys.readouterr()
     assert str(client.parent) not in output.err + output.out
 
@@ -700,7 +700,7 @@ def test_interrupted_post_activation_commit_is_reported_and_not_resumed(
     monkeypatch.setattr(bridge, "commit_activation", interrupt_once)
     bridge.converge_external_agent_skill(context, host_home=client.parent)
     assert (target / "SKILL.md").read_text() == "operator v2\n"
-    ledger_path = context.ava_home / "configs" / "external-agent-skills" / "codex.json"
+    ledger_path = context.meiva_home / "configs" / "external-agent-skills" / "codex.json"
     ledger_before = ledger_path.read_text()
     capsys.readouterr()
     monkeypatch.setattr(bridge, "commit_activation", original_commit)
@@ -748,7 +748,7 @@ def test_partial_stage_copy_remains_tracked_until_cleanup_finishes(
     bridge.converge_external_agent_skill(context, host_home=client.parent)
     bridge.converge_external_agent_skill(context, host_home=client.parent)
     assert target_path(client, tmp_path).is_dir()
-    assert list((client / "skills").glob(f".{SKILL}.ava-*")) == []
+    assert list((client / "skills").glob(f".{SKILL}.meiva-*")) == []
 
 
 def test_late_target_keeps_stage_and_previous_in_transaction_state(
@@ -778,7 +778,7 @@ def test_late_target_keeps_stage_and_previous_in_transaction_state(
     original_rename = bridge.rename_no_replace
 
     def insert_target(source_path: Path, destination: Path) -> None:
-        if ".ava-stage-" in source_path.name and destination == target:
+        if ".meiva-stage-" in source_path.name and destination == target:
             destination.symlink_to(outside, target_is_directory=True)
         original_rename(source_path, destination)
 
@@ -793,8 +793,6 @@ def test_late_target_keeps_stage_and_previous_in_transaction_state(
     assert ledger["transaction"]["claim_state"] == "claimed"
     assert ledger["garbage"] == []
     assert {
-        path.name.split(".ava-")[1].split("-")[0] for path in target.parent.glob(f".{SKILL}.ava-*")
-    } == {
-        "previous",
-        "stage",
-    }
+        path.name.split(".meiva-")[1].split("-")[0]
+        for path in target.parent.glob(f".{SKILL}.meiva-*")
+    } == {"previous", "stage"}

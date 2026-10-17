@@ -4,7 +4,7 @@ import pytest
 
 from services.desktop.browser import orphan
 
-_PROFILE = Path("/home/ava/.ava-wt/chrome-profile")
+_PROFILE = Path("/home/meiva/.meiva-wt/chrome-profile")
 
 
 def _chrome(*extra: str, udd: Path | str | None = _PROFILE) -> list[str]:
@@ -20,7 +20,7 @@ def test_a_chrome_on_another_profile_is_not_ours() -> None:
 
 
 def test_a_sibling_clusters_profile_is_not_ours() -> None:
-    sibling = _chrome(udd="/home/ava/.ava/chrome-profile")
+    sibling = _chrome(udd="/home/meiva/.meiva/chrome-profile")
     assert orphan.is_cluster_chrome("chrome", sibling, _PROFILE) is False
     nested = _chrome(udd=str(_PROFILE) + "-old")
     assert orphan.is_cluster_chrome("chrome", nested, _PROFILE) is False

@@ -2,10 +2,10 @@
 
 > **Status: landed. One thing is left — hooks-only plugin bundles.**
 >
-> Piece A (install registry + `ava plugins install/uninstall/installed/upgrade/
+> Piece A (install registry + `meiva plugins install/uninstall/installed/upgrade/
 > enable/disable` + overlay reservation) and Piece B (Claude Code plugin
 > materialization) shipped, as did the standalone `type="mcp"` registry package
-> (`ava mcp install`, third MCP source — see
+> (`meiva mcp install`, third MCP source — see
 > [`mcp-scope-and-bundling.md`](mcp-scope-and-bundling.md)) and the cross-machine
 > inventory UI (`/control/inventory` + `GET/PUT /api/inventory`).
 >
@@ -30,7 +30,7 @@
 
 Earlier framing: the cluster pushes capability-gated config to machines. Wrong.
 The real model: **installing a plugin / skill / MCP is a local operation.** The
-gap that bit us during the self-update rollout (`ava.self.update()`, removed
+gap that bit us during the self-update rollout (`meiva.self.update()`, removed
 2026-08) is not config distribution — it's
 that these resources have no mature install/upgrade system yet.
 
@@ -39,33 +39,33 @@ server lives on GUI machines because you only **install** it there.
 
 ## Units & bundling (mirrors Claude Code)
 
-- **skill** (SKILL.md + files), **MCP** (server config / process), and Ava's
+- **skill** (SKILL.md + files), **MCP** (server config / process), and Meiva's
   plugin hooks are independently usable primitives.
 - **plugin = a bundle** that MAY ship skills + MCP + hooks together (CC's plugin
   bundles `skills/` + `.mcp.json` + hooks + agents under one manifest). A plugin
   is a packaging/distribution mechanism, not a fundamental unit.
 - **Repo-local agent skill folders:** beyond static plugin-bundled skills, a plugin
   can contribute skill roots resolved at scan time
-  (`ava/skills/__init__.py:register_skill_source`). The `ava_code` plugin uses it to load the
+  (`meiva/skills/__init__.py:register_skill_source`). The `meiva_code` plugin uses it to load the
   working repo's own `.claude/skills` (Claude Code compat), `.agents/skills` (the
-  open Agent Skills standard directory) and `.ava/skills` (Ava's, scanned last so it
-  wins) as the agent points `ava.cwd` at a project — so a repo ships skills specific
+  open Agent Skills standard directory) and `.meiva/skills` (Meiva's, scanned last so it
+  wins) as the agent points `meiva.cwd` at a project — so a repo ships skills specific
   to working *on that repo*, git-tracked and riding its own `git pull`, separate from
-  Ava's built-in set. Other agent tools' folders (`.codex/...` etc.) can join the
+  Meiva's built-in set. Other agent tools' folders (`.codex/...` etc.) can join the
   same provider later.
 
 ## Install = local, agent-driven
 
 - A package is installed from a **source** (a git repo / URL / marketplace) into
-  the machine's `$AVA_HOME` overlay. The overlay is **only** for externally-installed
+  the machine's `$MEIVA_HOME` overlay. The overlay is **only** for externally-installed
   packages — repo content never belongs in it, which is what dissolved the
   stale-shadow problem.
-  *Superseded for skills (2026-07-14): `~/.ava/skills/` is now the single load dir;
+  *Superseded for skills (2026-07-14): `~/.meiva/skills/` is now the single load dir;
   repo/plugin skills are converged into it (registry-tracked, hash-guarded) rather
   than loading from the repo. See
   [`2026-07-14-skills-single-load-dir`](../../../docs/decisions/runtime/processes/shutdown/2026-07-14-skills-single-load-dir.md).*
-- The **installer is an Ava agent, not a declarative engine.** CC's
-  `/plugin install` is a fixed pipeline that can't debug. Ava's strength is an
+- The **installer is an Meiva agent, not a declarative engine.** CC's
+  `/plugin install` is a fixed pipeline that can't debug. Meiva's strength is an
   agent with terminal + code that can clone, run setup, hit an error, read it,
   fix, retry. Install becomes a task an agent performs (guided by an install
   skill); upgrade = re-fetch from the recorded source. Versioning is
@@ -78,7 +78,7 @@ server lives on GUI machines because you only **install** it there.
 > ([`2026-05-22-state-surface-canonicalization.md`](../../../docs/decisions/engineering/design/contracts/2026-05-22-state-surface-canonicalization.md)):
 > that draft put plugin config in Q4 (cluster-wide → DB); the move here reclassifies
 > it as **per-machine**, so it's local overlay config, not a DB row. The frame and its
-> "`~/.ava/` must be wipe-and-replay safe" rule still hold — the overlay just also
+> "`~/.meiva/` must be wipe-and-replay safe" rule still hold — the overlay just also
 > legitimately holds registry-tracked external installs (a *governed* per-host
 > location, not an ungoverned third place).
 
@@ -98,7 +98,7 @@ server lives on GUI machines because you only **install** it there.
   `agent`), and `BOOTSTRAP_FIELDS` is derived from it (`base/config/`). The
   override *store* was then retired on 2026-06-08 — cluster fields live in the
   gateway's `.env`, host fields in the machine's own, precedence collapsed to
-  `env(.env) > default`, and `ava config set` is the edit path.
+  `env(.env) > default`, and `meiva config set` is the edit path.
 - **The "one switch for many machines" convenience is a frontend concern**, not a
   data-model one — and it shipped as `/control/inventory`: a matrix of plugins / MCP
   servers × machines over `GET /api/inventory`, where a cell click `PUT`s a
@@ -142,7 +142,7 @@ capability decision lives in the installing agent, not a central table.
 - Capability-gating tables → gone (the capability check moves into the
   installing agent).
 - Central config push → gone (config local; fleet ops via spawned agents).
-- Stale `~/.ava/skills/` shadow → a non-issue once the overlay is governed by the
+- Stale `~/.meiva/skills/` shadow → a non-issue once the overlay is governed by the
   install registry.
 
 ## Still open: hooks-only plugin bundles
@@ -155,5 +155,5 @@ plugin. The blocker is not the adapter but the lifecycle: a Python-hook plugin n
 an agent restart to load, so "install succeeded" would not mean "hook active". That
 is the piece to design.
 
-Also unresolved: registry enable/disable gating for `~/.ava/plugins/` dirs (today
+Also unresolved: registry enable/disable gating for `~/.meiva/plugins/` dirs (today
 install == enabled).

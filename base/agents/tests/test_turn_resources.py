@@ -6,7 +6,7 @@ from uuid import uuid4
 
 import pytest
 
-from base.agents.context import AvaContext
+from base.agents.context import MeivaContext
 from base.agents.context.identity import AgentIdentity
 from base.native_process.runtime_incarnation import RuntimeIncarnation
 from base.native_process.turn_identity import (
@@ -55,7 +55,7 @@ def test_late_completion_preserves_replaced_resource_evidence() -> None:
 def test_copied_context_keeps_original_admission_and_cleanup_scope() -> None:
     incarnation = RuntimeIncarnation(17, uuid4(), uuid4())
     resources = HostedTurnResources()
-    context = AvaContext(
+    context = MeivaContext(
         identity=AgentIdentity(17, True),
         original_incarnation=incarnation,
         hosted_resources=resources,
@@ -66,7 +66,7 @@ def test_copied_context_keeps_original_admission_and_cleanup_scope() -> None:
     with pytest.raises(RuntimeError, match="different agent"):
         copied.require_original_incarnation(18)
     with pytest.raises(RuntimeError, match="no original RuntimeIncarnation"):
-        AvaContext(identity=AgentIdentity(17, True)).require_original_incarnation(17)
+        MeivaContext(identity=AgentIdentity(17, True)).require_original_incarnation(17)
 
 
 async def test_late_failure_keeps_original_scope_without_cancelling_other_turns(

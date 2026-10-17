@@ -2,7 +2,7 @@
 
 Each install entry calls `manifest_install_errors` on the source tree it is
 about to land. These are bare skill, Claude Code plugin and MCP packages, whose formats
-come from outside Ava, so a manifest is optional here. Empty list = nothing to refuse: no
+come from outside Meiva, so a manifest is optional here. Empty list = nothing to refuse: no
 manifest, or a manifest that validates and whose dependency mirror holds. Any error = the
 package ships a contract it breaks; the caller prints and refuses the install before
 anything is landed.
@@ -67,5 +67,5 @@ def gate_refuses(pkg_dir: Path, *, command: str, mirror_pyproject: bool = False)
     if not errors:
         return False
     for err in errors:
-        print(f"[ava {command}] {err}", file=sys.stderr)
+        print(f"[meiva {command}] {err}", file=sys.stderr)
     return True

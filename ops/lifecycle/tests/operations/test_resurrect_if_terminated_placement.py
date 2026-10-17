@@ -466,7 +466,7 @@ class TestResurrectIfTerminatedNotificationGuard:
         missing row / foreign agent falls through to None. The payload marker
         is a fail-closed carve-out: only the exact JSON boolean `true` lets a
         system-family chat through — a missing key, null, or any other value
-        (even the string "true") stays a notice (task #3687 review, Ava #3242)."""
+        (even the string "true") stays a notice (task #3687 review, Meiva #3242)."""
         from base.agents.inbox.insert import insert_inbound_message
         from base.db import create_agent
 

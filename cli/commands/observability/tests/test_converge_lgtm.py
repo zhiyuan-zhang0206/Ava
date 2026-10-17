@@ -1,8 +1,8 @@
 """cli.commands.observability.lgtm — native converge bring-up gating tests.
 
-The local LGTM backends are a host singleton; converge runs on every `ava
+The local LGTM backends are a host singleton; converge runs on every `meiva
 start` of every cluster on the box, so the bring-up must fire ONLY on the home
-carrying the $AVA_HOME/lgtm-host marker.
+carrying the $MEIVA_HOME/lgtm-host marker.
 """
 
 from __future__ import annotations
@@ -63,7 +63,7 @@ def _ctx(
     (repo / "deploy" / "lgtm").mkdir(parents=True)
     return ConvergeCtx(
         repo=repo,
-        ava_home=tmp_path / "home",
+        meiva_home=tmp_path / "home",
         roles=frozenset({"gateway"}),
         services=frozenset(lgtm_native.BACKENDS),
         config=machine_config_76,
@@ -168,7 +168,7 @@ def test_native_provisioning_renders_remote_observatory_urls(
     *,
     command_runtime: CommandRuntime,
 ) -> None:
-    """AVA_OBSERVABILITY_URL set -> the datasources + alert webhook render the
+    """MEIVA_OBSERVABILITY_URL set -> the datasources + alert webhook render the
     remote observatory endpoints; unset -> the current loopback defaults
     (locked by test_native_grafana_renders_from_the_repo_and_host_setting)."""
     repo = Path(__file__).resolve().parents[4]
@@ -183,7 +183,7 @@ def test_native_provisioning_renders_remote_observatory_urls(
     monkeypatch.setattr(
         config.settings.data_plane,
         "db_url",
-        "postgresql://grafana_ro@10.0.0.72:5433/ava_main",
+        "postgresql://grafana_ro@10.0.0.72:5433/meiva_main",
     )
 
     lgtm_native.render_configs(
@@ -196,19 +196,19 @@ def test_native_provisioning_renders_remote_observatory_urls(
     )
 
     rendered_runtime_env = (native_dir / "config/runtime.env").read_text(encoding="utf-8")
-    assert "AVA_TELEMETRY_LOKI_URL=http://10.0.0.46:3100" in rendered_runtime_env
-    assert "AVA_TELEMETRY_PROMETHEUS_URL=http://10.0.0.46:9090" in rendered_runtime_env
+    assert "MEIVA_TELEMETRY_LOKI_URL=http://10.0.0.46:3100" in rendered_runtime_env
+    assert "MEIVA_TELEMETRY_PROMETHEUS_URL=http://10.0.0.46:9090" in rendered_runtime_env
     # PG is the cluster's own database (#3606): it follows the data-plane
     # db_url, NOT the observatory — stage C moves the observatory while PG
     # stays on the gateway.
-    assert "AVA_PG_URL=10.0.0.72:5433" in rendered_runtime_env
-    assert "AVA_ALERTS_WEBHOOK_URL=http://10.0.0.10:8000/api/alerts" in rendered_runtime_env
+    assert "MEIVA_PG_URL=10.0.0.72:5433" in rendered_runtime_env
+    assert "MEIVA_ALERTS_WEBHOOK_URL=http://10.0.0.10:8000/api/alerts" in rendered_runtime_env
     _assert_rendered_provisioning(
         native_dir,
-        loki="$__env{AVA_TELEMETRY_LOKI_URL}",
-        prometheus="$__env{AVA_TELEMETRY_PROMETHEUS_URL}",
-        pg="$__env{AVA_PG_URL}",
-        webhook="$__env{AVA_ALERTS_WEBHOOK_URL}",
+        loki="$__env{MEIVA_TELEMETRY_LOKI_URL}",
+        prometheus="$__env{MEIVA_TELEMETRY_PROMETHEUS_URL}",
+        pg="$__env{MEIVA_PG_URL}",
+        webhook="$__env{MEIVA_ALERTS_WEBHOOK_URL}",
     )
 
 
@@ -243,9 +243,9 @@ def test_native_provisioning_webhook_stays_loopback_without_observatory(
     )
 
     rendered_runtime_env = (native_dir / "config/runtime.env").read_text(encoding="utf-8")
-    assert "AVA_ALERTS_WEBHOOK_URL=http://127.0.0.1:8000/api/alerts" in rendered_runtime_env
+    assert "MEIVA_ALERTS_WEBHOOK_URL=http://127.0.0.1:8000/api/alerts" in rendered_runtime_env
     assert "10.0.0.10" not in rendered_runtime_env
-    _assert_rendered_provisioning(native_dir, webhook="$__env{AVA_ALERTS_WEBHOOK_URL}")
+    _assert_rendered_provisioning(native_dir, webhook="$__env{MEIVA_ALERTS_WEBHOOK_URL}")
 
 
 def test_native_provisioning_preserves_user_edited_rendered_files(
@@ -275,7 +275,7 @@ def test_native_provisioning_preserves_user_edited_rendered_files(
     # The rendered tree carries $__env{} references (URLs live in runtime.env),
     # so a meaningful user edit replaces a reference with a hardcoded URL.
     user_edit = datasources.read_text(encoding="utf-8").replace(
-        "$__env{AVA_TELEMETRY_LOKI_URL}", "http://user.example:3100"
+        "$__env{MEIVA_TELEMETRY_LOKI_URL}", "http://user.example:3100"
     )
     assert user_edit != datasources.read_text(encoding="utf-8")
     datasources.write_text(user_edit, encoding="utf-8")
@@ -290,7 +290,7 @@ def test_native_provisioning_preserves_user_edited_rendered_files(
     )
 
     assert "http://user.example:3100" in datasources.read_text(encoding="utf-8")
-    assert "$__env{AVA_TELEMETRY_LOKI_URL}" not in datasources.read_text(encoding="utf-8")
+    assert "$__env{MEIVA_TELEMETRY_LOKI_URL}" not in datasources.read_text(encoding="utf-8")
     assert "modified locally" in capsys.readouterr().err
 
 
@@ -353,7 +353,7 @@ def test_native_provisioning_pg_stays_on_data_plane_when_db_url_is_loopback(
     monkeypatch.setattr(
         config.settings.data_plane,
         "db_url",
-        "postgresql:///ava_main?host=/tmp/ava-pg-ava-test&port=5433",
+        "postgresql:///meiva_main?host=/tmp/meiva-pg-meiva-test&port=5433",
     )
     loki, prometheus, pg = observatory_urls.observability_datasource_urls(
         database_factory=operator_database
@@ -370,7 +370,7 @@ def test_observability_url_validation_warns_and_falls_back(
     capsys: pytest.CaptureFixture[str],
     operator_database: Callable[[], Any],
 ) -> None:
-    """A malformed AVA_OBSERVABILITY_URL is warned about and falls back to the
+    """A malformed MEIVA_OBSERVABILITY_URL is warned about and falls back to the
     loopback endpoints instead of silently rendering broken URLs (QA P3)."""
     monkeypatch.setattr(
         config.settings.observability,
@@ -484,7 +484,7 @@ def test_native_converge_renders_the_telegram_contact_env_only_with_a_bot(
 
     env_file = home / "lgtm/native/grafana/telegram.env"
     assert env_file.read_text(encoding="utf-8") == (
-        "export AVA_ALERTS_TELEGRAM_BOT_TOKEN=fake-bot-token-for-test\nexport AVA_ALERTS_TELEGRAM_CHAT_ID=42\n"
+        "export MEIVA_ALERTS_TELEGRAM_BOT_TOKEN=fake-bot-token-for-test\nexport MEIVA_ALERTS_TELEGRAM_CHAT_ID=42\n"
     )
     assert env_file.stat().st_mode & 0o777 == 0o600
     run_script = (home / "lgtm/native/grafana/run.sh").read_text(encoding="utf-8")
@@ -501,7 +501,7 @@ def test_native_converge_renders_the_telegram_contact_env_only_with_a_bot(
         host=darwin_host,
     )
     assert not env_file.exists()
-    assert 'AVA_ALERTS_TELEGRAM_BOT_TOKEN:-unconfigured}"' in run_script
+    assert 'MEIVA_ALERTS_TELEGRAM_BOT_TOKEN:-unconfigured}"' in run_script
 
 
 @pytest.mark.parametrize(
@@ -538,7 +538,7 @@ def test_native_config_warns_only_for_mismatched_tempo_topology(
 
     captured = capsys.readouterr()
     if warns:
-        assert "AVA_TELEMETRY_TEMPO_QUERY_URL resolves to http://127.0.0.1:3200" in captured.err
+        assert "MEIVA_TELEMETRY_TEMPO_QUERY_URL resolves to http://127.0.0.1:3200" in captured.err
         assert "Tempo intake endpoint is http://tempo.example:14318" in captured.err
     else:
         assert captured.err == ""
@@ -548,12 +548,20 @@ def test_native_config_warns_only_for_mismatched_tempo_topology(
     ("listen_host", "grafana_listen_host", "expected_warns"),
     [
         # A specific non-loopback listen host with default loopback read URLs.
-        ("10.0.0.5", _WILDCARD_LISTEN, ["AVA_TELEMETRY_LOKI_URL", "AVA_TELEMETRY_PROMETHEUS_URL"]),
+        (
+            "10.0.0.5",
+            _WILDCARD_LISTEN,
+            ["MEIVA_TELEMETRY_LOKI_URL", "MEIVA_TELEMETRY_PROMETHEUS_URL"],
+        ),
         # Both knobs widened, loopback read URLs still in place.
         (
             "10.0.0.5",
             "10.0.0.6",
-            ["AVA_TELEMETRY_LOKI_URL", "AVA_TELEMETRY_PROMETHEUS_URL", "AVA_TELEMETRY_GRAFANA_URL"],
+            [
+                "MEIVA_TELEMETRY_LOKI_URL",
+                "MEIVA_TELEMETRY_PROMETHEUS_URL",
+                "MEIVA_TELEMETRY_GRAFANA_URL",
+            ],
         ),
         # Wildcard binds still answer on loopback — no warning.
         (_WILDCARD_LISTEN, _WILDCARD_LISTEN, []),
@@ -665,8 +673,8 @@ def test_native_step_runs_only_for_the_marker_home(
     operator_pipeline: Callable[[], EventPipeline],
 ) -> None:
     ctx = _ctx(tmp_path, operator_database=operator_database, producer=operator_pipeline)
-    ctx.ava_home.mkdir(parents=True)
-    (ctx.ava_home / "lgtm-host").touch()
+    ctx.meiva_home.mkdir(parents=True)
+    (ctx.meiva_home / "lgtm-host").touch()
     calls: list[tuple[Path, Path]] = []
 
     def record_ensure(
@@ -693,7 +701,7 @@ def test_native_step_runs_only_for_the_marker_home(
 
     lgtm_native.ensure_lgtm_native_step(ctx)
 
-    assert calls == [(ctx.repo, ctx.ava_home)]
+    assert calls == [(ctx.repo, ctx.meiva_home)]
 
 
 def _station_ctx(
@@ -709,7 +717,7 @@ def _station_ctx(
     (repo / "deploy" / "lgtm").mkdir(parents=True)
     return ConvergeCtx(
         repo=repo,
-        ava_home=tmp_path / "station-home",
+        meiva_home=tmp_path / "station-home",
         roles=frozenset({"observability-station"}),
         services=frozenset(lgtm_native.BACKENDS),
         config=machine_config_710,
@@ -732,7 +740,7 @@ def test_native_step_runs_for_station_role_without_marker(
     native backends with no lgtm-host marker — the marker mechanism is no
     longer required for a role-declared station."""
     ctx = _station_ctx(tmp_path, operator_database=operator_database, producer=operator_pipeline)
-    ctx.ava_home.mkdir(parents=True)
+    ctx.meiva_home.mkdir(parents=True)
     calls: list[tuple[Path, Path]] = []
 
     def record_ensure(
@@ -755,4 +763,4 @@ def test_native_step_runs_for_station_role_without_marker(
 
     lgtm_native.ensure_lgtm_native_step(ctx)
 
-    assert calls == [(ctx.repo, ctx.ava_home)]
+    assert calls == [(ctx.repo, ctx.meiva_home)]

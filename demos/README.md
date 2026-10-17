@@ -1,6 +1,6 @@
-# Ava Demos
+# Meiva Demos
 
-Copy-paste prompts that showcase Ava's core orchestration capabilities.
+Copy-paste prompts that showcase Meiva's core orchestration capabilities.
 Each demo lives in its own category folder under `demos/<category>/`.
 
 ## What's here
@@ -18,7 +18,7 @@ Each demo lives in its own category folder under `demos/<category>/`.
 | **Chrome MCP** | `chrome-mcp/` | Browser | 1 agent | Shared browser context between user and agents |
 | **Permission Hooks** | `permission-hooks/` | Hooks | 1 agent | Sensitive-operation gate examples |
 
-> Orchestrator reference scripts live at `ava_builtins/skills/coordination/ava-dynamic-workflow/references/`
+> Orchestrator reference scripts live at `meiva_builtins/skills/coordination/meiva-dynamic-workflow/references/`
 > (the two runnable lite demos are in its `scripts/` instead).
 >
 > The checkpoint for Codebase Sweep is the same `gather_files` file-polling
@@ -73,7 +73,7 @@ demos/
 ## One completion protocol, two checkpoint signals
 
 Every worker in every dynamic workflow finishes the same way: **write the result
-file, then `ava.self.terminate()` — silently**. No worker messages the orchestrator;
+file, then `meiva.self.terminate()` — silently**. No worker messages the orchestrator;
 N workers reporting individually would wake the orchestrator N times for N LLM turns.
 The orchestrator instead arms **checkpoints** — as few as one, at the places it
 actually wants to wake up — and each checkpoint reports a whole batch in one message.
@@ -89,7 +89,7 @@ What a checkpoint watches is the choice left:
 
 1. Open the demo folder
 2. Copy the prompt from the markdown file
-3. Send it to an Ava agent (or spawn a new one with `ava.agents.spawn(prompt=...)`)
+3. Send it to an Meiva agent (or spawn a new one with `meiva.agents.spawn(prompt=...)`)
 4. Watch the agent orchestrate its fleet
 
 ## For contributors
@@ -100,11 +100,11 @@ Each demo lives in its own folder under `demos/<category>/`. Add new demos as
 ```markdown
 # <Title>
 
-**What this shows**: <one-line summary of the Ava capability>
+**What this shows**: <one-line summary of the Meiva capability>
 
 ## Prompt
 
-<the exact prompt to give to an Ava agent>
+<the exact prompt to give to an Meiva agent>
 
 ## Expected flow
 
@@ -116,5 +116,5 @@ Each demo lives in its own folder under `demos/<category>/`. Add new demos as
 
 ## Why this matters
 
-<why this capability is uniquely strong in Ava vs alternatives>
+<why this capability is uniquely strong in Meiva vs alternatives>
 ```

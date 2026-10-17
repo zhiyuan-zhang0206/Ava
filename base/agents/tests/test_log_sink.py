@@ -28,7 +28,7 @@ from base import telemetry
 from base.cluster.machine import MachineIdentity
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from base.db import Database
-from base.paths import ava_home
+from base.paths import meiva_home
 from base.telemetry.delivery.receipts import DrainStatus
 from base.telemetry.process_logging import _event_sink, add_event_sink
 
@@ -42,7 +42,7 @@ def sink_logger(database: Database, machine_identity: MachineIdentity):
     process perspective is needed, logger.bind() overrides it.
     """
     pipeline = telemetry.build_pipeline(
-        database=lambda: database, machine=machine_identity, home=ava_home()
+        database=lambda: database, machine=machine_identity, home=meiva_home()
     )
 
     def producer() -> telemetry.EventPipeline:
@@ -68,11 +68,11 @@ def _isolate_events_mirror(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> N
     `logs_dir()` by day, so a later test in the same worker would otherwise
     read earlier tests' lines (order-dependent failures or false passes).
 
-    Both the writer and the reader resolve `ava_home()` at call time, so this
+    Both the writer and the reader resolve `meiva_home()` at call time, so this
     path owner redirects the complete operation to the same isolated home."""
     from base import paths
 
-    monkeypatch.setattr(paths, "ava_home", lambda: tmp_path / "ava_home")
+    monkeypatch.setattr(paths, "meiva_home", lambda: tmp_path / "meiva_home")
 
 
 def _last_event() -> tuple[str, int | None, str, dict]:
@@ -370,7 +370,7 @@ def test_sink_delta_read_compat_reconstruction_is_a_registered_event(sink_logger
     # Find the row by name rather than taking the mirror's last line: ambient
     # metered `sdk_call` rows can land in the per-test mirror after this test's
     # own row. (The historical source was the conftest cluster-spawn guard's
-    # `ava.mcps` probe, fixed in task #3950; the find-by-name defense stays for
+    # `meiva.mcps` probe, fixed in task #3950; the find-by-name defense stays for
     # any other ambient emitter.)
     from base.paths import logs_dir
 

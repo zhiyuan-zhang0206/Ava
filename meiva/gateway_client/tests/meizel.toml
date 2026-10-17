@@ -1,0 +1,9 @@
+[debt.env-patch]
+"test_watcher.py#monkeypatch.setenv os.environ.MEIVA_WATCHER_SESSION_ID" = 1
+
+[debt.first-party-patch]
+"test_watcher.py#monkeypatch.setattr meiva.gateway_client.send_message" = 1
+"test_watcher.py#monkeypatch.setattr meiva.sdk_surface.agent_identity.agent_id" = 1
+
+[debt.restricted-python]
+"test_watcher.py#exec of source text" = 1

@@ -52,7 +52,7 @@ def test_anything_short_of_the_executed_output_three_is_not_completion(
 
 
 def _chain(*pids: int) -> list[dict[str, Any]]:
-    names = {1: "launchd", 10: "AvaPermissionsHelper", 20: "ava-root", 30: "python3.12"}
+    names = {1: "launchd", 10: "MeivaPermissionsHelper", 20: "meiva-root", 30: "python3.12"}
     return [{"pid": pid, "name": names[pid]} for pid in pids]
 
 
@@ -87,37 +87,37 @@ def test_a_check_that_exists_on_one_platform_is_listed_not_failed_on_the_other()
 
 
 def test_the_human_secret_is_read_from_the_home_env(tmp_path: Path) -> None:
-    (tmp_path / ".env").write_text("AVA_CLUSTER_SECRET=dev-cluster-secret\n")
+    (tmp_path / ".env").write_text("MEIVA_CLUSTER_SECRET=dev-cluster-secret\n")
     assert observe.human_secret(tmp_path) == "dev-cluster-secret"
 
 
 def test_a_home_without_a_human_secret_is_refused(tmp_path: Path) -> None:
-    (tmp_path / ".env").write_text("AVA_DB_URL=postgresql://ava@127.0.0.1:5432/ava\n")
-    with pytest.raises(RuntimeError, match="AVA_CLUSTER_SECRET"):
+    (tmp_path / ".env").write_text("MEIVA_DB_URL=postgresql://meiva@127.0.0.1:5432/meiva\n")
+    with pytest.raises(RuntimeError, match="MEIVA_CLUSTER_SECRET"):
         observe.human_secret(tmp_path)
 
 
 def test_the_login_presents_the_human_secret_and_keeps_the_session(tmp_path: Path) -> None:
-    (tmp_path / ".env").write_text("AVA_CLUSTER_SECRET=dev-cluster-secret\n")
+    (tmp_path / ".env").write_text("MEIVA_CLUSTER_SECRET=dev-cluster-secret\n")
     seen: list[httpx.Request] = []
 
     def handler(request: httpx.Request) -> httpx.Response:
         seen.append(request)
         return httpx.Response(
-            200, json={"ok": True}, headers={"Set-Cookie": "ava_session=s1; Path=/"}
+            200, json={"ok": True}, headers={"Set-Cookie": "meiva_session=s1; Path=/"}
         )
 
     with httpx.Client(
         transport=httpx.MockTransport(handler), base_url="http://gateway.test"
     ) as client:
         observe.login(client, tmp_path)
-        assert client.cookies.get("ava_session") == "s1"
+        assert client.cookies.get("meiva_session") == "s1"
     assert [request.url.path for request in seen] == ["/api/auth/login"]
     assert json.loads(seen[0].content) == {"password": "dev-cluster-secret"}
 
 
 def test_a_refused_login_is_an_error(tmp_path: Path) -> None:
-    (tmp_path / ".env").write_text("AVA_CLUSTER_SECRET=dev-cluster-secret\n")
+    (tmp_path / ".env").write_text("MEIVA_CLUSTER_SECRET=dev-cluster-secret\n")
 
     def refuse(_request: httpx.Request) -> httpx.Response:
         return httpx.Response(401, json={"detail": "invalid password"})

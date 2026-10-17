@@ -33,7 +33,7 @@ def _rec(tmp_path: Path):
             "memory_search": 18024,
             "page_server": 18018,
         },
-        gateway_home=str(tmp_path / ".ava-t1"),
+        gateway_home=str(tmp_path / ".meiva-t1"),
         created_at="x",
     )
 
@@ -41,32 +41,32 @@ def _rec(tmp_path: Path):
 def test_derive_env_ports_and_urls(tmp_path: Path):
     env = cluster.derive_env(
         _rec(tmp_path),
-        base_db_url="postgresql://ava:p@localhost:5432/ava",
+        base_db_url="postgresql://meiva:p@localhost:5432/meiva",
         base_redis_url="redis://localhost:6379/0",
         cluster_secret="sekret",  # noqa: S106 — test fixture, not a real secret
         redis_admin_password="admin-value",  # noqa: S106 — isolated test credential
         redis_password="runtime-value",  # noqa: S106 — isolated test credential
-        pgbouncer_enabled=False,  # pooling off -> AVA_DB_URL stays on the direct pg port
+        pgbouncer_enabled=False,  # pooling off -> MEIVA_DB_URL stays on the direct pg port
     )
     # the secret is written into the cluster .env so every cluster process has it
-    assert env["AVA_CLUSTER_SECRET"] == "sekret"  # noqa: S105 — test fixture, not a real secret
-    assert env["AVA_GATEWAY_PORT"] == "18000"
+    assert env["MEIVA_CLUSTER_SECRET"] == "sekret"  # noqa: S105 — test fixture, not a real secret
+    assert env["MEIVA_GATEWAY_PORT"] == "18000"
     # a gateway box reaches its own gateway over loopback (self-call); the address
     # remote runners dial is given at their first start, never stored here
-    assert env["AVA_GATEWAY_URL"] == "http://localhost:18000"
-    assert env["AVA_GATEWAY_HEALTH_URL"] == "http://localhost:18000/api/health"
-    assert env["AVA_FRONTEND_HEALTHCHECK_URL"] == "http://localhost:18001"
+    assert env["MEIVA_GATEWAY_URL"] == "http://localhost:18000"
+    assert env["MEIVA_GATEWAY_HEALTH_URL"] == "http://localhost:18000/api/health"
+    assert env["MEIVA_FRONTEND_HEALTHCHECK_URL"] == "http://localhost:18001"
     # db_url + redis_url carry the data-plane identity AS DATA: a fresh birth
-    # writes the fixed `ava` db/role/ACL identifier. AVA_DB_URL is the
+    # writes the fixed `meiva` db/role/ACL identifier. MEIVA_DB_URL is the
     # credential-free endpoint (the owner is NOLOGIN; processes dial delivered
     # write-generation logins) — whatever the bearer; there is no owner password.
     # The redis URL keeps the base logical DB (0) — every cluster owns its redis,
     # so there is no per-cluster index swap.
-    assert env["AVA_DB_URL"] == "postgresql://ava@localhost:5432/ava"
-    assert "AVA_DB_ADMIN_PASSWORD" not in env
-    assert env["AVA_REDIS_URL"] == "redis://ava:runtime-value@localhost:6379/0"
+    assert env["MEIVA_DB_URL"] == "postgresql://meiva@localhost:5432/meiva"
+    assert "MEIVA_DB_ADMIN_PASSWORD" not in env
+    assert env["MEIVA_REDIS_URL"] == "redis://meiva:runtime-value@localhost:6379/0"
     # channels are fixed (single per-cluster redis, no neighbour to prefix away from)
-    assert env["AVA_EVENTS_CHANNEL"] == "ava:events"
+    assert env["MEIVA_EVENTS_CHANNEL"] == "meiva:events"
 
 
 def test_derive_env_writes_the_secret_and_keeps_redis_authenticated(tmp_path: Path):
@@ -75,24 +75,24 @@ def test_derive_env_writes_the_secret_and_keeps_redis_authenticated(tmp_path: Pa
     the runtime password and both Redis credentials are persisted."""
     env = cluster.derive_env(
         _rec(tmp_path),
-        base_db_url="postgresql://ava:p@localhost:5432/ava",
+        base_db_url="postgresql://meiva:p@localhost:5432/meiva",
         base_redis_url="redis://localhost:6379/0",
         cluster_secret="the-secret",  # noqa: S106 — isolated test credential
         redis_admin_password="admin-value",  # noqa: S106 — isolated test credential
         redis_password="runtime-value",  # noqa: S106 — isolated test credential
         pgbouncer_enabled=False,
     )
-    assert env["AVA_CLUSTER_SECRET"] == "the-secret"  # noqa: S105 — test value
-    assert "AVA_DB_ADMIN_PASSWORD" not in env
-    assert env["AVA_DB_URL"] == "postgresql://ava@localhost:5432/ava"
-    assert env["AVA_REDIS_URL"] == "redis://ava:runtime-value@localhost:6379/0"
-    assert env["AVA_REDIS_ADMIN_PASSWORD"] == "admin-value"  # noqa: S105 — test value
-    assert env["AVA_REDIS_PASSWORD"] == "runtime-value"  # noqa: S105 — test value
+    assert env["MEIVA_CLUSTER_SECRET"] == "the-secret"  # noqa: S105 — test value
+    assert "MEIVA_DB_ADMIN_PASSWORD" not in env
+    assert env["MEIVA_DB_URL"] == "postgresql://meiva@localhost:5432/meiva"
+    assert env["MEIVA_REDIS_URL"] == "redis://meiva:runtime-value@localhost:6379/0"
+    assert env["MEIVA_REDIS_ADMIN_PASSWORD"] == "admin-value"  # noqa: S105 — test value
+    assert env["MEIVA_REDIS_PASSWORD"] == "runtime-value"  # noqa: S105 — test value
     # the identities stay readable as data
     from urllib.parse import urlsplit
 
-    assert urlsplit(env["AVA_DB_URL"]).username == "ava"
-    assert urlsplit(env["AVA_REDIS_URL"]).username == "ava"
+    assert urlsplit(env["MEIVA_DB_URL"]).username == "meiva"
+    assert urlsplit(env["MEIVA_REDIS_URL"]).username == "meiva"
 
 
 def test_derive_env_refuses_an_empty_cluster_secret(tmp_path: Path):
@@ -100,7 +100,7 @@ def test_derive_env_refuses_an_empty_cluster_secret(tmp_path: Path):
     with pytest.raises(ValueError, match="requires a cluster secret"):
         cluster.derive_env(
             _rec(tmp_path),
-            base_db_url="postgresql://ava@localhost:5432/ava",
+            base_db_url="postgresql://meiva@localhost:5432/meiva",
             base_redis_url="redis://localhost:6379/0",
             cluster_secret="",
             redis_admin_password="admin-value",  # noqa: S106 — isolated test credential
@@ -115,7 +115,7 @@ def test_derive_env_refuses_missing_redis_credential(tmp_path: Path, missing: st
     with pytest.raises(ValueError, match="Redis always authenticates"):
         cluster.derive_env(
             _rec(tmp_path),
-            base_db_url="postgresql://ava@localhost:5432/ava",
+            base_db_url="postgresql://meiva@localhost:5432/meiva",
             base_redis_url="redis://localhost:6379/0",
             cluster_secret="the-secret",  # noqa: S106 — isolated test credential
             redis_admin_password=credentials["redis_admin_password"],
@@ -127,28 +127,28 @@ def test_derived_env_keys_in_sync(tmp_path: Path):
     """derived_env_keys() (used to strip leaked prod values from cluster
     subprocesses) must exactly match the keys derive_env actually produces —
     the registry declaration is the derive surface, this test is the verifier
-    that producer and declaration cannot drift. AVA_PGBOUNCER_PORT is
+    that producer and declaration cannot drift. MEIVA_PGBOUNCER_PORT is
     deliberately on NEITHER side — the pooler port is a registry fact, never
     an env key."""
     env = cluster.derive_env(
         _rec(tmp_path),
-        base_db_url="postgresql://ava:p@localhost:5432/ava",
+        base_db_url="postgresql://meiva:p@localhost:5432/meiva",
         base_redis_url="redis://localhost:6379/0",
         cluster_secret="sekret",  # noqa: S106 — test fixture, not a real secret
         redis_admin_password="admin-value",  # noqa: S106 — isolated test credential
         redis_password="runtime-value",  # noqa: S106 — isolated test credential
     )
     assert set(env) == registry.derived_env_keys()
-    assert "AVA_PGBOUNCER_PORT" not in env
+    assert "MEIVA_PGBOUNCER_PORT" not in env
 
 
 def test_derive_env_pgbouncer_enabled_writes_pooler_port(tmp_path: Path):
-    """The one-URL design: with pooling on (the default), AVA_DB_URL is born
+    """The one-URL design: with pooling on (the default), MEIVA_DB_URL is born
     carrying the pooler listener port (record-derived), not the direct pg port —
-    and there is still no separate AVA_PGBOUNCER_PORT key."""
+    and there is still no separate MEIVA_PGBOUNCER_PORT key."""
     env = cluster.derive_env(
         _rec(tmp_path),
-        base_db_url="postgresql://ava:p@localhost:5432/ava",
+        base_db_url="postgresql://meiva:p@localhost:5432/meiva",
         base_redis_url="redis://localhost:6379/0",
         cluster_secret="sekret",  # noqa: S106 — test fixture, not a real secret
         redis_admin_password="admin-value",  # noqa: S106 — isolated test credential
@@ -156,13 +156,13 @@ def test_derive_env_pgbouncer_enabled_writes_pooler_port(tmp_path: Path):
     )
     from urllib.parse import urlsplit
 
-    assert urlsplit(env["AVA_DB_URL"]).port == 18013
-    assert "AVA_PGBOUNCER_PORT" not in env
+    assert urlsplit(env["MEIVA_DB_URL"]).port == 18013
+    assert "MEIVA_PGBOUNCER_PORT" not in env
 
 
 def test_per_cluster_base_urls_point_at_own_instance_ports(tmp_path: Path):
     """Every cluster's base URLs are loopback at its recorded pg/redis ports —
-    derive_env then swaps in the db name + `ava_<cluster>` identity + secret.
+    derive_env then swaps in the db name + `meiva_<cluster>` identity + secret.
     The default (no `data_plane_host` on the record) MUST render exactly this
     local form — the A5 de-hardcoding contract: parameterizing the host source
     is not a behavior change."""
@@ -203,7 +203,7 @@ def test_get_record_round_trip_preserves_data_plane_host(tmp_path: Path):
     import json
     from dataclasses import asdict, replace
 
-    home = tmp_path / ".ava-t1"
+    home = tmp_path / ".meiva-t1"
     home.mkdir()
     rec = replace(_rec(tmp_path), data_plane_host="10.0.0.7")
     (home / cluster.INTENT_NAME).write_text(json.dumps({"record": asdict(rec)}))
@@ -224,7 +224,7 @@ def test_url_host_reads_host_with_loopback_fallback():
     from base.host.net.url_secret import url_host
 
     assert url_host("postgresql://x@127.0.0.1:5433/postgres") == "127.0.0.1"
-    assert url_host("redis://ava:p@10.0.0.7:6380/0") == "10.0.0.7"
+    assert url_host("redis://meiva:p@10.0.0.7:6380/0") == "10.0.0.7"
     assert url_host("postgresql://x@/postgres") == "127.0.0.1"
     assert url_host("redis://:6380/0") == "127.0.0.1"
 
@@ -251,10 +251,10 @@ def test_health_port_tables_in_sync():
     assert svcs <= set(FIXED_PORTS)
     # the fallback is the FIXED_PORTS subset, by construction
     assert {svc: FIXED_PORTS[svc] for svc in svcs} == health_ports.DEFAULT_PORTS
-    # env vars follow the AVA_<NAME>_HEALTH_PORT shape — a rename elsewhere
+    # env vars follow the MEIVA_<NAME>_HEALTH_PORT shape — a rename elsewhere
     # (settings alias, dotenv_boot force set) breaks this loudly
     for svc, var in registry.health_port_env_aliases().items():
-        assert var == f"AVA_{svc.upper()}_HEALTH_PORT", f"{svc} -> {var}"
+        assert var == f"MEIVA_{svc.upper()}_HEALTH_PORT", f"{svc} -> {var}"
     # every health var is part of the derive surface (subprocess strip + force)
     assert set(registry.health_port_env_aliases().values()) <= registry.derived_env_keys()
 
@@ -268,7 +268,7 @@ def test_derive_authenticated_env_refuses_missing_data_plane_credential(
     with pytest.raises(ValueError, match="explicit data-plane credentials"):
         cluster.derive_env(
             _rec(tmp_path),
-            base_db_url="postgresql://ava@localhost:5432/ava",
+            base_db_url="postgresql://meiva@localhost:5432/meiva",
             base_redis_url="redis://localhost:6379/0",
             cluster_secret="bearer-only",  # noqa: S106 — isolated test credential
             redis_admin_password=credentials["redis_admin_password"],

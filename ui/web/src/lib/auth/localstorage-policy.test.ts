@@ -19,29 +19,29 @@ const SRC_DIR = join(dirname(fileURLToPath(import.meta.url)), "..", "..");
 // per-device selection deliberately kept out of the DB.
 const SETITEM_ALLOWLIST = new Set<string>([
   "app/control/config/page.tsx", // control.config.collapsedGroups — per-device group disclosure state
-  "components/fleet/fleet-view.tsx", // ava.fleet.mobileTab — current mobile tab
-  "lib/agents/use-agents.ts", // ava.active.agent_id — last-viewed agent
+  "components/fleet/fleet-view.tsx", // meiva.fleet.mobileTab — current mobile tab
+  "lib/agents/use-agents.ts", // meiva.active.agent_id — last-viewed agent
 ]);
 
 // Files permitted to configure a react-resizable-panels split layout through
 // useDefaultLayout (a per-viewport ratio persisted by the library itself).
 const AUTOSAVE_ALLOWLIST = new Set<string>([
-  "components/fleet/fleet-view.tsx", // ava.fleet.split
+  "components/fleet/fleet-view.tsx", // meiva.fleet.split
   "components/shell/home-layout.tsx", // home Agent Tree + Inspector panel split ratios (task #2556)
-  "app/memory/graph/page.tsx", // ava.memory.graph.split (memory graph side panel, task #2145)
-  "components/run-timeline/run-timeline-workspace.tsx", // ava.run-timeline.split (run-timeline details panel width)
+  "app/memory/graph/page.tsx", // meiva.memory.graph.split (memory graph side panel, task #2145)
+  "components/run-timeline/run-timeline-workspace.tsx", // meiva.run-timeline.split (run-timeline details panel width)
 ]);
 
-// The complete set of ava-namespaced storage keys allowed in source.
+// The complete set of meiva-namespaced storage keys allowed in source.
 const ALLOWED_KEYS = new Set<string>([
-  "ava.fleet.mobileTab",
-  "ava.active.agent_id",
-  "ava.fleet.split",
-  "ava.memory.graph.split",
-  "ava.run-timeline.split",
-  "ava.home.columns.context",
-  "ava.home.columns.mobile",
-  "ava.home.context.desktop",
+  "meiva.fleet.mobileTab",
+  "meiva.active.agent_id",
+  "meiva.fleet.split",
+  "meiva.memory.graph.split",
+  "meiva.run-timeline.split",
+  "meiva.home.columns.context",
+  "meiva.home.columns.mobile",
+  "meiva.home.context.desktop",
 ]);
 
 function sourceFiles(): { rel: string; src: string }[] {
@@ -72,14 +72,14 @@ describe("localStorage state policy", () => {
     expect(offenders).toEqual([]);
   });
 
-  it("every ava-namespaced storage key in the allowed files is on the allowlist", () => {
+  it("every meiva-namespaced storage key in the allowed files is on the allowlist", () => {
     const files = new Set([...SETITEM_ALLOWLIST, ...AUTOSAVE_ALLOWLIST]);
     const byRel = new Map(SOURCE_FILES.map(({ rel, src }) => [rel, src]));
     const found = new Set<string>();
     for (const f of files) {
       const src = byRel.get(f);
       if (!src) throw new Error(`allowlisted file not found in source scan: ${f}`);
-      for (const m of src.matchAll(/["'](ava[.:-][A-Za-z0-9_.:-]*)["']/g)) {
+      for (const m of src.matchAll(/["'](meiva[.:-][A-Za-z0-9_.:-]*)["']/g)) {
         found.add(m[1]);
       }
     }

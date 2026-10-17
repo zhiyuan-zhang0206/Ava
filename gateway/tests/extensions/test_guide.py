@@ -1,9 +1,9 @@
-"""POST /api/keyed/v1/guide/draft — the Ava Guide entry.
+"""POST /api/keyed/v1/guide/draft — the Meiva Guide entry.
 
-Spawns an ava-guide agent for a natural-language ops request. The spawn is
+Spawns an meiva-guide agent for a natural-language ops request. The spawn is
 stubbed so the test asserts only the wiring: the fixed prompt points at the ROOT
-`ava.skills.ava_guide` skill, carries the user's request, labels the agent
-`ava-guide`, and the spawned id is returned as agent_id.
+`meiva.skills.meiva_guide` skill, carries the user's request, labels the agent
+`meiva-guide`, and the spawned id is returned as agent_id.
 """
 
 import psycopg
@@ -17,7 +17,7 @@ from gateway.tests.lifecycle.creation.test_guarded_creation import HEADERS
 from gateway.tests.lifecycle.creation.test_guarded_creation import client as client
 
 
-def test_draft_spawns_ava_guide_agent(
+def test_draft_spawns_meiva_guide_agent(
     client: TestClient, db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     from ops.rpc_schemas import SpawnAgentRequest, SpawnedAgent
@@ -51,7 +51,7 @@ def test_draft_spawns_ava_guide_agent(
     )
     assert r.status_code == 200, r.text
     assert r.json()["agent_id"] == 777
-    assert calls["label"] == "ava-guide"
+    assert calls["label"] == "meiva-guide"
     prompt = str(calls["prompt"])
     assert "install the linear MCP server" in prompt
-    assert "ava.skills.ava_guide" in prompt
+    assert "meiva.skills.meiva_guide" in prompt

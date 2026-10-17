@@ -11,7 +11,7 @@
 --     INSERT's skip counter; the replay rewrite (33689f111) reads and writes only
 --     (source_key, identity, position). Apply only on a release that contains
 --     that rewrite;
---   * agent_activity — write-dead since ava.self.log() was removed (2026-08-02);
+--   * agent_activity — write-dead since meiva.self.log() was removed (2026-08-02);
 --     its only remaining reader, GET /api/agents/{id}/activity, is removed in the
 --     same wave. The operator dumps the table before this migration runs, and it
 --     is applied only together with (or after) that release; the rows are not

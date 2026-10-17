@@ -18,7 +18,7 @@ materializes the named surfaces every consumer imports:
 
 The module lives OUTSIDE the ``base.config`` package on purpose, like
 ``base/config/config_registry.py``: ``base/host/env/registry.py`` (the env-authority
-projections that ``load_ava_env`` runs before Settings exists) imports it, and a
+projections that ``load_meiva_env`` runs before Settings exists) imports it, and a
 package submodule import would execute the ``base.config`` facade first —
 re-entering the boot it is part of.
 """

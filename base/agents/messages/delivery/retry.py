@@ -10,7 +10,7 @@ TRANSIENT_HTTP_STATUSES = frozenset({429, 502, 503, 504})
 class GatewayResponse(Protocol):
     """The slice of ``httpx.Response`` the retry policy reads.
 
-    Declared structurally so this module, which loads on the ``import ava`` path through the
+    Declared structurally so this module, which loads on the ``import meiva`` path through the
     gateway transport, does not import httpx at module level.
     """
 
@@ -22,7 +22,7 @@ class GatewayResponse(Protocol):
 
 def network_errors() -> tuple[type[Exception], ...]:
     """The httpx transport failures that leave the gateway reachable on a later attempt."""
-    import httpx  # deferred: `import ava` reaches this module and must not load the HTTP stack
+    import httpx  # deferred: `import meiva` reaches this module and must not load the HTTP stack
 
     return (
         httpx.TimeoutException,

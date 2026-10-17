@@ -53,7 +53,7 @@ def test_a_link_after_an_indented_block_is_checked_again(tmp_path: Path) -> None
 
 
 def test_the_memory_template_is_clean() -> None:
-    template = REPO / "ava_builtins" / "plugins" / "ava_memory" / "template" / "MEMORY.md"
+    template = REPO / "meiva_builtins" / "plugins" / "meiva_memory" / "template" / "MEMORY.md"
     assert check_doc(template, _NO_COMMANDS) == []
 
 
@@ -88,14 +88,18 @@ def test_the_planned_marker_must_be_immediately_adjacent(tmp_path: Path) -> None
 @pytest.fixture
 def nodes(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(
-        check_doc_references, "okf_nodes", lambda: frozenset({"pkg/docs/real.ava.okf.md"})
+        check_doc_references, "okf_nodes", lambda: frozenset({"pkg/docs/real.meiva.okf.md"})
     )
 
 
 @pytest.mark.usefixtures("nodes")
 @pytest.mark.parametrize(
     "link",
-    ["[[gone.ava.okf.md]]", "[[gone.ava.okf.md|the label]]", "[[../../gone.ava.okf.md|group]]"],
+    [
+        "[[gone.meiva.okf.md]]",
+        "[[gone.meiva.okf.md|the label]]",
+        "[[../../gone.meiva.okf.md|group]]",
+    ],
 )
 def test_a_dangling_wikilink_is_reported_with_or_without_a_label(link: str, tmp_path: Path) -> None:
     target = link[2:-2].split("|", maxsplit=1)[0]
@@ -103,7 +107,7 @@ def test_a_dangling_wikilink_is_reported_with_or_without_a_label(link: str, tmp_
 
 
 @pytest.mark.usefixtures("nodes")
-@pytest.mark.parametrize("link", ["[[real.ava.okf.md]]", "[[real.ava.okf.md|the label]]"])
+@pytest.mark.parametrize("link", ["[[real.meiva.okf.md]]", "[[real.meiva.okf.md|the label]]"])
 def test_a_resolving_wikilink_is_clean(link: str, tmp_path: Path) -> None:
     assert _targets(tmp_path, f"See {link} for detail.\n") == []
 
@@ -112,9 +116,9 @@ def test_a_resolving_wikilink_is_clean(link: str, tmp_path: Path) -> None:
 @pytest.mark.parametrize(
     "body",
     [
-        "Write `[[gone.ava.okf.md|label]]` for an edge.\n",
-        "```\n[[gone.ava.okf.md|label]]\n```\n",
-        "Format:\n\n    [[gone.ava.okf.md|label]]\n",
+        "Write `[[gone.meiva.okf.md|label]]` for an edge.\n",
+        "```\n[[gone.meiva.okf.md|label]]\n```\n",
+        "Format:\n\n    [[gone.meiva.okf.md|label]]\n",
     ],
 )
 def test_a_wikilink_sample_is_not_a_link(body: str, tmp_path: Path) -> None:
@@ -124,27 +128,27 @@ def test_a_wikilink_sample_is_not_a_link(body: str, tmp_path: Path) -> None:
 @pytest.mark.usefixtures("nodes")
 def test_the_planned_marker_exempts_a_wikilink_in_a_plan(tmp_path: Path) -> None:
     doc = tmp_path / "doc.md"
-    doc.write_text("Next: [[later.ava.okf.md|the node]] (planned), then [[gone.ava.okf.md]].\n")
+    doc.write_text("Next: [[later.meiva.okf.md|the node]] (planned), then [[gone.meiva.okf.md]].\n")
     problems = check_doc(doc, _NO_COMMANDS, skip_flags=True, allow_planned=True)
-    assert [m for _lineno, m in problems] == ["`[[gone.ava.okf.md]]` — no such OKF node"]
+    assert [m for _lineno, m in problems] == ["`[[gone.meiva.okf.md]]` — no such OKF node"]
 
 
 def test_skip_flags_suppresses_an_invalid_flag(tmp_path: Path) -> None:
-    commands: dict[tuple[str, ...], set[str]] = {("ava",): {"--verbose"}}
+    commands: dict[tuple[str, ...], set[str]] = {("meiva",): {"--verbose"}}
     doc = tmp_path / "doc.md"
-    doc.write_text("Run `ava --not-a-real-flag`.\n")
-    assert check_doc(doc, commands) == [(1, "`ava --not-a-real-flag` — no such flag")]
+    doc.write_text("Run `meiva --not-a-real-flag`.\n")
+    assert check_doc(doc, commands) == [(1, "`meiva --not-a-real-flag` — no such flag")]
     assert check_doc(doc, commands, skip_flags=True) == []
 
 
 def test_live_cli_options_reject_wrong_command(tmp_path: Path) -> None:
     doc = tmp_path / "doc.md"
     doc.write_text(
-        "Use `ava stop --keep-infra` or `ava agents timeline 7 --limit 8`.\n"
-        "Wrong: `ava start --keep-infra`.\n"
+        "Use `meiva stop --keep-infra` or `meiva agents timeline 7 --limit 8`.\n"
+        "Wrong: `meiva start --keep-infra`.\n"
     )
-    assert check_doc(doc, check_doc_references.ava_flags()) == [
-        (2, "`ava start --keep-infra` — no such flag")
+    assert check_doc(doc, check_doc_references.meiva_flags()) == [
+        (2, "`meiva start --keep-infra` — no such flag")
     ]
 
 
@@ -169,7 +173,7 @@ def test_skill_backtick_ref_to_existing_file_is_clean(tmp_path: Path) -> None:
 
 
 def test_nested_skill_resolves_against_ancestor_library(tmp_path: Path) -> None:
-    root = tmp_path / "ava_builtins" / "skills" / "serious"
+    root = tmp_path / "meiva_builtins" / "skills" / "serious"
     (root / "references").mkdir(parents=True)
     (root / "references" / "book.md").write_text("hi")
     nested = root / "ai-era" / "child"
@@ -181,7 +185,7 @@ def test_nested_skill_resolves_against_ancestor_library(tmp_path: Path) -> None:
 
 
 def test_nested_skill_own_library_shadows_ancestor(tmp_path: Path) -> None:
-    root = tmp_path / "ava_builtins" / "skills" / "serious"
+    root = tmp_path / "meiva_builtins" / "skills" / "serious"
     (root / "references").mkdir(parents=True)
     (root / "references" / "book.md").write_text("old")
     nested = root / "child"
@@ -213,7 +217,7 @@ def test_skill_bare_skills_prefix_ref_is_reported(tmp_path: Path) -> None:
 def test_skill_load_dir_prefix_ref_is_clean(tmp_path: Path) -> None:
     doc = tmp_path / "SKILL.md"
     doc.write_text(
-        "$AVA_HOME/source/.venv/bin/python $AVA_HOME/skills/gmail/reference/feed.py search\n",
+        "$MEIVA_HOME/source/.venv/bin/python $MEIVA_HOME/skills/gmail/reference/feed.py search\n",
         encoding="utf-8",
     )
     assert check_doc(doc, {}) == []
@@ -222,6 +226,6 @@ def test_skill_load_dir_prefix_ref_is_clean(tmp_path: Path) -> None:
 def test_skill_prose_about_load_dir_is_clean(tmp_path: Path) -> None:
     doc = tmp_path / "SKILL.md"
     doc.write_text(
-        "Scripts run from `$AVA_HOME/skills/<name>/` (the load dir).\n", encoding="utf-8"
+        "Scripts run from `$MEIVA_HOME/skills/<name>/` (the load dir).\n", encoding="utf-8"
     )
     assert check_doc(doc, {}) == []

@@ -27,7 +27,7 @@ from schedules.catchup import fire_slot_once
 from base.daemon.schedules.inputs import ScheduleInputs
 from schedules.entry import fresh_schedule_entry
 from schedules import entry as entry_owner
-from ava.sdk_surface import process_context
+from meiva.sdk_surface import process_context
 
 _ROOT = Path(__file__).resolve().parents[2]
 _DAILY_SCRIPTS = ("c9-daily-report-schedule.py", "dev-ci-metrics-schedule.py")
@@ -81,7 +81,7 @@ def _claim_worker(
     outcomes: Any,
     database_gate: ProcessDbGate,
 ) -> None:
-    os.environ["AVA_SCHEDULE_ID"] = str(schedule_id)
+    os.environ["MEIVA_SCHEDULE_ID"] = str(schedule_id)
     ready.put(True)
     if not start.wait(timeout=10):
         outcomes.put("timeout")
@@ -135,7 +135,7 @@ def test_winner_receives_utc_slot_and_payload_after_claim_commits(
     database: Database,
 ) -> None:
     schedule_id = _insert_schedule(db_conn, created_at=datetime(2026, 9, 6, 9, 30, tzinfo=UTC))
-    monkeypatch.setenv("AVA_SCHEDULE_ID", str(schedule_id))
+    monkeypatch.setenv("MEIVA_SCHEDULE_ID", str(schedule_id))
     local_slot = datetime(2026, 9, 6, 18, 0, tzinfo=timezone(timedelta(hours=8)))
     slot = datetime(2026, 9, 6, 10, 0, tzinfo=UTC)
     payload = object()
@@ -160,7 +160,7 @@ def test_nested_dispatch_keeps_each_callbacks_explicit_slot(
     database: Database,
 ) -> None:
     schedule_id = _insert_schedule(db_conn, created_at=datetime(2026, 9, 6, 9, 30, tzinfo=UTC))
-    monkeypatch.setenv("AVA_SCHEDULE_ID", str(schedule_id))
+    monkeypatch.setenv("MEIVA_SCHEDULE_ID", str(schedule_id))
     outer_slot = datetime(2026, 9, 6, 10, 0, tzinfo=UTC)
     inner_slot = datetime(2026, 9, 6, 11, 0, tzinfo=UTC)
     observed: list[tuple[datetime, str]] = []
@@ -186,7 +186,7 @@ def test_claim_survives_fire_failure(
     database: Database,
 ) -> None:
     schedule_id = _insert_schedule(db_conn, created_at=datetime(2026, 9, 6, 9, 30, tzinfo=UTC))
-    monkeypatch.setenv("AVA_SCHEDULE_ID", str(schedule_id))
+    monkeypatch.setenv("MEIVA_SCHEDULE_ID", str(schedule_id))
     slot = datetime(2026, 9, 6, 10, 0, tzinfo=UTC)
 
     with pytest.raises(RuntimeError, match="after claim"):
@@ -263,11 +263,11 @@ def test_schedule_entry_retains_the_loaded_image_gate(
     assert isinstance(gate, ProcessDbGate)
     assert consumer.call_args.args[0] is database
     count.assert_not_called()
-    assert gate.application_name() == "ava:schedule:v7"
+    assert gate.application_name() == "meiva:schedule:v7"
     count.assert_called_once_with(tmp_path, image.sha)
     gate.observe_minimum(7)
     assert not gate.min_read_due()
-    assert gate.application_name() == "ava:schedule:v7"
+    assert gate.application_name() == "meiva:schedule:v7"
     count.assert_called_once()
 
 

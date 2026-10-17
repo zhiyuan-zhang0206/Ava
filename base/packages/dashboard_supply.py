@@ -4,7 +4,7 @@ Task #3697 slice S1 (parent #3689). The dashboard renderer
 (``base.telemetry.metrics.grafana_dashboard``) is a pure function of its spec lists; this
 module collects the plugin specs from the two content sources (decision A2):
 
-- **repo** — the checkout's ``ava_builtins/plugins/*/metrics.py``, imported
+- **repo** — the checkout's ``meiva_builtins/plugins/*/metrics.py``, imported
   and their ``contribute()`` declarations admitted into a data registry (the
   inspector's loader pattern, task #180);
 - **installed** — the enabled ``kind='plugin'`` rows of the extension
@@ -50,7 +50,7 @@ class PluginSpecs:
     failed: list[str]
 
 
-REPO_PLUGINS_DIR = Path(__file__).resolve().parents[2] / "ava_builtins" / "plugins"
+REPO_PLUGINS_DIR = Path(__file__).resolve().parents[2] / "meiva_builtins" / "plugins"
 
 
 def _specs_of(faces: list[data_registry.DeclaredFace | None], names: list[str]) -> PluginSpecs:
@@ -80,7 +80,7 @@ def _repo_faces(
             data_registry.load_declaration(
                 name,
                 lambda name=name, path=metrics_py: _import_plugin_metrics(
-                    f"ava_repo_plugins.{name}.metrics", path
+                    f"meiva_repo_plugins.{name}.metrics", path
                 ),
                 (metrics_py.parent, data_registry.METRICS_KEY),
             )
@@ -165,7 +165,7 @@ def _installed_faces(
                     data_registry.load_declaration(
                         extension.name,
                         lambda name=extension.name, path=metrics_py: _import_plugin_metrics(
-                            f"ava_installed_plugins.{name}.metrics", path
+                            f"meiva_installed_plugins.{name}.metrics", path
                         ),
                         (tree, data_registry.METRICS_KEY),
                     )
@@ -200,7 +200,7 @@ def load_installed_plugin_specs(
 def _unpacked_plugin(name: str, archive: bytes) -> Generator[Path]:
     """Unpack a plugin blob into a scratch tree; yields the tree root. Owns
     (and removes) the scratch tree it creates."""
-    with tempfile.TemporaryDirectory(prefix=f"ava-plugin-{name}-") as scratch:
+    with tempfile.TemporaryDirectory(prefix=f"meiva-plugin-{name}-") as scratch:
         tree = Path(scratch)
         registry.unpack_tree(archive, tree)
         yield tree
@@ -227,9 +227,9 @@ def collect_plugin_specs(
 
 
 def render_dashboard_json(db: Database, *, repo_only: bool = False) -> tuple[str, tuple[str, ...]]:
-    """Render the complete ava-ops dashboard JSON from the live spec suppliers.
+    """Render the complete meiva-ops dashboard JSON from the live spec suppliers.
 
-    The one render path shared by the operator command (``ava lgtm render``)
+    The one render path shared by the operator command (``meiva lgtm render``)
     and the converge provisioning step (task #3697 S3). ``repo_only`` skips
     the installed-plugin registry read; otherwise the enabled installed
     plugins load from the cluster database. A plugin that fails to load is

@@ -7,28 +7,28 @@ exports = ["bootstrap"]
 "test_unit_capability_cli.py" = ["bootstrap"]
 
 [debt.env-patch]
-"test_install_unit.py#monkeypatch.setenv os.environ.AVA_HOME" = 2
+"test_install_unit.py#monkeypatch.setenv os.environ.MEIVA_HOME" = 2
 "test_install_unit.py#patch.dict os.environ" = 1
-"test_lite_verbs.py#monkeypatch.delenv os.environ.AVA_API_TOKEN" = 2
-"test_lite_verbs.py#monkeypatch.delenv os.environ.AVA_CONFIG_FETCH" = 3
-"test_lite_verbs.py#monkeypatch.delenv os.environ.AVA_LAUNCHER_PROFILE" = 2
-"test_lite_verbs.py#monkeypatch.delenv os.environ.AVA_PROCESS_PROFILE" = 1
-"test_lite_verbs.py#monkeypatch.setenv os.environ.AVA_API_TOKEN" = 2
-"test_lite_verbs.py#monkeypatch.setenv os.environ.AVA_CONFIG_FETCH" = 2
-"test_lite_verbs.py#monkeypatch.setenv os.environ.AVA_HOME" = 2
-"test_lite_verbs.py#monkeypatch.setenv os.environ.AVA_LAUNCHER_PROFILE" = 1
-"test_lite_verbs.py#monkeypatch.setenv os.environ.AVA_PROCESS_PROFILE" = 1
-"test_lite_verbs.py#monkeypatch.setitem os.environ.AVA_HOME" = 2
+"test_lite_verbs.py#monkeypatch.delenv os.environ.MEIVA_API_TOKEN" = 2
+"test_lite_verbs.py#monkeypatch.delenv os.environ.MEIVA_CONFIG_FETCH" = 3
+"test_lite_verbs.py#monkeypatch.delenv os.environ.MEIVA_LAUNCHER_PROFILE" = 2
+"test_lite_verbs.py#monkeypatch.delenv os.environ.MEIVA_PROCESS_PROFILE" = 1
+"test_lite_verbs.py#monkeypatch.setenv os.environ.MEIVA_API_TOKEN" = 2
+"test_lite_verbs.py#monkeypatch.setenv os.environ.MEIVA_CONFIG_FETCH" = 2
+"test_lite_verbs.py#monkeypatch.setenv os.environ.MEIVA_HOME" = 2
+"test_lite_verbs.py#monkeypatch.setenv os.environ.MEIVA_LAUNCHER_PROFILE" = 1
+"test_lite_verbs.py#monkeypatch.setenv os.environ.MEIVA_PROCESS_PROFILE" = 1
+"test_lite_verbs.py#monkeypatch.setitem os.environ.MEIVA_HOME" = 2
 "test_main_dispatch.py#monkeypatch.delenv os.environ" = 1
 "test_main_dispatch.py#monkeypatch.setenv os.environ" = 1
-"test_main_dispatch.py#monkeypatch.setenv os.environ.AVA_HOME" = 3
-"test_main_dispatch.py#monkeypatch.setenv os.environ.AVA_PROCESS_PROFILE" = 1
-"test_plugin_scaffold.py#monkeypatch.setenv os.environ.AVA_HOME" = 1
-"test_pty_commands.py#monkeypatch.delenv os.environ.AVA_CONFIG_FETCH" = 1
-"test_pty_commands.py#monkeypatch.setenv os.environ.AVA_HOME" = 1
-"test_start_gate.py#monkeypatch.setenv os.environ.AVA_HOME" = 4
+"test_main_dispatch.py#monkeypatch.setenv os.environ.MEIVA_HOME" = 3
+"test_main_dispatch.py#monkeypatch.setenv os.environ.MEIVA_PROCESS_PROFILE" = 1
+"test_plugin_scaffold.py#monkeypatch.setenv os.environ.MEIVA_HOME" = 1
+"test_pty_commands.py#monkeypatch.delenv os.environ.MEIVA_CONFIG_FETCH" = 1
+"test_pty_commands.py#monkeypatch.setenv os.environ.MEIVA_HOME" = 1
+"test_start_gate.py#monkeypatch.setenv os.environ.MEIVA_HOME" = 4
 "test_start_gate.py#patch.dict os.environ" = 1
-"test_unit_capability_cli.py#monkeypatch.setitem os.environ.AVA_MACHINE_SERVE_GATEWAY" = 1
+"test_unit_capability_cli.py#monkeypatch.setitem os.environ.MEIVA_MACHINE_SERVE_GATEWAY" = 1
 "test_unit_capability_cli.py#patch.dict os.environ" = 1
 
 [debt.first-party-patch]

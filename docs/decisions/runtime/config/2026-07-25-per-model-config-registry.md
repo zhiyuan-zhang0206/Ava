@@ -53,7 +53,7 @@ know whether the user actually set the field. Two candidate mechanisms:
   skips `None`), so "unset" survives every distribution path as data, and any
   real source — `.env`, exported env, bootstrap-forwarded value, per-agent
   overlay — writes a non-None value. An explicitly *empty*
-  `AVA_REASONING_EFFORT=` still parses to `""` ≠ None, preserving "explicitly
+  `MEIVA_REASONING_EFFORT=` still parses to `""` ≠ None, preserving "explicitly
   choose the provider default" as distinct from unset.
 
 Cost of the sentinel: the config panel's `default_value` for these fields is
@@ -79,7 +79,7 @@ per-model facts, and stay in `factory.py` / `_effort.py`.
 
 ## Rejected alternatives
 
-- **Per-model env namespace** (`AVA_<MODEL>_AUTO_COMPACT_FRACTION`): unbounded
+- **Per-model env namespace** (`MEIVA_<MODEL>_AUTO_COMPACT_FRACTION`): unbounded
   env surface, un-typed, un-distributable, and still needs a shipped-defaults
   table underneath.
 - **Keeping per-model knowledge only where it already existed** (windows,

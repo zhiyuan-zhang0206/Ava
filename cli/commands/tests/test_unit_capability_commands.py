@@ -32,7 +32,7 @@ def _serve_on_loopback(monkeypatch: pytest.MonkeyPatch, born: Born) -> ConfigAut
 
     monkeypatch.setattr(dotenv_file, "unit_home", lambda: born.home)
     monkeypatch.setattr(config.settings.general, "machine_host", "localhost")
-    monkeypatch.setitem(os.environ, "AVA_MACHINE_SERVE_GATEWAY", "true")
+    monkeypatch.setitem(os.environ, "MEIVA_MACHINE_SERVE_GATEWAY", "true")
     complete = config.settings if config.settings.profile is None else config.Settings(profile=None)
     return ConfigAuthority(config.settings, complete, born.home / ".env")
 
@@ -50,7 +50,7 @@ def test_a_bearer_only_runner_receives_no_database_login(
     for cls in ("gateway", "runner"):
         name, password = born.login(cls)
         assert name not in payload and password not in payload
-    endpoint = served["AVA_DB_URL"]
+    endpoint = served["MEIVA_DB_URL"]
     assert urlsplit(endpoint).password is None
     _refused(conninfo=endpoint)
 
@@ -75,7 +75,7 @@ def test_a_bundle_whose_login_cannot_be_proven_never_installs(
     bringup.ensure_pooler(
         data_plane_config,
         born.record,
-        "ava",
+        "meiva",
         born.home,
         delivery.active_generation(born.home),
         machine=command_runtime.machine,
@@ -85,7 +85,7 @@ def test_a_bundle_whose_login_cannot_be_proven_never_installs(
     )
     assert installed.generation.number == 0
     with psycopg.connect(installed.dsn, prepare_threshold=None, connect_timeout=5) as conn:
-        assert conn.execute("SELECT current_user").fetchone() == ("ava_g0_runner",)
+        assert conn.execute("SELECT current_user").fetchone() == ("meiva_g0_runner",)
     again = unit.install_bundle(
         runner,
         _open(issue(born.home, runner, endpoint=endpoint)),

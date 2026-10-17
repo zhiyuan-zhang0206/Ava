@@ -1,17 +1,17 @@
-# Infrastructure metrics use Ava roster identity
+# Infrastructure metrics use Meiva roster identity
 
 ## Context
 
 The infrastructure metrics pipeline identified series only by the operating
 system hostname. That physical identity is not the deployment identity: the
-Windows host reports `zzy-lenovo`, while the Ava roster names its Windows and
+Windows host reports `zzy-lenovo`, while the Meiva roster names its Windows and
 WSL units `win` and `wsl`. Grouping on the OS hostname therefore could not
 represent those units as separate operational series.
 
 ## Decision
 
 Per the 2026-08-24 user ruling, every collector stamps infra datapoints with
-both `host` (the OS hostname / physical identity) and `machine_name` (the Ava
+both `host` (the OS hostname / physical identity) and `machine_name` (the Meiva
 roster identity persisted for that unit). Converge bakes `machine_name` into
 the collector configuration, and Grafana dashboards and alert rules group by
 that label.

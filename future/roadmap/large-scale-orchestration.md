@@ -1,20 +1,20 @@
 # Large-scale agent orchestration
 
-The capability Ava is actually missing in multi-agent: not a richer spawn
+The capability Meiva is actually missing in multi-agent: not a richer spawn
 primitive, and not transcript search — it is **being the leader of a hundred or
 more agents**. Orchestrating a handful of peers works today; commanding a
 large fleet does not — the fleet is now visible, but the skill for running it is
 only a first cut and the board offers no way to act on agents in bulk.
 
 This is one item with three parts. The backend that makes it possible (peer
-spawn/fork, lineage, the 24-event `ava:events` stream) already exists — what is
+spawn/fork, lineage, the 24-event `meiva:events` stream) already exists — what is
 missing is the *scale* of the leader's skill and the leader's batch controls.
 
 > **Status:** the leader's eyes are built; the leader's hands are not. The
 > `/fleet` board shipped — `ui/web/src/components/fleet/` (graph, task graph,
 > task kanban, inbox queue, force controls) over `gateway/routers/fleet_graph.py`
 > — so lineage, per-agent activity, and label are all legible at a glance. The
-> leader skill `ava_fleet` also has a first cut (two dials Effort × Autonomy,
+> leader skill `meiva_fleet` also has a first cut (two dials Effort × Autonomy,
 > explore→fork→wake-join, adversarial+heterogeneous evaluation, finding-driven
 > converge; teamwork folded in). What remains open is Part 1's distillation
 > against a *real* 100+ run and the three unbuilt board controls in Part 2.

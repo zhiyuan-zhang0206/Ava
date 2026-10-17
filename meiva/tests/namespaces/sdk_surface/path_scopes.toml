@@ -1,0 +1,9 @@
+# Fixture modules (tests/path_scoped/) that govern this directory's tests: "." is the
+# directory itself, otherwise the test files named here (tests/fixtures/path_scopes.py).
+"meiva.tests.fixtures.meiva_tests" = [
+    ".",
+]
+"meiva.tests.fixtures.sdk" = [
+    "test_agent_attribution.py",
+    "test_impersonation_capture_rebinding.py",
+]

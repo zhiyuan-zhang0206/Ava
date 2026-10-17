@@ -14,7 +14,7 @@ from cli.database.tests.command_inputs import command_runtime as command_runtime
 from tests.path_scoped.cli_tests import operator_database as operator_database
 from tests.path_scoped.cli_tests import operator_pipeline as operator_pipeline
 
-SKILL_NAME = "ava-guide"
+SKILL_NAME = "meiva-guide"
 
 
 @pytest.fixture
@@ -26,7 +26,7 @@ def home(tmp_path: Path) -> Path:
 
 def _write_source(repo: Path) -> None:
     for name in (SKILL_NAME,):
-        source = repo / "ava_builtins" / "skills" / "platform" / name
+        source = repo / "meiva_builtins" / "skills" / "platform" / name
         source.mkdir(parents=True)
         (source / "SKILL.md").write_text("operator guidance\n")
 
@@ -65,7 +65,7 @@ def test_bridge_step_is_prod_host_global_and_skipped_for_dev_worktrees(
     converge_host.converge_host(
         dev_repo,
         None,
-        ava_home=home / ".ava",
+        meiva_home=home / ".meiva",
         steps=(step,),
         database_factory=operator_database,
         producer=operator_pipeline,
@@ -75,11 +75,11 @@ def test_bridge_step_is_prod_host_global_and_skipped_for_dev_worktrees(
 
     prod_repo = tmp_path / "prod" / "source"
     _write_source(prod_repo)
-    (home / ".ava" / "configs").mkdir(parents=True)
+    (home / ".meiva" / "configs").mkdir(parents=True)
     converge_host.converge_host(
         prod_repo,
         None,
-        ava_home=home / ".ava",
+        meiva_home=home / ".meiva",
         steps=(step,),
         database_factory=operator_database,
         producer=operator_pipeline,

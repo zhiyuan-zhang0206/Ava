@@ -181,7 +181,7 @@ def test_a_clean_third_party_install_is_still_unreviewed(
 def test_register_scans_too_so_a_hand_copy_is_not_the_way_around_the_gate(
     unit_home: Path, capsys: pytest.CaptureFixture
 ) -> None:
-    """`cp -r && ava skill register` reaches the same load dir as an install; it
+    """`cp -r && meiva skill register` reaches the same load dir as an install; it
     has to meet the same gate or the gate is decorative."""
     _write(unit_home / "skills" / "helpful-backup", "helpful-backup", _MALICIOUS)
 
@@ -259,7 +259,7 @@ def test_scan_reports_an_installed_package_and_exits_on_criticals(
     *,
     command_runtime: CommandRuntime,
 ) -> None:
-    """`ava skill scan` is the read-before-you-trust companion, and its exit
+    """`meiva skill scan` is the read-before-you-trust companion, and its exit
     code is what a caller gates on: 2 for critical, 0 for notices only."""
     clean = _write(tmp_path / "code-review", "code-review", _BENIGN)
     assert (
@@ -321,7 +321,7 @@ def test_converge_stamps_repo_skills_builtin_and_leaves_a_review_alone(
     from cli.commands.extensions.skills_sync import converge_skills
 
     repo = tmp_path / "repo"
-    _write(repo / "ava_builtins" / "skills" / "ava-goal", "ava-goal", _BENIGN)
+    _write(repo / "meiva_builtins" / "skills" / "meiva-goal", "meiva-goal", _BENIGN)
     installed = _write(tmp_path / "code-review", "code-review", _BENIGN)
     assert (
         cmd_skill_install(
@@ -337,7 +337,7 @@ def test_converge_stamps_repo_skills_builtin_and_leaves_a_review_alone(
 
     converge_skills(repo, unit_home)
 
-    assert reg.get("ava-goal").trust == "builtin"  # type: ignore[union-attr]
+    assert reg.get("meiva-goal").trust == "builtin"  # type: ignore[union-attr]
     assert reg.get("code-review").trust == "reviewed"  # type: ignore[union-attr]
 
 
@@ -347,8 +347,8 @@ def test_trust_refuses_to_hand_edit_a_builtin_tier(unit_home: Path, tmp_path: Pa
     from cli.commands.extensions.skills_sync import converge_skills
 
     repo = tmp_path / "repo"
-    _write(repo / "ava_builtins" / "skills" / "ava-goal", "ava-goal", _BENIGN)
+    _write(repo / "meiva_builtins" / "skills" / "meiva-goal", "meiva-goal", _BENIGN)
     converge_skills(repo, unit_home)
 
-    assert cmd_skill_trust("ava-goal") == 1
-    assert reg.get("ava-goal").trust == "builtin"  # type: ignore[union-attr]
+    assert cmd_skill_trust("meiva-goal") == 1
+    assert reg.get("meiva-goal").trust == "builtin"  # type: ignore[union-attr]

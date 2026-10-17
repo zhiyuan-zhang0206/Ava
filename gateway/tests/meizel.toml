@@ -14,8 +14,8 @@ exports = ["agents", "extensions", "test_agents_endpoints.py", "test_idempotency
 
 [debt.env-patch]
 "test_idempotency.py#patch.dict os.environ" = 1
-"test_understanding_build_endpoints.py#monkeypatch.delenv os.environ.AVA_PROCESS_PROFILE" = 1
-"test_understanding_build_endpoints.py#monkeypatch.setenv os.environ.AVA_PROCESS_PROFILE" = 1
+"test_understanding_build_endpoints.py#monkeypatch.delenv os.environ.MEIVA_PROCESS_PROFILE" = 1
+"test_understanding_build_endpoints.py#monkeypatch.setenv os.environ.MEIVA_PROCESS_PROFILE" = 1
 "test_understanding_build_endpoints.py#patch.dict os.environ" = 2
 
 [debt.first-party-patch]

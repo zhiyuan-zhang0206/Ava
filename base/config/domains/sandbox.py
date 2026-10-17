@@ -77,8 +77,8 @@ class SandboxSettings(EnvSettings):
 
     exec_timeout_seconds: float = Field(
         default=300.0,
-        alias="AVA_EXEC_TIMEOUT_SECONDS",
-        description="Hard timeout (seconds) for a single execute_code. On timeout, the envelope hints the agent toward ava.shell.run_background / ava.watcher.launch for long-running work. Must be less than exec_node_timeout_seconds (validated at startup).",
+        alias="MEIVA_EXEC_TIMEOUT_SECONDS",
+        description="Hard timeout (seconds) for a single execute_code. On timeout, the envelope hints the agent toward meiva.shell.run_background / meiva.watcher.launch for long-running work. Must be less than exec_node_timeout_seconds (validated at startup).",
         json_schema_extra={
             "restart_required": "agent",
             "writable": True,
@@ -89,7 +89,7 @@ class SandboxSettings(EnvSettings):
 
     exec_node_timeout_seconds: float = Field(
         default=1200.0,
-        alias="AVA_EXEC_NODE_TIMEOUT_SECONDS",
+        alias="MEIVA_EXEC_NODE_TIMEOUT_SECONDS",
         description=(
             "Graph-level timeout (seconds) wrapping the exec node's code-execution "
             "await. Defense-in-depth over exec_timeout_seconds: catches a hang inside "
@@ -105,7 +105,7 @@ class SandboxSettings(EnvSettings):
 
     exec_output_max_chars: int = Field(
         default=30_000,
-        alias="AVA_EXEC_OUTPUT_MAX_CHARS",
+        alias="MEIVA_EXEC_OUTPUT_MAX_CHARS",
         description="Hard inline character cap on a single exec's output fed back to the LLM. On overflow, keep the first + last half and archive the retained output in the workspace's bounded 20-file legacy ring. The independent soft line crop can produce a smaller preview first.",
         json_schema_extra={
             "restart_required": "agent",
@@ -118,7 +118,7 @@ class SandboxSettings(EnvSettings):
     exec_output_crop_after_lines: int = Field(
         default=300,
         ge=0,
-        alias="AVA_EXEC_OUTPUT_CROP_AFTER_LINES",
+        alias="MEIVA_EXEC_OUTPUT_CROP_AFTER_LINES",
         description="Soft preview line trigger: crop outputs with more than this many splitlines() lines. Part of a three-way OR - outputs longer than exec_output_crop_after_chars characters or exec_output_crop_after_bytes UTF-8 bytes also preview. Zero disables soft cropping entirely. Crop only when the marker-inclusive preview is shorter and the full output can be archived; existing hard caps still apply.",
         json_schema_extra={
             "restart_required": "agent",
@@ -131,7 +131,7 @@ class SandboxSettings(EnvSettings):
     exec_output_crop_after_chars: int = Field(
         default=64 * 1024,
         ge=1,
-        alias="AVA_EXEC_OUTPUT_CROP_AFTER_CHARS",
+        alias="MEIVA_EXEC_OUTPUT_CROP_AFTER_CHARS",
         description="Soft preview character trigger: crop outputs longer than this many characters even when their line count is under the line trigger (long lines). Must be >= exec_output_max_chars so a preview never triggers below the hard inline limit. Zero is not allowed; set exec_output_crop_after_lines=0 to disable soft cropping entirely.",
         json_schema_extra={
             "restart_required": "agent",
@@ -144,7 +144,7 @@ class SandboxSettings(EnvSettings):
     exec_output_crop_after_bytes: int = Field(
         default=64 * 1024,
         ge=1,
-        alias="AVA_EXEC_OUTPUT_CROP_AFTER_BYTES",
+        alias="MEIVA_EXEC_OUTPUT_CROP_AFTER_BYTES",
         description="Soft preview UTF-8 byte trigger: crop outputs whose encoded size exceeds this even when both their character count and line count are under their triggers (multibyte text). Must be >= exec_output_max_chars. Zero is not allowed; set exec_output_crop_after_lines=0 to disable soft cropping entirely.",
         json_schema_extra={
             "restart_required": "agent",
@@ -157,7 +157,7 @@ class SandboxSettings(EnvSettings):
     exec_output_crop_head_lines: int = Field(
         default=25,
         ge=1,
-        alias="AVA_EXEC_OUTPUT_CROP_HEAD_LINES",
+        alias="MEIVA_EXEC_OUTPUT_CROP_HEAD_LINES",
         description="Number of original leading lines kept by a soft exec output preview. Independent of the line-count trigger and the existing hard character caps.",
         json_schema_extra={
             "restart_required": "agent",
@@ -170,7 +170,7 @@ class SandboxSettings(EnvSettings):
     exec_output_crop_tail_lines: int = Field(
         default=25,
         ge=1,
-        alias="AVA_EXEC_OUTPUT_CROP_TAIL_LINES",
+        alias="MEIVA_EXEC_OUTPUT_CROP_TAIL_LINES",
         description="Number of original trailing lines kept by a soft exec output preview. Cropping never duplicates overlapping head and tail lines.",
         json_schema_extra={
             "restart_required": "agent",
@@ -183,7 +183,7 @@ class SandboxSettings(EnvSettings):
     exec_output_crop_archive_max_bytes: int = Field(
         default=16 * 1024 * 1024,
         ge=1,
-        alias="AVA_EXEC_OUTPUT_CROP_ARCHIVE_MAX_BYTES",
+        alias="MEIVA_EXEC_OUTPUT_CROP_ARCHIVE_MAX_BYTES",
         description="Per-agent byte budget for full soft-cropped outputs. Only files unreferenced by the current context can be evicted. If referenced files fill the budget or archival fails, skip soft cropping and retain the original output subject to existing hard caps. Independent of the legacy hard-overflow ring.",
         json_schema_extra={
             "restart_required": "agent",
@@ -195,7 +195,7 @@ class SandboxSettings(EnvSettings):
 
     exec_output_accumulation_max_chars: int = Field(
         default=1_000_000,
-        alias="AVA_EXEC_OUTPUT_ACCUMULATION_MAX_CHARS",
+        alias="MEIVA_EXEC_OUTPUT_ACCUMULATION_MAX_CHARS",
         description="Character budget the exec output accumulator holds in memory WHILE code runs. Past it the first half + last half are kept and the middle is dropped as it streams, so a runaway print loop cannot pressure the agent process; execution continues and the agent sees the drop marker. Must be >= exec_output_max_chars (validated at startup).",
         json_schema_extra={
             "restart_required": "agent",
@@ -207,7 +207,7 @@ class SandboxSettings(EnvSettings):
 
     syntax_fix_ruff_format: bool = Field(
         default=True,
-        alias="AVA_SYNTAX_FIX_RUFF_FORMAT",
+        alias="MEIVA_SYNTAX_FIX_RUFF_FORMAT",
         description="Run `ruff format` on each code block before exec (after deterministic syntax fixes), keeping in-context code canonical. Toggle for ablation.",
         json_schema_extra={
             "restart_required": "agent",
@@ -221,7 +221,7 @@ class SandboxSettings(EnvSettings):
 
     mcp_connect_timeout_seconds: float = Field(
         default=60.0,
-        alias="AVA_MCP_CONNECT_TIMEOUT_SECONDS",
+        alias="MEIVA_MCP_CONNECT_TIMEOUT_SECONDS",
         description="MCP server connect timeout (seconds). npm package downloads / uvx venv setup may be slow; 60s leaves headroom.",
         json_schema_extra={
             "restart_required": "agent",

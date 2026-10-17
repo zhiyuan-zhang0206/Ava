@@ -38,8 +38,8 @@ def _assert_database_entry_forwards_over_owner_only_socket(ini: str) -> None:
     # The [databases] entry keys on the cluster db and forwards to the local pg over
     # its owner-only unix socket (host=<socket dir>) with SCRAM pass-through.
     assert "[databases]" in ini
-    assert "ava_main = host=/" in ini
-    assert "port=5433 dbname=ava_main" in ini
+    assert "meiva_main = host=/" in ini
+    assert "port=5433 dbname=meiva_main" in ini
 
 
 def _assert_backends_born_with_statement_ceiling(ini: str) -> None:
@@ -80,7 +80,7 @@ def _assert_quiet_connection_logs_and_userlist_only_console(ini: str) -> None:
     assert "log_connections = 0" in ini.splitlines()
     assert "log_disconnections = 0" in ini.splitlines()
     # admin/stats console is the userlist-only operator entry, never a database role.
-    console = {"admin_users = ava_pooler_admin", "stats_users = ava_pooler_admin"}
+    console = {"admin_users = meiva_pooler_admin", "stats_users = meiva_pooler_admin"}
     assert console <= set(ini.splitlines())
 
 
@@ -90,7 +90,7 @@ def test_render_ini_is_transaction_scram_and_socket_server(
     ini = pgbouncer.render_ini(
         pg_port=5433,
         listen_port=6433,
-        db_name="ava_main",
+        db_name="meiva_main",
         machine=machine_identity,
     )
     _assert_transaction_pooling_with_scram_clients(ini)
@@ -104,10 +104,10 @@ def test_render_ini_authenticates_and_binds_loopback_on_a_single_box(
     machine_identity: MachineIdentity,
 ) -> None:
     """The internal data plane always authenticates, and a box that declares no
-    reachable address (`AVA_MACHINE_HOST` unset) binds loopback alone."""
+    reachable address (`MEIVA_MACHINE_HOST` unset) binds loopback alone."""
     machine_identity.set(host="localhost")
     ini = pgbouncer.render_ini(
-        pg_port=5433, listen_port=6433, db_name="ava", machine=machine_identity
+        pg_port=5433, listen_port=6433, db_name="meiva", machine=machine_identity
     )
     assert "auth_type = scram-sha-256" in ini.splitlines()
     assert "trust" not in ini
@@ -119,7 +119,7 @@ def test_render_ini_adds_only_the_declared_reachable_address(
 ) -> None:
     machine_identity.set(host="10.0.0.5")
     ini = pgbouncer.render_ini(
-        pg_port=5433, listen_port=6433, db_name="ava", machine=machine_identity
+        pg_port=5433, listen_port=6433, db_name="meiva", machine=machine_identity
     )
     assert "listen_addr = 127.0.0.1, 10.0.0.5" in ini.splitlines()
 
@@ -128,7 +128,7 @@ def test_render_ini_binds_loopback_never_all_interfaces(machine_identity: Machin
     ini = pgbouncer.render_ini(
         pg_port=5433,
         listen_port=6433,
-        db_name="ava_main",
+        db_name="meiva_main",
         machine=machine_identity,
     )
     listen = next(ln for ln in ini.splitlines() if ln.startswith("listen_addr ="))
@@ -161,9 +161,9 @@ def test_backup_defaults_to_a_direct_dump_source(
     from services.backup import dump as backup
 
     database = MagicMock(spec=Database)
-    database.direct_url.return_value = "postgresql://provider:5432/ava"
+    database.direct_url.return_value = "postgresql://provider:5432/meiva"
     authority = MagicMock()
-    authority.verified_conninfo.return_value = "host=/owner/socket dbname=ava"
+    authority.verified_conninfo.return_value = "host=/owner/socket dbname=meiva"
     local_owner = MagicMock(return_value=authority)
     monkeypatch.setattr(backup, "local_owner_authority", local_owner)
     reader = MagicMock(return_value=remote)
@@ -172,11 +172,11 @@ def test_backup_defaults_to_a_direct_dump_source(
 
     reader.assert_called_once_with()
     if remote:
-        assert result == "postgresql://provider:5432/ava"
+        assert result == "postgresql://provider:5432/meiva"
         database.direct_url.assert_called_once_with()
         local_owner.assert_not_called()
     else:
-        assert result == "host=/owner/socket dbname=ava"
+        assert result == "host=/owner/socket dbname=meiva"
         local_owner.assert_called_once_with(settings.data_plane.db_url, remote_plane=False)
         authority.verified_conninfo.assert_called_once_with()
         database.direct_url.assert_not_called()
@@ -192,7 +192,7 @@ def test_base_db_connect_and_pool_dial_one_url_with_direct_escape(
     from base.db import connections
 
     config = DbConfig(
-        db_url="postgresql://user:password@127.0.0.1:6433/ava",
+        db_url="postgresql://user:password@127.0.0.1:6433/meiva",
         db_sslmode="disable",
         db_pool_min_size=1,
         db_pool_max_size=2,

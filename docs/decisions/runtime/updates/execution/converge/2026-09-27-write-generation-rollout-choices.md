@@ -16,7 +16,7 @@ plan:
 
 1. Existing homes convert through an explicit, idempotent one-time cutover
    script (`scripts/cutover_db_authority.py`), never implicitly on a cold
-   `ava start`. Development and preview homes are recreated instead.
+   `meiva start`. Development and preview homes are recreated instead.
 2. Redis always authenticates but its credentials do not rotate per rollout.
 3. The HTTP API is fenced with per-generation machine tokens. Runners stop
    holding the human cluster secret, which rotates once at the fleet cutover. A
@@ -40,7 +40,7 @@ plan:
 
 ## Consequences
 
-- `ava start` refuses a password-less home and names the cutover script.
+- `meiva start` refuses a password-less home and names the cutover script.
 - Rotation of the Redis credential remains an explicit operator action.
 - Fleet releases stay blocked on the automated credential exchange, which in
   turn depends on the fleet release transition.

@@ -10,7 +10,7 @@ from base import config
 
 # --- agent_communication_style: enum ---
 
-_STYLE_ENV = ("AVA_AGENT_COMMUNICATION_STYLE",)
+_STYLE_ENV = ("MEIVA_AGENT_COMMUNICATION_STYLE",)
 
 
 def _style_from_env(monkeypatch: pytest.MonkeyPatch, **env: str) -> str | None:
@@ -41,7 +41,7 @@ def test_communication_style_defaults_to_off(monkeypatch: pytest.MonkeyPatch) ->
 
 @pytest.mark.parametrize("style", ["oriented", "concise", "silent", "off"])
 def test_communication_style_accepts_each_member(monkeypatch: pytest.MonkeyPatch, style) -> None:
-    assert _style_from_env(monkeypatch, AVA_AGENT_COMMUNICATION_STYLE=style) == style  # pyright: ignore[reportUnknownArgumentType]
+    assert _style_from_env(monkeypatch, MEIVA_AGENT_COMMUNICATION_STYLE=style) == style  # pyright: ignore[reportUnknownArgumentType]
 
 
 @pytest.mark.parametrize("bad", ["loud", "", "verbose", "2"])
@@ -51,7 +51,7 @@ def test_unknown_communication_style_fails_fast(monkeypatch: pytest.MonkeyPatch,
     from pydantic import ValidationError
 
     with pytest.raises(ValidationError):
-        _style_from_env(monkeypatch, AVA_AGENT_COMMUNICATION_STYLE=bad)  # pyright: ignore[reportUnknownArgumentType]
+        _style_from_env(monkeypatch, MEIVA_AGENT_COMMUNICATION_STYLE=bad)  # pyright: ignore[reportUnknownArgumentType]
 
 
 def test_communication_style_is_a_per_agent_enum() -> None:
@@ -66,10 +66,12 @@ def test_communication_style_is_a_per_agent_enum() -> None:
     assert extra["writable"] is True
     assert extra["scope"] == "cluster-default"
     assert extra["restart_required"] == "agent"
-    assert config.field_alias_map()["agent_communication_style"] == "AVA_AGENT_COMMUNICATION_STYLE"
+    assert (
+        config.field_alias_map()["agent_communication_style"] == "MEIVA_AGENT_COMMUNICATION_STYLE"
+    )
 
 
-_HELPER_ENV = ("AVA_PERMISSIONS_HELPER_PORT",)
+_HELPER_ENV = ("MEIVA_PERMISSIONS_HELPER_PORT",)
 
 
 def _helper_port_from_env(monkeypatch: pytest.MonkeyPatch, **env: str) -> int:
@@ -93,7 +95,7 @@ def test_permissions_helper_port_defaults_to_9223(monkeypatch: pytest.MonkeyPatc
 
 
 def test_permissions_helper_port_reads_new_key(monkeypatch: pytest.MonkeyPatch) -> None:
-    assert _helper_port_from_env(monkeypatch, AVA_PERMISSIONS_HELPER_PORT="18010") == 18010
+    assert _helper_port_from_env(monkeypatch, MEIVA_PERMISSIONS_HELPER_PORT="18010") == 18010
 
 
 def test_permissions_helper_serialization_alias_is_the_new_key() -> None:
@@ -101,11 +103,11 @@ def test_permissions_helper_serialization_alias_is_the_new_key() -> None:
     lands on the canonical name, never resurrecting the legacy one."""
     from base.config import field_alias
 
-    assert field_alias("permissions_helper_port") == "AVA_PERMISSIONS_HELPER_PORT"
-    assert field_alias("permissions_helper_enabled") == "AVA_PERMISSIONS_HELPER_ENABLED"
+    assert field_alias("permissions_helper_port") == "MEIVA_PERMISSIONS_HELPER_PORT"
+    assert field_alias("permissions_helper_enabled") == "MEIVA_PERMISSIONS_HELPER_ENABLED"
 
 
-# --- delay-list env field (AVA_IM_SEND_RETRY_DELAYS; AVA_EMBED_RETRY_DELAYS
+# --- delay-list env field (MEIVA_IM_SEND_RETRY_DELAYS; MEIVA_EMBED_RETRY_DELAYS
 # removed in R2-D — the embedder's retry policy is a base.host.net.resilience Policy
 # constant now, per design evaluation-record #14) ---
 
@@ -118,7 +120,7 @@ def _im_send_delays_from_env(monkeypatch: pytest.MonkeyPatch, **env: str) -> lis
     # setenv/delenv via loop variables — the direct literal spelling is
     # linted (settings is a module-load singleton), the indirect one
     # reaches the fresh ServiceSettings() construction below.
-    for key in ("AVA_IM_SEND_RETRY_DELAYS",):
+    for key in ("MEIVA_IM_SEND_RETRY_DELAYS",):
         monkeypatch.delenv(key, raising=False)
     for key, value in env.items():
         monkeypatch.setenv(key, value)
@@ -130,14 +132,14 @@ def test_delay_lists_accept_comma_separated_env(monkeypatch: pytest.MonkeyPatch)
     .env operator would naturally write (task #698 G8; regression: NoDecode
     handed the raw string to list[float] and Settings construction crashed,
     killing every spawned agent in e2e)."""
-    im = _im_send_delays_from_env(monkeypatch, AVA_IM_SEND_RETRY_DELAYS="0.5,1")
+    im = _im_send_delays_from_env(monkeypatch, MEIVA_IM_SEND_RETRY_DELAYS="0.5,1")
     assert im == [0.5, 1.0]
 
 
 def test_delay_lists_accept_json_array_env(monkeypatch: pytest.MonkeyPatch) -> None:
     """The JSON-array spelling pydantic-settings would natively decode also
     works."""
-    im = _im_send_delays_from_env(monkeypatch, AVA_IM_SEND_RETRY_DELAYS="[2.0, 4.0, 8.0]")
+    im = _im_send_delays_from_env(monkeypatch, MEIVA_IM_SEND_RETRY_DELAYS="[2.0, 4.0, 8.0]")
     assert im == [2.0, 4.0, 8.0]
 
 
@@ -146,7 +148,7 @@ def test_delay_lists_default_without_env(monkeypatch: pytest.MonkeyPatch) -> Non
     assert im == [2.0, 4.0, 8.0, 16.0, 32.0]
 
 
-# --- AVA_IM_DISABLED_ADAPTERS (Task #855; P0 fix: NoDecode list field needs
+# --- MEIVA_IM_DISABLED_ADAPTERS (Task #855; P0 fix: NoDecode list field needs
 # the same before-validator treatment or any env value crashes settings load) ---
 
 
@@ -159,7 +161,7 @@ def _disabled_adapters_from_env(
     # (settings is a module-load singleton), the indirect one reaches the
     # fresh ServiceSettings() construction below, same as the delay-list
     # tests.
-    for key in ("AVA_IM_DISABLED_ADAPTERS",):
+    for key in ("MEIVA_IM_DISABLED_ADAPTERS",):
         monkeypatch.delenv(key, raising=False)
         if value is not None:
             monkeypatch.setenv(key, value)

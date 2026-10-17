@@ -12,7 +12,7 @@ from scripts.codegen import build_android_release as release
 
 
 def _apk(directory: Path) -> Path:
-    apk = directory / "ava-app-0.4.2.apk"
+    apk = directory / "meiva-app-0.4.2.apk"
     apk.write_bytes(b"release apk")
     return apk
 
@@ -59,14 +59,14 @@ def test_manifest_describes_the_staged_apk(tmp_path: Path) -> None:
         version_name="0.4.2",
         apk=apk,
         commit="a" * 40,
-        repo="owner/Ava",
+        repo="owner/Meiva",
         built_at="2026-10-17T03:04:05+00:00",
     )
 
     assert manifest == {
         "versionCode": 1_000_007,
         "versionName": "0.4.2",
-        "apkUrl": "https://github.com/owner/Ava/releases/download/android-latest/ava-app-0.4.2.apk",
+        "apkUrl": "https://github.com/owner/Meiva/releases/download/android-latest/meiva-app-0.4.2.apk",
         "sha256": hashlib.sha256(b"release apk").hexdigest(),
         "commit": "a" * 40,
         "builtAt": "2026-10-17T03:04:05Z",
@@ -74,7 +74,7 @@ def test_manifest_describes_the_staged_apk(tmp_path: Path) -> None:
 
 
 def test_manifest_quotes_the_asset_name_in_the_url(tmp_path: Path) -> None:
-    apk = tmp_path / "ava-app-1.0.0+build.7.apk"
+    apk = tmp_path / "meiva-app-1.0.0+build.7.apk"
     apk.write_bytes(b"apk")
 
     manifest = release.build_manifest(
@@ -82,11 +82,11 @@ def test_manifest_quotes_the_asset_name_in_the_url(tmp_path: Path) -> None:
         version_name="1.0.0+build.7",
         apk=apk,
         commit="b" * 40,
-        repo="owner/Ava",
+        repo="owner/Meiva",
         built_at="2026-10-17T03:04:05Z",
     )
 
-    assert manifest["apkUrl"].endswith("/ava-app-1.0.0%2Bbuild.7.apk")
+    assert manifest["apkUrl"].endswith("/meiva-app-1.0.0%2Bbuild.7.apk")
 
 
 def test_manifest_defaults_built_at_to_utc_now(tmp_path: Path) -> None:
@@ -95,7 +95,7 @@ def test_manifest_defaults_built_at_to_utc_now(tmp_path: Path) -> None:
         version_name="0.4.2",
         apk=_apk(tmp_path),
         commit="c" * 40,
-        repo="owner/Ava",
+        repo="owner/Meiva",
     )
 
     assert re.fullmatch(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z", manifest["builtAt"])
@@ -107,7 +107,7 @@ def test_manifest_defaults_built_at_to_utc_now(tmp_path: Path) -> None:
         ("commit", "abc"),
         ("commit", "A" * 40),
         ("repo", "owner"),
-        ("repo", "owner/Ava/extra"),
+        ("repo", "owner/Meiva/extra"),
         ("version_name", "0.4 2"),
         ("version_name", ""),
     ],
@@ -120,7 +120,7 @@ def test_manifest_rejects_identity_values_it_cannot_publish(
         "version_name": "0.4.2",
         "apk": _apk(tmp_path),
         "commit": "d" * 40,
-        "repo": "owner/Ava",
+        "repo": "owner/Meiva",
         "built_at": "2026-10-17T03:04:05Z",
     }
     arguments[field] = value
@@ -136,7 +136,7 @@ def test_manifest_requires_a_built_at_offset(tmp_path: Path) -> None:
             version_name="0.4.2",
             apk=_apk(tmp_path),
             commit="e" * 40,
-            repo="owner/Ava",
+            repo="owner/Meiva",
             built_at="2026-10-17T03:04:05",
         )
 
@@ -188,7 +188,7 @@ def test_cli_writes_the_manifest(tmp_path: Path, capsys: pytest.CaptureFixture[s
             "--commit",
             "f" * 40,
             "--repo",
-            "owner/Ava",
+            "owner/Meiva",
             "--built-at",
             "2026-10-17T03:04:05Z",
             "--out",

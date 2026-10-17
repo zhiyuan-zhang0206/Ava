@@ -12,7 +12,7 @@ from langchain_core.messages import AnyMessage
 from langgraph.graph.message import REMOVE_ALL_MESSAGES
 from psycopg_pool import AsyncConnectionPool
 
-import ava
+import meiva
 from agent.state import ContextReset
 from base.agents.tests.units import spawn_agent
 from base.cluster.machine import MachineIdentity
@@ -117,7 +117,7 @@ async def running_agent(
         db=database,
     )
     assert incarnation is not None
-    ava.context = replace(ava.context, original_incarnation=incarnation)
+    meiva.context = replace(meiva.context, original_incarnation=incarnation)
     yield lambda: agent_id
 
 

@@ -181,7 +181,7 @@ def test_a_failed_drill_does_not_postpone_the_next_one_but_a_success_does() -> N
 
 
 def _target() -> PgTarget:
-    return PgTarget("postgresql://tester@/postgres?host=/s&port=1", Path("/pg"), "ava_main")
+    return PgTarget("postgresql://tester@/postgres?host=/s&port=1", Path("/pg"), "meiva_main")
 
 
 def _fail_reading(exc: Exception, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -282,7 +282,7 @@ class Source:
     def __init__(self, sandbox: Sandbox, pg: PgInstance, *, conversations: bool = True) -> None:
         self.sandbox = sandbox
         self.pg = pg
-        self.url = f"postgresql://ava@/postgres?host={pg.root}&port={pg.port}"
+        self.url = f"postgresql://meiva@/postgres?host={pg.root}&port={pg.port}"
         self.target = PgTarget(self.url, pg.data, "postgres")
         conn = pg.connect()
         conn.execute("CREATE TABLE agents (id serial PRIMARY KEY)")
@@ -415,7 +415,7 @@ def test_a_missing_segment_after_the_backup_fails_the_drill_and_cleans_up(
     assert record.last_ok_at is None
     assert record.target_lsn is not None  # the target was chosen before the restore failed
     assert list(scratch_base.iterdir()) == []
-    assert not [path for path in sockets if path.exists() and path.name.startswith("ava-walg-")]
+    assert not [path for path in sockets if path.exists() and path.name.startswith("meiva-walg-")]
 
 
 def test_without_anything_archived_after_the_backup_the_drill_recovers_to_the_end(

@@ -5,11 +5,11 @@ from collections.abc import Mapping
 
 from scripts.structure.imports import bindings
 
-_CONTEXT = "base.agents.context.AvaContext"
+_CONTEXT = "base.agents.context.MeivaContext"
 _RUNTIME = "langgraph.runtime.Runtime"
 _AGENT = "base.host.env.agent_slices.AgentSlices"
 _AUTHORITY = "base.config.service_read.ConfigAuthority"
-_AUTHORITY_GETTER = "ava.sdk_surface.settings.config_authority"
+_AUTHORITY_GETTER = "meiva.sdk_surface.settings.config_authority"
 _BOOT = "base.config.ConfigBoot"
 _BOOT_VIEW = "base.config.ConfigBoot.view"
 

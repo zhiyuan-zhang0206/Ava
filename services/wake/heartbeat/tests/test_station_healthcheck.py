@@ -4,7 +4,7 @@ WP4 (task #1946): the gateway probes a REMOTE observatory station through
 the reachability contract (the address the station advertises in
 machine_units) with the cluster bearer, and FAILS OPEN — a failed probe
 never blocks or restarts local business; a failed probe only logs. With no
-AVA_OBSERVABILITY_URL configured the check is a no-op.
+MEIVA_OBSERVABILITY_URL configured the check is a no-op.
 """
 
 from __future__ import annotations
@@ -30,7 +30,7 @@ from base.host.db_authority.api import (
 )
 from base.native_process import code_version
 from base.native_process.loaded_commit import LoadedCommit
-from base.paths import ava_home
+from base.paths import meiva_home
 from services.wake.heartbeat import station_probe as hc
 
 
@@ -54,7 +54,7 @@ def _no_remote_observatory(monkeypatch: pytest.MonkeyPatch) -> None:
     """Default: no remote observatory (the no-op posture); tests opt in."""
     monkeypatch.setattr(settings.observability, "observability_url", "")
     monkeypatch.setattr(hc.settings.observability, "telemetry_otlp_port", 4318)
-    publish_telemetry_token(ava_home(), "cluster-token")
+    publish_telemetry_token(meiva_home(), "cluster-token")
 
 
 def _insert_station_unit(
@@ -66,13 +66,13 @@ def _insert_station_unit(
             "(machine_name, home, serve_gateway, serve_agent_runner, "
             "serve_observability_station, url, up_since_at, stopped_at) "
             "VALUES (%s, %s, false, false, true, %s, now(), NULL)",
-            (name, "~/.ava_station", url),
+            (name, "~/.meiva_station", url),
         )
         conn.commit()
 
 
 def test_main_is_noop_without_remote_observatory(monkeypatch: pytest.MonkeyPatch) -> None:
-    """No AVA_OBSERVABILITY_URL -> nothing to probe: no DB read, no network,
+    """No MEIVA_OBSERVABILITY_URL -> nothing to probe: no DB read, no network,
     no alert (the local observatory is the lgtm check's job)."""
     calls: list[str] = []
 
@@ -107,7 +107,7 @@ def test_resolve_target_falls_back_to_configured_base_without_registration(
     monkeypatch: pytest.MonkeyPatch,
     database: Database,
 ) -> None:
-    """AVA_OBSERVABILITY_URL set but no station unit registered -> warn loudly
+    """MEIVA_OBSERVABILITY_URL set but no station unit registered -> warn loudly
     and probe the configured base + OTLP port (fail-open: still give signal)."""
     monkeypatch.setattr(settings.observability, "observability_url", "http://10.0.0.46")
     target = hc.resolve_target(database=lambda: database)
@@ -194,8 +194,8 @@ def test_station_answers_without_a_published_token_warns_and_fails_open(
 ) -> None:
     """No published telemetry token -> cannot authenticate the probe; warn and treat as
     alive rather than alerting on a config problem (fail-open)."""
-    telemetry_token_path(ava_home()).unlink()  # a start that has not published yet
-    assert read_telemetry_token(ava_home()) is None
+    telemetry_token_path(meiva_home()).unlink()  # a start that has not published yet
+    assert read_telemetry_token(meiva_home()) is None
 
     def _fail_if_called(_req: object, **_kw: object) -> None:
         pytest.fail("must not dial without a token")
@@ -258,7 +258,7 @@ def test_main_shares_one_captured_gate_with_the_probe_and_log_factory(
     gates = [call.kwargs["gate"] for call in create.call_args_list]
     assert len(gates) == 2 and gates[0] is gates[1]
     assert isinstance(gates[0], ProcessDbGate)
-    assert gates[0].application_name() == "ava:station:v7"
+    assert gates[0].application_name() == "meiva:station:v7"
     count.assert_called_once_with(tmp_path, image.sha)
     gates[0].observe_minimum(7)
     assert not gates[0].min_read_due()

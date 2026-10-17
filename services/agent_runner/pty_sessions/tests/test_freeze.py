@@ -18,33 +18,33 @@ WRITER = AtomicWriter(SYSTEM_FS)
 def test_a_frozen_allocation_reuses_a_live_name_but_refuses_a_missing_one_until_resume(
     unit_home: Path,
 ) -> None:
-    assert new("ava-agent-1-shell-0-existing", unit_home) is True
+    assert new("meiva-agent-1-shell-0-existing", unit_home) is True
     frozen = allocation_freeze.freeze(
         holder="operator", reason="manifest and cleanup", writer=WRITER
     )
     assert frozen.generation is not None
 
-    assert new("ava-agent-1-shell-0-existing", unit_home) is False, "a live name stays usable"
+    assert new("meiva-agent-1-shell-0-existing", unit_home) is False, "a live name stays usable"
     with pytest.raises(client.ServiceError, match="allocation refused") as refused:
-        new("ava-agent-1-shell-1-missing", unit_home)
+        new("meiva-agent-1-shell-1-missing", unit_home)
     assert frozen.generation in str(refused.value)
-    assert not client.has_session("ava-agent-1-shell-1-missing")
+    assert not client.has_session("meiva-agent-1-shell-1-missing")
 
     assert allocation_freeze.resume(frozen.generation, writer=WRITER)
-    assert new("ava-agent-1-shell-1-missing", unit_home) is True
+    assert new("meiva-agent-1-shell-1-missing", unit_home) is True
 
 
 def test_a_corrupt_marker_fails_closed(unit_home: Path) -> None:
     allocation_freeze.state_path().write_text("{broken-json")
     with pytest.raises(client.ServiceError, match=r"allocation refused.*invalid"):
-        new("ava-agent-1-shell-0-corrupt", unit_home)
-    assert not client.has_session("ava-agent-1-shell-0-corrupt")
+        new("meiva-agent-1-shell-0-corrupt", unit_home)
+    assert not client.has_session("meiva-agent-1-shell-0-corrupt")
 
 
 def test_the_active_generation_rejects_a_live_name_from_a_prior_generation(
     unit_home: Path,
 ) -> None:
-    name = "ava-agent-1-shell-0-stale"
+    name = "meiva-agent-1-shell-0-stale"
     new(name, unit_home)
     (before,) = client.list_sessions()
     assert before.generation is None
@@ -63,7 +63,7 @@ def test_a_session_carries_the_generation_it_was_admitted_under(unit_home: Path)
     )
     assert frozen.generation is not None
     assert allocation_freeze.resume(frozen.generation, writer=WRITER)
-    names = ("ava-agent-41-shell-2-page-dashboard", "ava-schedule-7")
+    names = ("meiva-agent-41-shell-2-page-dashboard", "meiva-schedule-7")
     for name in names:
         assert new(name, unit_home) is True
     assert {s.name: s.generation for s in client.list_sessions()} == dict.fromkeys(
@@ -82,7 +82,7 @@ def test_freeze_acknowledgement_has_no_later_session_start_during_concurrent_all
     lock = threading.Lock()
 
     def allocate(index: int) -> None:
-        name = f"ava-freeze-race-{index}"
+        name = f"meiva-freeze-race-{index}"
         try:
             created = new(name, unit_home)
         except client.ServiceError as exc:
@@ -116,13 +116,13 @@ def test_freeze_acknowledgement_has_no_later_session_start_during_concurrent_all
         assert all(
             result == "created" or "allocation refused" in result for result in outcomes.values()
         ), outcomes
-        sessions = client.list_sessions("ava-freeze-race-")
+        sessions = client.list_sessions("meiva-freeze-race-")
         acknowledged_at = frozen.created_at.timestamp()
         assert sessions
         assert all(s.started_at <= acknowledged_at for s in sessions)
         with pytest.raises(client.ServiceError, match="allocation refused"):
-            new("ava-freeze-race-after-ack", unit_home)
-        assert not client.has_session("ava-freeze-race-after-ack")
+            new("meiva-freeze-race-after-ack", unit_home)
+        assert not client.has_session("meiva-freeze-race-after-ack")
     finally:
         for thread in threads:
             thread.join(timeout=60)
@@ -131,7 +131,7 @@ def test_freeze_acknowledgement_has_no_later_session_start_during_concurrent_all
 
 
 def test_a_frozen_session_still_serves_input(unit_home: Path) -> None:
-    name = "ava-test-frozen-use-1"
+    name = "meiva-test-frozen-use-1"
     new(name, unit_home)
     frozen = allocation_freeze.freeze(holder="operator", reason="inspection", writer=WRITER)
     try:

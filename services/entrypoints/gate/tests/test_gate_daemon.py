@@ -111,7 +111,7 @@ def test_entry_keeps_one_image_gate_factory_and_producer(
     assert entry.database() is not entry.database()
     assert len(opened) == 2 and opened[0] is opened[1]
     assert opened[0].min_read_due()
-    assert opened[0].application_name() == "ava:gate:v17"
+    assert opened[0].application_name() == "meiva:gate:v17"
     version.assert_called_once_with(entry.image.source_root, entry.image.sha)
     args, kwargs = entry.logging.call_args
     assert args == ("gate",)

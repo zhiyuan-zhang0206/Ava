@@ -97,7 +97,7 @@ def test_shortage_everywhere_fails_loudly_naming_each_base(
         base.select_throwaway_base(500, override=None)
     message = str(excinfo.value)
     assert str(default) in message and str(fallback) in message
-    assert "AVA_PG_THROWAWAY_BASE" in message  # the escape hatch is named
+    assert "MEIVA_PG_THROWAWAY_BASE" in message  # the escape hatch is named
 
 
 def test_a_single_base_serves_or_the_selection_refuses(
@@ -118,7 +118,7 @@ def test_a_single_base_serves_or_the_selection_refuses(
 def test_configured_override_wins_even_when_short(
     scratch_bases: tuple[Path, Path], monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    """An explicit AVA_PG_THROWAWAY_BASE is the operator's call: it is used as-is
+    """An explicit MEIVA_PG_THROWAWAY_BASE is the operator's call: it is used as-is
     (with a warning), never silently replaced by a demotion."""
     _default, _fallback = scratch_bases
     forced = tmp_path / "forced"
@@ -131,7 +131,7 @@ def test_configured_override_wins_even_when_short(
 def test_configured_override_must_be_a_real_directory(
     scratch_bases: tuple[Path, Path], tmp_path: Path
 ) -> None:
-    with pytest.raises(RuntimeError, match="AVA_PG_THROWAWAY_BASE"):
+    with pytest.raises(RuntimeError, match="MEIVA_PG_THROWAWAY_BASE"):
         base.select_throwaway_base(override=tmp_path / "missing")
 
 
@@ -177,10 +177,10 @@ def test_throwaway_postgres_creates_the_instance_under_the_given_base(
     again — the drill's chosen base is the base used. A short `/tmp` root: the
     Postgres socket path (`<dir>/.s.PGSQL.<port>`) is capped at 103 bytes, so a
     pytest `tmp_path` is too deep for a real cluster."""
-    instances = Path(tempfile.mkdtemp(prefix="ava-base-", dir="/tmp"))
+    instances = Path(tempfile.mkdtemp(prefix="meiva-base-", dir="/tmp"))
     config = ThrowawayConfig(instances)
     try:
-        abandoned = instances / "ava-pg-abandoned"
+        abandoned = instances / "meiva-pg-abandoned"
         abandoned.mkdir()
         (abandoned / pg_tools.OWNER_LOCK_NAME).write_text("{}")
         with pg_tools.throwaway_postgres(

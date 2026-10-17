@@ -71,7 +71,7 @@ def test_actual_github_envelope_retains_pr_identity() -> None:
     host = _host(
         [
             ("actions/runs?", _page("workflow_runs", [_run(pull_requests=[{"number": 42}])])),
-            ("pr view 42 ", "[Ava-5811] improve parser (task #2571)"),
+            ("pr view 42 ", "[Meiva-5811] improve parser (task #2571)"),
             ("runs/101/jobs?", _page("jobs", [_job()])),
         ],
         calls,

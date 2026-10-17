@@ -44,8 +44,8 @@ class TestBuildTimelineItemsStartOffset:
         msg = HumanMessage(
             content="hi",
             additional_kwargs={
-                "ava_msg_type": "inbound",
-                "ava_created_at": "2026-01-01T00:00:00+00:00",
+                "meiva_msg_type": "inbound",
+                "meiva_created_at": "2026-01-01T00:00:00+00:00",
             },
         )
         items, msg_count = build_timeline_items(
@@ -62,10 +62,10 @@ class TestBuildTimelineItemsStartOffset:
         msg = HumanMessage(
             content="hi",
             additional_kwargs={
-                "ava_msg_type": "inbound",
-                "ava_source": "user",
-                "ava_inbound_id": 70598,
-                "ava_created_at": "2026-01-01T00:00:00+00:00",
+                "meiva_msg_type": "inbound",
+                "meiva_source": "user",
+                "meiva_inbound_id": 70598,
+                "meiva_created_at": "2026-01-01T00:00:00+00:00",
             },
         )
 
@@ -111,11 +111,11 @@ def test_inbound_item_ts_is_read_time_not_arrival() -> None:
         HumanMessage(
             content="[2026-01-01 00:00:01]\n\nhi",
             additional_kwargs={
-                "ava_msg_type": "inbound",
-                "ava_source": "user",
-                "ava_inbound_id": 1,
-                "ava_created_at": "2026-01-01T00:00:01+00:00",
-                "ava_picked_up_at": "2026-01-01T00:00:20+00:00",
+                "meiva_msg_type": "inbound",
+                "meiva_source": "user",
+                "meiva_inbound_id": 1,
+                "meiva_created_at": "2026-01-01T00:00:01+00:00",
+                "meiva_picked_up_at": "2026-01-01T00:00:20+00:00",
             },
         ),
     ]

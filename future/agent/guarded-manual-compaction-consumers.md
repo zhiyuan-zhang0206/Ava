@@ -10,8 +10,8 @@ tags: [agent, compaction, idempotency]
 Historical preparation audit for [the protocol design](guarded-manual-compaction.md).
 The native protocol is implemented; UI and CLI now use observed closed-history
 admission and the old public compact route is removed. Current behavior is owned
-by [[base/agents/compaction/docs/manual-compact/manual-compact.ava.okf.md]] and
-[[gateway/agents/docs/control-acceptance.ava.okf.md]]. The matrix and proposed gates
+by [[base/agents/compaction/docs/manual-compact/manual-compact.meiva.okf.md]] and
+[[gateway/agents/docs/control-acceptance.meiva.okf.md]]. The matrix and proposed gates
 below record the preparation state, not current contributor instructions.
 
 ## Actual consumers and verification matrix
@@ -22,13 +22,13 @@ below record the preparation state, not current contributor instructions.
 | `ui/web/src/lib/transport/api.ts:compact`, `use-agent-actions.ts` | Mint key per action, legacy HTTP | No activation or retry promise |
 | `cli/commands/agents/control.py:cmd_agents_compact` | Legacy HTTP, new UUID, immediate enqueue | Preserve existing CLI |
 | `base/db:insert_compact_request_inbound` | Queue/audit producer, tests/admin | No implicit guarded conversion |
-| `ava/self.py:compact`, composer `/compact` | Agent-authored summary; composer sends instruction | Preserve distinct semantics |
+| `meiva/self.py:compact`, composer `/compact` | Agent-authored summary; composer sends instruction | Preserve distinct semantics |
 | IM core/GatewayClient | Unknown slash goes through ordinary chat; no compact HTTP method | Do not invent a new consumer |
 | MCP endpoint/fleet SDK | No registered manual compact operation | No claimed activation |
 | claim routing/dispatch/decide | Done-before-LLM; multi-request last summary; chat deferral | New pointer dispatch isolated |
 | compact hook/transition/init_context | Shared prompt and history replacement | Reuse; auto/self unchanged |
 | host invocation/continuation/startup | Flush, native settlement, inbound reconcile | Recover exact command before ordinary work |
-| checkpoint history/chunks/timeline | Boundary and `ava_compact_id` readers | Frozen anchor, stable original result metadata |
+| checkpoint history/chunks/timeline | Boundary and `meiva_compact_id` readers | Frozen anchor, stable original result metadata |
 
 Real PostgreSQL + actual graph/host tests must cover fresh concurrent same-key,
 changed target, distinct-key same source, NOOP then new input, ended-work eligibility

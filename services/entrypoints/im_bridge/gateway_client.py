@@ -26,7 +26,7 @@ _log = logging.getLogger("services.entrypoints.im_bridge.gateway_client")
 
 
 class GatewayClient:
-    """REST + SSE client for the Ava gateway (the Post Gateway)."""
+    """REST + SSE client for the Meiva gateway (the Post Gateway)."""
 
     def __init__(
         self, config: ImBridgeConfig, *, gateway_url: str, auth_headers: Mapping[str, str]
@@ -157,7 +157,7 @@ class GatewayClient:
         return agent_id
 
     async def list_commands(self) -> list[dict[str, Any]]:
-        """GET /api/commands — the Ava slash-command catalog (every active
+        """GET /api/commands — the Meiva slash-command catalog (every active
         skill gets a same-named command; project/user/plugin templates add
         more). name + description + instruction_hint, deduped and sorted."""
         client = await self._http()

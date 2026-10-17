@@ -20,7 +20,7 @@ Both deepseek registry entries (`shared/lm/registry.py:MODELS`) now carry
 
 The mechanism is untouched: `resolve_context_budget` still derives the absolute
 thresholds as fractions of the model's own `context_window`, and the
-`AVA_*_FRACTION` / `AVA_AUTO_COMPACT_CEILING_TOKENS` env and per-agent overlay
+`MEIVA_*_FRACTION` / `MEIVA_AUTO_COMPACT_CEILING_TOKENS` env and per-agent overlay
 layers still override these per-model defaults. Every other model keeps the
 flat 30/40 rule.
 

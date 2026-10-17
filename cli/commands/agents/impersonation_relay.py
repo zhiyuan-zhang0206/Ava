@@ -110,11 +110,11 @@ class WakeListener(Protocol):
 
 
 def ack_command(lease_id: int | UUID, ids: Sequence[int], agent_id: int | None = None) -> str:
-    """The exact ACK command for one pushed batch, as a bare `ava`: the host's
-    `~/.local/bin/ava`, linked to the production CLI."""
+    """The exact ACK command for one pushed batch, as a bare `meiva`: the host's
+    `~/.local/bin/meiva`, linked to the production CLI."""
     return shlex.join(
         [
-            "ava",
+            "meiva",
             "impersonate",
             "ack",
             str(lease_id),
@@ -145,7 +145,7 @@ def message_push(
     before the ACK.
     """
     ids = [message.id for message in messages]
-    header = f"Ava message agent={agent_id} lease={lease_id} ids={','.join(map(str, ids))}"
+    header = f"Meiva message agent={agent_id} lease={lease_id} ids={','.join(map(str, ids))}"
     if redelivery:
         header += " (re-delivery: unacknowledged)"
     blocks: list[str] = [header]
@@ -183,12 +183,12 @@ def activation_hint(
     messages arrive here, acknowledge each batch on receipt, inbox is the
     fallback read.
     """
-    prefix = ["ava", "impersonate"]
+    prefix = ["meiva", "impersonate"]
     scope = ["--agent", str(agent_id)] if isinstance(lease_id, int) else []
     inbox = shlex.join([*prefix, "inbox", str(lease_id), *scope])
     ack = shlex.join([*prefix, "ack", str(lease_id), *scope])
     return (
-        f"Ava control active: agent={agent_id} lease={lease_id}. "
+        f"Meiva control active: agent={agent_id} lease={lease_id}. "
         "Inbox messages are pushed to this session; acknowledge each batch as soon as it "
         f"arrives: {ack} ID... Use {inbox} to read missed messages or a truncated "
         "message's full body — read it before acknowledging. "

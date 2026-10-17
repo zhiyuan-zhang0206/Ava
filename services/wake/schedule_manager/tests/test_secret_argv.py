@@ -53,9 +53,11 @@ def test_schedule_launch(
 
     assert wait_for(dump.exists), f"the runner never started:\n{pty_service.output()}"
     runner_env = dump.read_text()
-    assert f"AVA_SCHEDULE_ID={schedule_id}\n" in runner_env, "the schedule id rides the request env"
+    assert f"MEIVA_SCHEDULE_ID={schedule_id}\n" in runner_env, (
+        "the schedule id rides the request env"
+    )
     for secret in SECRET_VALUES:
         assert secret not in runner_env, f"{secret!r} reached the schedule's environment"
     assert_service_tree_clean(pty_service, label="ScheduleManager._launch")
     for argv in service_tree_argvs(pty_service):
-        assert "AVA_SCHEDULE_ID" not in " ".join(argv), f"schedule id on argv: {argv!r}"
+        assert "MEIVA_SCHEDULE_ID" not in " ".join(argv), f"schedule id on argv: {argv!r}"

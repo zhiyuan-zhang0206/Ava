@@ -9,7 +9,7 @@ vocabulary therefore never has to grow a widget type for every unforeseen need
 This is the sibling mount of `gateway/routers/pages.py`, with the same path-
 segment validation, the same auth (the cluster middleware, like every other
 `/api` route), and the same 404-when-not-available semantics. What differs is
-the backend: an `ava.ui` page is a live page server owned by an agent, while a
+the backend: an `meiva.ui` page is a live page server owned by an agent, while a
 plugin page is **static files inside the plugin package** — `<plugin>/ui/`,
 which converge already materializes along with the rest of the plugin image.
 Static is the preferred backend precisely because it needs no process: nothing
@@ -59,8 +59,8 @@ def _enabled_plugin_dir(plugin: str) -> Path:
     """
     installed = enable_config.installed_plugin_dirs()
     # Dash/underscore folding, exactly like `plugins_config.load`: the
-    # directory is a Python package (`ava_code`) while the name a human writes
-    # in a URL or a manifest is dash-spelled (`ava-code`).
+    # directory is a Python package (`meiva_code`) while the name a human writes
+    # in a URL or a manifest is dash-spelled (`meiva-code`).
     resolved = names.find(plugin, set(installed)) or plugin
     directory = installed.get(resolved)
     if directory is None:

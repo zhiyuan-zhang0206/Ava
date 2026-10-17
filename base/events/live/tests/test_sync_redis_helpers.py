@@ -16,8 +16,8 @@ def test_sync_redis_ping(redis_url: str) -> None:
 def test_sync_redis_decode_responses_passthrough(redis_url: str) -> None:
     client = EventBus.from_settings().sync_redis(decode_responses=True)
     try:
-        client.set("ava:test:connect-helper", "v")
-        assert client.get("ava:test:connect-helper") == "v"  # str, not bytes
+        client.set("meiva:test:connect-helper", "v")
+        assert client.get("meiva:test:connect-helper") == "v"  # str, not bytes
     finally:
-        client.delete("ava:test:connect-helper")
+        client.delete("meiva:test:connect-helper")
         client.close()

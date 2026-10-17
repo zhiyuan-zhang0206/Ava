@@ -1,6 +1,6 @@
-"""Inspect the editable Ava install in a checkout's virtualenv.
+"""Inspect the editable Meiva install in a checkout's virtualenv.
 
-uv writes ``_editable_impl_ava.pth`` into the active virtualenv, and records
+uv writes ``_editable_impl_meiva.pth`` into the active virtualenv, and records
 the editable source URL in the matching ``*.dist-info/direct_url.json``. A
 polluted ``VIRTUAL_ENV`` can therefore make a worktree install repoint a
 long-lived checkout's interpreter at disposable source. This module only reads
@@ -24,12 +24,12 @@ from collections.abc import Iterable
 from pathlib import Path
 from typing import cast
 
-EDITABLE_PTH_NAME = "_editable_impl_ava.pth"
-EDITABLE_DIST_INFO_GLOB = "ava-*.dist-info/direct_url.json"
+EDITABLE_PTH_NAME = "_editable_impl_meiva.pth"
+EDITABLE_DIST_INFO_GLOB = "meiva-*.dist-info/direct_url.json"
 
 
-def editable_ava_pth_paths(source_root: Path) -> tuple[Path, ...]:
-    """Existing Ava editable pointers under ``source_root/.venv``.
+def editable_meiva_pth_paths(source_root: Path) -> tuple[Path, ...]:
+    """Existing Meiva editable pointers under ``source_root/.venv``.
 
     Virtualenvs use ``lib/pythonX.Y/site-packages`` (or ``lib64``). Scan those
     layouts explicitly rather than deriving one from the running interpreter:
@@ -50,7 +50,7 @@ def editable_ava_pth_paths(source_root: Path) -> tuple[Path, ...]:
 def editable_direct_url_paths(source_root: Path) -> tuple[Path, ...]:
     """Existing editable ``direct_url.json`` records under ``source_root/.venv``.
 
-    Same layout scan as :func:`editable_ava_pth_paths`: uv writes this file
+    Same layout scan as :func:`editable_meiva_pth_paths`: uv writes this file
     beside the editable pointer, so a poisoned install is recorded in both
     places and both must be asserted.
     """
@@ -65,8 +65,8 @@ def editable_direct_url_paths(source_root: Path) -> tuple[Path, ...]:
     return tuple(sorted(matches, key=str))
 
 
-def _missing_editable_ava_pth_paths(source_root: Path) -> tuple[Path, ...]:
-    """Pointer paths missing beside existing Ava editable metadata records."""
+def _missing_editable_meiva_pth_paths(source_root: Path) -> tuple[Path, ...]:
+    """Pointer paths missing beside existing Meiva editable metadata records."""
 
     paths = {
         record.parent.parent / EDITABLE_PTH_NAME
@@ -76,11 +76,11 @@ def _missing_editable_ava_pth_paths(source_root: Path) -> tuple[Path, ...]:
 
 
 def _pth_paths_without_sibling_direct_url(source_root: Path) -> tuple[Path, ...]:
-    """Pointers whose site-packages directory has no Ava direct-URL record."""
+    """Pointers whose site-packages directory has no Meiva direct-URL record."""
 
     missing = (
         pth_path
-        for pth_path in editable_ava_pth_paths(source_root)
+        for pth_path in editable_meiva_pth_paths(source_root)
         if not tuple(pth_path.parent.glob(EDITABLE_DIST_INFO_GLOB))
     )
     return tuple(sorted(missing, key=str))
@@ -165,7 +165,7 @@ def editable_install_violations(
         | {root.expanduser().resolve(strict=False).as_uri() for root in allowed_roots}
     )
     violations: list[str] = []
-    for pth_path in _missing_editable_ava_pth_paths(resolved_source):
+    for pth_path in _missing_editable_meiva_pth_paths(resolved_source):
         violations.append(
             f"{pth_path} editable install metadata present but pointer missing — half-uninstalled"
         )
@@ -173,7 +173,7 @@ def editable_install_violations(
         violations.append(
             f"{pth_path} editable pointer present but metadata missing — half-uninstalled"
         )
-    for pth_path in editable_ava_pth_paths(resolved_source):
+    for pth_path in editable_meiva_pth_paths(resolved_source):
         try:
             raw_text = pth_path.read_text()
         except OSError:
@@ -209,12 +209,12 @@ def venv_python(source_root: Path) -> Path | None:
 
 
 def editable_console_script_violations(source_root: Path) -> tuple[str, ...]:
-    """Report a missing Ava console script beside the virtualenv's interpreter."""
+    """Report a missing Meiva console script beside the virtualenv's interpreter."""
 
     interpreter = venv_python(source_root)
     if interpreter is None:
         return ()
-    console_script = interpreter.with_name("ava")
+    console_script = interpreter.with_name("meiva")
     if console_script.exists():
         return ()
     return (f"{console_script} editable console script missing",)

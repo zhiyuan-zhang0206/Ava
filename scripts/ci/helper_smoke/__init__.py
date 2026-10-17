@@ -8,11 +8,11 @@ Two entry points, both run by that job on a hosted macOS runner and by hand on a
   `python -m scripts.ci.helper_smoke`
       the two-section chain smoke, described below.
 
-Two-section chain smoke: launchd -> permissions-helper -> ava-root -> unit.
+Two-section chain smoke: launchd -> permissions-helper -> meiva-root -> unit.
 
 The dev-side acceptance run for the macOS "two-section" adapter (task #3209, design #3195).
 A helper compiled from this checkout is registered as a throwaway launchd job under an
-isolated workdir; the helper seeds a dev ava-root from a seed config (the K3 face), and
+isolated workdir; the helper seeds a dev meiva-root from a seed config (the K3 face), and
 this script verifies the whole chain and helper collision handling:
 
   build      compile + ad-hoc sign a dev helper from this checkout
@@ -31,12 +31,12 @@ this script verifies the whole chain and helper collision handling:
 The helper binds its home to the seed file's directory, so the seed lives in the root run dir.
 Nothing here touches production: the binary is throwaway-signed, every path lives under the workdir,
 and the launchd job uses its own test label (never the production helper's). The helper's first-run
-registration nudge is disabled via AVA_PERMISSIONS_HELPER_SKIP_REGISTRATION=1 -- an Aqua-session
+registration nudge is disabled via MEIVA_PERMISSIONS_HELPER_SKIP_REGISTRATION=1 -- an Aqua-session
 helper with a fresh code identity would otherwise raise TCC dialogs on an unattended machine.
 
 Exit 0 = every phase passed. Evidence (ps/logs/status snapshots) is retained
 under the workdir; pass --cleanup to remove it. Run with the repository venv,
-on macOS, from a checkout that contains services/supervision/ava_root (dev/CI only).
+on macOS, from a checkout that contains services/supervision/meiva_root (dev/CI only).
 """
 
 # The package facade: callers keep using `helper_smoke.<name>` (the

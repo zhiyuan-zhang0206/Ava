@@ -45,7 +45,7 @@ _LIVENESS_RETRY_INTERVAL_S = 30.0
 
 # Data-volume used fraction at which the probe fails (alert-only, see
 # `disk_usage_failure`). One line shared across the statvfs family: the
-# trace auto-degrade watermark (`AVA_TRACE_DISK_WATERMARK=0.9`), the 312
+# trace auto-degrade watermark (`MEIVA_TRACE_DISK_WATERMARK=0.9`), the 312
 # resource watcher's CRITICAL threshold, and the 2026-08-08 incident level.
 # The disk the checkpoint/trace mirrors grow on filling is the
 # gateway-can't-start outage class, so the owner should hear as the trace
@@ -240,14 +240,14 @@ def service_probes(*, machine: MachineIdentity, host: Host) -> list[str]:
     """Probe every service this host's roles should be running; return the failing
     services, each annotated with why (empty = all responding).
 
-    Reuses the `ava status` roster + probe primitives: the role-annotated spec
+    Reuses the `meiva status` roster + probe primitives: the role-annotated spec
     list (gated-out services are intentionally absent and skipped) and the
     ownership-bound per-spec probe. Unknown evidence or an unresolved roster
     cannot certify health, even when the gateway responds.
 
     The probe's `detail` rides along into the entry because this list becomes the
-    `health_probe_failing` message, the only diagnostic a human sees in the alert. "ava-ops
-    not responding" and "ava-ops is answering, but it is /home/ava/.ava" are the
+    `health_probe_failing` message, the only diagnostic a human sees in the alert. "meiva-ops
+    not responding" and "meiva-ops is answering, but it is /home/meiva/.meiva" are the
     same bare session name and completely different incidents — the second one
     means another unit holds this unit's port and no amount of waiting fixes it."""
     import cli.commands._repo as _repo_commands
@@ -300,7 +300,7 @@ def disk_usage_fraction() -> float | None:
     """Used fraction of the data volume, statvfs-family, or None when unmeasurable.
 
     Uses ``shutil.disk_usage`` — the same measurement the trace disk-watermark
-    guard (``AVA_TRACE_DISK_WATERMARK``, ``base/telemetry/trace_mirror.py``) and the
+    guard (``MEIVA_TRACE_DISK_WATERMARK``, ``base/telemetry/trace_mirror.py``) and the
     macmini resource watcher make, so the probe fires at the line the owner is
     already told about. df(1) was the original measure, but its offset to the
     statvfs family is unstable in both directions (2026-08-24: ~0.8 points
@@ -351,7 +351,7 @@ def editable_install_failure() -> str | None:
     repair of the identified installation.
 
     The shared inspection helper applies exact-root allowlisting (production
-    source plus the stable ~/Ava clone), never an arbitrary descendant.
+    source plus the stable ~/Meiva clone), never an arbitrary descendant.
     """
     import base.deploy.release.editable_install as ei
     from base.deploy.git import cluster_drift
@@ -360,7 +360,7 @@ def editable_install_failure() -> str | None:
     if source_root is None:
         return None
     violations = list(
-        ei.editable_install_violations(source_root, allowed_roots=(Path.home() / "Ava",))
+        ei.editable_install_violations(source_root, allowed_roots=(Path.home() / "Meiva",))
     )
     violations.extend(ei.editable_console_script_violations(source_root))
     if not violations:
@@ -478,7 +478,7 @@ def _observe_cluster_health(
         print("  ✓ gateway liveness")
 
     # 2. Agent population
-    # `agent_min` defaults to the cluster's AVA_HEALTH_PROBE_AGENT_MIN (itself
+    # `agent_min` defaults to the cluster's MEIVA_HEALTH_PROBE_AGENT_MIN (itself
     # 1): a test/QA cluster with no resident agents sets it to 0 or the check
     # otherwise reports a permanent population outage.
     if agent_min is None:
@@ -540,7 +540,7 @@ def _check_alert_only_health(
 
     # 6b. WAL archiving — alert-only, same class as checks 5 and 6: a stuck or
     # misconfigured archiver is fixed by repairing the archive path, not by rolling
-    # code back. Silent unless AVA_WALG_CONFIG_FILE switches WAL-G on.
+    # code back. Silent unless MEIVA_WALG_CONFIG_FILE switches WAL-G on.
     config = command.config
 
     def path_reader() -> Path | None:
@@ -572,7 +572,7 @@ def _check_alert_only_health(
 
     # 8. Source-tree integrity — alert-only, same class as checks 5-7: a
     # tampered checkout that a source-run home executes is the 2026-08-28
-    # outage class (edited source broke `import ava` for every agent on the
+    # outage class (edited source broke `import meiva` for every agent on the
     # box), but rolling back code does not undo an on-disk edit. The probe
     # detects and alerts; it never writes, and nothing repairs the tree for
     # the operator.

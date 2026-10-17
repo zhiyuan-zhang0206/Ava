@@ -26,7 +26,7 @@ from base.host.private_storage import create_private_bytes
 from base.paths.private_dir import ensure_private_dir
 from gateway.schemas.uploads import UploadedBatch, UploadedFile
 
-RESERVED_PREFIX = "ava-upload-"
+RESERVED_PREFIX = "meiva-upload-"
 type UploadItem = tuple[str, bytes, str]
 
 

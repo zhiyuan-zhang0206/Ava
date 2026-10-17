@@ -70,7 +70,7 @@ class SdkWrap:
     wrapper: Callable[..., Any]
 
 
-# ava:ref base/packages/plugins/docs/runtime-contributions.ava.okf.md#immutable-declarations
+# meiva:ref base/packages/plugins/docs/runtime-contributions.meiva.okf.md#immutable-declarations
 @dataclass(frozen=True)
 class PluginContributions:
     system_prompt_sections: tuple[SectionFn, ...] = ()
@@ -206,7 +206,7 @@ class PluginContributions:
         return (*namespaces, *members, *expansions, *wraps, *sources, *config)
 
 
-# ava:ref base/packages/plugins/docs/runtime-contributions.ava.okf.md#immutable-declarations
+# meiva:ref base/packages/plugins/docs/runtime-contributions.meiva.okf.md#immutable-declarations
 @dataclass(frozen=True)
 class ExtensionRegistry:
     plugins: tuple[tuple[str, PluginContributions], ...] = ()

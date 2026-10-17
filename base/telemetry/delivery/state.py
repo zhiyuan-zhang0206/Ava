@@ -41,7 +41,7 @@ process_state: dict[str, Any] = {
 def process_name() -> str:
     """This process's bound identity (`init_telemetry(process=...)`), the
     bounded dimension every telemetry record carries as `process`. The OTLP
-    backend stamps it into the metrics Resource (`service.name=ava-<process>`)
+    backend stamps it into the metrics Resource (`service.name=meiva-<process>`)
     so same-named counters from different process kinds cannot collide into
     one Prometheus series."""
     return str(process_state["process"])

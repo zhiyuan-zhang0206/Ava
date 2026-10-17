@@ -9,7 +9,7 @@ from base.native_process.os_platform import LockTimeoutError
 
 
 def test_a_bounded_wait_names_the_last_holder(tmp_path, monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(state.base.paths, "ava_home", lambda: tmp_path)
+    monkeypatch.setattr(state.base.paths, "meiva_home", lambda: tmp_path)
 
     with state.resource_lock(purpose="ops.pause"):
         resource = json.loads(state.holder_path(state.lifecycle_lock_path()).read_text())

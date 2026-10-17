@@ -5,7 +5,7 @@
 Phase A pauses every restarter before agents quiesce, and the rollout contract
 says those agents remain down until the new gateway is ready and Phase B brings
 the fleet back. The gateway's local child violated that boundary: its fresh
-`ava start` launched the local restarter alongside the gateway. Agents marked
+`meiva start` launched the local restarter alongside the gateway. Agents marked
 `restarting` could therefore relaunch while the surviving parent still had to
 adopt changed credentials, persist the pin, prove gateway reachability, and
 update remote runners. During the credential-split failure this surfaced as
@@ -35,7 +35,7 @@ use the same transient restarter skip, so rollback cannot relaunch agents while
 the gateway is still returning.
 
 The boundary is enforced again at the durable-intent seams. Local unpause does
-not respawn a restarter listed in `$AVA_HOME/disabled_services`, and an already
+not respawn a restarter listed in `$MEIVA_HOME/disabled_services`, and an already
 spawned restarter checks that marker before schema or DB startup. If the marker
 cannot be read, both paths leave the restarter down. The watchdog's
 `PauseController` already blocks the complete roster for both `paused` and

@@ -41,7 +41,7 @@ def test_operator_handles_share_the_command_gate_without_git(
     ) -> Database:
         assert callable(direct_url.local_host)
         seen.append(gate)
-        assert gate.application_name() == "ava:cli"
+        assert gate.application_name() == "meiva:cli"
         assert not gate.min_read_due()
         return MagicMock(spec=Database)
 
@@ -53,7 +53,7 @@ def test_operator_handles_share_the_command_gate_without_git(
     assert seen[0] is seen[1]
     service = ProcessDbGate(version=lambda: 12, process="service")
     assert service.min_read_due()
-    assert service.application_name() == "ava:service:v12"
+    assert service.application_name() == "meiva:service:v12"
 
 
 def test_operator_factory_binds_gateway_reader_without_reading_it() -> None:
@@ -75,7 +75,7 @@ def test_operator_factory_binds_gateway_reader_without_reading_it() -> None:
     )
     assert reads == []
     factory()
-    factory.for_url("postgresql://ava:pw@db.example:6433/ava")
+    factory.for_url("postgresql://meiva:pw@db.example:6433/meiva")
     assert reads == []
     assert len(resolvers) == 2
     assert all(resolver.gateway_url_reader is gateway_url for resolver in resolvers)
@@ -107,8 +107,8 @@ def test_each_operator_handle_reads_the_live_connection_settings(
     from base.config import settings
 
     monkeypatch.setattr(settings.data_plane, "pgbouncer_enabled", False)
-    first_url = "postgresql://operator@127.0.0.1:6101/ava"
-    second_url = "postgresql://operator@127.0.0.1:6102/ava"
+    first_url = "postgresql://operator@127.0.0.1:6101/meiva"
+    second_url = "postgresql://operator@127.0.0.1:6102/meiva"
     factory = _factory(command_runtime, open_operator_database)
     monkeypatch.setattr(settings.data_plane, "db_url", first_url)
     first = factory()
@@ -180,8 +180,8 @@ def test_recovery_url_handle_keeps_the_operator_gate_and_live_slice(
         return open_operator_database(config, gate, direct_url)
 
     monkeypatch.setattr(settings.data_plane, "pgbouncer_enabled", False)
-    live_url = "postgresql://operator@127.0.0.1:6101/ava"
-    scratch_url = "postgresql://operator@127.0.0.1:6102/ava"
+    live_url = "postgresql://operator@127.0.0.1:6101/meiva"
+    scratch_url = "postgresql://operator@127.0.0.1:6102/meiva"
     monkeypatch.setattr(settings.data_plane, "db_url", live_url)
     factory = _factory(command_runtime, open_database)
     assert not seen

@@ -2,7 +2,7 @@
 
 Loaded first by the repo-root `conftest.py`, and it has to stay first: everything
 here runs at IMPORT time, before any project module exists. It redirects
-`AVA_HOME` to a per-session tmpfs home, pins every cluster-scope value to a test
+`MEIVA_HOME` to a per-session tmpfs home, pins every cluster-scope value to a test
 sentinel, scrubs the operator's ambient environment, and pins service ports and the fd
 limit without constructing Settings. Consumer fixtures own configuration boot. `_assert_env_precedes_project_imports` fails the
 run when a project module was imported earlier, i.e. when a plugin that imports
@@ -30,9 +30,9 @@ from collections.abc import Callable, Mapping
 from pathlib import Path
 
 # Third-party only. These import no project module, so they are safe above the
-# env block; every `base.*` / `ava.*` import is below it. `tests._test_env_file`
+# env block; every `base.*` / `meiva.*` import is below it. `tests._test_env_file`
 # is the one project-side import above it: it imports no project module either,
-# and importing it pops the host's AVA_LGTM_* variables before Settings exists.
+# and importing it pops the host's MEIVA_LGTM_* variables before Settings exists.
 import pytest
 
 import tests._test_env_file
@@ -60,22 +60,22 @@ if sys.platform == "darwin":
 
 # ── The unit's home: redirected here, before anything can read it ──
 #
-# `base.paths.home.resolve_ava_home` reads `AVA_HOME` (else `~/.ava`)
+# `base.paths.home.resolve_meiva_home` reads `MEIVA_HOME` (else `~/.meiva`)
 # every time it is asked; nothing captures it at import. What this block must
 # still precede is `Settings`: it reads about twenty-five other variables at
-# import, and its boot (`load_ava_env`) loads `$AVA_HOME/.env` and force-assigns
+# import, and its boot (`load_meiva_env`) loads `$MEIVA_HOME/.env` and force-assigns
 # every derived_env_keys() entry (`os.environ[key] = val`, overriding what is
-# already there). With the home left at the operator's `~/.ava`:
+# already there). With the home left at the operator's `~/.meiva`:
 #
-#   - `load_ava_env()` reads the operator's REAL `~/.ava/.env`, so the
-#     production AVA_CLUSTER_SECRET, AVA_DB_URL and AVA_REDIS_URL land in the
+#   - `load_meiva_env()` reads the operator's REAL `~/.meiva/.env`, so the
+#     production MEIVA_CLUSTER_SECRET, MEIVA_DB_URL and MEIVA_REDIS_URL land in the
 #     test process, overwriting the sentinels set a few lines below. A test
 #     suite holding production credentials is the real severity here.
 #   - every Settings read (`Settings` field defaults, the gateway config fetch)
-#     would follow the operator's cluster; the suite pins AVA_CONFIG_FETCH=skip
+#     would follow the operator's cluster; the suite pins MEIVA_CONFIG_FETCH=skip
 #     (below) so no Settings construction may dial a gateway.
 #   - the CLI's `.env` writers resolve the home from the same variable, so
-#     `tests/cli` would rewrite the operator's real `~/.ava/.env` (that happened
+#     `tests/cli` would rewrite the operator's real `~/.meiva/.env` (that happened
 #     three times on one dev box in a single night, 2026-07-28/29, during a
 #     production rollout).
 #
@@ -85,31 +85,31 @@ if sys.platform == "darwin":
 # import (Settings' own snapshot, which this block precedes) and a host-global
 # namespace with no value to redirect at all (the scheduler, below — same
 # lesson, no fix available beyond not acting). The variable is exported, not
-# set on a fixture, so the subprocesses tests spawn (`ava` CLI, e2e gateway)
+# set on a fixture, so the subprocesses tests spawn (`meiva` CLI, e2e gateway)
 # inherit the same home.
 _SESSION_SUFFIX = f"{os.getpid()}_{int(time.time() * 1_000_000)}"
-TEST_AVA_HOME = Path(tempfile.mkdtemp(prefix=f"ava_test_home_{_SESSION_SUFFIX}_"))
-os.environ["AVA_HOME"] = str(TEST_AVA_HOME)
+TEST_MEIVA_HOME = Path(tempfile.mkdtemp(prefix=f"meiva_test_home_{_SESSION_SUFFIX}_"))
+os.environ["MEIVA_HOME"] = str(TEST_MEIVA_HOME)
 # CI keeps the vendored Postgres tree (zonky + pgvector, put in place by
 # scripts/ci/vendor_pg_runtime.py) outside the per-session home; linking it in
 # makes `pg_tool` resolve the production server build instead of a host apt one.
 _CI_VENDORED_RUNTIME_ROOT = os.environ.get("CI_VENDORED_RUNTIME_ROOT")
 if _CI_VENDORED_RUNTIME_ROOT:
-    (TEST_AVA_HOME / "runtime").symlink_to(_CI_VENDORED_RUNTIME_ROOT, target_is_directory=True)
+    (TEST_MEIVA_HOME / "runtime").symlink_to(_CI_VENDORED_RUNTIME_ROOT, target_is_directory=True)
 # Persist the same worker-local channel through settings refresh and child boot.
 # A mutation of settings.data_plane alone is lost when a rollout rebuilds it.
-_TEST_EVENTS_CHANNEL = f"ava:events:test:{_SESSION_SUFFIX}"
-os.environ["AVA_EVENTS_CHANNEL"] = _TEST_EVENTS_CHANNEL
+_TEST_EVENTS_CHANNEL = f"meiva:events:test:{_SESSION_SUFFIX}"
+os.environ["MEIVA_EVENTS_CHANNEL"] = _TEST_EVENTS_CHANNEL
 
 # No Settings construction in the suite may fetch from a gateway. The config
-# source is role-derived (AVA_CONFIG_SOURCE is gone; a unit that does not serve
+# source is role-derived (MEIVA_CONFIG_SOURCE is gone; a unit that does not serve
 # the gateway fetches at Settings build), and this test process is
 # agent-runner-only by default — without the skip, an SDK import would make
-# a live GET /api/bootstrap against whatever AVA_GATEWAY_URL leaks in. The
+# a live GET /api/bootstrap against whatever MEIVA_GATEWAY_URL leaks in. The
 # suite's cluster-scoped values (db/redis URLs, secret) are pinned explicitly in
 # this env block; subprocess tests that spawn real daemons/agents re-derive or
 # re-pin their own env per test.
-os.environ["AVA_CONFIG_FETCH"] = "skip"
+os.environ["MEIVA_CONFIG_FETCH"] = "skip"
 
 # ── Pre-compact history dump: pinned OFF for the suite, like a cluster that
 # configures the flag off ──
@@ -126,20 +126,20 @@ os.environ["AVA_CONFIG_FETCH"] = "skip"
 # authority pass takes its force branch (an undeclared cluster-scope key is
 # DROPPED). Feature tests (agent/tests/history/test_history_dump.py) flip the singleton
 # back on per test.
-os.environ["AVA_COMPACT_HISTORY_DUMP"] = "false"
+os.environ["MEIVA_COMPACT_HISTORY_DUMP"] = "false"
 
 # ── Process-profile marker: the suite is profile-less, like CI ──
 #
-# `Settings()` reads AVA_PROCESS_PROFILE at construction to build only the
+# `Settings()` reads MEIVA_PROCESS_PROFILE at construction to build only the
 # domains that process kind consumes. The pytest process has no process kind,
 # but a local run launched from a fleet agent / runner process INHERITS the
-# launcher's marker (AVA_PROCESS_PROFILE=agent), so `settings` builds only the
+# launcher's marker (MEIVA_PROCESS_PROFILE=agent), so `settings` builds only the
 # agent domains and gateway-domain reads fail — `settings.feishu` /
 # `settings.telegram` in the im_bridge adapter tests raise "does not construct
 # the 'feishu' config domain" — while CI (no marker, every domain constructed)
 # stays green. Pop the marker here, before the first Settings() construction,
 # so local runs match CI (2026-08-06, PR #1650 verification).
-os.environ.pop("AVA_PROCESS_PROFILE", None)
+os.environ.pop("MEIVA_PROCESS_PROFILE", None)
 
 # ── Boot mode: the suite exercises the eager config chain ──
 #
@@ -150,65 +150,65 @@ os.environ.pop("AVA_PROCESS_PROFILE", None)
 # `model_fields_set` probes, the metadata walks) assume the eager chain from
 # import time, so pin it here; the lite paths are exercised in their own
 # subprocess tests (base/config/tests/test_config_boot_lite.py). Read at
-# `base.config` import, hence inside this block. The `AVA_CONFIG_FETCH=skip`
+# `base.config` import, hence inside this block. The `MEIVA_CONFIG_FETCH=skip`
 # pin below overrides this one, so `_config_chain_upgraded` upgrades explicitly.
-os.environ.setdefault("AVA_CONFIG_BOOT", "eager")
+os.environ.setdefault("MEIVA_CONFIG_BOOT", "eager")
 
 # ── OS-scheduled jobs: the suite never arms one ──
 #
 # launchd reads ONE ~/Library/LaunchAgents per OS user; `crontab` edits ONE table
-# per user. Unlike AVA_HOME / the DB /
+# per user. Unlike MEIVA_HOME / the DB /
 # the ports / the session namespace, that namespace is not addressed by a value a
-# process reads, so no redirect isolates it — a test-scoped $AVA_HOME still lands
+# process reads, so no redirect isolates it — a test-scoped $MEIVA_HOME still lands
 # its jobs in the operator's real scheduler.
 #
 # Set in the environment (not only on the settings singleton) because the leak
 # that motivated this was in a SUBPROCESS: the e2e gateway runs the real
 # lifespan, which registers the health probe, and the pytest-process
 # monkeypatch that was meant to stop it never reached the child. Nine
-# `com.ava.ava_e2e_home_*.health-probe` LaunchAgents survived on a dev box,
-# firing `--auto-rollback` every 300s against whatever `ava` PATH resolved to.
+# `com.meiva.meiva_e2e_home_*.health-probe` LaunchAgents survived on a dev box,
+# firing `--auto-rollback` every 300s against whatever `meiva` PATH resolved to.
 # `base.host.system.cron.os_jobs_enabled` gates all four registrars on this; the
 # unregister paths stay live so cleanup still works.
-os.environ["AVA_OS_JOBS_ENABLED"] = "false"
+os.environ["MEIVA_OS_JOBS_ENABLED"] = "false"
 
 # Import-time sentinel for the required-no-default Settings fields (db_url /
 # redis_url). Set BEFORE base.config is imported so Settings() constructs from
-# the sentinel even with no AVA_DB_URL in the environment (CI / a fresh clone),
+# the sentinel even with no MEIVA_DB_URL in the environment (CI / a fresh clone),
 # and a stray connection that bypasses a provisioning fixture fails loudly
 # instead of hitting a real database. load_dotenv(override=False) won't clobber
 # these. The real per-session URLs are injected by the `provisioned_db` /
 # `provisioned_redis` fixtures, which start throwaway native pg/redis (base/deploy/tests/containers.py).
 UNPROVISIONED_DB_URL = "postgresql://unprovisioned@127.0.0.1:1/unprovisioned"
 UNPROVISIONED_REDIS_URL = "redis://127.0.0.1:1/0"
-os.environ["AVA_DB_URL"] = UNPROVISIONED_DB_URL
-os.environ["AVA_REDIS_URL"] = UNPROVISIONED_REDIS_URL
+os.environ["MEIVA_DB_URL"] = UNPROVISIONED_DB_URL
+os.environ["MEIVA_REDIS_URL"] = UNPROVISIONED_REDIS_URL
 
 # The cluster secret authenticates bootstrap / /ops. Data-plane credentials
 # are independent, including in the private test bootstrap. Use a URL-safe token that
 # passes the cluster_secret validator. Individual auth tests monkeypatch it (incl.
 # to "" for the unset-fail-closed paths).
-os.environ["AVA_CLUSTER_SECRET"] = "test-cluster-secret"  # noqa: S105 — test fixture
+os.environ["MEIVA_CLUSTER_SECRET"] = "test-cluster-secret"  # noqa: S105 — test fixture
 # The suite's secret-bearing servers include the e2e ops daemon, which binds
 # non-loopback. The deployment precondition requires a declared mode; overlay
 # records the suite's private-network posture.
-os.environ["AVA_TRANSPORT_ENCRYPTION"] = "overlay"
+os.environ["MEIVA_TRANSPORT_ENCRYPTION"] = "overlay"
 
-# The suite's data-plane identity is `ava_citest`, carried entirely by the URLs
+# The suite's data-plane identity is `meiva_citest`, carried entirely by the URLs
 # the provisioning fixtures write (names-as-data — Settings keeps the URL
 # verbatim, credentials included). The throwaway pg/redis provide the
-# `ava_citest` role/db/ACL user (base/deploy/tests/containers.py), while the prod-db guard
-# (ava/tests/fixtures/ava_tests.py, which refuses `ava`/`ava_main`) still fires if a test
+# `meiva_citest` role/db/ACL user (base/deploy/tests/containers.py), while the prod-db guard
+# (meiva/tests/fixtures/meiva_tests.py, which refuses `meiva`/`meiva_main`) still fires if a test
 # ever points at the real production database.
 
 # PgBouncer defaults ON in prod, but the suite pins it OFF for determinism: with
-# no running pooler, AVA_DB_URL (the one dial URL) stays direct, and pinning the
+# no running pooler, MEIVA_DB_URL (the one dial URL) stays direct, and pinning the
 # toggle keeps the real ensure_cluster_instance bring-up
 # (cli/commands/data_plane/tests/test_cluster_instance_native.py) from spawning a pgbouncer process.
 # Tests that exercise the pooled path opt in explicitly (monkeypatch enabled=True).
-os.environ["AVA_PGBOUNCER_ENABLED"] = "false"
+os.environ["MEIVA_PGBOUNCER_ENABLED"] = "false"
 
-# OTLP export OFF for the whole test session (AVA_TELEMETRY_OTLP_ENABLED,
+# OTLP export OFF for the whole test session (MEIVA_TELEMETRY_OTLP_ENABLED,
 # default ON since the 2026-08-11 stack decision): the pytest-process
 # monkeypatch (`_otlp_export_off`) only covers the pytest process itself —
 # subprocess tests (spawned gateways / agents / restarters) inherit the
@@ -219,15 +219,15 @@ os.environ["AVA_PGBOUNCER_ENABLED"] = "false"
 # was in subprocesses. The OTLP-specific tests
 # (base/telemetry/tests/otlp/test_telemetry_otlp.py) re-enable the flag and install
 # in-memory providers where the path is under test.
-os.environ["AVA_TELEMETRY_OTLP_ENABLED"] = "false"
+os.environ["MEIVA_TELEMETRY_OTLP_ENABLED"] = "false"
 
 # ── Host-scope identity and telemetry URLs: loopback, like CI ──
 #
 # The native LGTM installer renders Tempo targets from the host-scope
 # telemetry settings (`settings.observability.telemetry_tempo_query_url` /
 # `telemetry_tempo_endpoint`), and `self_machine_host()` prefers the
-# AVA_MACHINE_HOST env var. The login
-# shell exports the operator's real ~/.ava/.env into every child process (the
+# MEIVA_MACHINE_HOST env var. The login
+# shell exports the operator's real ~/.meiva/.env into every child process (the
 # 2026-08-04 shell-env leak class), and host-scope keys survive the
 # cluster-scope drop in `_enforce_cluster_env_authority` — so on a dev box a
 # private-network host override reached the suite and
@@ -237,13 +237,13 @@ os.environ["AVA_TELEMETRY_OTLP_ENABLED"] = "false"
 # resolve the same loopback host everywhere, and a test that needs a remote
 # Tempo URL or host address monkeypatches the settings explicitly
 # (base/cluster/tests/test_machine.py does for machine_host).
-os.environ["AVA_TELEMETRY_TEMPO_QUERY_URL"] = "http://127.0.0.1:3200"
-os.environ["AVA_TELEMETRY_TEMPO_ENDPOINT"] = "http://127.0.0.1:14318"
+os.environ["MEIVA_TELEMETRY_TEMPO_QUERY_URL"] = "http://127.0.0.1:3200"
+os.environ["MEIVA_TELEMETRY_TEMPO_ENDPOINT"] = "http://127.0.0.1:14318"
 # The OTLP ingress port is rendered into the collector config, the roster gate
-# and the healthcheck probe ports; an ambient AVA_TELEMETRY_OTLP_PORT from the
+# and the healthcheck probe ports; an ambient MEIVA_TELEMETRY_OTLP_PORT from the
 # operator's .env would move every rendered endpoint off the pinned 4318 the
 # render tests assert. Pinned for the same leak class as the Tempo URLs.
-os.environ["AVA_TELEMETRY_OTLP_PORT"] = "4318"
+os.environ["MEIVA_TELEMETRY_OTLP_PORT"] = "4318"
 # The collector endpoint is a value AND a signal: any env value marks the
 # field explicitly set (killing the port-derived default) and opens the OTLP
 # export gates for every identity (endpoint_override_is_explicit). So unlike
@@ -253,9 +253,9 @@ os.environ["AVA_TELEMETRY_OTLP_PORT"] = "4318"
 # stayed green (test_exec_subprocess.py, test_otel_bootstrap_relay.py,
 # 2026-09-14). Popped, never set: absent is the state CI runs in — the
 # endpoint derives from the pinned port, and a test that needs an explicit
-# endpoint monkeypatches it. Host AVA_LGTM_* are popped in tests/_test_env_file.
-os.environ.pop("AVA_TELEMETRY_OTLP_ENDPOINT", None)
-os.environ["AVA_MACHINE_HOST"] = "localhost"
+# endpoint monkeypatches it. Host MEIVA_LGTM_* are popped in tests/_test_env_file.
+os.environ.pop("MEIVA_TELEMETRY_OTLP_ENDPOINT", None)
+os.environ["MEIVA_MACHINE_HOST"] = "localhost"
 
 # ── Grafana admin credential: the suite never carries a live one ──
 #
@@ -270,25 +270,25 @@ os.environ["GRAFANA_ADMIN_PASSWORD"] = ""
 # The gateway address every client-side caller resolves (`gateway_api_base()` ->
 # `_resolve_gateway_url()` -> `settings.gateway.gateway_url`, whose field default
 # is ""). It is read off the Settings singleton, so it has to be in the
-# environment before `import ava` builds that singleton — a later assignment
+# environment before `import meiva` builds that singleton — a later assignment
 # cannot reach it.
 #
 # This is the one value the suite was getting purely by accident. It used to be a
 # `setdefault` further down, which was dead code twice over: the operator's real
-# ~/.ava/.env had already supplied their live gateway URL, and even had it not,
+# ~/.meiva/.env had already supplied their live gateway URL, and even had it not,
 # the assignment landed after Settings was built. Five tests (the SDK client's
 # bearer/base-url pair, cmd_restart, the agent-runner self-update) passed only
-# because that leaked value was there — on a host with no Ava install they raise
+# because that leaked value was there — on a host with no Meiva install they raise
 # `GatewayApiBaseMissing`. Pinned unconditionally, like the db/redis/secret
 # sentinels above, so the suite resolves the same fake gateway everywhere instead
 # of inheriting whatever the box happens to be enrolled with.
-os.environ["AVA_GATEWAY_URL"] = "http://test-gateway.invalid:8000"
+os.environ["MEIVA_GATEWAY_URL"] = "http://test-gateway.invalid:8000"
 # ── Telegram: the suite never carries a live bot token ──
 #
-# On dev boxes the login shell exports the operator's real ~/.ava/.env into
+# On dev boxes the login shell exports the operator's real ~/.meiva/.env into
 # every child process (the 2026-08-04 shell-env leak class), so
-# AVA_TELEGRAM_BOT_TOKEN / AVA_TELEGRAM_OWNER_ID are live here even though
-# AVA_HOME is redirected: pydantic-settings precedence is env > default, and
+# MEIVA_TELEGRAM_BOT_TOKEN / MEIVA_TELEGRAM_OWNER_ID are live here even though
+# MEIVA_HOME is redirected: pydantic-settings precedence is env > default, and
 # `_enforce_cluster_env_authority` drops only the DERIVED data-plane keys, not
 # these. Anything reading `settings.telegram` then holds a working send path
 # to the operator's bot. The health probe did exactly that pre-W16 — its
@@ -300,15 +300,15 @@ os.environ["AVA_GATEWAY_URL"] = "http://test-gateway.invalid:8000"
 # telegram skill, IM adapters, any future direct caller). Pinned empty like
 # the db/redis sentinels: a test that needs a token monkeypatches
 # `settings.telegram` explicitly (cli/commands/cluster/tests/test_cluster_health.py does).
-os.environ["AVA_TELEGRAM_BOT_TOKEN"] = ""
-os.environ["AVA_TELEGRAM_OWNER_ID"] = "0"
+os.environ["MEIVA_TELEGRAM_BOT_TOKEN"] = ""
+os.environ["MEIVA_TELEGRAM_OWNER_ID"] = "0"
 # Terminal/execution transport tests have no inherited desktop-helper route.
 # This switch does not disable mandatory macOS application-root ancestry:
 # _guard_permissions_helper_native_io forbids those native effects separately.
 # A terminal transport test can deliberately patch its own helper capability.
-os.environ["AVA_PERMISSIONS_HELPER_SPAWN"] = "false"
+os.environ["MEIVA_PERMISSIONS_HELPER_SPAWN"] = "false"
 # The spawn-attribution marker rides a second channel the pin above cannot
-# close: the signed helper stamps AVA_PERMISSIONS_HELPER_PID (its own pid)
+# close: the signed helper stamps MEIVA_PERMISSIONS_HELPER_PID (its own pid)
 # into every direct child (services/desktop/permissions_helper/helper/main.swift),
 # descendants inherit it, and base/helper_chain_guard.parent_chain_intact
 # treats a marked process whose ancestor chain lacks the helper as an
@@ -319,9 +319,9 @@ os.environ["AVA_PERMISSIONS_HELPER_SPAWN"] = "false"
 # is stripped with it so the suite carries no helper spawn context at all —
 # the state CI runs in. A test that needs the marker sets it via monkeypatch
 # (tests/harness/test_helperproc.py).
-os.environ.pop("AVA_PERMISSIONS_HELPER_PID", None)
-os.environ.pop("AVA_PERMISSIONS_HELPER_PORT", None)
-# ── Off-site backup destination: no ambient AVA_BACKUP_OFFSITE_* in the suite ──
+os.environ.pop("MEIVA_PERMISSIONS_HELPER_PID", None)
+os.environ.pop("MEIVA_PERMISSIONS_HELPER_PORT", None)
+# ── Off-site backup destination: no ambient MEIVA_BACKUP_OFFSITE_* in the suite ──
 #
 # Same shell-leak class as the telegram token above. A field the fixture `.env`
 # does not pin falls back to the BOOT-TIME environment value (candidate
@@ -330,12 +330,12 @@ os.environ.pop("AVA_PERMISSIONS_HELPER_PORT", None)
 # resolve an "unconfigured" home as configured. CI carries no such env; scrubbing
 # here makes a local run resolve exactly as CI does. A test that exercises the
 # destination sets its own keys (monkeypatch / write_fields).
-for _offsite_key in [key for key in os.environ if key.startswith("AVA_BACKUP_OFFSITE_")]:
+for _offsite_key in [key for key in os.environ if key.startswith("MEIVA_BACKUP_OFFSITE_")]:
     del os.environ[_offsite_key]
 # The WAL-G switch is the same class: a shell that carries it would turn archiving
 # on for every Postgres a test starts. The key is off by default and a test that
 # needs it sets it itself.
-os.environ.pop("AVA_WALG_CONFIG_FILE", None)
+os.environ.pop("MEIVA_WALG_CONFIG_FILE", None)
 
 # Repository providers read the process environment while spawn validation reads
 # the cluster `.env` file. Seed every default provider's inert key through both
@@ -354,7 +354,7 @@ for _provider_key_env in _TEST_PROVIDER_KEY_ENVS:
     os.environ[_provider_key_env] = "sk-test"
 # ── The same DERIVED keys, declared in the test home's .env ──
 #
-# `_enforce_cluster_env_authority` (dotenv_boot, run at `load_ava_env`) forces a
+# `_enforce_cluster_env_authority` (dotenv_boot, run at `load_meiva_env`) forces a
 # DERIVED key the unit's .env declares, and DROPS one it does not (2026-08-02:
 # generalized from the pgbouncer-port-only rule). The suite plants its cluster
 # values in the ENVIRONMENT, not in a file — which worked while the drop was
@@ -363,44 +363,44 @@ for _provider_key_env in _TEST_PROVIDER_KEY_ENVS:
 # test home's .env as well, so the file declares what the env carries and the
 # authority pass takes the force branch. Subprocess tests that spawn the real
 # CLI inherit this home, so they read the same declarations.
-(TEST_AVA_HOME / ".env").write_text(
+(TEST_MEIVA_HOME / ".env").write_text(
     "\n".join(
         [
             # Cluster-scope pin carried by both channels (see the block above):
             # the env side sets it before Settings construction, the file side
             # keeps the authority pass on its force branch.
-            f"AVA_COMPACT_HISTORY_DUMP={os.environ['AVA_COMPACT_HISTORY_DUMP']}",
-            f"AVA_DB_URL={os.environ['AVA_DB_URL']}",
-            f"AVA_REDIS_URL={os.environ['AVA_REDIS_URL']}",
-            f"AVA_EVENTS_CHANNEL={_TEST_EVENTS_CHANNEL}",
-            f"AVA_CLUSTER_SECRET={os.environ['AVA_CLUSTER_SECRET']}",
-            "AVA_RUNNER_DB_PASSWORD=test-runner-db-password",
-            f"AVA_TRANSPORT_ENCRYPTION={os.environ['AVA_TRANSPORT_ENCRYPTION']}",
-            f"AVA_GATEWAY_URL={os.environ['AVA_GATEWAY_URL']}",
-            f"AVA_TELEGRAM_BOT_TOKEN={os.environ['AVA_TELEGRAM_BOT_TOKEN']}",
-            f"AVA_TELEGRAM_OWNER_ID={os.environ['AVA_TELEGRAM_OWNER_ID']}",
+            f"MEIVA_COMPACT_HISTORY_DUMP={os.environ['MEIVA_COMPACT_HISTORY_DUMP']}",
+            f"MEIVA_DB_URL={os.environ['MEIVA_DB_URL']}",
+            f"MEIVA_REDIS_URL={os.environ['MEIVA_REDIS_URL']}",
+            f"MEIVA_EVENTS_CHANNEL={_TEST_EVENTS_CHANNEL}",
+            f"MEIVA_CLUSTER_SECRET={os.environ['MEIVA_CLUSTER_SECRET']}",
+            "MEIVA_RUNNER_DB_PASSWORD=test-runner-db-password",
+            f"MEIVA_TRANSPORT_ENCRYPTION={os.environ['MEIVA_TRANSPORT_ENCRYPTION']}",
+            f"MEIVA_GATEWAY_URL={os.environ['MEIVA_GATEWAY_URL']}",
+            f"MEIVA_TELEGRAM_BOT_TOKEN={os.environ['MEIVA_TELEGRAM_BOT_TOKEN']}",
+            f"MEIVA_TELEGRAM_OWNER_ID={os.environ['MEIVA_TELEGRAM_OWNER_ID']}",
             *(f"{key}={os.environ[key]}" for key in _TEST_PROVIDER_KEY_ENVS),
             # Host binary selections are file-owned. Preserve an explicit test
             # override through Settings refresh without importing a real home.
             *(
                 f"{key}={os.environ[key]}"
-                for key in ("AVA_REDIS_BIN_DIR", "AVA_PG_BIN_DIR")
+                for key in ("MEIVA_REDIS_BIN_DIR", "MEIVA_PG_BIN_DIR")
                 if key in os.environ
             ),
-            f"AVA_TELEMETRY_OTLP_ENABLED={os.environ['AVA_TELEMETRY_OTLP_ENABLED']}",
-            f"AVA_TELEMETRY_TEMPO_QUERY_URL={os.environ['AVA_TELEMETRY_TEMPO_QUERY_URL']}",
-            f"AVA_TELEMETRY_TEMPO_ENDPOINT={os.environ['AVA_TELEMETRY_TEMPO_ENDPOINT']}",
-            f"AVA_MACHINE_HOST={os.environ['AVA_MACHINE_HOST']}",
+            f"MEIVA_TELEMETRY_OTLP_ENABLED={os.environ['MEIVA_TELEMETRY_OTLP_ENABLED']}",
+            f"MEIVA_TELEMETRY_TEMPO_QUERY_URL={os.environ['MEIVA_TELEMETRY_TEMPO_QUERY_URL']}",
+            f"MEIVA_TELEMETRY_TEMPO_ENDPOINT={os.environ['MEIVA_TELEMETRY_TEMPO_ENDPOINT']}",
+            f"MEIVA_MACHINE_HOST={os.environ['MEIVA_MACHINE_HOST']}",
             # The session unit's identity, as an initialized home records it: spawn_agent /
             # claim_agent_row read machine_name(), and a runner flag with a gateway URL is a
             # configured agent-runner. Subprocess tests that spawn the real CLI read it here.
-            f"AVA_MACHINE_NAME=test-{_SESSION_SUFFIX}",
-            "AVA_MACHINE_SERVE_AGENT_RUNNER=true",
+            f"MEIVA_MACHINE_NAME=test-{_SESSION_SUFFIX}",
+            "MEIVA_MACHINE_SERVE_AGENT_RUNNER=true",
             f"GRAFANA_ADMIN_PASSWORD={os.environ['GRAFANA_ADMIN_PASSWORD']}",
             # Same force-branch reasoning: exec timeout is cluster-scoped; without a
             # declaration the drop deletes the pinned 60s and the D5 fallback reads the
             # field default (300s) — test_config bootstrap/panel tests assert equality.
-            "AVA_EXEC_TIMEOUT_SECONDS=60.0",  # the pinned value below; constant, not env-read (write precedes the pin)
+            "MEIVA_EXEC_TIMEOUT_SECONDS=60.0",  # the pinned value below; constant, not env-read (write precedes the pin)
             "",
         ]
     )
@@ -419,20 +419,20 @@ def _assert_env_precedes_project_imports() -> None:
 
     So assert the precondition instead of documenting it. `tests` itself is
     excluded (it is the package this module lives in); `base` is the one that
-    matters, since it is what loads `$AVA_HOME/.env`.
+    matters, since it is what loads `$MEIVA_HOME/.env`.
     """
     leaked = sorted(
         name
         for name in sys.modules
-        if name.split(".")[0] in {"base", "ava", "agent", "gateway", "cli", "ops", "services"}
+        if name.split(".")[0] in {"base", "meiva", "agent", "gateway", "cli", "ops", "services"}
     )
     if leaked:
         raise RuntimeError(
             "tests/fixtures/env_bootstrap.py: a project module was imported before the env block "
             f"finished: {leaked[:5]}{'...' if len(leaked) > 5 else ''}. Everything above "
-            "this line sets env vars that are read at IMPORT time — AVA_HOME decides "
+            "this line sets env vars that are read at IMPORT time — MEIVA_HOME decides "
             "which .env the config boot loads. An import above it silently pins the "
-            "suite to the operator's real ~/.ava, production credentials included. Move the import below this assertion, or "
+            "suite to the operator's real ~/.meiva, production credentials included. Move the import below this assertion, or "
             "list the plugin that imports it after tests.fixtures.env_bootstrap in the "
             "repo-root conftest.py."
         )
@@ -447,7 +447,7 @@ from dotenv import dotenv_values
 os.environ.update(
     {
         key: value
-        for key, value in dotenv_values(TEST_AVA_HOME / ".env").items()
+        for key, value in dotenv_values(TEST_MEIVA_HOME / ".env").items()
         if value is not None
     }
 )
@@ -457,8 +457,8 @@ from base.host.env.port_table import FIXED_PORTS
 from base.host.env.registry import health_port_env_aliases
 from base.native_process.os_platform import raise_fd_limit
 
-os.environ.pop("AVA_AGENT_ID", None)
-os.environ["AVA_EXEC_TIMEOUT_SECONDS"] = "60.0"
+os.environ.pop("MEIVA_AGENT_ID", None)
+os.environ["MEIVA_EXEC_TIMEOUT_SECONDS"] = "60.0"
 
 
 def _reserve_distinct_ports(count: int) -> list[int]:
@@ -479,13 +479,13 @@ def _reserve_distinct_ports(count: int) -> list[int]:
 
 def _pin_setting(field: str, value: object) -> None:
     """Deliver a session pin before Settings construction, including child boots."""
-    key = f"AVA_{field.upper()}"
+    key = f"MEIVA_{field.upper()}"
     os.environ[key] = str(value)
-    tests._test_env_file.rewrite_line(TEST_AVA_HOME / ".env", key, str(value))
+    tests._test_env_file.rewrite_line(TEST_MEIVA_HOME / ".env", key, str(value))
 
 
 _HEALTH_PORT_FIELDS = tuple(
-    alias.removeprefix("AVA_").lower() for alias in health_port_env_aliases().values()
+    alias.removeprefix("MEIVA_").lower() for alias in health_port_env_aliases().values()
 )
 _ports = iter(_reserve_distinct_ports(len(_HEALTH_PORT_FIELDS) + 7 + len(FIXED_PORTS)))
 for _health_port_field in _HEALTH_PORT_FIELDS:
@@ -535,7 +535,7 @@ _PRISTINE_ENV: dict[str, str] = dict(os.environ)
 def _config_chain_upgraded() -> None:
     """Upgrade the boot-lite config before the first test, once the test modules are imported.
 
-    `AVA_CONFIG_BOOT=eager` above does not take effect: the `AVA_CONFIG_FETCH=skip` pin wins
+    `MEIVA_CONFIG_BOOT=eager` above does not take effect: the `MEIVA_CONFIG_FETCH=skip` pin wins
     over it in `ConfigBoot.boot`, so the process stays boot-lite and the first test to read a
     non-boot field would upgrade it inside that test. The upgrade installs `Settings` and its
     companions into `base.config`; the leak guard reads those as a leak, pops them, and leaves

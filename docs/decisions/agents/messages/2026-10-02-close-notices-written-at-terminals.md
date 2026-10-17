@@ -2,9 +2,9 @@
 
 ## Context
 
-`ava stop` closes busy persistent shells and owes each owner agent a notice
+`meiva stop` closes busy persistent shells and owes each owner agent a notice
 (issue #2044). The first design recorded one JSON file per notice under
-`$AVA_HOME/state/pty-close-notices/` and had a task in the ops daemon deliver
+`$MEIVA_HOME/state/pty-close-notices/` and had a task in the ops daemon deliver
 the files at the next start, once the start released its maintenance hold. The
 reasoning: the stop window was meant to open no database client connection
 (`decisions/2026-09-12-stop-window-contract.md`), and the gateway and ops

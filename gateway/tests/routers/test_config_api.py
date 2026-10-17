@@ -373,8 +373,8 @@ def test_put_self_returns_write_result_and_routes_scopes(clean_overrides: Path) 
     # host ops_concurrency.
     assert runtime_config.env_set_field_names() == {"llm_model", "ops_concurrency"}
     aliases = dotenv_file.read_env_aliases()
-    assert aliases["AVA_MODEL"] == "put-cluster"
-    assert aliases["AVA_OPS_CONCURRENCY"] == "4"
+    assert aliases["MEIVA_MODEL"] == "put-cluster"
+    assert aliases["MEIVA_OPS_CONCURRENCY"] == "4"
 
 
 def test_put_self_capability_failure_writes_nothing(clean_overrides: Path) -> None:
@@ -421,7 +421,7 @@ def test_put_accepts_valid_enum_value(clean_overrides: Path) -> None:
         resp = client.put("/api/config", json={"agent_reply_reminder_cadence": "every_time"})
     assert resp.status_code == 200, resp.text
     assert resp.json()["applied"] is True
-    assert dotenv_file.read_env_aliases()["AVA_AGENT_REPLY_REMINDER_CADENCE"] == "every_time"
+    assert dotenv_file.read_env_aliases()["MEIVA_AGENT_REPLY_REMINDER_CADENCE"] == "every_time"
 
 
 def test_put_rejects_invalid_enum_value(clean_overrides: Path) -> None:
@@ -461,7 +461,7 @@ def test_put_sentinel_preserves_secret(clean_overrides: Path) -> None:
     assert resp.status_code == 200, resp.text
     aliases = dotenv_file.read_env_aliases()
     assert aliases["DEEPSEEK_API_KEY"] == "sk-REAL-SECRET"  # untouched
-    assert aliases["AVA_MODEL"] == "m2"
+    assert aliases["MEIVA_MODEL"] == "m2"
 
 
 def test_put_absent_key_preserves_secret(clean_overrides: Path) -> None:
@@ -480,7 +480,7 @@ def test_put_absent_key_preserves_secret(clean_overrides: Path) -> None:
     aliases = dotenv_file.read_env_aliases()
     assert aliases["DEEPSEEK_API_KEY"] == "sk-REAL-SECRET"  # untouched (absent from body)
     assert aliases["OPENAI_API_KEY"] == "sk-OPENAI"  # untouched (absent from body)
-    assert aliases["AVA_MODEL"] == "m2"
+    assert aliases["MEIVA_MODEL"] == "m2"
 
 
 def test_put_replaces_one_secret_leaves_others(clean_overrides: Path) -> None:
@@ -515,7 +515,7 @@ def test_put_replaces_one_secret_leaves_others(clean_overrides: Path) -> None:
     aliases = dotenv_file.read_env_aliases()
     assert aliases["DEEPSEEK_API_KEY"] == "sk-NEW-DEEPSEEK"  # rewritten
     assert aliases["OPENAI_API_KEY"] == "sk-OPENAI"  # untouched (sentinel)
-    assert aliases["AVA_MODEL"] == "m1"
+    assert aliases["MEIVA_MODEL"] == "m1"
 
 
 def test_put_null_unsets_cluster_field(clean_overrides: Path) -> None:
@@ -527,7 +527,7 @@ def test_put_null_unsets_cluster_field(clean_overrides: Path) -> None:
         resp = client.put("/api/config", json={"llm_model": None})
     assert resp.status_code == 200, resp.text
     aliases = dotenv_file.read_env_aliases()
-    assert "AVA_MODEL" not in aliases  # explicitly unset
+    assert "MEIVA_MODEL" not in aliases  # explicitly unset
     assert aliases["DEEPSEEK_API_KEY"] == "sk-X"  # untouched
 
 
@@ -541,7 +541,7 @@ def test_put_host_failure_leaves_cluster_unwritten(clean_overrides: Path) -> Non
         )
     assert resp.status_code == 200, resp.text
     assert resp.json()["applied"] is False
-    assert "AVA_MODEL" not in dotenv_file.read_env_aliases()
+    assert "MEIVA_MODEL" not in dotenv_file.read_env_aliases()
 
 
 def test_put_rejects_bad_scalar(
@@ -589,7 +589,7 @@ def test_put_nonsensitive_field_can_hold_literal_sentinel(clean_overrides: Path)
     with gateway_test_client() as client:
         resp = client.put("/api/config", json={"llm_model": CONFIG_UNCHANGED_SENTINEL})
     assert resp.status_code == 200, resp.text
-    assert dotenv_file.read_env_aliases()["AVA_MODEL"] == CONFIG_UNCHANGED_SENTINEL
+    assert dotenv_file.read_env_aliases()["MEIVA_MODEL"] == CONFIG_UNCHANGED_SENTINEL
 
 
 def test_put_self_edits_writable_host_capability_field(
@@ -607,7 +607,7 @@ def test_put_self_edits_writable_host_capability_field(
         resp = client.put("/api/config", json={"cross_machine_transfer_backend": "none"})
     assert resp.status_code == 200, resp.text
     assert resp.json()["applied"] is True
-    assert dotenv_file.read_env_aliases()["AVA_CROSS_MACHINE_TRANSFER_BACKEND"] == "none"
+    assert dotenv_file.read_env_aliases()["MEIVA_CROSS_MACHINE_TRANSFER_BACKEND"] == "none"
 
 
 @pytest.mark.asyncio
@@ -667,7 +667,7 @@ def test_put_self_rejects_readonly_identity_field(clean_overrides: Path) -> None
         resp = client.put("/api/config", json={"machine_name": "renamed"})
     assert resp.status_code == 400, resp.text
     assert "unknown or read-only" in resp.json()["detail"]
-    assert "AVA_MACHINE_NAME" not in dotenv_file.read_env_aliases()
+    assert "MEIVA_MACHINE_NAME" not in dotenv_file.read_env_aliases()
 
 
 def test_get_self_raw_overrides_exposes_writable_host_field_not_readonly(
@@ -712,7 +712,7 @@ def test_put_explicit_self_edits_remote_writable_host_toggle(
     assert "unknown or read-only" in cluster_resp.json()["detail"]
     assert host_resp.status_code == 200, host_resp.text
     assert host_resp.json()["applied"] is True
-    assert dotenv_file.read_env_aliases()["AVA_HEARTBEAT_ENABLED"] == "false"
+    assert dotenv_file.read_env_aliases()["MEIVA_HEARTBEAT_ENABLED"] == "false"
 
 
 # ── PUT remote ──
@@ -724,11 +724,11 @@ def test_plugin_config_owner_metadata_and_mixed_patch_rejection(clean_overrides:
 
     dotenv_file.env_file_path().touch()
     before_env = dotenv_file.env_file_path().read_bytes()
-    image = disk_image_path("ava_fleet")
+    image = disk_image_path("meiva_fleet")
     before_image = image.read_bytes() if image.exists() else None
     with gateway_test_client() as client:
         fields = {field["name"]: field for field in client.get("/api/config").json()["fields"]}
-        assert fields["task_escalate_n"]["owner"] == "ava_fleet"
+        assert fields["task_escalate_n"]["owner"] == "meiva_fleet"
         assert fields["llm_model"]["owner"] is None
         response = client.put("/api/config", json={"task_escalate_n": 7, "llm_model": "unknown"})
     assert response.status_code == 400
@@ -738,8 +738,8 @@ def test_plugin_config_owner_metadata_and_mixed_patch_rejection(clean_overrides:
 
 
 def test_fleet_cluster_write_goes_only_to_owned_image(clean_overrides: Path) -> None:
-    from ava_builtins.plugins.ava_fleet.default_config import FleetConfig
     from base.packages.plugins.config_registration import disk_image_path, read_config_image
+    from meiva_builtins.plugins.meiva_fleet.default_config import FleetConfig
 
     dotenv_file.env_file_path().touch()
     before_env = dotenv_file.env_file_path().read_bytes()
@@ -752,7 +752,7 @@ def test_fleet_cluster_write_goes_only_to_owned_image(clean_overrides: Path) -> 
     assert response.json()["applied"] is True
     assert response.json()["restart_required"] == ["agent", "all"]
     assert invalid.status_code == 400
-    saved = read_config_image(FleetConfig, disk_image_path("ava_fleet"))
+    saved = read_config_image(FleetConfig, disk_image_path("meiva_fleet"))
     assert saved.task_escalate_n == 11 and saved.reduce_context_switch is False
     assert dotenv_file.env_file_path().read_bytes() == before_env
 
@@ -760,8 +760,8 @@ def test_fleet_cluster_write_goes_only_to_owned_image(clean_overrides: Path) -> 
 def test_remote_host_fleet_toggle_respects_owned_image_and_policy(
     *, config_authority: ConfigAuthority, machine_identity: MachineIdentity
 ) -> None:
-    from ava_builtins.plugins.ava_fleet.default_config import FleetConfig
     from base.packages.plugins.config_registration import disk_image_path, read_config_image
+    from meiva_builtins.plugins.meiva_fleet.default_config import FleetConfig
     from ops.host_config import config_write_op
 
     rejected = config_write_op(
@@ -781,7 +781,7 @@ def test_remote_host_fleet_toggle_respects_owned_image_and_policy(
     )
     assert accepted.applied is True
     assert (
-        read_config_image(FleetConfig, disk_image_path("ava_fleet")).task_maintenance_enabled
+        read_config_image(FleetConfig, disk_image_path("meiva_fleet")).task_maintenance_enabled
         is False
     )
     mixed = config_write_op(
@@ -793,6 +793,6 @@ def test_remote_host_fleet_toggle_respects_owned_image_and_policy(
     assert mixed.applied is False
     assert "mixes owners" in str(mixed.results["task_maintenance_enabled"].reason)
     assert (
-        read_config_image(FleetConfig, disk_image_path("ava_fleet")).task_maintenance_enabled
+        read_config_image(FleetConfig, disk_image_path("meiva_fleet")).task_maintenance_enabled
         is False
     )

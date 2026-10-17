@@ -4,7 +4,7 @@ sessions.
 
 Most of these spawn REAL child processes (the double-fork reparent path is the
 whole point of the supervisor), so they are POSIX-only and use the ``unit_home``
-fixture to keep records/logs under a tmp $AVA_HOME — the same shape as
+fixture to keep records/logs under a tmp $MEIVA_HOME — the same shape as
 base/sessions/tests/test_posixproc.py. Command-shape tests monkeypatch the supervisor
 instead.
 """
@@ -58,17 +58,17 @@ def test_new_session_login_shell_wraps(monkeypatch: pytest.MonkeyPatch, unit_hom
     monkeypatch.setattr(posixproc, "new_session", fake_new)  # pyright: ignore[reportUnknownArgumentType]
 
     env = {
-        "AVA_HOME": str(unit_home),  # pyright: ignore[reportUnknownArgumentType]
+        "MEIVA_HOME": str(unit_home),  # pyright: ignore[reportUnknownArgumentType]
         "PATH": "/bin",
-        "AVA_CLUSTER_SECRET": "top-secret-value",
+        "MEIVA_CLUSTER_SECRET": "top-secret-value",
     }
     ok = _backend().new_session(
-        "ava-main-gateway", ".venv/bin/python -m gateway", Path("/repo"), env=env
+        "meiva-main-gateway", ".venv/bin/python -m gateway", Path("/repo"), env=env
     )
     assert ok is True
     assert len(calls) == 1  # pyright: ignore[reportUnknownArgumentType]
     name, cmd, cwd, got_env = calls[0]
-    assert name == "ava-main-gateway"
+    assert name == "meiva-main-gateway"
     assert cwd == Path("/repo")
     # env passes through untouched — the child inherits it as its real
     # environment (the legacy sourced-file mechanism existed only to keep values
@@ -105,7 +105,7 @@ def test_new_session_no_login_shell_passthrough(monkeypatch: pytest.MonkeyPatch)
     monkeypatch.setattr(posixproc, "new_session", fake_new)  # pyright: ignore[reportUnknownArgumentType]
 
     ok = _backend().new_session(
-        "ava-svc", "mycmd --flag", Path("/repo"), env={"PATH": "/bin"}, login_shell=False
+        "meiva-svc", "mycmd --flag", Path("/repo"), env={"PATH": "/bin"}, login_shell=False
     )
     assert ok is True
     assert captured["cmd"] == "mycmd --flag"
@@ -117,8 +117,8 @@ def test_posix_backend_keeps_its_own_log_file():
     from base.sessions.protocol import SessionBackend
 
     posix_be = _backend()
-    assert posix_be.session_log_path("ava-x") is not None
-    assert SessionBackend.session_log_path(posix_be, "ava-x") is None
+    assert posix_be.session_log_path("meiva-x") is not None
+    assert SessionBackend.session_log_path(posix_be, "meiva-x") is None
 
 
 # ---------------------------------------------------------------------------
@@ -130,7 +130,7 @@ def test_spawn_and_kill_idempotent(unit_home):
     """new_session twice on a live name is a no-op (same pid); kill confirms
     the session gone; a second kill is a noop."""
     backend = _backend()
-    name = "ava-test-posixbe-1"
+    name = "meiva-test-posixbe-1"
     assert backend.new_session(name, _SLEEP, unit_home, env=dict(os.environ)) is True  # pyright: ignore[reportUnknownArgumentType]
     try:
         first_pid = _pid(name)
@@ -153,7 +153,7 @@ def test_kill_session_accepts_expected_for_interface_parity(unit_home):
     """kill_session takes the `expected` kwarg callers pass on rollout/stop
     paths (the ABC requires it) and ignores it — the native supervisor has no
     force-kill escalation to quieten."""
-    ok, mode = _backend().kill_session("ava-test-posixbe-ghost", expected=True)
+    ok, mode = _backend().kill_session("meiva-test-posixbe-ghost", expected=True)
     assert ok is True and mode == "noop"
 
 
@@ -164,7 +164,7 @@ def test_tree_kill_leaves_no_orphans(unit_home):
     script.write_text(  # pyright: ignore[reportUnknownMemberType]
         "import subprocess, time\nsubprocess.Popen(['sleep', '300'])\ntime.sleep(300)\n"
     )
-    name = "ava-test-posixbe-tree"
+    name = "meiva-test-posixbe-tree"
     cmd = f"{sys.executable} {shlex.quote(str(script))}"  # pyright: ignore[reportUnknownArgumentType]
     backend = _backend()
     assert backend.new_session(name, cmd, unit_home, env=dict(os.environ)) is True  # pyright: ignore[reportUnknownArgumentType]
@@ -212,7 +212,7 @@ def test_pid_reuse_protection(unit_home):
     create_time) is not a live session — the liveness check defeats pid
     recycling by the OS."""
     backend = _backend()
-    name = "ava-test-posixbe-pidreuse"
+    name = "meiva-test-posixbe-pidreuse"
     # An unrelated long-lived process we control, standing in for the recycled pid.
     proc = subprocess.Popen(["/bin/sleep", "300"])
     try:
@@ -226,7 +226,7 @@ def test_pid_reuse_protection(unit_home):
         )
         rec.write(posixproc.record_path(name))
         assert backend.has_session(name) is False
-        assert name not in backend.list_sessions(prefix="ava-test-posixbe-")
+        assert name not in backend.list_sessions(prefix="meiva-test-posixbe-")
     finally:
         proc.kill()
         proc.wait(timeout=5)
@@ -236,7 +236,7 @@ def test_session_record_reclaimed(unit_home):
     """A record whose process died out from under it is unlinked as
     list_sessions walks, so the listing reflects reality."""
     backend = _backend()
-    name = "ava-test-posixbe-reclaim"
+    name = "meiva-test-posixbe-reclaim"
     assert backend.new_session(name, _SLEEP, unit_home, env=dict(os.environ)) is True  # pyright: ignore[reportUnknownArgumentType]
     pid = _pid(name)
     # Kill the process WITHOUT going through kill_session, so the record lingers.
@@ -244,7 +244,7 @@ def test_session_record_reclaimed(unit_home):
     proc.kill()
     proc.wait(timeout=5)
     assert posixproc.record_path(name).exists()
-    assert backend.list_sessions(prefix="ava-test-posixbe-") == []
+    assert backend.list_sessions(prefix="meiva-test-posixbe-") == []
     assert not posixproc.record_path(name).exists()
 
 
@@ -265,7 +265,7 @@ def test_login_shell_rebuilds_path_with_venv_prefix(unit_home):
     # A marker prefix on a still-working PATH: the login profile must DROP the
     # forwarded prefix (it rebuilds PATH from scratch) while bash stays findable.
     env["PATH"] = "/custom-only/bin:" + os.environ["PATH"]
-    name = "ava-test-posixbe-path1"
+    name = "meiva-test-posixbe-path1"
     # Write via tmp + rename: `>` creates the file empty before echo fills it,
     # so a bare redirect lets poll_until(out.exists) observe an empty window.
     tmp = out.with_suffix(".tmp")  # pyright: ignore[reportUnknownMemberType]
@@ -295,7 +295,7 @@ def test_no_login_shell_preserves_env_path_exactly(unit_home):
     out.unlink(missing_ok=True)  # pyright: ignore[reportUnknownMemberType]
     env = dict(os.environ)
     env["PATH"] = "/custom-only/bin"
-    name = "ava-test-posixbe-path2"
+    name = "meiva-test-posixbe-path2"
     # tmp + rename for the same empty-window reason as the login-shell test
     tmp = out.with_suffix(".tmp")  # pyright: ignore[reportUnknownMemberType]
     cmd = f'echo "$PATH" > {shlex.quote(str(tmp))} && exec /bin/mv {shlex.quote(str(tmp))} {shlex.quote(str(out))}'  # pyright: ignore[reportUnknownArgumentType]
@@ -338,7 +338,7 @@ def test_backend_is_a_session_backend():
 
 
 def test_has_session_false_for_unknown(unit_home):
-    assert _backend().has_session("ava-test-posixbe-unknown") is False
+    assert _backend().has_session("meiva-test-posixbe-unknown") is False
 
 
 def test_get_shell_backend_returns_pty_backend():

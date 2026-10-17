@@ -1,0 +1,9 @@
+# Fixture modules (tests/path_scoped/) that govern this directory's tests: "." is the
+# directory itself, otherwise the test files named here (tests/fixtures/path_scopes.py).
+"agent.tests.agent_tests" = [
+    "test_meiva_sdk_reminder_plugin.py",
+    "test_sysprompt_verbosity_regression.py",
+]
+"meiva.tests.fixtures.sdk" = [
+    "test_data_registry.py",
+]

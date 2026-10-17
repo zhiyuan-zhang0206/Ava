@@ -164,12 +164,12 @@ def require_postgres_connection(
 
 
 def redis_data_dir() -> Path:
-    """This home's native Redis data directory (`$AVA_HOME/redis`)."""
+    """This home's native Redis data directory (`$MEIVA_HOME/redis`)."""
     # Lazy: `import base.cluster` stays free of Settings and the home (the restricted
     # restore worker imports it before either exists).
-    from base.paths import ava_home
+    from base.paths import meiva_home
 
-    return ava_home() / "redis"
+    return meiva_home() / "redis"
 
 
 def redis_port_of(redis_url: str) -> int | None:

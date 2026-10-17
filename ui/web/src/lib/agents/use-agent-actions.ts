@@ -84,7 +84,7 @@ export function useAgentActions(
 
   const forkMutation = useMutation({
     // Fork defaults to the source agent's machine — sharing local
-    // resources on the same node (~/.ava/memory / plugin config /
+    // resources on the same node (~/.meiva/memory / plugin config /
     // panel server etc.) and avoiding unnecessary cross-machine
     // forwards. If source can not be found, the UI is holding a stale
     // id (the button should not appear for a non-existent agent) —

@@ -1,11 +1,11 @@
 """Durable status journal for hosted lifecycle operations (stop / restart).
 
 A lifecycle command can outlive its caller: an outer budget (a subprocess
-timeout on `ava restart`, a dropped SSH session) kills the CLI process
+timeout on `meiva restart`, a dropped SSH session) kills the CLI process
 mid-operation, and stdout — the only place phase progress and the final
 diagnosis were printed — is lost with it. This journal records the operation's
 identity, deadline, phase timeline and final diagnosis at
-``$AVA_HOME/run/lifecycle-op.json``, written atomically after every phase, so
+``$MEIVA_HOME/run/lifecycle-op.json``, written atomically after every phase, so
 the outcome stays readable after the process is gone (issue #2123).
 
 Writers never fail the operation they journal: a journal write failure is
@@ -34,7 +34,7 @@ from typing import Any, cast
 import psutil
 
 from base.log import logger
-from base.paths import ava_home, run_dir
+from base.paths import meiva_home, run_dir
 
 
 @dataclass
@@ -72,7 +72,7 @@ class LifecycleOp:
 
 
 def journal_path() -> Path:
-    return run_dir(ava_home()) / "lifecycle-op.json"
+    return run_dir(meiva_home()) / "lifecycle-op.json"
 
 
 def _write(op: LifecycleOp) -> None:

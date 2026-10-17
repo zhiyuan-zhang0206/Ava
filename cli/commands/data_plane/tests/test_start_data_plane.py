@@ -27,7 +27,7 @@ def _rec() -> cluster.ClusterRecord:
 
 class _Ledger:
     def __init__(self, *, active: bool) -> None:
-        self.owner = "ava"
+        self.owner = "meiva"
         self.groups = "groups"
         self.active = SimpleNamespace(number=0) if active else None
         self.generation = SimpleNamespace(number=0)
@@ -53,7 +53,7 @@ def plane(monkeypatch: pytest.MonkeyPatch, data_plane_config: DataPlaneConfig) -
     recorded = _Plane(
         dataclasses.replace(
             data_plane_config,
-            db_url="postgresql://ava@127.0.0.1:6433/ava",
+            db_url="postgresql://meiva@127.0.0.1:6433/meiva",
             redis_url="redis://127.0.0.1:6380/0",
         )
     )
@@ -72,7 +72,7 @@ def plane(monkeypatch: pytest.MonkeyPatch, data_plane_config: DataPlaneConfig) -
 
     monkeypatch.setattr(bringup, "prepare_memory_vectors", record("memory-vectors"))
     monkeypatch.setattr(bringup, "admin_session", admin)
-    monkeypatch.setattr(bringup, "db_endpoint", lambda: "postgresql://ava@127.0.0.1:6433/ava")
+    monkeypatch.setattr(bringup, "db_endpoint", lambda: "postgresql://meiva@127.0.0.1:6433/meiva")
     monkeypatch.setattr(bringup, "ensure_pooler", record("pooler"))
     monkeypatch.setattr(bringup, "prove_generation_logins", record("prove-logins"))
     monkeypatch.setattr(bringup, "adopt_gateway_login", record("adopt"))
@@ -295,7 +295,7 @@ def test_remote_plane_prepares_memory_vectors_through_its_provider_url(
 
     data_plane_config = dataclasses.replace(
         data_plane_config,
-        db_url="postgresql://owner@db.example/ava",
+        db_url="postgresql://owner@db.example/meiva",
         memory_search_backend="pgvector",
     )
     patch_database(monkeypatch, connect=provider)
@@ -355,7 +355,7 @@ def test_storage_refuses_missing_credentials_before_effects(
             data_plane_config,
             pg_port=5433,
             redis_port=6380,
-            redis_user="ava",
+            redis_user="meiva",
             redis_password=credentials["redis_password"],
             retained_children=retained_children,
             machine=command_machine,

@@ -24,7 +24,7 @@ regex scanning is limited to streaming items where the field is absent. Alerts
 history now pins the 24-hour window named by its empty-state copy, and fleet
 graph counts/emptiness follow the rendered liveness-filtered graph.
 
-The Ava Ops dashboard required no change: it already opens at six hours with no
+The Meiva Ops dashboard required no change: it already opens at six hours with no
 per-panel time overrides or collapsed rows. Its 32 instant range-scanning
 targets are stat/table/barchart whole-window totals, where bucketed range
 queries would change the displayed value. The retired metrics redirect also

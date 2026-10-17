@@ -24,7 +24,7 @@ Two invariants make one upstream safe for many clients:
 
 Page lifetime (2026-09-11 ruling): every page this stack
 CREATES (an explicit `new_page`, or the auto-created page on a page-less first
-navigate) carries a hard TTL deadline (`AVA_CHROME_PAGE_DEFAULT_TTL_SECONDS`,
+navigate) carries a hard TTL deadline (`MEIVA_CHROME_PAGE_DEFAULT_TTL_SECONDS`,
 24h default) and is closed by the expiry sweep when
 the deadline passes -- activity never extends it. `renew_page`, a daemon-owned
 tool appended to the upstream tool list, moves the deadline to now + ttl (at
@@ -39,7 +39,7 @@ Chrome tab group (`ChromeMcpDaemon._new_page`, via
 is logged and never fails the call. Nothing here removes a group -- Chrome does
 when the agent's last page closes, which every close path above ends in.
 
-Wire protocol (JSON line per request, mirrors `ava.mcps._daemon`):
+Wire protocol (JSON line per request, mirrors `meiva.mcps._daemon`):
   Request:  {"id": 1, "method": "list_tools"}
             {"id": 2, "method": "call_tool", "tool": "click", "args": {...}}
             {"id": 3, "method": "release_agent_page", "agent_id": 7}
@@ -77,7 +77,7 @@ from base.db.config import db_config_from_boot
 from base.log import logger
 from base.native_process.code_version import CodeVersion
 from base.native_process.loaded_commit import LoadedCommit
-from base.paths import ava_home, chrome_mcp_socket
+from base.paths import chrome_mcp_socket, meiva_home
 from base.telemetry import build_pipeline
 from base.telemetry.process_logging import init_gateway_process
 from services.desktop.browser import page_lifecycle
@@ -648,7 +648,7 @@ async def run(
             gateway.cancel_one_shots()
             tab_groups.cancel_pending()
             # Two bounded steps, so the daemon may keep closing for up to
-            # `shutdown_budget.SHUTDOWN_CEILING_S`; ava-root's window for this unit
+            # `shutdown_budget.SHUTDOWN_CEILING_S`; meiva-root's window for this unit
             # is derived from that total.
             await bounded_stack_close(current_stack, "upstream stack close during shutdown")
             server.close()
@@ -693,7 +693,7 @@ def main() -> None:
     config = ConfigBoot()
     config.boot()
     machine = machine_from_boot(config)
-    process_home = ava_home().resolve()
+    process_home = meiva_home().resolve()
     version = CodeVersion(image)
     gate = ProcessDbGate(version=version.get, process="browser-mcp")
 
@@ -715,7 +715,7 @@ def main() -> None:
     )
     asyncio.run(
         run(
-            home=ava_home(),
+            home=meiva_home(),
             browser_cdp_port=config.view.services.browser_cdp_port,
             connect_timeout_reader=lambda: config.view.sandbox.mcp_connect_timeout_seconds,
         )

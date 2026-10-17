@@ -1,11 +1,11 @@
 """build_graph: assemble 8-Node self-cycling topology, all Command(goto=) routing.
 
-Deps (ops_pool / llm / event_publisher) are injected via `Runtime[AvaContext]` —
+Deps (ops_pool / llm / event_publisher) are injected via `Runtime[MeivaContext]` —
 build_graph does not take them; the caller passes them via
-`graph.ainvoke(..., context=AvaContext(...))`. Node functions access them via
+`graph.ainvoke(..., context=MeivaContext(...))`. Node functions access them via
 `runtime.context.X`.
 
-Plugins reach the graph as a value: the caller loads them (`ava.sdk_surface.extensions.load_extensions()`),
+Plugins reach the graph as a value: the caller loads them (`meiva.sdk_surface.extensions.load_extensions()`),
 builds the `ExtensionRegistry` of what they declare (`base.packages.plugins.loading.registry.build_registry()`)
 and passes it in. The graph is a function of that registry: its hooks run in the hook container
 nodes, its state classes shape the dynamic `AgentState`. The loader lives in `agent.extensions`
@@ -15,7 +15,7 @@ import mechanics and the fail-soft contract live in `base.packages.plugins.loadi
 `sys.modules` identity, and containment however many times a plugin loads.
 A repeat load re-executes the module already in `sys.modules` rather than
 binding a new one, so a plugin module's identity is stable for the life of the
-process. Layer A wrap monkey-patches the process's ava module; the exec child
+process. Layer A wrap monkey-patches the process's meiva module; the exec child
 re-runs the plugin surface load at its own boot, so agent code there sees the
 wrapped version too. Config decides what is imported; not imported = not
 declared.
@@ -45,7 +45,7 @@ from agent.nodes import (
     NodeName,
 )
 from agent.state import BaseAgentState, build_agent_state
-from base.agents.context import AvaContext
+from base.agents.context import MeivaContext
 from base.packages.plugins.extensions import ExtensionRegistry
 
 from ._init_context import init_context_node
@@ -77,8 +77,8 @@ def _after_exec_default_next(_state: BaseAgentState) -> NodeName:
 def build_graph(
     checkpointer: BaseCheckpointSaver | None,
     extensions: ExtensionRegistry,
-) -> CompiledStateGraph[BaseAgentState, AvaContext, BaseAgentState, BaseAgentState]:
-    """Build 8-Node self-cycling graph — deps injected via ainvoke(context=AvaContext);
+) -> CompiledStateGraph[BaseAgentState, MeivaContext, BaseAgentState, BaseAgentState]:
+    """Build 8-Node self-cycling graph — deps injected via ainvoke(context=MeivaContext);
     this function takes the checkpointer and the plugin registry.
 
     8-Node topology:
@@ -120,13 +120,13 @@ def build_graph(
     config) multi-arg signature. Functionally correct, just stub doesn't narrow.
     """
     state_cls = build_agent_state(extensions)
-    g = StateGraph(state_cls, context_schema=AvaContext)
+    g = StateGraph(state_cls, context_schema=MeivaContext)
     # What the llm node remembers per agent between tries and turns belongs to this graph: one
     # ledger per compiled graph, so two graphs in one process never share failure counts.
     ledger = LlmLedger()
 
     async def llm(
-        state: BaseAgentState, runtime: Runtime[AvaContext], config: RunnableConfig
+        state: BaseAgentState, runtime: Runtime[MeivaContext], config: RunnableConfig
     ) -> Command[LlmGoto]:
         return await llm_node(state, runtime, config, ledger=ledger)
 

@@ -156,7 +156,7 @@ def _checkpoint_thread_id(config: RunnableConfig) -> str:
 # The turn's own interval rides the graph's invoke config under this key: LangGraph hands that
 # config to every checkpoint write of the run, and the `__` prefix keeps it out of the
 # checkpoint metadata the saver derives from the config.
-CHECKPOINT_INTERVAL_KEY = "__ava_checkpoint_interval"
+CHECKPOINT_INTERVAL_KEY = "__meiva_checkpoint_interval"
 
 
 def _resolve_checkpoint_interval(
@@ -228,7 +228,7 @@ def wrap_saver_writes_with_nstep_interval(
     PUSH writes except for writes at the next retained step. Those writes and
     retained checkpoints use the last persisted config, so every parent and
     write target has a checkpoint row. A completed turn flushes the latest
-    skipped update through ``_ava_nstep_flush(thread_id)``; retained and
+    skipped update through ``_meiva_nstep_flush(thread_id)``; retained and
     flushed checkpoints persist one full snapshot's blobs per channel, so
     every referenced channel value stays readable; a crash may instead replay
     up to ``interval - 1`` super-steps. A turn names its own interval in its invoke
@@ -355,7 +355,7 @@ def wrap_saver_writes_with_nstep_interval(
 
     checkpointer.aput = _throttled_aput  # type: ignore[method-assign]
     checkpointer.aput_writes = _throttled_aput_writes  # type: ignore[method-assign]
-    checkpointer._ava_nstep_flush = _flush_final  # type: ignore[attr-defined]
+    checkpointer._meiva_nstep_flush = _flush_final  # type: ignore[attr-defined]
 
 
 async def consume_claimed_inbounds(
@@ -386,7 +386,7 @@ async def consume_claimed_inbounds(
 
 
 async def notify_desktop_permissions_at_startup() -> None:
-    """Surface broken helper desktop permissions via ava.ui.notify, once.
+    """Surface broken helper desktop permissions via meiva.ui.notify, once.
 
     The converge preflight writes independent Screen Recording and
     Accessibility status files. Each is atomically claimed, so concurrent
@@ -394,7 +394,7 @@ async def notify_desktop_permissions_at_startup() -> None:
     share one notice; unreadable and available statuses are stale cleanup. If
     notify fails, every claimed fault is restored for the next startup to retry.
 
-    Must run after SDK init so ava.ui.notify is registered.
+    Must run after SDK init so meiva.ui.notify is registered.
     """
     from base.host.converge.accessibility import AccessibilityStatus
     from base.host.converge.accessibility import (
@@ -438,10 +438,10 @@ async def notify_desktop_permissions_at_startup() -> None:
             f"{accessibility_status.headline}: {accessibility_status.diagnostic}"
         )
 
-    import ava
+    import meiva
 
     try:
-        ava.ui.notify(  # type: ignore[attr-defined]
+        meiva.ui.notify(  # type: ignore[attr-defined]
             title=title,
             content=content,
             priority="P1",

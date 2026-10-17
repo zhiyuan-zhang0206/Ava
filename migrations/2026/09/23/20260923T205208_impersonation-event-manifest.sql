@@ -448,15 +448,15 @@ REVOKE ALL ON FUNCTION public.certify_impersonation_event_delivery(UUID,TEXT) FR
 
 DO $$
 BEGIN
-    IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'ava_runner') THEN
-        REVOKE INSERT, UPDATE ON agent_impersonations FROM ava_runner;
-        REVOKE UPDATE ON agent_impersonation_event_participants FROM ava_runner;
+    IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'meiva_runner') THEN
+        REVOKE INSERT, UPDATE ON agent_impersonations FROM meiva_runner;
+        REVOKE UPDATE ON agent_impersonation_event_participants FROM meiva_runner;
         GRANT INSERT (
             id,agent_id,source,machine,reason,status,ttl_seconds,expires_at,
             relay_provider,relay_thread_id,relay_codex_remote,relay_token_hash,
             relay_batch_window_seconds,name,executor_name,process_metadata,automatic,
             ack_window_seconds,max_delivery_attempts,event_delivery_protocol_version
-        ) ON agent_impersonations TO ava_runner;
+        ) ON agent_impersonations TO meiva_runner;
         GRANT UPDATE (
             status,ttl_seconds,expires_at,rejection_reason,summary_inbound_id,summary,
             accepted_generation,accepted_owner,consent_version,activated_at,ended_at,
@@ -464,18 +464,18 @@ BEGIN
             relay_last_failure_at,relay_minted_at,relay_minted_generation,relay_minted_owner,
             events_cursor,events_next_read_at,handoff_document,handoff_path,handoff_applied_at,
             next_entry,event_delivery_pending_reason,start_message
-        ) ON agent_impersonations TO ava_runner;
-        GRANT SELECT, INSERT ON agent_impersonation_event_participants TO ava_runner;
-        GRANT SELECT, INSERT ON agent_impersonation_event_participant_items TO ava_runner;
-        GRANT SELECT ON agent_impersonation_event_expected_receipts TO ava_runner;
-        GRANT SELECT ON agent_impersonation_event_expected_items TO ava_runner;
-        REVOKE ALL ON agent_impersonation_event_certifiers FROM ava_runner;
-        GRANT EXECUTE ON FUNCTION public.close_impersonation_event_manifest_admission(UUID) TO ava_runner;
-        GRANT EXECUTE ON FUNCTION public.admit_impersonation_event_certifier(UUID,TEXT) TO ava_runner;
-        GRANT EXECUTE ON FUNCTION public.seal_impersonation_event_participant(UUID, TEXT, TEXT, TEXT, BIGINT, TEXT) TO ava_runner;
-        GRANT EXECUTE ON FUNCTION public.freeze_impersonation_event_manifest(UUID, TEXT, BIGINT, TIMESTAMPTZ) TO ava_runner;
-        GRANT EXECUTE ON FUNCTION public.record_impersonation_event_retention_loss(UUID,TIMESTAMPTZ) TO ava_runner;
-        GRANT EXECUTE ON FUNCTION public.record_impersonation_event_integrity_alert(UUID) TO ava_runner;
-        GRANT EXECUTE ON FUNCTION public.certify_impersonation_event_delivery(UUID,TEXT) TO ava_runner;
+        ) ON agent_impersonations TO meiva_runner;
+        GRANT SELECT, INSERT ON agent_impersonation_event_participants TO meiva_runner;
+        GRANT SELECT, INSERT ON agent_impersonation_event_participant_items TO meiva_runner;
+        GRANT SELECT ON agent_impersonation_event_expected_receipts TO meiva_runner;
+        GRANT SELECT ON agent_impersonation_event_expected_items TO meiva_runner;
+        REVOKE ALL ON agent_impersonation_event_certifiers FROM meiva_runner;
+        GRANT EXECUTE ON FUNCTION public.close_impersonation_event_manifest_admission(UUID) TO meiva_runner;
+        GRANT EXECUTE ON FUNCTION public.admit_impersonation_event_certifier(UUID,TEXT) TO meiva_runner;
+        GRANT EXECUTE ON FUNCTION public.seal_impersonation_event_participant(UUID, TEXT, TEXT, TEXT, BIGINT, TEXT) TO meiva_runner;
+        GRANT EXECUTE ON FUNCTION public.freeze_impersonation_event_manifest(UUID, TEXT, BIGINT, TIMESTAMPTZ) TO meiva_runner;
+        GRANT EXECUTE ON FUNCTION public.record_impersonation_event_retention_loss(UUID,TIMESTAMPTZ) TO meiva_runner;
+        GRANT EXECUTE ON FUNCTION public.record_impersonation_event_integrity_alert(UUID) TO meiva_runner;
+        GRANT EXECUTE ON FUNCTION public.certify_impersonation_event_delivery(UUID,TEXT) TO meiva_runner;
     END IF;
 END $$;

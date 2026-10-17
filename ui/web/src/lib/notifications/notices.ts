@@ -1,5 +1,5 @@
 // Shared helpers for the "waiting on you" queue (the open notices that need a
-// response — ava.ui.notify(require_response=True)), so the queue, the fleet tree
+// response — meiva.ui.notify(require_response=True)), so the queue, the fleet tree
 // badge, and the sidebar tree badge can't drift apart on priority ranking or
 // colors.
 

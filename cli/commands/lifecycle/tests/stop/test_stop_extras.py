@@ -10,9 +10,9 @@ from services.desktop.permissions_helper import launchd_job
 
 
 def _home(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Path:
-    home = tmp_path / ".ava"
+    home = tmp_path / ".meiva"
     home.mkdir()
-    monkeypatch.setattr(paths, "ava_home", lambda: home)
+    monkeypatch.setattr(paths, "meiva_home", lambda: home)
     return home
 
 

@@ -115,7 +115,7 @@ def graph_reexports() -> dict[str, Any]:
     }
 
 
-_PLUGIN_ROOTS = ("ava_builtins.plugins.", "plugins.")
+_PLUGIN_ROOTS = ("meiva_builtins.plugins.", "plugins.")
 
 
 def _plugin_modules(suffix: str) -> list[str]:
@@ -125,9 +125,9 @@ def _plugin_modules(suffix: str) -> list[str]:
 
 
 def plugin_surface_load() -> dict[str, Any]:
-    import ava
+    import meiva
 
-    ava.ensure_plugins_loaded(surface=True)
+    meiva.ensure_plugins_loaded(surface=True)
     agent_side = sorted(
         name
         for name in sys.modules
@@ -142,13 +142,14 @@ def plugin_surface_load() -> dict[str, Any]:
 
 
 def plugin_surface_upgrade() -> dict[str, Any]:
-    import ava
+    import meiva
 
-    ava.ensure_plugins_loaded(surface=True)
-    surface = sys.modules["ava_builtins.plugins.ava_memory.plugin"]
-    ava.ensure_plugins_loaded(surface=False)  # the stateful-request upgrade
+    meiva.ensure_plugins_loaded(surface=True)
+    surface = sys.modules["meiva_builtins.plugins.meiva_memory.plugin"]
+    meiva.ensure_plugins_loaded(surface=False)  # the stateful-request upgrade
     return {
-        "same_surface_identity": sys.modules["ava_builtins.plugins.ava_memory.plugin"] is surface,
+        "same_surface_identity": sys.modules["meiva_builtins.plugins.meiva_memory.plugin"]
+        is surface,
         "faces": _plugin_modules(".agent_runtime"),
     }
 
@@ -166,7 +167,7 @@ def stateful_request_raw(req: str) -> dict[str, Any]:
 
 
 def _snapshot(tag: str) -> dict[str, Any]:
-    from ava.sdk_surface import process_context
+    from meiva.sdk_surface import process_context
 
     # Child imports may continue while the report is filtered. Observe one table.
     modules = sys.modules.copy()
@@ -190,13 +191,13 @@ class _ImportingModuleName(str):
 
 
 def child_state_lazy(req: str, mutate_module_names: str) -> dict[str, Any]:
-    import ava
+    import meiva
     from agent.execution import child as exec_child
     from agent.graph.exec.protocol import read_request
 
     child = exec_child.import_runtime(0.0)  # the child boot's step that binds the SDK
     payload = read_request(Path(req))
-    ava.ensure_plugins_loaded()
+    meiva.ensure_plugins_loaded()
     boot = _snapshot("boot")
     exec_child.build_state_slot(child, payload)
     if mutate_module_names == "mutate":
@@ -208,28 +209,28 @@ def child_state_lazy(req: str, mutate_module_names: str) -> dict[str, Any]:
         del sys.modules["lazy_child_snapshot_added"]
     else:
         armed = _snapshot("armed")
-    ava.state.materialize()
+    meiva.state.materialize()
     return {"boot": boot, "armed": armed, "touched": _snapshot("touched")}
 
 
 def child_cwd_set_first_touch(req: str, arg: str) -> dict[str, Any]:
-    import ava
+    import meiva
     from agent.execution import child as exec_child
     from agent.graph.exec.protocol import read_request
 
     child = exec_child.import_runtime(0.0)  # the child boot's step that binds the SDK
     payload = read_request(Path(req))
-    ava.ensure_plugins_loaded()
+    meiva.ensure_plugins_loaded()
     exec_child.build_state_slot(child, payload)
 
     out: dict[str, Any] = {}
     try:
-        ava.cwd.set(arg)  # the very first state touch — no warm-up read
+        meiva.cwd.set(arg)  # the very first state touch — no warm-up read
         out["set"] = "ok"
     except Exception as e:  # the report carries the failure (type + message)
         out["set"] = f"{type(e).__name__}: {e}"
-    out["state_update_keys"] = None if ava.state_update is None else sorted(ava.state_update)
-    out["cwd_after"] = str(ava.cwd.get())
+    out["state_update_keys"] = None if meiva.state_update is None else sorted(meiva.state_update)
+    out["cwd_after"] = str(meiva.cwd.get())
     return out
 
 

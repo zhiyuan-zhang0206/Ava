@@ -64,7 +64,7 @@ export default defineConfig({
       // test step (ci.yml).
       reportOnFailure: true,
       include: ["src/**"],
-      // `src/**` sweeps in the *.ava.okf.md docs that sit in the `docs/`
+      // `src/**` sweeps in the *.meiva.okf.md docs that sit in the `docs/`
       // layers beside the code they describe. v8 hands each to the
       // transform pipeline, which throws RolldownError PARSE_ERROR and then
       // drops the file from coverage anyway — five lines of red-looking log per

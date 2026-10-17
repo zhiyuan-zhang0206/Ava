@@ -61,7 +61,7 @@ def test_redis_bringup(
     monkeypatch.setattr(ci, "redis_running", lambda *_a: next(probes))  # pyright: ignore[reportUnknownArgumentType]
     machine_identity.set(host="127.0.0.1")
     config = with_redis_admin(data_plane_config, SECRET)
-    assert ci.start_redis(config, 46999, SECRET, "ava", machine=machine_identity) == 0
+    assert ci.start_redis(config, 46999, SECRET, "meiva", machine=machine_identity) == 0
 
     for argv in calls:
         assert_clean(argv, label="redis bring-up")

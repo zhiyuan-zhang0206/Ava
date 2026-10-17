@@ -69,11 +69,11 @@ def migration_phase(monkeypatch: pytest.MonkeyPatch) -> list[str]:
     calls: list[str] = []
     owner = threading.current_thread()
     conn = object()
-    admin_conn = _FakeAdminConnection("ava")
+    admin_conn = _FakeAdminConnection("meiva")
     authority = pg_admin.OwnerAuthority(
-        admin_url="postgresql://admin@/postgres?host=/tmp/ava-pg-test&port=5999",
-        database="ava",
-        owner="ava",
+        admin_url="postgresql://admin@/postgres?host=/tmp/meiva-pg-test&port=5999",
+        database="meiva",
+        owner="meiva",
         data_dir=Path("/home/pg"),
     )
 
@@ -84,7 +84,7 @@ def migration_phase(monkeypatch: pytest.MonkeyPatch) -> list[str]:
 
     def fake_admin_connect(url: str, **kwargs: object) -> _FakeAdminConnection:
         if threading.current_thread() is not owner:
-            return _FakeAdminConnection("ava")
+            return _FakeAdminConnection("meiva")
         assert url == authority.conninfo
         calls.append(f"admin:{kwargs}")
         return admin_conn
@@ -93,10 +93,10 @@ def migration_phase(monkeypatch: pytest.MonkeyPatch) -> list[str]:
         assert isinstance(tracked_migrations, set)
         calls.append("dependency")
 
-    def fake_ava_migrations(got: object, *, machine_name: Callable[[], str]) -> list[str]:
+    def fake_meiva_migrations(got: object, *, machine_name: Callable[[], str]) -> list[str]:
         assert callable(machine_name)
         assert got in (conn, admin_conn)
-        calls.append("ava")
+        calls.append("meiva")
         return ["20260823T000000_example"]
 
     def fake_checkpoint_assertion(url: str, **kwargs: object) -> None:
@@ -108,7 +108,7 @@ def migration_phase(monkeypatch: pytest.MonkeyPatch) -> list[str]:
 
     monkeypatch.setattr(pg_admin, "require_postgres_connection", record_ownership)
     patch_database(monkeypatch, connect=fake_connect)
-    patch_database(monkeypatch, direct_url=lambda: "postgresql://direct/ava")
+    patch_database(monkeypatch, direct_url=lambda: "postgresql://direct/meiva")
 
     def owner_authority(_db_url: str, *, remote_plane: bool) -> pg_admin.OwnerAuthority:
         assert not remote_plane
@@ -117,7 +117,7 @@ def migration_phase(monkeypatch: pytest.MonkeyPatch) -> list[str]:
     monkeypatch.setattr(pg_admin, "local_owner_authority", owner_authority)
     monkeypatch.setattr(pg_admin.psycopg, "connect", fake_admin_connect)
     monkeypatch.setattr(
-        base.deploy.schema.migrations, "apply_pending_migrations", fake_ava_migrations
+        base.deploy.schema.migrations, "apply_pending_migrations", fake_meiva_migrations
     )
     monkeypatch.setattr(
         cluster, "assert_checkpoint_dependency_pinned", fake_dependency_gate, raising=False
@@ -128,7 +128,7 @@ def migration_phase(monkeypatch: pytest.MonkeyPatch) -> list[str]:
     return calls
 
 
-def test_start_phase_verifies_checkpoint_schema_after_ava_migrations(
+def test_start_phase_verifies_checkpoint_schema_after_meiva_migrations(
     migration_phase: list[str],
     operator_database: Callable[[], Any],
     *,
@@ -137,7 +137,9 @@ def test_start_phase_verifies_checkpoint_schema_after_ava_migrations(
     from base.cluster.dataplane import pg_admin
     from cli.commands.lifecycle.migrations import cmd_migrations_apply
 
-    authority = pg_admin.local_owner_authority("postgresql://ava@localhost/ava", remote_plane=False)
+    authority = pg_admin.local_owner_authority(
+        "postgresql://meiva@localhost/meiva", remote_plane=False
+    )
     applied = cmd_migrations_apply(
         database_factory=operator_database, machine_name=command_runtime.machine.name
     )
@@ -146,7 +148,7 @@ def test_start_phase_verifies_checkpoint_schema_after_ava_migrations(
         "dependency",
         "admin:{}",
         "ownership",
-        "ava",
+        "meiva",
         f"checkpoint:{authority.conninfo}:{{'expected_data_dir': {authority.data_dir!r}}}",
     ]
     assert applied == ["20260823T000000_example"]
@@ -170,7 +172,7 @@ def test_foreign_connected_postgres_refuses_before_migration_ddl(
         cmd_migrations_apply(
             database_factory=operator_database, machine_name=command_runtime.machine.name
         )
-    assert "ava" not in migration_phase
+    assert "meiva" not in migration_phase
 
 
 def test_admin_session_without_owner_role_refuses_before_migration_ddl(
@@ -187,7 +189,7 @@ def test_admin_session_without_owner_role_refuses_before_migration_ddl(
 
     def superuser_dial(_url: str, **_kwargs: object) -> _FakeAdminConnection:
         if threading.current_thread() is not owner:
-            return _FakeAdminConnection("ava")
+            return _FakeAdminConnection("meiva")
         return _FakeAdminConnection("postgres")
 
     monkeypatch.setattr(pg_admin.psycopg, "connect", superuser_dial)
@@ -195,7 +197,7 @@ def test_admin_session_without_owner_role_refuses_before_migration_ddl(
         cmd_migrations_apply(
             database_factory=operator_database, machine_name=command_runtime.machine.name
         )
-    assert "ava" not in migration_phase
+    assert "meiva" not in migration_phase
 
 
 def test_remote_managed_migration_preserves_explicit_provider_authority(
@@ -209,7 +211,7 @@ def test_remote_managed_migration_preserves_explicit_provider_authority(
     from base.config import settings
     from cli.commands.lifecycle.migrations import cmd_migrations_apply
 
-    monkeypatch.setattr(settings.data_plane, "db_url", "postgresql://owner@db.example/ava")
+    monkeypatch.setattr(settings.data_plane, "db_url", "postgresql://owner@db.example/meiva")
     monkeypatch.setattr(settings.data_plane, "redis_url", "redis://cache.example/0")
 
     def refuse_local_owner(_db_url: str, *, remote_plane: bool) -> NoReturn:
@@ -222,8 +224,8 @@ def test_remote_managed_migration_preserves_explicit_provider_authority(
     assert migration_phase == [
         "dependency",
         "connect:{'direct': True, 'unbounded': True}",
-        "ava",
-        "checkpoint:postgresql://direct/ava:{}",
+        "meiva",
+        "checkpoint:postgresql://direct/meiva:{}",
     ]
 
 
@@ -253,7 +255,7 @@ def _bind_private_database(conn: psycopg.Connection, monkeypatch: pytest.MonkeyP
     monkeypatch.setattr(pg_admin, "local_owner_authority", owner_authority)
 
 
-def test_real_start_phase_converges_ava_then_is_idempotent(
+def test_real_start_phase_converges_meiva_then_is_idempotent(
     db_conn: psycopg.Connection,
     monkeypatch: pytest.MonkeyPatch,
     operator_database: Callable[[], Any],
@@ -271,8 +273,8 @@ def test_real_start_phase_converges_ava_then_is_idempotent(
         database_factory=operator_database, machine_name=command_runtime.machine.name
     )
 
-    ava_rows = db_conn.execute("SELECT name FROM schema_migrations").fetchall()
-    assert {row[0] for row in ava_rows} == required_migration_set()
+    meiva_rows = db_conn.execute("SELECT name FROM schema_migrations").fetchall()
+    assert {row[0] for row in meiva_rows} == required_migration_set()
     checkpoint_rows = db_conn.execute("SELECT v FROM checkpoint_migrations").fetchall()
     assert {row[0] for row in checkpoint_rows} == set(range(10))
     assert (
@@ -301,28 +303,28 @@ def test_dependency_drift_fails_before_any_database_change(
     cmd_migrations_apply(
         database_factory=operator_database, machine_name=command_runtime.machine.name
     )
-    ava_before = db_conn.execute("SELECT name FROM schema_migrations").fetchall()
+    meiva_before = db_conn.execute("SELECT name FROM schema_migrations").fetchall()
     checkpoint_before = db_conn.execute("SELECT v FROM checkpoint_migrations").fetchall()
 
     monkeypatch.setattr(PostgresSaver, "MIGRATIONS", [*PostgresSaver.MIGRATIONS, "SELECT 1"])
 
-    with pytest.raises(CheckpointDependencyDriftError, match="Ava timestamp migration"):
+    with pytest.raises(CheckpointDependencyDriftError, match="Meiva timestamp migration"):
         cmd_migrations_apply(
             database_factory=operator_database, machine_name=command_runtime.machine.name
         )
 
-    assert db_conn.execute("SELECT name FROM schema_migrations").fetchall() == ava_before
+    assert db_conn.execute("SELECT name FROM schema_migrations").fetchall() == meiva_before
     assert db_conn.execute("SELECT v FROM checkpoint_migrations").fetchall() == checkpoint_before
 
 
 def test_checkpoint_schema_upstream_baseline_is_frozen() -> None:
     from base.cluster.provision import (
-        CHECKPOINT_SCHEMA_AVA_MIGRATIONS,
+        CHECKPOINT_SCHEMA_MEIVA_MIGRATIONS,
         CHECKPOINT_SCHEMA_UPSTREAM_BASELINE_VERSION,
     )
 
     assert CHECKPOINT_SCHEMA_UPSTREAM_BASELINE_VERSION == 9
-    assert CHECKPOINT_SCHEMA_AVA_MIGRATIONS == {}
+    assert CHECKPOINT_SCHEMA_MEIVA_MIGRATIONS == {}
 
 
 def test_checkpoint_migration_manifest_must_be_contiguous(
@@ -330,7 +332,7 @@ def test_checkpoint_migration_manifest_must_be_contiguous(
 ) -> None:
     from base.cluster import provision
 
-    monkeypatch.setattr(provision, "CHECKPOINT_SCHEMA_AVA_MIGRATIONS", {11: "future"})
+    monkeypatch.setattr(provision, "CHECKPOINT_SCHEMA_MEIVA_MIGRATIONS", {11: "future"})
 
     with pytest.raises(provision.CheckpointDependencyDriftError, match="contiguous"):
         provision.assert_checkpoint_dependency_pinned(set())
@@ -343,7 +345,7 @@ def test_checkpoint_migration_manifest_follows_upstream_version_order(
 
     monkeypatch.setattr(
         provision,
-        "CHECKPOINT_SCHEMA_AVA_MIGRATIONS",
+        "CHECKPOINT_SCHEMA_MEIVA_MIGRATIONS",
         {
             10: "20990102T000000_checkpoint-v10",
             11: "20990101T000000_checkpoint-v11",
@@ -374,12 +376,14 @@ def test_checkpoint_migration_manifest_requires_a_tracked_migration(
     name = "20990101T000000_checkpoint-v10"
     if write_up:
         (tmp_path / f"{name}.sql").write_text("SELECT 1;\n")
-    monkeypatch.setattr(provision, "CHECKPOINT_SCHEMA_AVA_MIGRATIONS", {10: name})
+    monkeypatch.setattr(provision, "CHECKPOINT_SCHEMA_MEIVA_MIGRATIONS", {10: name})
     monkeypatch.setattr(migration_layout, "MIGRATIONS_DIR", tmp_path)
     if tracked:
         git(tmp_path, "add", "-A")
 
-    with pytest.raises(provision.CheckpointDependencyDriftError, match="git-tracked Ava migration"):
+    with pytest.raises(
+        provision.CheckpointDependencyDriftError, match="git-tracked Meiva migration"
+    ):
         provision.assert_checkpoint_dependency_pinned(required_migration_set())
 
 
@@ -397,7 +401,7 @@ def test_checkpoint_migration_manifest_accepts_nested_tracked_sql(
     hour.mkdir(parents=True)
     (hour / f"{name}.sql").write_text("SELECT 1;\n")
     init_repo(tmp_path)
-    monkeypatch.setattr(provision, "CHECKPOINT_SCHEMA_AVA_MIGRATIONS", {10: name})
+    monkeypatch.setattr(provision, "CHECKPOINT_SCHEMA_MEIVA_MIGRATIONS", {10: name})
     monkeypatch.setattr(migration_layout, "MIGRATIONS_DIR", tmp_path)
     monkeypatch.setattr(PostgresSaver, "MIGRATIONS", [*PostgresSaver.MIGRATIONS, "SELECT 1;"])
 

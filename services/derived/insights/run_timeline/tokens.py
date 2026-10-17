@@ -1,4 +1,4 @@
-# ava:ref services/derived/insights/run_timeline/docs/range-projection.ava.okf.md#indexed-history-windows
+# meiva:ref services/derived/insights/run_timeline/docs/range-projection.meiva.okf.md#indexed-history-windows
 from __future__ import annotations
 
 from bisect import bisect_right
@@ -144,7 +144,7 @@ def timeline_units(view: HistoryView, start: datetime, end: datetime) -> list[Ru
         tokens = contexts.tokens(unit)
         context = contexts.of(unit)
         inbound = (
-            message_addl_kwargs(view.history.messages[unit.i0]).get("ava_inbound_id")
+            message_addl_kwargs(view.history.messages[unit.i0]).get("meiva_inbound_id")
             if unit.kind in ("inbound", "note")
             else None
         )

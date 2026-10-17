@@ -23,7 +23,7 @@ the hosted world's own machinery.
    issuance (`inbound_messages.created_at`, DB clock). Only update-family
    drains (`pause_local_cluster` — spawn_update's Phase A, the update quiesce,
    and the restart-only `spawn_restart` chain) reap; the local stop family
-   (`ava stop`/`pause`/`restart`) keeps the never-kill contract.
+   (`meiva stop`/`pause`/`restart`) keeps the never-kill contract.
 2. **Kill = a CAS mark, not a signal.** The drain CAS-marks the row
    `running → 'restarting'` and `agent.db.has_pending_interrupt` treats that
    mark (with its still-un-applied maintenance restart) as an in-flight abort
@@ -84,4 +84,4 @@ the hosted world's own machinery.
   blocking-residue behavior), and its own failure path's resume settles them —
   self-healing on the retry.
 
-Forward link (2026-10-03): `ava pause` was deleted; a stop with a different keep set replaces it. See [delete ava pause](../../../agents/graph/2026-10-03-delete-ava-pause.md).
+Forward link (2026-10-03): `meiva pause` was deleted; a stop with a different keep set replaces it. See [delete meiva pause](../../../agents/graph/2026-10-03-delete-meiva-pause.md).

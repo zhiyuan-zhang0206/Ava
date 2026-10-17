@@ -2,7 +2,7 @@
 
 A sibling of `skills_sync.py` (repo/plugin skills from the checkout) and
 `_plugin_scaffold.py`, for the content the CLUSTER owns: whatever arrived by
-`ava skill install` on any machine (`future/infra/extensions/extension-ownership.md` S2,
+`meiva skill install` on any machine (`future/infra/extensions/extension-ownership.md` S2,
 model in `docs/decisions/extensions/plugins/2026-08-21-extension-ownership-three-tiers.md`).
 
 Its own module rather than another function in `lifecycle/converge_host.py` because it is
@@ -22,21 +22,21 @@ from base.agents.context.clients import DatabaseFactory
 def materialize_cluster_extensions(*, database_factory: DatabaseFactory, skills_root: Path) -> None:
     """Land the cluster's installed skills onto `skills_root` on this machine.
 
-    Adds the names that arrived by `ava skill install` on any machine of the
+    Adds the names that arrived by `meiva skill install` on any machine of the
     cluster, alongside the repo/plugin skills converge already syncs from the
     checkout (a `source='repo'` row carries no blob — the schema enforces it).
     That is what makes a freshly enrolled runner fungible: no "did we remember
     to install the skills here" step.
 
     **Deliberately NOT a `CONVERGE_STEPS` entry**, though the design doc first
-    described it as one. `ava start` runs converge as step 1, brings this
+    described it as one. `meiva start` runs converge as step 1, brings this
     cluster's Postgres up as step 2, and applies migrations as step 2.5 — so a
     converge step would run before the database is up on a single box, and
     before the `extensions` table exists on the rollout that creates it. It
     would have failed on every start of the most common posture while printing a
     warning that reads like a transient. Both callers below instead invoke it at
     a point where the data plane is up and migrated:
-    `cmd_converge` (the cluster is already running) and `ava start` after the
+    `cmd_converge` (the cluster is already running) and `meiva start` after the
     schema-current verification.
 
     Failures are reported, not raised. Being behind is a recoverable state with

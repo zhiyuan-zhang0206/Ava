@@ -11,7 +11,7 @@
 
 ## Context
 
-Scope: the To user reading panel must share Ava's typography, theme and link
+Scope: the To user reading panel must share Meiva's typography, theme and link
 behavior while displaying agent-authored reports, images and downloadable files.
 Agents can work in repositories or arbitrary directories. Requiring an assets
 folder adds copying and stale duplicates. The existing document is a live

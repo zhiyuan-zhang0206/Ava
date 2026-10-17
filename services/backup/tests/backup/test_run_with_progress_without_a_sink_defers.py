@@ -164,8 +164,8 @@ def test_run_backup_narrates_both_silent_stages_through_progress(
 
 
 def test_backup_lock_reentrant_same_thread(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    ava_home = tmp_path / "ava-home"
-    monkeypatch.setenv("AVA_HOME", str(ava_home))
+    meiva_home = tmp_path / "meiva-home"
+    monkeypatch.setenv("MEIVA_HOME", str(meiva_home))
 
     with backup.backup_lock(), backup.backup_lock(timeout_s=0.5):
         pass
@@ -177,10 +177,10 @@ def test_backup_lock_reentrant_same_thread(tmp_path: Path, monkeypatch: pytest.M
 def test_backup_lock_cross_process_excludes(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    ava_home = tmp_path / "ava-home"
-    monkeypatch.setenv("AVA_HOME", str(ava_home))
+    meiva_home = tmp_path / "meiva-home"
+    monkeypatch.setenv("MEIVA_HOME", str(meiva_home))
     ready = tmp_path / "ready"
-    holder = spawn_backup_lock_holder(ava_home, ready, hold_s=2.0)
+    holder = spawn_backup_lock_holder(meiva_home, ready, hold_s=2.0)
     try:
         await_backup_lock_holder(ready, holder)
 
@@ -197,10 +197,10 @@ def test_backup_lock_cross_process_excludes(
 
 
 def test_backup_lock_timeout_expires(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    ava_home = tmp_path / "ava-home"
-    monkeypatch.setenv("AVA_HOME", str(ava_home))
+    meiva_home = tmp_path / "meiva-home"
+    monkeypatch.setenv("MEIVA_HOME", str(meiva_home))
     ready = tmp_path / "ready"
-    holder = spawn_backup_lock_holder(ava_home, ready, hold_s=30.0)
+    holder = spawn_backup_lock_holder(meiva_home, ready, hold_s=30.0)
     try:
         await_backup_lock_holder(ready, holder)
 

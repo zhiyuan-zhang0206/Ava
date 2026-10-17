@@ -129,7 +129,7 @@ def classify_and_log_provider_error(
 
     `billing` / `vendor` / `model` ride the same log because an out-of-credit key
     is an ops event, not a postmortem detail: the Grafana rule
-    `ava-ops-llm-billing-quota` fires on the first `billing=True` row and its IM
+    `meiva-ops-llm-billing-quota` fires on the first `billing=True` row and its IM
     message has to name what stopped working. `vendor` is the model's provider
     key (deepseek / claude / …) — `classification.provider` is only the SDK
     package that raised, which DeepSeek and Claude share. The exception

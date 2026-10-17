@@ -250,7 +250,7 @@ def test_every_run_emits_the_heartbeat_healthy_or_not(
     monkeypatch.setattr(
         cluster_health,
         "service_probes",
-        partial(service_probe_verdict, failures=["ava-main-frontend"]),
+        partial(service_probe_verdict, failures=["meiva-main-frontend"]),
     )
     assert probe() == 1  # the alert-only path
     monkeypatch.setattr(cluster_health, "gateway_liveness_with_retry", lambda: False)
@@ -291,7 +291,7 @@ def test_service_probe_failure_emits_the_alert_only_signal(
     monkeypatch.setattr(
         cluster_health,
         "service_probes",
-        partial(service_probe_verdict, failures=["ava-main-frontend"]),
+        partial(service_probe_verdict, failures=["meiva-main-frontend"]),
     )
 
     assert probe() == 1
@@ -300,7 +300,7 @@ def test_service_probe_failure_emits_the_alert_only_signal(
         {
             "check": "service_probe",
             "failure_class": "alert-only",
-            "message": "FAIL: service probe — not healthy: ava-main-frontend",
+            "message": "FAIL: service probe — not healthy: meiva-main-frontend",
         }
     ]
 
@@ -421,7 +421,7 @@ def test_source_tree_failure_signals(
 ) -> None:
     """A tampered prod source tree fails the probe (exit 1) and emits the
     `source_tree` signal; rolling back code does not undo an on-disk edit (the
-    2026-08-28 outage class: edited source broke `import ava` for every agent on
+    2026-08-28 outage class: edited source broke `import meiva` for every agent on
     the box)."""
     message = "prod source tree tampered: untracked outside whitelist: junk.txt"
     monkeypatch.setattr(cluster_health, "source_tree_failure", lambda: message)  # pyright: ignore[reportUnknownArgumentType]
@@ -505,7 +505,7 @@ def test_signal_names_the_failed_check(
     monkeypatch.setattr(
         cluster_health,
         "service_probes",
-        partial(service_probe_verdict, failures=["ava-main-frontend"]),
+        partial(service_probe_verdict, failures=["meiva-main-frontend"]),
     )
     assert probe() == 1
     monkeypatch.setattr(cluster_health, "gateway_liveness_with_retry", lambda: False)
@@ -539,7 +539,7 @@ def test_schema_failure_does_not_mask_the_provider_guard(
         (
             "provider_balance",
             "FAIL: provider balance — account balance below the configured minimum "
-            "(AVA_PROVIDER_GUARD_BALANCE_MIN_CNY=¥500); top up the provider account "
+            "(MEIVA_PROVIDER_GUARD_BALANCE_MIN_CNY=¥500); top up the provider account "
             "before it runs dry",
         )
     )

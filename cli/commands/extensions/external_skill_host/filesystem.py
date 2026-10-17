@@ -13,7 +13,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-_MARKER_NAME = ".ava-managed.json"
+_MARKER_NAME = ".meiva-managed.json"
 
 
 class SourceIntegrityError(RuntimeError):
@@ -202,7 +202,7 @@ def manifest_digest(manifest: list[dict[str, Any]]) -> str:
 def tree_manifest(
     root: Path, *, source: bool = False, ignore_root_names: frozenset[str] = frozenset()
 ) -> list[dict[str, Any]]:
-    """Describe each path Ava may later verify or reclaim."""
+    """Describe each path Meiva may later verify or reclaim."""
     inspect = source_lstat if source else lstat
     error = SourceIntegrityError if source else ClientConflictError
     root_before = inspect(root)

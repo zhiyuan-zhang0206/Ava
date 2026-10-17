@@ -25,7 +25,7 @@ END = timestamp("2026-10-07T00:00:00Z")
 
 def test_cumulative_selection_weights_calls_and_keeps_whole_modules() -> None:
     events = [
-        event(1, "ava.files.read", weight=5),
+        event(1, "meiva.files.read", weight=5),
         event(2, "shell.run", 2, 3),
         event(3, "files.read", 2),
         event(4, "agents.spawn"),
@@ -45,7 +45,7 @@ def test_window_and_agent_filters_apply_before_ranking() -> None:
     events = [event(1, "files.read", 1), event(2, "shell.run", 2)]
     assert report(events, START, END, agent_ids={2})["selected_sdk_modules"] == ["shell"]
     empty = report(events, END, END)
-    assert empty["suggested_ava_sdk_expand"] is None
+    assert empty["suggested_meiva_sdk_expand"] is None
     assert empty["observed_events"] == 0
 
 

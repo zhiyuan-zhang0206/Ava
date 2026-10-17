@@ -10,7 +10,7 @@ needed — the fixture *owns* the server, torn down on context exit.
 One server process per worker = the same isolation the old per-worker container
 gave, minus the Docker dependency: nothing to pull, no daemon, no socket mount,
 no sibling-container engine contention. Postgres is started (not mocked) because
-Ava's durable inbound queue (the claim node's SELECT + recheck) and history
+Meiva's durable inbound queue (the claim node's SELECT + recheck) and history
 persistence (the LangGraph `PostgresSaver`) both live in it; neither has a
 faithful in-process fake.
 
@@ -74,7 +74,7 @@ def postgres(
     pending migrations applied, ready for the test suite. Yields a psycopg
     connection URL.
 
-    schema.sql stamps only the baseline sentinel; a real `ava start` then applies
+    schema.sql stamps only the baseline sentinel; a real `meiva start` then applies
     every post-baseline migration during bring-up. Mirror that here so the test
     DB's applied-set matches the code's required-set — otherwise a daemon that
     verifies the schema at startup (`assert_schema_current`, e.g. the e2e ops
@@ -99,7 +99,7 @@ def postgres(
 def redis_server() -> Generator[str]:
     """Start a throwaway redis-server on an ephemeral port, yield its URL.
     The process + data dir are destroyed on context exit."""
-    tmp = Path(tempfile.mkdtemp(prefix="ava-redis-", dir=_TMPFS_BASE))
+    tmp = Path(tempfile.mkdtemp(prefix="meiva-redis-", dir=_TMPFS_BASE))
     port = free_port()
     proc = subprocess.Popen(  # noqa: S603 — argv is the static redis-server path + flags
         [
@@ -125,25 +125,25 @@ def redis_server() -> Generator[str]:
             r.ping()  # pyright: ignore[reportUnknownMemberType]
             # A subprocess (e2e gateway / ops daemon) loads Settings fresh, which
             # re-derives the redis_url username to the test suite's cluster ACL user
-            # `ava_citest` (the suite's URL-carried identity, tests/fixtures/env_bootstrap.py). This throwaway
-            # redis has only the `default` user, so add `ava_citest` as a nopass
+            # `meiva_citest` (the suite's URL-carried identity, tests/fixtures/env_bootstrap.py). This throwaway
+            # redis has only the `default` user, so add `meiva_citest` as a nopass
             # full-access user (the redis analog of the throwaway pg's peer-superuser
-            # `ava_citest`) — otherwise that connection is rejected (WRONGPASS / no
+            # `meiva_citest`) — otherwise that connection is rejected (WRONGPASS / no
             # such user).
             r.execute_command(  # pyright: ignore[reportUnknownMemberType]
                 "ACL",
                 "SETUSER",
-                "ava_citest",
+                "meiva_citest",
                 "on",
                 "nopass",
                 "~*",
                 # Prod-shaped channel grants (mirrors ensure_cluster_redis_acl):
                 # the wildcard `&*` masked the hosted dispatcher's need for the
-                # `&ava:inbound:*` subscription-pattern grant (soak startup bug
+                # `&meiva:inbound:*` subscription-pattern grant (soak startup bug
                 # 2026-08-30) — every redis consumer in this suite must live
                 # under the production channel scope.
-                "&ava:*",
-                "&ava:inbound:*",
+                "&meiva:*",
+                "&meiva:inbound:*",
                 "+@all",
             )
         yield url

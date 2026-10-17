@@ -46,7 +46,7 @@ class TestConfigRebind:
         assert graph.observations[-1].model == "before"
         assert host.stats.cache_misses == 1
 
-        # The overlay write, as `ava.self.restart(config_overlay)` performs it.
+        # The overlay write, as `meiva.self.restart(config_overlay)` performs it.
         rows[1] = Row(overlay={"llm_model": "after"})
         await asyncio.wait_for(host.run_turn(1), 2)
 
@@ -99,14 +99,14 @@ class TestTurnLoop:
             cast(AsyncConnectionPool[Any], object()), read_checkpoint_interval=lambda: 1
         )
 
-        assert "_ava_nstep_flush" in checkpointer.__dict__
+        assert "_meiva_nstep_flush" in checkpointer.__dict__
 
     async def test_completed_turn_flushes_its_own_nstep_checkpoint_tail(self, wired: Build) -> None:
         """Hosted turns must persist a skipped tail before the task returns."""
         host, _, _ = wired({1: Row()})
         flush = AsyncMock()
         saver: Any = type("_NstepSaver", (), {})()
-        saver._ava_nstep_flush = flush
+        saver._meiva_nstep_flush = flush
         host._checkpointer = saver
 
         await host.run_turn(1)
@@ -516,7 +516,7 @@ class TestTurnStallGuard:
     """Task #2417, half 2: the no-progress stall guard around graph.ainvoke.
 
     A turn that stops making ANY progress (no node enter, no completed LLM
-    step) past ``AVA_HOST_TURN_NO_PROGRESS_TIMEOUT_SECONDS`` is aborted, the
+    step) past ``MEIVA_HOST_TURN_NO_PROGRESS_TIMEOUT_SECONDS`` is aborted, the
     error lands (one Error event), and the turn task ends; a turn that keeps
     stepping — the days-long autonomous loop the design allows — is never
     touched. All timing is shrunk: the tests run tiny intervals and let the

@@ -7,13 +7,13 @@ import pytest
 from fastapi.testclient import TestClient
 from psycopg.types.json import Jsonb
 
-from ava.gateway_client import use_client
 from base.api_contracts.agent_contract import GatewayUnavailable
 from base.host.net.tests.retry_waits import retry_waits as retry_waits
 from gateway.agents import creation as agent_creation
 from gateway.tests.lifecycle.creation.test_guarded_creation import HEADERS, PATH
 from gateway.tests.lifecycle.creation.test_guarded_creation import client as client
 from gateway.tests.lifecycle.creation.test_sdk_strong_creation import httpx_response_of, sdk
+from meiva.gateway_client import use_client
 from tests.path_scoped.gateway_tests import local_spawn_in_process as local_spawn_in_process
 
 

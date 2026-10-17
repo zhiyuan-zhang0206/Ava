@@ -19,9 +19,8 @@ from agent.graph.exec import node
 from agent.graph.exec.node import _exec_node_impl
 from agent.hooks.tests.fakes import make_fake_ops_pool
 from agent.state import AgentState
-from ava.tests.fixtures.pin_agent import hosted_resources as hosted_resources
 from base import config
-from base.agents.context import AvaContext
+from base.agents.context import MeivaContext
 from base.clock import Clock
 from base.config.tests.configuration import defaults
 from base.db import Database
@@ -30,6 +29,7 @@ from base.events.live.bus import EventBus
 from base.host.env.agent_slices import AgentSlices
 from base.native_process.turn_identity import HostedTurnResources
 from base.packages.plugin_providers import build_model_catalog
+from meiva.tests.fixtures.pin_agent import hosted_resources as hosted_resources
 
 _CONFIG: RunnableConfig = {"configurable": {"thread_id": "7"}}
 
@@ -46,9 +46,9 @@ _TOOL_CALL_AIMESSAGE = AIMessage(
 
 def _make_runtime(
     hosted_resources: HostedTurnResources, database_gate: ProcessDbGate
-) -> Runtime[AvaContext]:
+) -> Runtime[MeivaContext]:
     """Minimal runtime with fake ops_pool + event_publisher."""
-    ctx = AvaContext(
+    ctx = MeivaContext(
         hosted_resources=hosted_resources,
         ops_pool=make_fake_ops_pool(),
         llm=None,

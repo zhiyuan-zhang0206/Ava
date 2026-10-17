@@ -21,9 +21,9 @@ from agent.hooks.compact_anchor import closing_of
 from agent.hooks.compact_events import emit_compact_finished
 from agent.hooks.history_dump import dump_history, history_dump_note
 from agent.nodes import BEFORE_LLM, CLAIM, END, INIT_CONTEXT
-from base.agents.context import AvaContext
+from base.agents.context import MeivaContext
 from base.agents.messages.inbound import InboundKind
-from base.agents.messages.kwargs import AvaMsgType, NoteTag, read_ava_kwargs
+from base.agents.messages.kwargs import MeivaMsgType, NoteTag, read_meiva_kwargs
 from base.events.live.projection import CompactDone, CompactionStatus
 
 
@@ -33,14 +33,14 @@ class _Outcome:
     publish_end_snapshot: bool = False
 
 
-# ava:ref agent/graph/docs/context-window/replacement.ava.okf.md#clean-replacement
+# meiva:ref agent/graph/docs/context-window/replacement.meiva.okf.md#clean-replacement
 def _markers_only(messages: list[BaseMessage]) -> list[BaseMessage]:
     kept: list[BaseMessage] = []
     subject_kept = False
     for message in messages:
-        kwargs = read_ava_kwargs(message)
-        keep = kwargs.get("ava_msg_type") == AvaMsgType.SYSTEM_NOTE.value
-        if keep and kwargs.get("ava_note_tag") == NoteTag.SECURITY.value:
+        kwargs = read_meiva_kwargs(message)
+        keep = kwargs.get("meiva_msg_type") == MeivaMsgType.SYSTEM_NOTE.value
+        if keep and kwargs.get("meiva_note_tag") == NoteTag.SECURITY.value:
             keep = subject_kept
         if keep:
             kept.append(message)
@@ -48,8 +48,8 @@ def _markers_only(messages: list[BaseMessage]) -> list[BaseMessage]:
     return kept
 
 
-# ava:ref agent/graph/docs/context-window/replacement.ava.okf.md#compact-failure-boundary
-def _cancel_outcome(ctx: AvaContext, agent_id: int, st: BatchState) -> _Outcome:
+# meiva:ref agent/graph/docs/context-window/replacement.meiva.okf.md#compact-failure-boundary
+def _cancel_outcome(ctx: MeivaContext, agent_id: int, st: BatchState) -> _Outcome:
     if st.compact_payload is not None and st.compact_payload[2] is not None:
         emit_compact_finished(
             ctx.event_publisher, agent_id, st.compact_payload[2], status=CompactionStatus.REPLACED
@@ -69,9 +69,9 @@ def _cancel_outcome(ctx: AvaContext, agent_id: int, st: BatchState) -> _Outcome:
     )
 
 
-# ava:ref agent/graph/docs/context-window/replacement.ava.okf.md#clean-replacement
+# meiva:ref agent/graph/docs/context-window/replacement.meiva.okf.md#clean-replacement
 async def _compact_outcome(
-    ctx: AvaContext, state: _state.AgentState, agent_id: int, st: BatchState
+    ctx: MeivaContext, state: _state.AgentState, agent_id: int, st: BatchState
 ) -> _Outcome:
     if st.compact_payload is None:
         raise RuntimeError("decide compact path requires a compact payload")
@@ -109,11 +109,11 @@ async def _compact_outcome(
         st.new_msgs.append(history_dump_note(dump_path))
     extra_msgs = [cast(AnyMessage, m) for m in st.new_msgs if not isinstance(m, RemoveMessage)]
     summary_kwargs: dict[str, str] = {
-        "ava_msg_type": compact_kind,
-        "ava_created_at": datetime.now(UTC).isoformat(),
+        "meiva_msg_type": compact_kind,
+        "meiva_created_at": datetime.now(UTC).isoformat(),
     }
     if compact_run_id is not None:
-        summary_kwargs["ava_compact_id"] = compact_run_id
+        summary_kwargs["meiva_compact_id"] = compact_run_id
     transition = build_compact_transition(
         summary_text,
         resume=st.next_goto,
@@ -171,7 +171,7 @@ def _idle_restart_gate(
 
 
 async def decide(
-    ctx: AvaContext,
+    ctx: MeivaContext,
     state: _state.AgentState,
     agent_id: int,
     batch: list[ClaimedInbound],

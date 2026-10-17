@@ -12,15 +12,15 @@ because text is git-reversible and needs no sandbox. Read the two together.
 ## The bet
 
 Competitors that ship a "learning loop" (Hermes' Curator, OpenClaw's Skill
-Workshop) evolve only **skills** — text the agent reads. Ava does that too, as
+Workshop) evolve only **skills** — text the agent reads. Meiva does that too, as
 gen 1 — but the north star is one level deeper: the agent evolves its **own
 codebase** — the framework, the SDK, the kernel — autonomously.
 
-The reason this is tractable for Ava specifically is the CodeAct architecture.
-Because the agent already acts by composing Python over the `ava.*` namespace,
+The reason this is tractable for Meiva specifically is the CodeAct architecture.
+Because the agent already acts by composing Python over the `meiva.*` namespace,
 and because the prod-upgrade path is already first-class
 (the fleet update script → cluster-wide PR-merged rollout; the one-time SDK
-call `ava.self.update()` was removed 2026-08), "modify yourself" is not
+call `meiva.self.update()` was removed 2026-08), "modify yourself" is not
 a new mechanism — it is the agent driving the loop it already has:
 
 > read the codebase → write a change → open a PR → CI → merge → fleet update

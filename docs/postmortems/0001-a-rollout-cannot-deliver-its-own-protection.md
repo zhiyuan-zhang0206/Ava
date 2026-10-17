@@ -33,7 +33,7 @@ would notice and restart them. It did not. The controller ships *in* `05c58b35`
 and is absent from `a87a23f5`; the watchdogs doing the noticing were the
 pre-rollout processes, which had never heard of it. Confirmed directly with
 `git cat-file -e <sha>:ops/controllers/code.py` against both commits. A human ran
-`ava restart` on each host.
+`meiva restart` on each host.
 
 Later the same night, a manual Windows pass was carried out on the understanding
 that the settle hold was keeping the deploy lease alive and auto-rollback
@@ -51,8 +51,8 @@ had serving within sixty seconds.
 
 ## Root cause
 
-A rollout executes under the process that started it. `ava cluster update`
-(then `ava update --local`) begins, imports its orchestration modules, and only
+A rollout executes under the process that started it. `meiva cluster update`
+(then `meiva update --local`) begins, imports its orchestration modules, and only
 afterwards moves the tree. From that moment the on-disk code and the executing
 code are different programs, and every decision the rollout makes — what to spawn,
 what flags to pass, when to give up, whether to roll back — is made by the older
@@ -89,7 +89,7 @@ written brief, is what rules out carelessness and makes it a class.
   because that is the only leg whose exit code a caller turns into a cluster-wide
   revert. Read the reasoning in place — it is the load-bearing comment on the
   function, and the same argument appears in
-  [`cli/commands/start-readiness.ava.okf.md`](../cli/commands/start-readiness.ava.okf.md).
+  [`cli/commands/start-readiness.meiva.okf.md`](../cli/commands/start-readiness.meiva.okf.md).
 - **The code controller and the settle hold now exist**
   (`ops/controllers/code.py`, `shared/cluster_lock.py:settle_update_lock`). They
   protect every rollout after the one that shipped them, which was always the

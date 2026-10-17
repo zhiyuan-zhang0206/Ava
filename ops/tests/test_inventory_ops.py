@@ -7,7 +7,7 @@ all-or-nothing, then applies them to the per-machine local files.
 
 Tests run entirely in-process; no DB required. `inventory_read_op` /
 `inventory_write_op` only touch local files (plugins_config.json,
-mcp_enabled.json) + the merged MCP config. `unit_home` redirects `ava_home()`
+mcp_enabled.json) + the merged MCP config. `unit_home` redirects `meiva_home()`
 to a per-test tmp dir so the overlay + plugin config files are isolated.
 """
 
@@ -18,7 +18,7 @@ from pathlib import Path
 
 import pytest
 
-import ava.mcps.config as mcp_cfg_mod
+import meiva.mcps.config as mcp_cfg_mod
 from base.cluster.machine import MachineIdentity
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from base.host.system.hostport import Host
@@ -43,7 +43,7 @@ def _machine_only_mcp(
     """Isolate the MCP merged map to just the machine `mcp.json` under test —
     the public MCP loader supplies that real file's server map. Also pins
     the host role to agent-runner (the ops' precondition): inventory ops run only
-    there, and the test env has no AVA_MACHINE_SERVE_* set."""
+    there, and the test env has no MEIVA_MACHINE_SERVE_* set."""
 
     def machine_config(*, include_disabled: bool = False) -> dict[str, dict[str, object]]:
         assert include_disabled is True
@@ -62,14 +62,14 @@ def _machine_only_mcp(
 def test_inventory_read_op_lists_real_plugins(
     _machine_only_mcp: Path, monkeypatch: pytest.MonkeyPatch, *, machine_identity: MachineIdentity
 ) -> None:
-    """The repo's real built-in plugins (ava_code, etc.) appear, each with
-    an enabled bool + a description. (ava_compact moved to core, Issue #1284.)"""
+    """The repo's real built-in plugins (meiva_code, etc.) appear, each with
+    an enabled bool + a description. (meiva_compact moved to core, Issue #1284.)"""
     machine_identity.set(name="test-machine")
     result = inventory_read_op(local_machine=machine_identity, host=fake_host())
     assert result.machine == "test-machine"
     plugins = result.plugins
-    # Real repo plugins discovered under <repo>/ava_builtins/plugins/.
-    assert "ava_code" in plugins
+    # Real repo plugins discovered under <repo>/meiva_builtins/plugins/.
+    assert "meiva_code" in plugins
     for entry in plugins.values():
         assert isinstance(entry.enabled, bool)
         assert isinstance(entry.description, str)
@@ -122,7 +122,7 @@ def test_inventory_rejects_invalid_requirements_before_read_or_write(
         inventory_read_op(local_machine=machine_identity, host=fake_host())
     with pytest.raises(mcp_cfg_mod.MCPError, match="requires"):
         inventory_write_op(
-            plugins={"ava_code": False},
+            plugins={"meiva_code": False},
             mcp_servers={"broken": True},
             local_machine=machine_identity,
             host=fake_host(),
@@ -158,16 +158,16 @@ def test_inventory_write_op_plugin_happy_path(
     """Disabling a present plugin -> applied=True, and the local config reflects it."""
     machine_identity.set(name="test-machine")
     result = inventory_write_op(
-        plugins={"ava_code": False},
+        plugins={"meiva_code": False},
         mcp_servers={},
         local_machine=machine_identity,
         host=fake_host(),
     )
     assert result.applied is True
-    assert result.plugin_results["ava_code"] == FieldWriteResult(ok=True, reason=None)
-    # The per-machine plugins_config.json now records ava_code as disabled.
+    assert result.plugin_results["meiva_code"] == FieldWriteResult(ok=True, reason=None)
+    # The per-machine plugins_config.json now records meiva_code as disabled.
     cfg = enable_config.load(set(enable_config.discover_plugins()))
-    assert cfg.plugins["ava_code"].enabled is False
+    assert cfg.plugins["meiva_code"].enabled is False
 
 
 def test_inventory_write_op_atomic_rejects_unknown_plugin(
@@ -177,13 +177,13 @@ def test_inventory_write_op_atomic_rejects_unknown_plugin(
     atomically: applied=False, the present plugin's file is UNCHANGED."""
     machine_identity.set(name="test-machine")
     result = inventory_write_op(
-        plugins={"ava_code": False, "does-not-exist": True},
+        plugins={"meiva_code": False, "does-not-exist": True},
         mcp_servers={},
         local_machine=machine_identity,
         host=fake_host(),
     )
     assert result.applied is False
-    assert result.plugin_results["ava_code"].ok is True
+    assert result.plugin_results["meiva_code"].ok is True
     assert result.plugin_results["does-not-exist"].ok is False
     assert "not installed" in (result.plugin_results["does-not-exist"].reason or "")
     # Atomicity: nothing was written, so the local file does not exist yet.
@@ -256,14 +256,14 @@ def test_inventory_write_op_applies_both_plugin_and_mcp(
     machine_identity.set(name="test-machine")
     _write_machine_mcp(_machine_only_mcp, {"fs": {"command": "x"}})
     result = inventory_write_op(
-        plugins={"ava_code": False},
+        plugins={"meiva_code": False},
         mcp_servers={"fs": False},
         local_machine=machine_identity,
         host=fake_host(),
     )
     assert result.applied is True
     cfg = enable_config.load(set(enable_config.discover_plugins()))
-    assert cfg.plugins["ava_code"].enabled is False
+    assert cfg.plugins["meiva_code"].enabled is False
     assert mcp_enabled.read_enabled() == {"fs": False}
 
 

@@ -139,7 +139,7 @@ co-located under a rule someone had to keep. Discriminators held correct by
 configuration (a database name, a logical-DB index, a channel prefix, an ACL user)
 are that rule wearing a schema. Prefer the structural version: a separate
 instance under a separate home, so the blast radius is set by what the thing *is*
-rather than by how carefully the operator aimed. This is why every Ava cluster
+rather than by how carefully the operator aimed. This is why every Meiva cluster
 owns its own Postgres and Redis.
 Evidence: [`docs/postmortems/0004`](../postmortems/0004-isolation-one-command-can-undo.md).
 
@@ -189,7 +189,7 @@ records the original `no_db` / `dead_db` fixture failure.
 ### A real-infrastructure suite fails open
 
 A mocked suite fails closed: an unmocked call blows up. A suite that provisions
-real infrastructure — as Ava's does, a throwaway Postgres per session — fails
+real infrastructure — as Meiva's does, a throwaway Postgres per session — fails
 *open*: an unmocked call succeeds against an empty table, and "it returned
 nothing" is not "it could not reach the database". Reason about absence
 explicitly; the environment will not do it for you.
@@ -297,7 +297,7 @@ to liveness — the daemon keepalive checks do, via identity-verified `/healthz`
 plus a `Liveness` beat that certifies the work loop is still ticking, not that
 the subsystem's work succeeds. The audit found one violation (a bare
 TCP connect, since replaced by a real RPC); the roster carries a
-"what it certifies" column per check (`services/supervision/healthchecks/docs/check-roster/check-roster.ava.okf.md`)
+"what it certifies" column per check (`services/supervision/healthchecks/docs/check-roster/check-roster.meiva.okf.md`)
 and `scripts/content_lint/lint_doc_roster.py` pins roster, module directory, and ServiceSpec
 registrations together so the drift the audit found cannot silently return.
 

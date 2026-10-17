@@ -68,7 +68,7 @@ from agent.graph.tool_calls import code_from_args, normalize_tool_calls
 from agent.messages import exec_output_message
 from agent.nodes import AFTER_EXEC, EXEC
 from agent.state import AttachState, validate_plugin_state_keys
-from base.agents.context import AvaContext, agent_id_from_config
+from base.agents.context import MeivaContext, agent_id_from_config
 from base.agents.history.timeline_inputs import TimelineReadInputs
 from base.agents.lifecycle import AgentImpersonation, AgentRestart, AgentTermination, SystemHalt
 from base.agents.messages.kwargs import ExecStatus
@@ -108,7 +108,7 @@ ExecGoto = Literal["exec", "after_exec"]
 
 async def exec_node(
     state: _state.AgentState,
-    runtime: Runtime[AvaContext],
+    runtime: Runtime[MeivaContext],
     config: RunnableConfig,
 ) -> Command[ExecGoto]:
     """Run agent-written code in one disposable child process. See module docstring."""
@@ -174,7 +174,7 @@ async def _exec_with_node_shield(
 
 async def run_agent_code(
     state: _state.AgentState,
-    ctx: AvaContext,
+    ctx: MeivaContext,
     agent_id: int,
     code: str,
     chunk_publisher: ExecOutputChunkPublisher,
@@ -187,7 +187,7 @@ async def run_agent_code(
 ]:
     """Run the agent's code in one disposable child process.
 
-    The parent does not touch the ava.state slot — the child rebuilds the
+    The parent does not touch the meiva.state slot — the child rebuilds the
     snapshot from the request envelope (`agent/execution/child.py`), and the
     state-update delta (plugin fields, security findings) rides the result
     envelope back. Validation is fail-fast on a tampered slot, and the child
@@ -227,7 +227,7 @@ async def run_agent_code(
     if isinstance(result, ExecCancelled) and cancel_event.is_set():
         result = replace(result, reason=cancel_event.reason)
     if payload is not None and payload.state_update_error is not None:
-        # The child reported a tampered slot (agent set ava.state_update to a
+        # The child reported a tampered slot (agent set meiva.state_update to a
         # non-dict) — raise the TypeError the child would have raised.
         raise TypeError(payload.state_update_error)
     delta = payload.state_update if payload is not None else None
@@ -250,7 +250,7 @@ def _emit_exec_boot_failed(agent_id: int, exc: BaseException) -> None:
 
 def dispatch_exec_result(
     result: ExecResult,
-    ctx: AvaContext,
+    ctx: MeivaContext,
     agent_id: int,
     *,
     elapsed_seconds: float,
@@ -282,10 +282,10 @@ def dispatch_exec_result(
     stream_cap = result.stream_cap
     match result:
         case ExecLifecycle(output=output, exc=SystemHalt()):
-            # ava.self.compact already INSERTed compact_summary inbound; append
+            # meiva.self.compact already INSERTed compact_summary inbound; append
             # "[system halt]" at the end (agent's real output comes first).
             halted, status = True, ExecStatus.HALTED
-            extra = "[system halt] You just called ava.self.compact; your context has been compacted and you will continue as the same agent\n"
+            extra = "[system halt] You just called meiva.self.compact; your context has been compacted and you will continue as the same agent\n"
             output = (output if not output or output.endswith("\n") else output + "\n") + extra
             envelope = wrap(
                 output,
@@ -409,7 +409,7 @@ def dispatch_exec_result(
     return halted, envelope, status
 
 
-def _attach_model(ctx: AvaContext) -> str:
+def _attach_model(ctx: MeivaContext) -> str:
     """The model name attachments are packed for (media capability gate).
 
     Same resolution as the claim fallback drain (`_attach_drain.py`): the live
@@ -421,7 +421,7 @@ def _attach_model(ctx: AvaContext) -> str:
 
 async def _exec_single_call(
     state: _state.AgentState,
-    ctx: AvaContext,
+    ctx: MeivaContext,
     agent_id: int,
     call: ToolCall,
     exec_msg_idx: int,
@@ -575,7 +575,7 @@ def _remaining_exec_calls(
 
 
 def _skipped_call_results(
-    calls: Sequence[ToolCall], ctx: AvaContext, agent_id: int, start_index: int
+    calls: Sequence[ToolCall], ctx: MeivaContext, agent_id: int, start_index: int
 ) -> list[ToolMessage]:
     """Pair calls left unexecuted by a lifecycle halt or cancellation."""
     assert ctx.event_publisher is not None  # noqa: S101
@@ -601,7 +601,7 @@ def _skipped_call_results(
 
 async def _exec_node_impl(
     state: _state.AgentState,
-    runtime: Runtime[AvaContext],
+    runtime: Runtime[MeivaContext],
     config: RunnableConfig,
 ) -> Command[ExecGoto]:
     """Run one call; LangGraph owns reducer application and the next snapshot."""

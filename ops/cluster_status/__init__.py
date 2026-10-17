@@ -58,7 +58,7 @@ class ClusterStatus(BaseModel):
     """`GET /api/cluster/status` response body — this host's snapshot in the
     multi-machine view.
 
-    `ava cluster status` CLI and the future monitoring page consume the
+    `meiva cluster status` CLI and the future monitoring page consume the
     same payload.
     """
 
@@ -81,7 +81,7 @@ class ClusterStatus(BaseModel):
     # serving gate (`startup`) legible from a deliberate pause, instead of one
     # opaque bool that a consumer can only guess at.
     paused_reason: PausedReason | None = None
-    # This host's prod-source HEAD commit (`$AVA_HOME/source`), or None when it
+    # This host's prod-source HEAD commit (`$MEIVA_HOME/source`), or None when it
     # cannot be read (no prod source / git unavailable); threaded to the roster so
     # the multi-machine view shows each node's checkout.
     head_sha: str | None = None
@@ -169,17 +169,17 @@ def _group_agent_sessions(
     return list(groups.values())
 
 
-# Session name prefix — sessions are named `ava-<service>` (see
+# Session name prefix — sessions are named `meiva-<service>` (see
 # base/cluster.py:session_name; the per-home session-record namespace already
-# scopes them to this cluster). The prefix filter drops non-ava sessions.
-_CLUSTER_SESSION_PREFIX = f"{base.cluster.session_name('')}"  # "ava-"
+# scopes them to this cluster). The prefix filter drops non-meiva sessions.
+_CLUSTER_SESSION_PREFIX = f"{base.cluster.session_name('')}"  # "meiva-"
 
-# A bare agent main-process session (`ava-agent-<id>`). Agent processes are
+# A bare agent main-process session (`meiva-agent-<id>`). Agent processes are
 # pid records, not sessions — `collect_sessions` filters them out so the
 # session count / agent groups stay session-shaped (a P1 regression in #2330
 # put them back in and ghosted 26 of 38 agent_groups).
 _AGENT_PROCESS_RE = re.compile(
-    r"^ava-(?:[a-z0-9]+-)*(?:agent-\d+|boot-\d+-(?:\d+-\d+|[a-f0-9]{32}))$"
+    r"^meiva-(?:[a-z0-9]+-)*(?:agent-\d+|boot-\d+-(?:\d+-\d+|[a-f0-9]{32}))$"
 )
 
 _AGENT_SESSION_RE = re.compile(r"-agent-(\d+)")
@@ -319,7 +319,7 @@ def kill_agent_shells(agent_id: int, *, before_session_index: int) -> list[int]:
     `agent_shell_sessions` — the one `…-agent-<id>-shell-<sid>[-<name>]` rule —
     so the agent's explicit shells and its watchers go, while another agent's
     sessions and the agent's own process session are never touched. Page-server
-    sessions (`ava.ui.serve`, the `page-` label owned by
+    sessions (`meiva.ui.serve`, the `page-` label owned by
     `base.sessions.page_session`) are spared: a page keeps its own lifecycle.
     The backend's kill is idempotent, so a session that ended between the
     listing and its kill still counts as killed — it is gone either way. No
@@ -367,10 +367,10 @@ def collect_sessions() -> tuple[list[SessionInfo], int, int]:
     The service/daemon sessions come from `get_backend()` (native supervisor)
     and the agents' persistent shells / watchers from
     `get_shell_backend()` (the pty-sessions service) — the same two namespaces
-    `ava start` / the healthchecks write into. Only sessions matching the
-    current cluster prefix (`ava-*`) are kept — dev-worktree clusters and bare
-    non-ava sessions are excluded. Agent processes are not sessions (they are
-    pid records, tracked separately), so bare `ava-agent-<id>` sessions are
+    `meiva start` / the healthchecks write into. Only sessions matching the
+    current cluster prefix (`meiva-*`) are kept — dev-worktree clusters and bare
+    non-meiva sessions are excluded. Agent processes are not sessions (they are
+    pid records, tracked separately), so bare `meiva-agent-<id>` sessions are
     filtered out here — this covers the daemons + the agents' persistent
     shells. A backend that is down degrades to empty data.
     """
@@ -492,10 +492,10 @@ def _paused_reason(
 def _supervisor_online() -> bool | None:
     """An observed native root is online; unavailable inspection stays unknown."""
     from base.native_process.root_control.client import RootClientError, root_process
-    from base.paths import ava_home
+    from base.paths import meiva_home
 
     try:
-        return root_process(home=ava_home()) is not None
+        return root_process(home=meiva_home()) is not None
     except (RootClientError, RuntimeError):
         return None
 

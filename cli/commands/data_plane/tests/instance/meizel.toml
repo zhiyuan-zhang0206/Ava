@@ -6,7 +6,7 @@
 [debt.env-patch]
 "bind_support.py#patch.dict os.environ" = 1
 "test_cluster_instance_native.py#monkeypatch.setenv os.environ" = 1
-"test_cluster_instance_native.py#monkeypatch.setenv os.environ.AVA_HOME" = 2
+"test_cluster_instance_native.py#monkeypatch.setenv os.environ.MEIVA_HOME" = 2
 "test_pg_bind.py#monkeypatch.setenv os.environ" = 1
 "test_redis_bind.py#monkeypatch.setenv os.environ" = 1
 

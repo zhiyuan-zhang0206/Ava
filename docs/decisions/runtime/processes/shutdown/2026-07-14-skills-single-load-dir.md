@@ -1,24 +1,24 @@
-# Skills: single converged load dir (`~/.ava/skills/`), installed ≠ enabled
+# Skills: single converged load dir (`~/.meiva/skills/`), installed ≠ enabled
 
 ## Decision
 
-Collapse the skill scanner's five mount points (repo `skills/`, `~/.ava/skills/`
-overlay, provider roots, repo `plugins/*/skills/`, `~/.ava/plugins/*/skills/`)
-to **one on-disk load dir** — `$AVA_HOME/skills/` — plus runtime provider roots.
-A converge step (`cli/commands/_converge_skills.py`, run by `ava start` /
-`ava update` / `ava converge` and inline after `ava plugins install`/`upgrade`)
+Collapse the skill scanner's five mount points (repo `skills/`, `~/.meiva/skills/`
+overlay, provider roots, repo `plugins/*/skills/`, `~/.meiva/plugins/*/skills/`)
+to **one on-disk load dir** — `$MEIVA_HOME/skills/` — plus runtime provider roots.
+A converge step (`cli/commands/_converge_skills.py`, run by `meiva start` /
+`meiva update` / `meiva converge` and inline after `meiva plugins install`/`upgrade`)
 syncs repo and plugin skills into it, tracked by the install registry.
 
 Two orthogonal dimensions replace the implicit install==enabled coupling:
 **installed** (the dir exists on disk) and **enabled** (the registry entry says
-the scanner loads it). `ava skill enable/disable` flips the toggle without
-touching disk; `ava skill register` adopts a hand-copied dir; an untracked dir
+the scanner loads it). `meiva skill enable/disable` flips the toggle without
+touching disk; `meiva skill register` adopts a hand-copied dir; an untracked dir
 never loads.
 
 ## Why
 
 - Agents could not answer "where does this skill live on disk?" — five mounts
-  meant the answer depended on provenance. One dir makes `ava.help()`'s path
+  meant the answer depended on provenance. One dir makes `meiva.help()`'s path
   line uniformly actionable (edit, read sibling files).
 - The old model coupled repo skills to the checkout and gated only the overlay,
   so "disable a repo skill on this machine" had no mechanism at all.
@@ -32,19 +32,19 @@ never loads.
   This reconciles "auto-clean derived state" with "never destroy user content".
 - **Registry fields are additive, not the design-doc rename.** The design
   called for `source: "repo"|"plugin"|"user"`, but `InstalledPackage.source`
-  already carried the install git URL (and `ava plugins upgrade` depends on
+  already carried the install git URL (and `meiva plugins upgrade` depends on
   it); renaming would need a migration and the fail-fast registry load would
-  brick `ava start` on any not-yet-migrated host. Added `origin` /
+  brick `meiva start` on any not-yet-migrated host. Added `origin` /
   `origin_path` / `content_hash` / `installed_at` / `updated_at` instead.
 - **An installed plugin's skills gate on the plugin's own registry entry** —
-  no duplicate `type="skill"` row for `~/.ava/skills/<plugin>/`. The registry
+  no duplicate `type="skill"` row for `~/.meiva/skills/<plugin>/`. The registry
   stays name-keyed with unique names.
 - **User package wins name conflicts.** A user-installed package squatting a
   repo/plugin skill's name shadows the source (warn), because overwriting
   would destroy user content — the one deliberate deviation from the design's
   "repo wins on the same path".
 - **Untracked dirs (e.g. legacy `auto-review`) are not
-  auto-registered** — converge warns and points at `ava skill register`;
+  auto-registered** — converge warns and points at `meiva skill register`;
   preserves the pre-change behavior (they did not load before either).
 
 ## Rejected

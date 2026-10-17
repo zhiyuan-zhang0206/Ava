@@ -56,12 +56,12 @@ code version allowed to write.
   acts from any thread and gives the old code no graceful shutdown to keep
   writing in.
 - **Not gated:** direct connections (administrator, migration applier,
-  `pg_dump`) and `connect_url` targets. The `ava` CLI is exempt by declaration,
-  because `ava stop` writes to the database to drain agents: a host left behind
+  `pg_dump`) and `connect_url` targets. The `meiva` CLI is exempt by declaration,
+  because `meiva stop` writes to the database to drain agents: a host left behind
   must still be able to run the command that stops it, or the update script
   cannot recover it. Service processes start with `python -m <module>`, never
   through the CLI entry point, so all of them are gated.
-- **Observable:** pooled connections carry `application_name = ava:<process>:v<version>`,
+- **Observable:** pooled connections carry `application_name = meiva:<process>:v<version>`,
   so PgBouncer's `SHOW CLIENTS` lists which process on which version holds each
   connection.
 - **Credential leak:** a runbook of manual rotation, no code

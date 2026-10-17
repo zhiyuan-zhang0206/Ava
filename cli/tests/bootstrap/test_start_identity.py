@@ -1,4 +1,4 @@
-"""`ava init` records one home identity before effects; `ava start` admits it."""
+"""`meiva init` records one home identity before effects; `meiva start` admits it."""
 
 from __future__ import annotations
 
@@ -20,7 +20,7 @@ from base.host.permissions_helper.client import HelperFactory
 from base.host.system.hostport import Host
 from base.host.system.tests.fake_commands import DARWIN_ARM64, fake_host
 from base.native_process.os_platform import file_lock
-from base.paths import ava_home
+from base.paths import meiva_home
 from cli import init_intent, start_intent
 from cli import start_identity as identity
 from cli.commands.lifecycle import start
@@ -47,7 +47,7 @@ def inputs(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> identity.Identity
         tmp_path / "home",
         checkout,
         frozenset({"gateway", "agent-runner"}),
-        {"AVA_MACHINE_NAME": "preview"},
+        {"MEIVA_MACHINE_NAME": "preview"},
     )
 
 
@@ -58,21 +58,21 @@ def test_fresh_identity_committed_before_native_work(inputs: identity.IdentityIn
     rec = cluster.get_record(inputs.home)
     env = dotenv_values(inputs.home / ".env")
     assert rec is not None and "pgbouncer" in rec.ports
-    db_url = env["AVA_DB_URL"]
-    assert db_url is not None and db_url.endswith(f":{rec.ports['pgbouncer']}/ava")
+    db_url = env["MEIVA_DB_URL"]
+    assert db_url is not None and db_url.endswith(f":{rec.ports['pgbouncer']}/meiva")
     # The database endpoint is credential-free: the owner is NOLOGIN and the
     # first start mints write generation 0; no DB password is ever minted here.
     assert urlsplit(db_url).password is None
     # Every gateway home is born with a human secret, a single box included.
-    assert env["AVA_CLUSTER_SECRET"]
-    assert "AVA_DB_ADMIN_PASSWORD" not in env
-    assert "AVA_RUNNER_DB_PASSWORD" not in env
+    assert env["MEIVA_CLUSTER_SECRET"]
+    assert "MEIVA_DB_ADMIN_PASSWORD" not in env
+    assert "MEIVA_RUNNER_DB_PASSWORD" not in env
     # Redis always authenticates: a single box is born with
     # independent Redis admin and runtime passwords, the runtime one in its URL.
-    redis_admin, redis_runtime = env["AVA_REDIS_ADMIN_PASSWORD"], env["AVA_REDIS_PASSWORD"]
+    redis_admin, redis_runtime = env["MEIVA_REDIS_ADMIN_PASSWORD"], env["MEIVA_REDIS_PASSWORD"]
     assert redis_admin and redis_runtime and redis_admin != redis_runtime
-    redis_url = urlsplit(env["AVA_REDIS_URL"] or "")
-    assert (redis_url.username, redis_url.password) == ("ava", redis_runtime)
+    redis_url = urlsplit(env["MEIVA_REDIS_URL"] or "")
+    assert (redis_url.username, redis_url.password) == ("meiva", redis_runtime)
     assert not (inputs.home / "pg").exists()
 
 
@@ -84,7 +84,7 @@ def test_an_initialized_home_is_refused_again_and_keeps_its_bytes(
     paths = [inputs.home / ".env", inputs.home / identity.INTENT_NAME]
     before = [(p.read_bytes(), p.stat().st_mtime_ns) for p in paths]
     env = dotenv_values(paths[0])
-    keys = ("AVA_CLUSTER_SECRET", "AVA_REDIS_ADMIN_PASSWORD", "AVA_REDIS_PASSWORD")
+    keys = ("MEIVA_CLUSTER_SECRET", "MEIVA_REDIS_ADMIN_PASSWORD", "MEIVA_REDIS_PASSWORD")
     assert len({env[k] for k in keys}) == len(keys)
     assert all(env[k] for k in keys)
     for phase in ("configured", "provisioned", "ready"):
@@ -119,7 +119,7 @@ def test_a_gateway_birth_pins_a_minted_logical_backup_passphrase(
     assert passphrase.pin_path(inputs.home).stat().st_mode & 0o777 == 0o600
     monkeypatch.setattr(identity, "upsert_env", upsert)
     identity.resume_claim(inputs.home)
-    assert dotenv_values(inputs.home / ".env")["AVA_CLUSTER_SECRET"]
+    assert dotenv_values(inputs.home / ".env")["MEIVA_CLUSTER_SECRET"]
     assert passphrase.resolve(inputs.home) == minted
 
 
@@ -130,7 +130,7 @@ def test_a_remote_unit_birth_pins_no_backup_passphrase(inputs: identity.Identity
     runner = replace(
         inputs,
         roles=frozenset({"agent-runner"}),
-        values={**inputs.values, "AVA_GATEWAY_URL": "http://10.0.0.7:8000"},
+        values={**inputs.values, "MEIVA_GATEWAY_URL": "http://10.0.0.7:8000"},
     )
     identity.prepare_identity(runner)
     assert passphrase.pinned(runner.home) is None
@@ -147,7 +147,8 @@ def test_a_published_claim_keeps_no_copy_of_its_credentials(
     identity.prepare_identity(inputs)
     env = dotenv_values(inputs.home / ".env")
     credentials = [
-        env[key] for key in ("AVA_CLUSTER_SECRET", "AVA_REDIS_ADMIN_PASSWORD", "AVA_REDIS_PASSWORD")
+        env[key]
+        for key in ("MEIVA_CLUSTER_SECRET", "MEIVA_REDIS_ADMIN_PASSWORD", "MEIVA_REDIS_PASSWORD")
     ]
     assert all(credentials)
     data = identity.read_intent(inputs.home)
@@ -266,23 +267,23 @@ def test_init_uses_explicit_home_not_ambient_projection(
     inputs: identity.IdentityInput, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.setattr(start_intent, "checkout", lambda: inputs.checkout)
-    monkeypatch.setenv("AVA_HOME", str(inputs.home))
-    monkeypatch.setenv("AVA_DB_URL", "postgresql://foreign@foreign.invalid/production")
-    monkeypatch.setenv("AVA_CLUSTER_SECRET", "foreign-secret")
+    monkeypatch.setenv("MEIVA_HOME", str(inputs.home))
+    monkeypatch.setenv("MEIVA_DB_URL", "postgresql://foreign@foreign.invalid/production")
+    monkeypatch.setenv("MEIVA_CLUSTER_SECRET", "foreign-secret")
     prepare_init_identity(_single_box())
     env = dotenv_values(inputs.home / ".env")
-    db_url = env["AVA_DB_URL"]
+    db_url = env["MEIVA_DB_URL"]
     assert db_url is not None and "foreign" not in db_url
     # The cluster's secret is minted for it, never inherited from the caller's environment.
-    assert env["AVA_CLUSTER_SECRET"] and env["AVA_CLUSTER_SECRET"] != "foreign-secret"  # noqa: S105
+    assert env["MEIVA_CLUSTER_SECRET"] and env["MEIVA_CLUSTER_SECRET"] != "foreign-secret"  # noqa: S105
 
 
 def test_interrupted_init_keeps_admitted_tool_path(
     inputs: identity.IdentityInput, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.setattr(start_intent, "checkout", lambda: inputs.checkout)
-    monkeypatch.setenv("AVA_HOME", str(inputs.home))
-    monkeypatch.delenv("AVA_SERVICE_PATH", raising=False)
+    monkeypatch.setenv("MEIVA_HOME", str(inputs.home))
+    monkeypatch.delenv("MEIVA_SERVICE_PATH", raising=False)
     activated = inputs.checkout.parent / "other-venv"
     tools = str(inputs.checkout.parent / "tools")
     bin_name = "bin"
@@ -303,19 +304,19 @@ def test_interrupted_init_keeps_admitted_tool_path(
         prepare_init_identity(_single_box())
     pending = identity.read_intent(inputs.home)
     assert pending is not None and pending["phase"] == "claiming"
-    assert pending["env"]["AVA_SERVICE_PATH"] == tools
+    assert pending["env"]["MEIVA_SERVICE_PATH"] == tools
     monkeypatch.setattr(identity, "upsert_env", write)
     monkeypatch.setenv("PATH", str(inputs.checkout.parent / "different-tools"))
     prepare_init_identity(_args())  # the resume takes no flags
-    assert dotenv_values(inputs.home / ".env")["AVA_SERVICE_PATH"] == tools
+    assert dotenv_values(inputs.home / ".env")["MEIVA_SERVICE_PATH"] == tools
 
 
 def test_existing_home_cannot_recapture_caller_tool_path(
     inputs: identity.IdentityInput, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     identity.prepare_identity(inputs)
-    monkeypatch.setenv("AVA_SERVICE_PATH", str(inputs.checkout.parent / "unadmitted"))
-    with pytest.raises(ValueError, match="explicit AVA_SERVICE_PATH"):
+    monkeypatch.setenv("MEIVA_SERVICE_PATH", str(inputs.checkout.parent / "unadmitted"))
+    with pytest.raises(ValueError, match="explicit MEIVA_SERVICE_PATH"):
         init_intent.service_path(identity.stored_values(inputs.home), inputs.home)
 
 
@@ -323,8 +324,8 @@ def test_lossy_tool_path_is_rejected_before_identity_publication(
     inputs: identity.IdentityInput, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.setattr(start_intent, "checkout", lambda: inputs.checkout)
-    monkeypatch.setenv("AVA_HOME", str(inputs.home))
-    monkeypatch.delenv("AVA_SERVICE_PATH", raising=False)
+    monkeypatch.setenv("MEIVA_HOME", str(inputs.home))
+    monkeypatch.delenv("MEIVA_SERVICE_PATH", raising=False)
     monkeypatch.setenv("PATH", str(inputs.checkout.parent / "tools #1"))
     with pytest.raises(ValueError, match="round-trip literally"):
         prepare_init_identity(_single_box())
@@ -332,7 +333,8 @@ def test_lossy_tool_path_is_rejected_before_identity_publication(
 
 
 @pytest.mark.parametrize(
-    "key", ["AVA_HOME", "AVA_GATEWAY_PORT", "AVA_DB_URL", "AVA_MACHINE_NAME", "UNKNOWN_SETTING"]
+    "key",
+    ["MEIVA_HOME", "MEIVA_GATEWAY_PORT", "MEIVA_DB_URL", "MEIVA_MACHINE_NAME", "UNKNOWN_SETTING"],
 )
 def test_config_file_cannot_choose_identity(inputs: identity.IdentityInput, key: str) -> None:
     config = inputs.home.parent / "input.env"
@@ -341,7 +343,7 @@ def test_config_file_cannot_choose_identity(inputs: identity.IdentityInput, key:
         init_intent.config_values(_args("--config-file", str(config)), inputs.home)
 
 
-_RUNNER_ENDPOINT = "postgresql://ava@remote.invalid/db"
+_RUNNER_ENDPOINT = "postgresql://meiva@remote.invalid/db"
 
 
 _FETCH_BEARERS: list[object] = []
@@ -354,13 +356,13 @@ def _runner_start(
     from base.host.env import bootstrap
 
     monkeypatch.setattr(start_intent, "checkout", lambda: inputs.checkout)
-    monkeypatch.setenv("AVA_HOME", str(inputs.home))
+    monkeypatch.setenv("MEIVA_HOME", str(inputs.home))
     # A remote unit joins without the human secret: its capability authenticates.
-    monkeypatch.delenv("AVA_CLUSTER_SECRET", raising=False)
+    monkeypatch.delenv("MEIVA_CLUSTER_SECRET", raising=False)
 
     def served(*_a: object, **kwargs: object) -> dict[str, str]:
         _FETCH_BEARERS.append(kwargs.get("bearer"))
-        return {"AVA_DB_URL": _RUNNER_ENDPOINT, "AVA_REDIS_URL": "redis://remote.invalid/0"}
+        return {"MEIVA_DB_URL": _RUNNER_ENDPOINT, "MEIVA_REDIS_URL": "redis://remote.invalid/0"}
 
     monkeypatch.setattr(bootstrap, "fetch_bootstrap_config", served)
     return _args(
@@ -412,12 +414,12 @@ def test_runner_without_a_capability_refuses_before_persisting(
     _FETCH_BEARERS.clear()
     prepare_init_identity(args)
     env = dotenv_values(inputs.home / ".env")
-    assert env["AVA_MACHINE_HOST"] == "runner.invalid"
-    assert "AVA_DB_URL" not in env and "AVA_REDIS_URL" not in env
+    assert env["MEIVA_MACHINE_HOST"] == "runner.invalid"
+    assert "MEIVA_DB_URL" not in env and "MEIVA_REDIS_URL" not in env
     # The fetch authenticated with the capability's API token; no bearer persisted.
     installed = unit.require_unit_capability(home)
     assert [installed.api.token] == _FETCH_BEARERS
-    assert "AVA_CLUSTER_SECRET" not in env
+    assert "MEIVA_CLUSTER_SECRET" not in env
     assert cluster.get_record(home) is None
 
 
@@ -426,9 +428,9 @@ def test_capability_bundle_needs_its_transport_key(
 ) -> None:
     bundle = tmp_path / "unit.bundle"
     bundle.write_text("{}")
-    monkeypatch.delenv("AVA_DB_CAPABILITY_KEY", raising=False)
+    monkeypatch.delenv("MEIVA_DB_CAPABILITY_KEY", raising=False)
     args = _runner_start(inputs, monkeypatch, "--db-capability", str(bundle))
-    with pytest.raises(ValueError, match="AVA_DB_CAPABILITY_KEY"):
+    with pytest.raises(ValueError, match="MEIVA_DB_CAPABILITY_KEY"):
         prepare_init_identity(args)
     assert bundle.exists()
     assert not (inputs.home / ".env").exists()
@@ -438,7 +440,7 @@ def test_gateway_init_refuses_a_capability_bundle(
     inputs: identity.IdentityInput, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     monkeypatch.setattr(start_intent, "checkout", lambda: inputs.checkout)
-    monkeypatch.setenv("AVA_HOME", str(inputs.home))
+    monkeypatch.setenv("MEIVA_HOME", str(inputs.home))
     with pytest.raises(ValueError, match="agent-runner units"):
         prepare_init_identity(_single_box("--db-capability", str(tmp_path / "unit.bundle")))
     assert identity.read_intent(inputs.home) is None
@@ -529,14 +531,14 @@ def test_config_file_is_taken_once_and_a_second_init_is_refused(
     inputs: identity.IdentityInput, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.setattr(start_intent, "checkout", lambda: inputs.checkout)
-    monkeypatch.setenv("AVA_HOME", str(inputs.home))
+    monkeypatch.setenv("MEIVA_HOME", str(inputs.home))
     config = inputs.home.parent / "config.env"
-    config.write_text("AVA_LLM_OVERRIDE=fixture:model\n")
+    config.write_text("MEIVA_LLM_OVERRIDE=fixture:model\n")
     args = _single_box("--config-file", str(config))
     prepare_init_identity(args)
     first = (inputs.home / ".env").read_bytes()
-    assert b"AVA_LLM_OVERRIDE" in first
-    config.write_text("AVA_LLM_OVERRIDE=other:model\n")
+    assert b"MEIVA_LLM_OVERRIDE" in first
+    config.write_text("MEIVA_LLM_OVERRIDE=other:model\n")
     with pytest.raises(RuntimeError, match="already initialized"):
         prepare_init_identity(args)
     assert (inputs.home / ".env").read_bytes() == first
@@ -565,10 +567,10 @@ def _remote_config(
         "getaddrinfo",
         lambda *_a, **_k: [(socket.AF_INET, socket.SOCK_STREAM, 6, "", ("192.0.2.55", 0))],  # pyright: ignore[reportUnknownArgumentType] — test double or third-party stubs
     )
-    monkeypatch.setenv("AVA_HOME", str(inputs.home))
+    monkeypatch.setenv("MEIVA_HOME", str(inputs.home))
     config = inputs.home.parent / "remote.env"
     config.write_text(
-        f"AVA_DB_URL=postgresql://owner:provider@{host}:6543/app{query}\nAVA_REDIS_URL=rediss://acl:provider@redis.invalid:6381/0\nAVA_RUNNER_DB_PASSWORD=external-runner\n"
+        f"MEIVA_DB_URL=postgresql://owner:provider@{host}:6543/app{query}\nMEIVA_REDIS_URL=rediss://acl:provider@redis.invalid:6381/0\nMEIVA_RUNNER_DB_PASSWORD=external-runner\n"
     )
     return _single_box("--config-file", str(config))
 
@@ -579,11 +581,11 @@ def test_remote_init_preserves_provider_urls_and_runner_credential(
     args = _remote_config(inputs, monkeypatch)
     prepare_init_identity(args)
     env = dotenv_values(inputs.home / ".env")
-    assert env["AVA_DB_URL"] == "postgresql://owner:provider@db.invalid:6543/app"
-    assert env["AVA_REDIS_URL"] == "rediss://acl:provider@redis.invalid:6381/0"
-    assert env["AVA_RUNNER_DB_PASSWORD"] == "external-runner"  # noqa: S105 — fixture credential
-    assert "AVA_DB_ADMIN_PASSWORD" not in env
-    assert "AVA_REDIS_ADMIN_PASSWORD" not in env
+    assert env["MEIVA_DB_URL"] == "postgresql://owner:provider@db.invalid:6543/app"
+    assert env["MEIVA_REDIS_URL"] == "rediss://acl:provider@redis.invalid:6381/0"
+    assert env["MEIVA_RUNNER_DB_PASSWORD"] == "external-runner"  # noqa: S105 — fixture credential
+    assert "MEIVA_DB_ADMIN_PASSWORD" not in env
+    assert "MEIVA_REDIS_ADMIN_PASSWORD" not in env
     before = (inputs.home / ".env").read_bytes()
     with pytest.raises(RuntimeError, match="already initialized"):
         prepare_init_identity(args)
@@ -617,12 +619,12 @@ def test_public_start_holds_home_lock_through_runtime_start(
     command_runtime: CommandRuntime,
 ) -> None:
     producer = operator_event_pipeline(
-        operator_database, machine=command_runtime.machine, home=ava_home()
+        operator_database, machine=command_runtime.machine, home=meiva_home()
     )
     from base.native_process.os_platform import LockTimeoutError
 
     monkeypatch.setattr(start_intent, "checkout", lambda: inputs.checkout)
-    monkeypatch.setenv("AVA_HOME", str(inputs.home))
+    monkeypatch.setenv("MEIVA_HOME", str(inputs.home))
 
     def runtime(**_kw: object) -> int:
         with (
@@ -656,13 +658,13 @@ def test_public_start_publishes_boot_pid_only_after_complete_success(
     command_runtime: CommandRuntime,
 ) -> None:
     producer = operator_event_pipeline(
-        operator_database, machine=command_runtime.machine, home=ava_home()
+        operator_database, machine=command_runtime.machine, home=meiva_home()
     )
     from cli.commands.lifecycle import root_driver
 
     calls: list[str] = []
     monkeypatch.setattr(start_intent, "checkout", lambda: inputs.checkout)
-    monkeypatch.setenv("AVA_HOME", str(inputs.home))
+    monkeypatch.setenv("MEIVA_HOME", str(inputs.home))
 
     def runtime(**_kw: object) -> int:
         calls.append("complete wrapped start")
@@ -695,13 +697,13 @@ def test_failed_boot_publication_clears_serving_and_refuses_success(
     command_runtime: CommandRuntime,
 ) -> None:
     producer = operator_event_pipeline(
-        operator_database, machine=command_runtime.machine, home=ava_home()
+        operator_database, machine=command_runtime.machine, home=meiva_home()
     )
     from base.deploy.lifecycle import start_serving
     from cli.commands.lifecycle import root_driver
 
     monkeypatch.setattr(start_intent, "checkout", lambda: inputs.checkout)
-    monkeypatch.setenv("AVA_HOME", str(inputs.home))
+    monkeypatch.setenv("MEIVA_HOME", str(inputs.home))
     calls: list[str] = []
 
     def ready(**_kw: object) -> int:
@@ -728,12 +730,12 @@ def test_failed_boot_publication_clears_serving_and_refuses_success(
 
 
 def _initialized_gateway_home(inputs: identity.IdentityInput) -> Path:
-    """A born gateway home that has finished its claim, as `ava start` finds it."""
+    """A born gateway home that has finished its claim, as `meiva start` finds it."""
     identity.prepare_identity(replace(inputs, roles=frozenset({"gateway"})))
     env = dotenv_values(inputs.home / ".env")
     with (inputs.home / ".env").open("a") as handle:
-        handle.write("AVA_SERVICE_PATH=/usr/bin:/bin\n")
-    assert env["AVA_CLUSTER_SECRET"]
+        handle.write("MEIVA_SERVICE_PATH=/usr/bin:/bin\n")
+    assert env["MEIVA_CLUSTER_SECRET"]
     return inputs.home
 
 
@@ -751,6 +753,6 @@ def test_start_refuses_a_gateway_home_without_a_cluster_secret(
     from base.host.net.auth import ClusterSecretMissingError
 
     home = _initialized_gateway_home(inputs)
-    upsert_env(home / ".env", {"AVA_CLUSTER_SECRET": ""})
-    with pytest.raises(ClusterSecretMissingError, match="AVA_CLUSTER_SECRET"):
+    upsert_env(home / ".env", {"MEIVA_CLUSTER_SECRET": ""})
+    with pytest.raises(ClusterSecretMissingError, match="MEIVA_CLUSTER_SECRET"):
         identity.require_initialized(home)

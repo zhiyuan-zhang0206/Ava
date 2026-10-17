@@ -142,9 +142,9 @@ async def test_boot_primary_survives_a_failed_constructed_writer_cleanup(
     database: Database,
     unit_home: Path,
 ) -> None:
-    from ava.sdk_surface.installation import Installation
     from base.cluster.machine import MachineIdentity
     from base.config import ConfigBoot
+    from meiva.sdk_surface.installation import Installation
 
     boot_error = ValueError("original plugin bootstrap defect")
     writer_error = TypeError("boot event writer defect")

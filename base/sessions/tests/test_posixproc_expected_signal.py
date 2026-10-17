@@ -34,7 +34,7 @@ def test_replaced_name_never_signals_replacement(
     with subprocess.Popen(argv) as old, subprocess.Popen(argv) as replacement:  # noqa: S603 — fixed isolated test children.
         try:
             expected, new = record_for(old.pid), record_for(replacement.pid)
-            path = tmp_path / "ava-ops.json"
+            path = tmp_path / "meiva-ops.json"
             expected.write(path)
             calls = 0
 
@@ -47,7 +47,7 @@ def test_replaced_name_never_signals_replacement(
                 return new
 
             monkeypatch.setattr(posixproc, "read_record", swapped_read)
-            assert not posixproc.graceful_signal("ava-ops", expected=expected)
+            assert not posixproc.graceful_signal("meiva-ops", expected=expected)
             assert calls == 2
             assert replacement.poll() is None
             assert old.poll() is None
@@ -110,7 +110,7 @@ def test_expected_identity_uses_stable_ticks_before_epoch_birth(
             expected = replace(
                 original, create_time=original.create_time + birth_delta, starttime=stored_tick
             )
-            path = tmp_path / "ava-private-ticks.json"
+            path = tmp_path / "meiva-private-ticks.json"
             expected.write(path)
             ticks = iter(observed_ticks)
 
@@ -123,7 +123,7 @@ def test_expected_identity_uses_stable_ticks_before_epoch_birth(
             monkeypatch.setattr(record, "pid_starttime_ticks", read_ticks)
             monkeypatch.setattr(posixproc, "record_path", record_path)
             assert (
-                posixproc.graceful_signal("ava-private-ticks", expected=expected) is should_signal
+                posixproc.graceful_signal("meiva-private-ticks", expected=expected) is should_signal
             )
             if should_signal:
                 assert child.wait(timeout=3) == -signal.SIGTERM

@@ -5,16 +5,16 @@
 `PUT /api/config` was full-replace: the body was the whole desired override set,
 and any managed field set in `.env` but ABSENT from the body was unset. An agent
 sent a one-field write (`{anthropic_api_key: ...}`) through it; every other
-cluster-pinned key — all provider API keys, the telegram token, `AVA_CLUSTER_SECRET`
+cluster-pinned key — all provider API keys, the telegram token, `MEIVA_CLUSTER_SECRET`
 — was absent, so all of them were silently unset. Running processes held the old
-values in memory and stayed up, so it was invisible for ~2h; the next `ava update`
+values in memory and stayed up, so it was invisible for ~2h; the next `meiva update`
 restarted every service, and agents (which cold-start from `.env` alone) crashed —
 redis auth failed (no secret → identity not rewritten → connected as `default`) and
 the model factory found no API key. The `.env` was the only on-disk copy of those
 secrets; the running process env was the sole surviving copy.
 
 The frontend never needed full-replace: its delta helper only ever *sets* keys, and
-there is no UI to clear one. `ava config unset` needed deletion, but implemented it
+there is no UI to clear one. `meiva config unset` needed deletion, but implemented it
 by omitting the key from an otherwise-full body — the same delete-by-absence that
 did the damage.
 
@@ -24,7 +24,7 @@ did the damage.
 is set/replaced, a key mapped to `null` is unset (reverted to default), and an
 ABSENT key is left untouched. Deletion is always the explicit `null`, never inferred
 from absence. Both scope paths (cluster in the gateway's `.env`, host via
-`config_write_op`) and the `ava config` CLI (`unset` now sends `{key: null}`, `set`
+`config_write_op`) and the `meiva config` CLI (`unset` now sends `{key: null}`, `set`
 sends only the changed key) follow it. Independently, every `.env` write
 (`write_fields`, `upsert_env`) snapshots the file to `<home>/backups/env/` first and
 logs any unset — the write is recoverable and never silent.
@@ -45,7 +45,7 @@ logs any unset — the write is recoverable and never silent.
 ## Consequences
 
 - Deletion requires an explicit `null` — a client that wants to clear a field must
-  say so. `ava config unset` and any future "reset to default" UI send `{key:
+  say so. `meiva config unset` and any future "reset to default" UI send `{key:
   null}`; there is no other delete path, by design.
 - Clients send only what they change; echoing the whole override set back is
   unnecessary and (with a stale snapshot) unsafe.

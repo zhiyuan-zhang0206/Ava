@@ -9,7 +9,7 @@ accident), and turning WAL-G off is "unset the key, restart" with nothing left b
 `archive_mode` is a postmaster-context setting: it only takes effect when Postgres
 is newly launched. A retained postmaster that is merely reloaded keeps its old
 launch arguments, so switching archiving on (or off) is an explicit
-`ava stop` + `ava start`; the health probe reports a Postgres that disagrees with
+`meiva stop` + `meiva start`; the health probe reports a Postgres that disagrees with
 the configured expectation.
 
 The command itself holds no secret: the pinned binary, `--config <file>` and
@@ -61,7 +61,7 @@ def postgres_command(*walg_args: str, path_reader: Callable[[], Path | None]) ->
     """
     config_file = configured_path(path_reader=path_reader)
     if config_file is None:
-        raise WalgConfigError("AVA_WALG_CONFIG_FILE is not set")
+        raise WalgConfigError("MEIVA_WALG_CONFIG_FILE is not set")
     return shlex.join(
         [
             _percent_escaped(str(walg_path())),

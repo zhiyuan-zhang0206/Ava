@@ -5,8 +5,8 @@ with zero kernel/agent involvement.
 Each message is bucketed by kind (system prompt / cluster+agent memory /
 reasoning / output / tool call+response / compact summary / context note, and
 inbound messages split by source into user input / agent messages / automation)
-using the same discriminators the timeline classifier keys on (`ava_msg_type`,
-`ava_note_tag`, the inbound `ava_source`, AIMessage content-block types).
+using the same discriminators the timeline classifier keys on (`meiva_msg_type`,
+`meiva_note_tag`, the inbound `meiva_source`, AIMessage content-block types).
 
 A bucket's tokens are the sum of its messages' own counts, which are anchored to the provider's
 reported `input_tokens` (exact for a lone message in a request interval, estimated where several
@@ -42,9 +42,9 @@ from base.agents.history.message_tokens import (
 )
 from base.agents.messages.kwargs import (
     COMPACT_SUMMARY_HEADER,
-    AvaMsgType,
+    MeivaMsgType,
     NoteTag,
-    read_ava_kwargs,
+    read_meiva_kwargs,
 )
 from base.agents.messages.token_estimate import estimate_text_tokens
 
@@ -52,7 +52,7 @@ from base.agents.messages.token_estimate import estimate_text_tokens
 # two categories share the same token count (the frontend legend renders them
 # sorted by context share, descending). A closed set: an
 # untagged HumanMessage that is not the compact summary falls to `user_input`.
-# Inbound messages are split by their envelope `ava_source` into three buckets —
+# Inbound messages are split by their envelope `meiva_source` into three buckets —
 # `user_input` (a human turn), `agent_messages` (a peer agent), `automation` (a
 # machine/framework wakeup or notice) — see `_inbound_bucket`. The frontend
 # legend merges `automation` with `context_note` into one "System notes" row
@@ -74,7 +74,7 @@ CATEGORY_ORDER: tuple[str, ...] = (
 
 
 def _inbound_bucket(source: str) -> str:
-    """Bucket an inbound HumanMessage by its envelope `ava_source` (the taxonomy
+    """Bucket an inbound HumanMessage by its envelope `meiva_source` (the taxonomy
     in `base/agents/messages/envelope.py`): a peer agent (`agent:N`) or a declared external agent
     (`external_agent:S`) -> `agent_messages`; a
     machine- or framework-originated wakeup / notice (`watcher:N` / `shell:N` /
@@ -89,7 +89,7 @@ def _inbound_bucket(source: str) -> str:
     return "user_input"
 
 
-# ava_note_tag values that map to their own bucket; every other note tag
+# meiva_note_tag values that map to their own bucket; every other note tag
 # (agent_id / exec_timeout / compact_reminder / lifecycle_* / ...) is a
 # `context_note` (see the system_note branch of `bucket_messages`).
 
@@ -105,15 +105,15 @@ def _note_bucket(tag: object) -> str:
 
 
 def _human_bucket(msg: HumanMessage) -> str:
-    """The context bucket a HumanMessage belongs to, by its Ava message type."""
-    kwargs = read_ava_kwargs(msg)
-    ava_type = kwargs.get("ava_msg_type")
-    if ava_type == AvaMsgType.INBOUND:
-        return _inbound_bucket(kwargs.get("ava_source") or "")
-    if ava_type == AvaMsgType.COMPACT_SUMMARY:
+    """The context bucket a HumanMessage belongs to, by its Meiva message type."""
+    kwargs = read_meiva_kwargs(msg)
+    meiva_type = kwargs.get("meiva_msg_type")
+    if meiva_type == MeivaMsgType.INBOUND:
+        return _inbound_bucket(kwargs.get("meiva_source") or "")
+    if meiva_type == MeivaMsgType.COMPACT_SUMMARY:
         return "compact_summary"
-    if ava_type == AvaMsgType.SYSTEM_NOTE:
-        return _note_bucket(kwargs.get("ava_note_tag"))
+    if meiva_type == MeivaMsgType.SYSTEM_NOTE:
+        return _note_bucket(kwargs.get("meiva_note_tag"))
     if isinstance(msg.content, str) and msg.content.startswith(COMPACT_SUMMARY_HEADER):  # pyright: ignore[reportUnknownMemberType]
         # The auto-compact summary is injected as an untagged HumanMessage
         # (compose_summary_message); the header is its one invariant.

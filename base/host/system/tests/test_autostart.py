@@ -1,18 +1,18 @@
 """Boot-time autostart registration (`base.host.system.autostart`).
 
 Pins the properties that matter for reboot survival without recursion:
-- the macOS plist runs `ava start --boot` at load (RunAtLoad — identity is the
+- the macOS plist runs `meiva start --boot` at load (RunAtLoad — identity is the
   home path, no name flag exists) with a PATH that includes Homebrew's bin
-  (launchd's minimal PATH omits it, which is what made a bare `ava start` fail
+  (launchd's minimal PATH omits it, which is what made a bare `meiva start` fail
   to find the repo's tools at boot);
 - registration writes the plist but NEVER `launchctl bootstrap`s it -- bootstrap
-  on a RunAtLoad job runs it immediately, and this runs inside `ava start`, so
-  bootstrapping would spawn a second concurrent `ava start`.
+  on a RunAtLoad job runs it immediately, and this runs inside `meiva start`, so
+  bootstrapping would spawn a second concurrent `meiva start`.
 Linux systemd delegation is tested at the platform backend; this file also
 covers native boot jobs.
 
 The retry block (`test_the_job_retries_*`) is the one that earns its keep: a
-fire-once boot job left an agent-runner down for 6.5 hours after its `ava start`
+fire-once boot job left an agent-runner down for 6.5 hours after its `meiva start`
 raced the VPN interface at boot, and each platform states the same policy
 (`base/host/system/boot_policy.py`) in its own scheduler's terms.
 """
@@ -29,8 +29,8 @@ from base.host.system.hostport import Host
 from base.host.system.tests.fake_commands import DARWIN_ARM64, FakeCommands, fake_host
 
 
-def _local_ava(*, host: Host) -> str:
-    return "/Users/x/.local/bin/ava"
+def _local_meiva(*, host: Host) -> str:
+    return "/Users/x/.local/bin/meiva"
 
 
 def _brew_path(*, host: Host) -> str:
@@ -39,23 +39,23 @@ def _brew_path(*, host: Host) -> str:
 
 @pytest.fixture(autouse=True)
 def _stub(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    monkeypatch.setenv("AVA_HOME", str(tmp_path))
-    monkeypatch.setattr(autostart, "ava_binary_path", _local_ava)
+    monkeypatch.setenv("MEIVA_HOME", str(tmp_path))
+    monkeypatch.setattr(autostart, "meiva_binary_path", _local_meiva)
 
 
-def test_plist_runs_ava_start_at_load() -> None:
+def test_plist_runs_meiva_start_at_load() -> None:
     xml = autostart.autostart_plist_content(host=fake_host())
-    assert "<string>com.ava.autostart</string>" in xml
+    assert "<string>com.meiva.autostart</string>" in xml
     assert "<key>RunAtLoad</key>" in xml and "<true/>" in xml
-    # ProgramArguments == `ava start --boot` — no name flag exists (path-only).
-    for token in ("/Users/x/.local/bin/ava", "<string>start</string>", "<string>--boot</string>"):
+    # ProgramArguments == `meiva start --boot` — no name flag exists (path-only).
+    for token in ("/Users/x/.local/bin/meiva", "<string>start</string>", "<string>--boot</string>"):
         assert token in xml
     assert "--cluster" not in xml
 
 
 def test_plist_embeds_a_path_env(monkeypatch: pytest.MonkeyPatch) -> None:
     """The plist must carry an explicit PATH — launchd's minimal PATH omits
-    Homebrew's bin, which is what made a bare `ava start` fail to find its tools at
+    Homebrew's bin, which is what made a bare `meiva start` fail to find its tools at
     boot. The PATH composition itself is `base.host.system.cron.launchd_path_env`
     (shared with the watchdog probe's plist) and is unit-tested there."""
     monkeypatch.setattr(cron, "launchd_path_env", _brew_path)
@@ -71,10 +71,10 @@ def test_register_macos_writes_plist_but_never_bootstraps(
     commands = FakeCommands()  # no command scripted: any launchctl call fails the test
     rc = autostart.register_macos(host=fake_host(commands, platform=DARWIN_ARM64))
     assert rc == 0
-    plist = tmp_path / "Library" / "LaunchAgents" / "com.ava.autostart.plist"
+    plist = tmp_path / "Library" / "LaunchAgents" / "com.meiva.autostart.plist"
     assert plist.exists()
     # The whole point: registration must not launchctl-bootstrap (would recurse
-    # RunAtLoad -> a second `ava start`). No command at all is issued.
+    # RunAtLoad -> a second `meiva start`). No command at all is issued.
     assert commands.argvs == []
 
 
@@ -96,18 +96,18 @@ def test_register_macos_idempotent_no_rewrite(
 
 # --- the retry policy, per platform ---------------------------------------
 #
-# One behaviour -- re-run `ava start` every BOOT_RETRY_INTERVAL_S seconds until
+# One behaviour -- re-run `meiva start` every BOOT_RETRY_INTERVAL_S seconds until
 # it exits 0, at most BOOT_MAX_ATTEMPTS times -- stated per platform, because only
 # launchd can retry a boot job for us (and it has no attempt limit: `--boot` counts). A boot job that gives up after one failure is what the 2026-07-28 incident
-# was: `ava start` raced the VPN interface, exited 1, and nothing tried again.
+# was: `meiva start` raced the VPN interface, exited 1, and nothing tried again.
 
 
 def test_the_job_retries_on_macos_only_while_it_fails() -> None:
     """launchd.plist(5): `SuccessfulExit: false` restarts the job "in the
     inverse condition" of a zero exit -- i.e. while it keeps failing, and never
     once it succeeds. Getting this key backwards (or passing a bare
-    `KeepAlive: true`) would respawn `ava start` forever, including after a
-    deliberate `ava stop`."""
+    `KeepAlive: true`) would respawn `meiva start` forever, including after a
+    deliberate `meiva stop`."""
     xml = autostart.autostart_plist_content(host=fake_host())
     assert "<key>KeepAlive</key>" in xml
     keep_alive = xml.split("<key>KeepAlive</key>", 1)[1].split("</dict>", 1)[0]

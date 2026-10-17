@@ -21,7 +21,7 @@ _TIMELINE_INPUTS = TimelineReadInputs(
 
 
 def ts(second: int) -> dict[str, str]:
-    return {"ava_created_at": f"2026-10-04T12:00:{second:02d}+00:00"}
+    return {"meiva_created_at": f"2026-10-04T12:00:{second:02d}+00:00"}
 
 
 def ai(second: int, *, text: str | None = None, code: str | None = None) -> AIMessage:
@@ -36,14 +36,18 @@ def result(second: int) -> ToolMessage:
     return ToolMessage(
         content="ok",
         tool_call_id="tc",
-        additional_kwargs={"ava_msg_type": "exec_output", "ava_exec_body_start": 0, **ts(second)},
+        additional_kwargs={
+            "meiva_msg_type": "exec_output",
+            "meiva_exec_body_start": 0,
+            **ts(second),
+        },
     )
 
 
 def inbound(second: int, text: str) -> HumanMessage:
     return HumanMessage(
         content=text,
-        additional_kwargs={"ava_msg_type": "inbound", "ava_source": "user", **ts(second)},
+        additional_kwargs={"meiva_msg_type": "inbound", "meiva_source": "user", **ts(second)},
     )
 
 

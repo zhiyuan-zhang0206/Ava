@@ -1,5 +1,5 @@
 """Fixture plugin writer for the provider-plugin tests: a `provider.py` + `plugin.py` pair in the
-session's tmp AVA_HOME. Each test explicitly builds its own catalog after writing its plugins."""
+session's tmp MEIVA_HOME. Each test explicitly builds its own catalog after writing its plugins."""
 
 from __future__ import annotations
 
@@ -65,7 +65,7 @@ _PRICE_LINE = """\"{model}\": PriceRates(
 @pytest.fixture
 def provider_plugin() -> Generator[Callable[..., None], None, None]:
     """Write fixture provider declarations for an explicit catalog build."""
-    # Tests share one session AVA_HOME — remove anything this test created so
+    # Tests share one session MEIVA_HOME — remove anything this test created so
     # a later test's loader scan cannot see leftover plugin dirs.
     plugin_root = paths.plugins_dir()
     plugin_root.mkdir(parents=True, exist_ok=True)
@@ -113,13 +113,13 @@ def provider_plugin() -> Generator[Callable[..., None], None, None]:
         # empty stub here; it contributes nothing agent-side).
         (plugin_dir / "plugin.py").write_text("# provider plugin stub")
         # Every plugin ships a manifest; this one declares the single provider prefix it contributes.
-        (plugin_dir / "ava-plugin.json").write_text(
+        (plugin_dir / "meiva-plugin.json").write_text(
             json.dumps(
                 {
                     "apiVersion": 2,
                     "name": dir_name,
                     "version": "1.0.0",
-                    "engines": {"ava": ">=2026.1.1"},
+                    "engines": {"meiva": ">=2026.1.1"},
                     "contributions": {"providers": [prefix]},
                 }
             )
@@ -130,5 +130,5 @@ def provider_plugin() -> Generator[Callable[..., None], None, None]:
     finally:
         for directory in set(plugin_root.iterdir()) - original:
             shutil.rmtree(directory)
-        cfg = paths.ava_home() / "plugins_config.json"
+        cfg = paths.meiva_home() / "plugins_config.json"
         cfg.unlink(missing_ok=True)

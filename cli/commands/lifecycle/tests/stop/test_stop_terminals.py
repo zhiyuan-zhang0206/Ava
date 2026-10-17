@@ -2,7 +2,7 @@
 
 The service holds every shell and runs the one terminal closure
 (`base.sessions.pty.closure`, covered by `services/agent_runner/pty_sessions/tests/test_close_all.py`).
-These tests lock what `ava stop` does around it, with real shells where the service
+These tests lock what `meiva stop` does around it, with real shells where the service
 is the thing under test:
 
 - `close_terminals` asks the service to close everything within a grace capped by
@@ -68,7 +68,7 @@ from tests.path_scoped.cli_tests import operator_database as operator_database
 from tests.path_scoped.cli_tests import operator_pipeline as operator_pipeline
 
 # The idle test's own prompt, set by its home's `.bash_profile`.
-_IDLE_PROMPT = "ava-idle-shell>"
+_IDLE_PROMPT = "meiva-idle-shell>"
 
 pytestmark = pytest.mark.usefixtures("written")
 
@@ -93,7 +93,7 @@ def test_stop_closes_busy_terminal_job_with_real_signals(
     service, and its owner gets the closure notice."""
     dependencies(monkeypatch, machine=command_runtime.machine)
     stop_env(monkeypatch, home)
-    name = "ava-agent-987-shell-2045-job"
+    name = "meiva-agent-987-shell-2045-job"
     _, running = busy_session(home, name, jobs.TERM_OK, pty_reaper)
     assert running, "the synthetic job never started"
 
@@ -132,7 +132,7 @@ def test_stop_kills_a_job_that_ignores_termination_after_its_grace(
     dependencies(monkeypatch, machine=command_runtime.machine)
     stop_env(monkeypatch, home)
     monkeypatch.setattr(strict, "_TERMINAL_STOP_GRACE_S", 1.0)
-    name = "ava-agent-987-shell-2045-stubborn"
+    name = "meiva-agent-987-shell-2045-stubborn"
     _, running = busy_session(home, name, jobs.STUBBORN, pty_reaper, ready_line="stubborn-ready")
     assert running, "the stubborn job never started"
 
@@ -177,8 +177,8 @@ def test_stop_records_nothing_for_idle_shell(
     dependencies(monkeypatch, machine=command_runtime.machine)
     stop_env(monkeypatch, home)
     (home / ".bash_profile").write_text(f"PS1='{_IDLE_PROMPT} '\n")
-    name = "ava-agent-987-shell-2044-idle"
-    assert new(name, home, {"AVA_HOME": str(home), "HOME": str(home)})
+    name = "meiva-agent-987-shell-2044-idle"
+    assert new(name, home, {"MEIVA_HOME": str(home), "HOME": str(home)})
     pty_reaper.track_session(name)
     assert wait_for(lambda: support.screen(name).rstrip().endswith(_IDLE_PROMPT)), (
         "the login shell never printed its prompt"
@@ -215,7 +215,7 @@ def test_stop_tolerates_naturally_exited_session(
     the service: it must not fail the stop."""
     dependencies(monkeypatch, machine=command_runtime.machine)
     stop_env(monkeypatch, home)
-    name = "ava-agent-987-shell-2045-already-dead"
+    name = "meiva-agent-987-shell-2045-already-dead"
     shell, _ = busy_session(home, name, jobs.TERM_OK, pty_reaper)
     os.kill(shell.pid, signal.SIGKILL)
     assert wait_for(lambda: not client.has_session(name)), "the service kept the dead session"
@@ -257,7 +257,7 @@ def test_the_stop_services_phase_keeps_the_pty_sessions_service_until_its_termin
         real_close(*args, **kwargs)  # pyright: ignore[reportArgumentType]
 
     monkeypatch.setattr(command, "close_terminals", close)
-    name = "ava-agent-987-shell-2044-order"
+    name = "meiva-agent-987-shell-2044-order"
     busy_session(home, name, jobs.TERM_OK, pty_reaper)
 
     assert (
@@ -297,8 +297,8 @@ def test_incomplete_stop_still_records_the_sessions_itclosed_session(
     dependencies(monkeypatch, machine=command_runtime.machine)
     root_stops = record_root_stops(monkeypatch)
     stop_env(monkeypatch, home)
-    closed = "ava-agent-987-shell-2051-closed"
-    stuck = "ava-agent-987-shell-2052-stuck"
+    closed = "meiva-agent-987-shell-2051-closed"
+    stuck = "meiva-agent-987-shell-2052-stuck"
     shell = identity_of(launch(stuck, term="ignore", ignore_hangup=True))
     stub_closure(
         monkeypatch,
@@ -360,7 +360,7 @@ def test_known_job_leftover_is_reported_without_failing_stop(
     stop successfully once the shell and terminal are closed."""
     dependencies(monkeypatch, machine=command_runtime.machine)
     stop_env(monkeypatch, home)
-    name = "ava-agent-987-shell-2044-stubborn"
+    name = "meiva-agent-987-shell-2044-stubborn"
     job = launch("private-job", term="ignore", ignore_hangup=True)
     survivor = closure.Survivor(name, identity_of(job), "job")
     stub_closure(
@@ -457,7 +457,7 @@ def test_the_closure_grace_is_the_stops_remaining_time_up_to_its_ceiling(
 ) -> None:
     """The grace never exceeds the stop's deadline or the ceiling; the SIGKILL leg runs
     with its own bound even when the deadline is already spent."""
-    monkeypatch.setenv("AVA_HOME", str(home))
+    monkeypatch.setenv("MEIVA_HOME", str(home))
     asked = stub_closure(monkeypatch, closure.Outcome())
 
     def settled(_until: float, _stage: str) -> None:
@@ -483,8 +483,8 @@ def test_a_terminal_left_after_the_closure_fails_the_stop_in_its_own_words(
     """A terminal still present once the closure ended every session it captured
     fails the stop, naming it, and without maintenance's claim that nothing will be
     killed: this stop has just killed its sessions."""
-    name = "ava-agent-987-shell-2053-lingering"
-    monkeypatch.setitem(os.environ, "AVA_HOME", str(home))
+    name = "meiva-agent-987-shell-2053-lingering"
+    monkeypatch.setitem(os.environ, "MEIVA_HOME", str(home))
     monkeypatch.setattr(strict, "live_terminals", lambda: [name])
 
     with pytest.raises(StopIncompleteError) as excinfo:
@@ -505,11 +505,11 @@ def test_a_terminal_that_clears_within_the_stop_deadline_does_not_fail_the_stop(
     """The closure evidence waits until the stop's deadline, and at least the SIGKILL
     leg's bound: a session still tearing down past that bound but gone from the
     service before the deadline is a closed terminal, not a failed stop."""
-    monkeypatch.setitem(os.environ, "AVA_HOME", str(home))
+    monkeypatch.setitem(os.environ, "MEIVA_HOME", str(home))
     monkeypatch.setattr(strict, "TERMINAL_KILL_WAIT_S", 0.2)
     stub_closure(monkeypatch, closure.Outcome())
     cleared_at = time.monotonic() + 0.6
-    name = "ava-agent-987-shell-2053-tearing-down"
+    name = "meiva-agent-987-shell-2053-tearing-down"
 
     def tearing_down() -> list[str]:
         return [] if time.monotonic() >= cleared_at else [name]
@@ -533,7 +533,7 @@ def test_live_terminals_reads_the_service_while_it_listens(
     refuses maintenance."""
     assert strict.live_terminals() == []
     strict.require_no_terminals()
-    name = "ava-agent-987-shell-2053-listed"
+    name = "meiva-agent-987-shell-2053-listed"
     assert new(name, home, {"HOME": str(home)})
 
     assert strict.live_terminals() == [name]
@@ -547,7 +547,7 @@ def test_live_terminals_without_the_service_is_what_its_ledger_still_runs(
     """A service that is not listening has no sessions; a crash's leftover is a process
     its ledger names that is still its recorded process."""
     assert strict.live_terminals() == []
-    name = "ava-agent-987-shell-2053-leftover"
+    name = "meiva-agent-987-shell-2053-leftover"
     proc = launch(name, term="ignore", ignore_hangup=True)
     ledger.write(ledger_path(), [closure.Target(name, identity_of(proc))])
     assert strict.live_terminals() == [name]
@@ -570,7 +570,7 @@ def test_a_stop_without_the_service_closes_the_leftovers_its_ledger_names(
     the dead service left, the leftover hung up first and SIGKILLed when it ignores
     the hangup, and the ledger is then empty."""
     monkeypatch.setattr(ledger, "SWEEP_HANGUP_WAIT_S", 0.3)
-    name = "ava-agent-987-shell-2054-orphaned"
+    name = "meiva-agent-987-shell-2054-orphaned"
     proc = launch(
         name, term="ignore" if ignores_hangup else "default", ignore_hangup=ignores_hangup
     )
@@ -600,8 +600,8 @@ def test_force_close_closes_every_session_at_once_without_notices(
 ) -> None:
     """`--force` closes terminals with no grace: a job that ignores TERM and HUP is
     SIGKILLed at once, and no owner notice is written."""
-    monkeypatch.setenv("AVA_HOME", str(home))
-    name = "ava-agent-987-shell-2055-force"
+    monkeypatch.setenv("MEIVA_HOME", str(home))
+    name = "meiva-agent-987-shell-2055-force"
     _, running = busy_session(home, name, jobs.STUBBORN, pty_reaper, ready_line="stubborn-ready")
     assert running, "the stubborn job never started"
 
@@ -619,8 +619,8 @@ def test_force_close_reports_known_job_without_failing(
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    monkeypatch.setenv("AVA_HOME", str(home))
-    name = "ava-agent-987-shell-2055-denied"
+    monkeypatch.setenv("MEIVA_HOME", str(home))
+    name = "meiva-agent-987-shell-2055-denied"
     job = launch("private-job", term="ignore", ignore_hangup=True)
     asked = stub_closure(
         monkeypatch,
@@ -634,7 +634,7 @@ def test_force_close_reports_known_job_without_failing(
 def test_force_close_still_fails_when_known_shell_survives(
     home: Path, launch: Launcher, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    monkeypatch.setenv("AVA_HOME", str(home))
+    monkeypatch.setenv("MEIVA_HOME", str(home))
     name = "private-surviving-shell"
     shell = launch(name, term="ignore", ignore_hangup=True)
     stub_closure(

@@ -2,7 +2,7 @@
 
 ## Decision
 
-`ava.self.pause_heartbeat` records every pause in the append-only trail,
+`meiva.self.pause_heartbeat` records every pause in the append-only trail,
 updates the active heartbeat window, and emits telemetry. It no longer compares
 the new duration with the previous row or emits a backoff reminder. Repeating
 the 24-hour cap is legal.

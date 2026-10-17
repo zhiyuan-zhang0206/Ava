@@ -1,12 +1,12 @@
 """Skills converge — sync repo + plugin skills into the single load dir.
 
-`$AVA_HOME/skills/` is the only directory `ava.skills` scans (plus runtime
-provider roots — see `ava/skills/__init__.py`). This module keeps it converged with the
+`$MEIVA_HOME/skills/` is the only directory `meiva.skills` scans (plus runtime
+provider roots — see `meiva/skills/__init__.py`). This module keeps it converged with the
 three source kinds:
 
-- repo skills:             `<repo>/ava_builtins/skills/[<group>/]<name>/` -> `skills/<name>/`  (origin="repo")
-- built-in plugin skills:  `<repo>/ava_builtins/plugins/<p>/skills/`  -> `skills/<p>/`     (origin="plugin")
-- installed plugin skills: `$AVA_HOME/plugins/<p>/skills/` -> `skills/<p>/`   (origin="plugin")
+- repo skills:             `<repo>/meiva_builtins/skills/[<group>/]<name>/` -> `skills/<name>/`  (origin="repo")
+- built-in plugin skills:  `<repo>/meiva_builtins/plugins/<p>/skills/`  -> `skills/<p>/`     (origin="plugin")
+- installed plugin skills: `$MEIVA_HOME/plugins/<p>/skills/` -> `skills/<p>/`   (origin="plugin")
 
 `<repo>/.agents/skills/` (the kernel-contributor project skills) is NOT a
 converge source: it reaches agents through the project-local mount instead
@@ -19,7 +19,7 @@ duplicate `type="skill"` row is created for it.
 
 **Bootstrap-only for repo-native sources (R5 design, task #1013)**: converge
 lands a repo-native package only when its load-dir copy is absent; it NEVER
-updates an existing copy (updates are the explicit `ava skill update` command,
+updates an existing copy (updates are the explicit `meiva skill update` command,
 which replaces a differing local copy). Installed-plugin skills keep the
 older sync behavior (updated on source change, user edits protected).
 
@@ -27,11 +27,11 @@ Converge-managed copies are derived state: the registry's `content_hash`
 records the tree hash converge / skill update last wrote, so a user edit to the
 copy is detected and never clobbered (and never auto-removed). Sources vanish ->
 untouched copies are removed; touched ones are kept with a warning.
-User-origin entries (installed via `ava plugins install <git-url>` or
-`ava skill register`) are never touched.
+User-origin entries (installed via `meiva plugins install <git-url>` or
+`meiva skill register`) are never touched.
 
-Runs as a converge step (`ava start` / the fleet update / `ava converge`) and
-directly after `ava plugins install`/`uninstall` so packages activate on the
+Runs as a converge step (`meiva start` / the fleet update / `meiva converge`) and
+directly after `meiva plugins install`/`uninstall` so packages activate on the
 next skill scan without a restart.
 """
 
@@ -58,13 +58,13 @@ from base.telemetry.converge_report import report_converge_preserve
 from cli.commands.extensions.skill_package import contains_skill_md
 
 # A git worktree checkout's sources are branch work-in-progress. converge and
-# `ava skill update` take their sources from the checkout the CLI runs from
+# `meiva skill update` take their sources from the checkout the CLI runs from
 # (`_repo_root()`), and in a worktree-heavy dev environment that assumption is
 # false exactly when the CLI is run from a `.worktrees/...` or
 # `.claude/worktrees/...` checkout while the resolved home is the default prod
 # home — the worktree's branch content (possibly unmerged) then lands in
-# `~/.ava/skills`, silently shadowing what main ships. Observed 2026-08-08: a
-# R5 worktree's copy of `ava-serious-research` was synced into prod by a
+# `~/.meiva/skills`, silently shadowing what main ships. Observed 2026-08-08: a
+# R5 worktree's copy of `meiva-serious-research` was synced into prod by a
 # `skill update` run from that worktree (audit round 2, skills-plugins #3).
 # Only the prod-home + worktree combination is refused: a home of any other
 # name (a test or scratch home) takes whatever checkout runs.
@@ -79,20 +79,20 @@ def _is_worktree_checkout(repo: Path) -> bool:
     return any(marker in resolved for marker in _WORKTREE_MARKERS)
 
 
-def assert_repo_source_bound(repo: Path, ava_home: Path) -> None:
+def assert_repo_source_bound(repo: Path, meiva_home: Path) -> None:
     """Fail when a sync would write a *worktree* checkout's sources into the
     prod home's load dir.
 
-    `AVA_CONVERGE_ALLOW_WORKTREE=1` opts out (a caller that means it).
+    `MEIVA_CONVERGE_ALLOW_WORKTREE=1` opts out (a caller that means it).
     """
-    if os.environ.get("AVA_CONVERGE_ALLOW_WORKTREE") == "1":
+    if os.environ.get("MEIVA_CONVERGE_ALLOW_WORKTREE") == "1":
         return
-    if is_default_home(ava_home) and _is_worktree_checkout(repo):
+    if is_default_home(meiva_home) and _is_worktree_checkout(repo):
         raise RuntimeError(
             f"refusing to sync skills from worktree checkout {repo} into the prod "
-            f"home {ava_home}: a worktree's sources are branch work-in-progress and "
-            f"must not replace prod's load dir (run `ava` from the prod checkout, "
-            f"or set AVA_CONVERGE_ALLOW_WORKTREE=1 to override)"
+            f"home {meiva_home}: a worktree's sources are branch work-in-progress and "
+            f"must not replace prod's load dir (run `meiva` from the prod checkout, "
+            f"or set MEIVA_CONVERGE_ALLOW_WORKTREE=1 to override)"
         )
 
 
@@ -155,12 +155,12 @@ class Source:
     origin: PackageOrigin  # "repo" | "plugin" (never "user")
     trust: TrustTier
     """Content trust for what this source lands. `"builtin"` only when the tree
-    came out of the Ava checkout — an *installed* plugin's skills converge with
+    came out of the Meiva checkout — an *installed* plugin's skills converge with
     origin="plugin" too, but their content is third-party and was scanned at
-    `ava plugins install` time, so they stay `"unreviewed"` here."""
+    `meiva plugins install` time, so they stay `"unreviewed"` here."""
     bootstrap_only: bool = False
     """True for repo-native sources (R5): converge lands the copy only when
-    absent and never updates it — updates are the explicit `ava skill update`.
+    absent and never updates it — updates are the explicit `meiva skill update`.
     False for installed-plugin skills, which keep the sync-on-change behavior."""
 
 
@@ -170,7 +170,7 @@ def _stamp_trust(entry: InstalledPackage, s: Source) -> None:
     Converge owns the *builtin* stamp and nothing else: it marks repo-sourced
     content builtin, and takes the stamp back off if that name stops coming out
     of the checkout. A `reviewed` promotion is a human's statement about content
-    they read (`ava skill trust`), so it survives every pass.
+    they read (`meiva skill trust`), so it survives every pass.
     """
     if s.trust == "builtin":
         entry.trust = "builtin"
@@ -179,7 +179,7 @@ def _stamp_trust(entry: InstalledPackage, s: Source) -> None:
 
 
 def _repo_skill_dirs(repo_skills: Path) -> list[Path]:
-    """The skill directories under `ava_builtins/skills/`, in name order.
+    """The skill directories under `meiva_builtins/skills/`, in name order.
 
     A directory with its own `SKILL.md` is a skill. One without only groups skills
     in the source tree (`skills/<group>/<name>/`): each child converges to
@@ -223,17 +223,17 @@ def iter_sources(repo: Path) -> tuple[list[Source], list[str]]:
             return
         sources[name] = Source(name, key, src, origin, trust, bootstrap_only=bootstrap_only)
 
-    for d in _repo_skill_dirs(repo / "ava_builtins" / "skills"):
+    for d in _repo_skill_dirs(repo / "meiva_builtins" / "skills"):
         add(d.name, d, "repo", "builtin", bootstrap_only=True)
     # The repo's `.agents/skills/` project skills (the kernel-contributor
-    # family: ava-self-development, review-contribution, …) are deliberately NOT a
+    # family: meiva-self-development, review-contribution, …) are deliberately NOT a
     # converge source (issue #146 / decision 2026-08-20). They reach agents
     # only through the project-local mount — `project_skill_roots` in
-    # `ava_builtins/plugins/ava_code/_walk.py` resolves `.agents/skills/` from
-    # `ava.cwd` at scan time — so only an agent working inside the checkout
+    # `meiva_builtins/plugins/meiva_code/_walk.py` resolves `.agents/skills/` from
+    # `meiva.cwd` at scan time — so only an agent working inside the checkout
     # sees them, never a runtime agent via the fleet-wide load dir.
     builtin_then_installed: tuple[tuple[Path, TrustTier, bool], ...] = (
-        (repo / "ava_builtins" / "plugins", "builtin", True),
+        (repo / "meiva_builtins" / "plugins", "builtin", True),
         (paths.plugins_dir(), "unreviewed", False),
     )
     for plugins_root, trust, bootstrap_only in builtin_then_installed:
@@ -242,7 +242,7 @@ def iter_sources(repo: Path) -> tuple[list[Source], list[str]]:
         for p in sorted(plugins_root.iterdir()):
             # Dot-prefixed dirs are atomic-install residue (.name.staging /
             # .name.backup-<pid>) — never a plugin, so their skills must not
-            # be converged into the load dir (2026-08-28 ava_ledger defense).
+            # be converged into the load dir (2026-08-28 meiva_ledger defense).
             if p.name.startswith("."):
                 continue
             skills_sub = p / "skills"
@@ -288,7 +288,7 @@ def _untracked_warning(s: Source, dest: Path) -> str:
     converge will not clobber it — register it to keep it."""
     return (
         f"'{s.name}': untracked dir {dest} shadows {s.src} (content differs); "
-        f"not synced, not loaded (remove it, or `ava skill register {s.name}` to keep yours)"
+        f"not synced, not loaded (remove it, or `meiva skill register {s.name}` to keep yours)"
     )
 
 
@@ -304,7 +304,7 @@ def _sync_bootstrap_only(
 ) -> None:
     """A repo-native (bootstrap-only) source whose copy already exists."""
     # Repo-native sources are bootstrap-only (R5): an existing copy is
-    # never touched here — updates are the explicit `ava skill update`
+    # never touched here — updates are the explicit `meiva skill update`
     # (which replaces a differing local copy). The one exception is the
     # lost-registry-row self-heal (#974): a source-identical copy is
     # adopted back; a differing registry-less copy stays an untracked
@@ -404,7 +404,7 @@ def _sync_one(
     entry = next((p for p in registry.packages if match_key(p.name) == s.key), None)
     # An installed plugin's own skills dir is fair game even while its
     # registry row still says origin="user" (the state right after
-    # `ava plugins install`, before the first converge).
+    # `meiva plugins install`, before the first converge).
     own_plugin_skills = (
         entry is not None
         and entry.type == "plugin"
@@ -439,7 +439,7 @@ def _cleanup_gone_sources(
     """Handle converge-managed entries whose source vanished. Untouched copies
     are pure derived state -> removed; user-edited copies are kept (loudly).
     Only `type="skill"` rows are deregistered — a `type="plugin"` row is owned
-    by `ava plugins uninstall`."""
+    by `meiva plugins uninstall`."""
     for entry in list(registry.packages):
         if entry.origin == "user" or match_key(entry.name) in managed:
             continue
@@ -452,7 +452,7 @@ def _cleanup_gone_sources(
             ):
                 result.warnings.append(
                     f"'{entry.name}': source {entry.origin_path} is gone but {dest} was "
-                    f"modified locally; kept (remove it or `ava skill register {entry.name}`)"
+                    f"modified locally; kept (remove it or `meiva skill register {entry.name}`)"
                 )
                 continue
             if any(
@@ -480,12 +480,12 @@ def _cleanup_gone_sources(
                 entry.trust = "unreviewed"
 
 
-def converge_skills(repo: Path, ava_home: Path) -> SkillsConvergeResult:
-    """Sync all skill sources into `<ava_home>/skills/` and update the install
+def converge_skills(repo: Path, meiva_home: Path) -> SkillsConvergeResult:
+    """Sync all skill sources into `<meiva_home>/skills/` and update the install
     registry. Idempotent; never touches user-origin entries or user-edited
     copies. See the module docstring for the full rules."""
-    assert_repo_source_bound(repo, ava_home)
-    skills_root = ava_home / "skills"
+    assert_repo_source_bound(repo, meiva_home)
+    skills_root = meiva_home / "skills"
     skills_root.mkdir(parents=True, exist_ok=True)
     now = datetime.now(UTC).isoformat(timespec="seconds")
     result = SkillsConvergeResult()
@@ -510,6 +510,6 @@ def converge_skills(repo: Path, ava_home: Path) -> SkillsConvergeResult:
     for name in untracked:
         result.warnings.append(
             f"'{name}': untracked dir in {skills_root} — not loaded "
-            f"(`ava skill register {name}` to load it)"
+            f"(`meiva skill register {name}` to load it)"
         )
     return result

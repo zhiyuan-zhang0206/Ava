@@ -1,11 +1,11 @@
 """Framework lifecycle signals — the exceptions that drive turn-stopping.
 
-These live in `base` (below both the agent kernel and the `ava` SDK) so the
-kernel can import them without depending on the agent-facing `ava.self` module.
-`ava.self` re-exports them and its `restart()` / `terminate()` / `compact()` /
+These live in `base` (below both the agent kernel and the `meiva` SDK) so the
+kernel can import them without depending on the agent-facing `meiva.self` module.
+`meiva.self` re-exports them and its `restart()` / `terminate()` / `compact()` /
 `update()` functions raise them; the exec node catches them to end a turn. That
-separation lets a context like a benchmark runner disable `ava.self` wholesale
-(via AVA_SDK_DISABLE) without breaking the kernel's import of these signals.
+separation lets a context like a benchmark runner disable `meiva.self` wholesale
+(via MEIVA_SDK_DISABLE) without breaking the kernel's import of these signals.
 """
 
 from __future__ import annotations

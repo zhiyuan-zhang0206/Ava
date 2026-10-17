@@ -2,7 +2,7 @@
 
 The gateway never runs plugin code of its own beyond a plugin's data faces (`metrics.py`,
 `inspector.py`); a face is loaded for a builtin plugin only while that plugin is ENABLED
-(`plugins_config`), consulted per request, so `ava plugins disable` takes effect without a gateway
+(`plugins_config`), consulted per request, so `meiva plugins disable` takes effect without a gateway
 restart. Metrics and widgets use the same rule. (The Grafana dashboard supply is a different
 surface: it renders panels for every shipped plugin so a disabled plugin's history stays visible.)
 """

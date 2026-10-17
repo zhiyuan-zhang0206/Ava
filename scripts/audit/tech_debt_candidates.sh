@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Optional Ava debt-candidate report. Rules and evidence requirements live in
+# Optional Meiva debt-candidate report. Rules and evidence requirements live in
 # docs/conventions/engineering/tech-debt.md. This is not a lint or contribution prerequisite.
 # Usage: bash scripts/audit/tech_debt_candidates.sh [--repo PATH]
 # The existing daily-debt schedule consumes this report; no runtime is changed here.
@@ -95,8 +95,8 @@ npm_report() { (cd ui/web && npm outdated --json); }
 SCAN_ROOTS=(
   # meizel:roles BEGIN dirs application templates
   agent/
-  ava/
-  ava_builtins/
+  meiva/
+  meiva_builtins/
   base/
   cli/
   gateway/

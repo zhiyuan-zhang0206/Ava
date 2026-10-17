@@ -1,7 +1,7 @@
 """In-memory system-note injection for the exec node (user ruling 2026-08-11).
 
 AGENTS.md / CLAUDE.md context notes are delivered inside the exec's own messages delta, not
-through a side-channel file read by a later hook: ava_code writes them to the base `messages`
+through a side-channel file read by a later hook: meiva_code writes them to the base `messages`
 channel via PluginStateHandle during the turn; the exec node pops them out of the plugin state
 update (a dict **spread would otherwise let them clobber the exec ToolMessage) and merges them
 into the same delta.

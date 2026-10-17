@@ -1,0 +1,14 @@
+[debt.env-patch]
+"test_read_wrap_corrupted_state_field_raises.py#patch.dict os.environ" = 4
+"test_read_wrap_hash_dedup_primary_path_blocks.py#patch.dict os.environ" = 2
+
+[debt.first-party-patch]
+"test_read_wrap_corrupted_state_field_raises.py#assignment meiva.state" = 17
+"test_read_wrap_corrupted_state_field_raises.py#assignment meiva.state.meiva_code__injected_paths" = 1
+"test_read_wrap_corrupted_state_field_raises.py#assignment meiva.state_update" = 17
+"test_read_wrap_corrupted_state_field_raises.py#monkeypatch.setattr base.lm.factory.build_chat_model" = 1
+"test_read_wrap_hash_dedup_primary_path_blocks.py#assignment meiva.context" = 1
+"test_read_wrap_hash_dedup_primary_path_blocks.py#assignment meiva.state" = 5
+"test_read_wrap_hash_dedup_primary_path_blocks.py#assignment meiva.state.meiva_code__project_skills_note" = 1
+"test_read_wrap_hash_dedup_primary_path_blocks.py#assignment meiva.state.meiva_code__project_skills_seen_compact" = 1
+"test_read_wrap_hash_dedup_primary_path_blocks.py#assignment meiva.state_update" = 5

@@ -52,7 +52,7 @@ STATE_PREAMBLE = (
 # spelling are what the question was calibrated on; the note the agent reads spells the
 # loadable path instead (`render_note`).
 QUESTION_TEMPLATE = (
-    "Skill `ava.skills.{identifier}` -- {description}\n\n"
+    "Skill `meiva.skills.{identifier}` -- {description}\n\n"
     "If the agent loads this skill now and follows it, will that clearly help it handle "
     "the latest request in the conversation?"
 )
@@ -70,7 +70,7 @@ FALSE_IF = (
 # because the lines below it are the same index lines.
 _FRAMING = (
     "Skills that match the current conversation, offered automatically. The descriptions "
-    "are summaries; load a skill's full instructions with `ava.help(ava.skills.<path>)` "
+    "are summaries; load a skill's full instructions with `meiva.help(meiva.skills.<path>)` "
     "before using it."
 )
 

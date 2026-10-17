@@ -1,12 +1,12 @@
-"""`ava firewall` — the standalone face of the ALF allowlist manifest.
+"""`meiva firewall` — the standalone face of the ALF allowlist manifest.
 
 The converge step (`firewall.ensure_firewall_allowlist`) converges the
-allowlist automatically on every source `ava start`. These verbs give an
+allowlist automatically on every source `meiva start`. These verbs give an
 operator the same machinery on demand, without a full converge:
 
-- `ava firewall status` — read-only: verdict, manifest coverage, stale rules,
+- `meiva firewall status` — read-only: verdict, manifest coverage, stale rules,
   and whether the older-macOS sudo fallback grant is installed.
-- `ava firewall sync` — run the rootless-first repair + prune pass now.
+- `meiva firewall sync` — run the rootless-first repair + prune pass now.
 
 Mutation exits 0 as the ordinary user on macOS 15.3.1, but the daemon silently
 drops an add whose bundle identifier already has a rule, so `sync` verifies
@@ -30,7 +30,7 @@ from cli.commands.converge.firewall import (
 
 
 def cmd_firewall_status(*, machine: MachineIdentity, host: Host) -> int:
-    """`ava firewall status` — audit the host and diff the manifest (read-only)."""
+    """`meiva firewall status` — audit the host and diff the manifest (read-only)."""
     from cli.commands import _repo
 
     roles = _repo.roles_or_none(machine=machine)
@@ -64,7 +64,7 @@ def cmd_firewall_status(*, machine: MachineIdentity, host: Host) -> int:
 
 
 def cmd_firewall_sync(*, machine: MachineIdentity, host: Host) -> int:
-    """`ava firewall sync` — apply the manifest now (repair + prune).
+    """`meiva firewall sync` — apply the manifest now (repair + prune).
 
     Mutates directly first. On older macOS it retries with `sudo -n`; if both
     paths fail, it prints the exact manual commands and exits 1.

@@ -1,4 +1,4 @@
-"""Unit tests for `ava.terminate` / `ava.restart` behavior.
+"""Unit tests for `meiva.terminate` / `meiva.restart` behavior.
 
 Each throws a dedicated `SystemExit` subclass (`AgentTermination` / `AgentRestart`),
 not swallowed by `except Exception`; the difference is what kind is written to the inbound queue:
@@ -17,9 +17,7 @@ from dataclasses import replace
 import psycopg
 import pytest
 
-import ava
-from ava.sdk_surface.installation import Installation
-from ava.tests.fixtures.pin_agent import pin_agent
+import meiva
 from base import telemetry
 from base.agents.tests.units import spawn_agent
 from base.cluster.machine import MachineIdentity
@@ -30,8 +28,10 @@ from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
 from base.lm.catalog import ModelCatalog
 from base.packages.tests.model_catalog import AddModels
-from base.paths import ava_home
+from base.paths import meiva_home
 from base.telemetry.tests.capture.event_capture import EmittedEvents
+from meiva.sdk_surface.installation import Installation
+from meiva.tests.fixtures.pin_agent import pin_agent
 
 
 @pytest.fixture
@@ -40,7 +40,7 @@ def event_pipeline(
 ) -> Iterator[telemetry.EventPipeline]:
     """Own the process writer used by the operation and its mirror barrier."""
     pipeline = telemetry.build_pipeline(
-        database=lambda: database, machine=machine_identity, home=ava_home()
+        database=lambda: database, machine=machine_identity, home=meiva_home()
     )
     try:
         telemetry.init_telemetry(process="test-sdk-operation", pipeline=pipeline)
@@ -68,7 +68,7 @@ class TestLifecycleExceptions:
         except written by the agent will not accidentally swallow lifecycle signals."""
 
         def _raise() -> None:
-            raise ava.self.AgentTermination
+            raise meiva.self.AgentTermination
 
         caught_by_exception = False
         try:
@@ -76,7 +76,7 @@ class TestLifecycleExceptions:
                 _raise()
             except Exception:
                 caught_by_exception = True
-        except ava.self.AgentTermination:
+        except meiva.self.AgentTermination:
             pass
         assert not caught_by_exception
 
@@ -87,7 +87,7 @@ class TestLifecycleExceptions:
         """AgentRestart inherits SystemExit, not Exception — same as AgentTermination."""
 
         def _raise() -> None:
-            raise ava.self.AgentRestart
+            raise meiva.self.AgentRestart
 
         caught_by_exception = False
         try:
@@ -95,7 +95,7 @@ class TestLifecycleExceptions:
                 _raise()
             except Exception:
                 caught_by_exception = True
-        except ava.self.AgentRestart:
+        except meiva.self.AgentRestart:
             pass
         assert not caught_by_exception
 
@@ -123,9 +123,9 @@ class TestTerminate:
                 machine=machine_identity,
             )
         )  # self identity
-        with pytest.raises(ava.self.AgentTermination):
-            ava.self.terminate()
-        assert _inbound_rows(db_conn, ava.self.AGENT_ID) == [("", "terminate", "self")]
+        with pytest.raises(meiva.self.AgentTermination):
+            meiva.self.terminate()
+        assert _inbound_rows(db_conn, meiva.self.AGENT_ID) == [("", "terminate", "self")]
 
 
 class TestRestart:
@@ -143,7 +143,7 @@ class TestRestart:
     ) -> None:
         """restart self-inserts a kind='restart' source='self' into its own agent.
         The restarter daemon will handle the respawn (this test only verifies the SDK-side write is correct)."""
-        monkeypatch.setattr(ava, "__plugin_installation__", model_installation, raising=False)
+        monkeypatch.setattr(meiva, "__plugin_installation__", model_installation, raising=False)
         pin_agent(
             spawn_agent(
                 catalog=model_catalog,
@@ -152,9 +152,9 @@ class TestRestart:
                 machine=machine_identity,
             )
         )  # self identity
-        with pytest.raises(ava.self.AgentRestart):
-            ava.self.restart()
-        assert _inbound_rows(db_conn, ava.self.AGENT_ID) == [("", "restart", "self")]
+        with pytest.raises(meiva.self.AgentRestart):
+            meiva.self.restart()
+        assert _inbound_rows(db_conn, meiva.self.AGENT_ID) == [("", "restart", "self")]
 
     def test_restart_with_config_inserts_payload(
         self,
@@ -168,12 +168,12 @@ class TestRestart:
         database_gate: ProcessDbGate,
         machine_identity: MachineIdentity,
     ) -> None:
-        """`ava.self.restart(config_overlay={...})` (PR-E) — payload JSONB holds config_overlay.
+        """`meiva.self.restart(config_overlay={...})` (PR-E) — payload JSONB holds config_overlay.
 
         Validation + INSERT path exercised, validate_config_overlay passes then payload serialized
         into inbound_messages.payload.
         """
-        monkeypatch.setattr(ava, "__plugin_installation__", model_installation, raising=False)
+        monkeypatch.setattr(meiva, "__plugin_installation__", model_installation, raising=False)
         pin_agent(
             spawn_agent(
                 catalog=model_catalog,
@@ -182,13 +182,13 @@ class TestRestart:
                 machine=machine_identity,
             )
         )
-        with pytest.raises(ava.self.AgentRestart):
-            ava.self.restart(config_overlay={"auto_compact_fraction": 0.7})
+        with pytest.raises(meiva.self.AgentRestart):
+            meiva.self.restart(config_overlay={"auto_compact_fraction": 0.7})
         with db_conn.cursor() as cur:
             cur.execute(
                 "SELECT kind, source, payload FROM inbound_messages "
                 "WHERE agent_id = %s ORDER BY id DESC LIMIT 1",
-                (ava.self.AGENT_ID,),
+                (meiva.self.AGENT_ID,),
             )
             row = cur.fetchone()
         assert row is not None
@@ -216,7 +216,7 @@ class TestRestart:
         diff (not the merged result) so the restart_completed marker shows the
         right diff text.
         """
-        monkeypatch.setattr(ava, "__plugin_installation__", model_installation, raising=False)
+        monkeypatch.setattr(meiva, "__plugin_installation__", model_installation, raising=False)
         pin_agent(
             spawn_agent(
                 catalog=model_catalog,
@@ -229,18 +229,18 @@ class TestRestart:
         with db_conn.cursor() as cur:
             cur.execute(
                 "UPDATE agents_meta SET config_overlay = %s::jsonb WHERE id = %s",
-                ('{"auto_compact_fraction": 0.7}', ava.self.AGENT_ID),
+                ('{"auto_compact_fraction": 0.7}', meiva.self.AGENT_ID),
             )
         db_conn.commit()
 
-        with pytest.raises(ava.self.AgentRestart):
-            ava.self.restart(config_overlay={"llm_model": "gpt-5.6-sol"})
+        with pytest.raises(meiva.self.AgentRestart):
+            meiva.self.restart(config_overlay={"llm_model": "gpt-5.6-sol"})
 
         # Column should have MERGED result (pre-existing key preserved).
         with db_conn.cursor() as cur:
             cur.execute(
                 "SELECT config_overlay FROM agents_meta WHERE id = %s",
-                (ava.self.AGENT_ID,),
+                (meiva.self.AGENT_ID,),
             )
             row = cur.fetchone()
         assert row is not None
@@ -251,7 +251,7 @@ class TestRestart:
             cur.execute(
                 "SELECT payload FROM inbound_messages "
                 "WHERE agent_id = %s AND kind = 'restart' ORDER BY id DESC LIMIT 1",
-                (ava.self.AGENT_ID,),
+                (meiva.self.AGENT_ID,),
             )
             inbound_row = cur.fetchone()
         assert inbound_row is not None
@@ -270,7 +270,7 @@ class TestRestart:
         machine_identity: MachineIdentity,
     ) -> None:
         """Non-per_agent field → InvalidConfigOverlay; does **not** deliver inbound, process does not exit."""
-        monkeypatch.setattr(ava, "__plugin_installation__", model_installation, raising=False)
+        monkeypatch.setattr(meiva, "__plugin_installation__", model_installation, raising=False)
         pin_agent(
             spawn_agent(
                 catalog=model_catalog,
@@ -279,13 +279,13 @@ class TestRestart:
                 machine=machine_identity,
             )
         )
-        with pytest.raises(ava.self.InvalidConfigOverlay, match=r"typo|per_agent"):  # type: ignore[attr-defined]
-            ava.self.restart(config_overlay={"definitely_not_a_field": 1})
+        with pytest.raises(meiva.self.InvalidConfigOverlay, match=r"typo|per_agent"):  # type: ignore[attr-defined]
+            meiva.self.restart(config_overlay={"definitely_not_a_field": 1})
         # No inbound delivered (process will not exit)
         with db_conn.cursor() as cur:
             cur.execute(
                 "SELECT COUNT(*) FROM inbound_messages WHERE agent_id = %s AND kind = 'restart'",
-                (ava.self.AGENT_ID,),
+                (meiva.self.AGENT_ID,),
             )
             count_row = cur.fetchone()
             assert count_row is not None
@@ -304,7 +304,7 @@ class TestRestart:
         machine_identity: MachineIdentity,
     ) -> None:
         """A model typo is rejected before either persistent restart side effect."""
-        monkeypatch.setattr(ava, "__plugin_installation__", model_installation, raising=False)
+        monkeypatch.setattr(meiva, "__plugin_installation__", model_installation, raising=False)
         pin_agent(
             spawn_agent(
                 catalog=model_catalog,
@@ -316,24 +316,24 @@ class TestRestart:
         with db_conn.cursor() as cur:
             cur.execute(
                 "SELECT config_overlay FROM agents_meta WHERE id = %s",
-                (ava.self.AGENT_ID,),
+                (meiva.self.AGENT_ID,),
             )
             before_row = cur.fetchone()
         assert before_row is not None
         assert before_row[0] in (None, {})
 
-        with pytest.raises(ava.self.InvalidConfigOverlay, match="not a registered model"):  # type: ignore[attr-defined]
-            ava.self.restart(config_overlay={"llm_model": "deepseek-v4-flash-vision"})
+        with pytest.raises(meiva.self.InvalidConfigOverlay, match="not a registered model"):  # type: ignore[attr-defined]
+            meiva.self.restart(config_overlay={"llm_model": "deepseek-v4-flash-vision"})
 
         with db_conn.cursor() as cur:
             cur.execute(
                 "SELECT COUNT(*) FROM inbound_messages WHERE agent_id = %s AND kind = 'restart'",
-                (ava.self.AGENT_ID,),
+                (meiva.self.AGENT_ID,),
             )
             inbound_count_row = cur.fetchone()
             cur.execute(
                 "SELECT config_overlay FROM agents_meta WHERE id = %s",
-                (ava.self.AGENT_ID,),
+                (meiva.self.AGENT_ID,),
             )
             after_row = cur.fetchone()
         assert inbound_count_row is not None
@@ -371,7 +371,7 @@ class TestRestart:
             },
         )
         model_installation = replace(model_installation, catalog=model_catalog)
-        monkeypatch.setattr(ava, "__plugin_installation__", model_installation, raising=False)
+        monkeypatch.setattr(meiva, "__plugin_installation__", model_installation, raising=False)
         pin_agent(
             spawn_agent(
                 catalog=model_catalog,
@@ -380,12 +380,12 @@ class TestRestart:
                 machine=machine_identity,
             )
         )
-        with pytest.raises(ava.self.AgentRestart):
-            ava.self.restart(config_overlay={"llm_model": model})
+        with pytest.raises(meiva.self.AgentRestart):
+            meiva.self.restart(config_overlay={"llm_model": model})
         with db_conn.cursor() as cur:
             cur.execute(
                 "SELECT config_overlay FROM agents_meta WHERE id = %s",
-                (ava.self.AGENT_ID,),
+                (meiva.self.AGENT_ID,),
             )
             row = cur.fetchone()
         assert row is not None
@@ -394,7 +394,7 @@ class TestRestart:
             cur.execute(
                 "SELECT payload FROM inbound_messages "
                 "WHERE agent_id = %s AND kind = 'restart' ORDER BY id DESC LIMIT 1",
-                (ava.self.AGENT_ID,),
+                (meiva.self.AGENT_ID,),
             )
             inbound_row = cur.fetchone()
         assert inbound_row is not None
@@ -411,7 +411,7 @@ class TestPauseHeartbeat:
     ) -> None:
         """The actual SDK caller uses this test root's supplied live configuration."""
         monkeypatch.setattr(
-            ava,
+            meiva,
             "__plugin_installation__",
             replace(model_installation, authority=config_authority),
             raising=False,
@@ -439,19 +439,19 @@ class TestPauseHeartbeat:
                 machine=machine_identity,
             )
         )  # self identity
-        ava.self.pause_heartbeat(1800)
+        meiva.self.pause_heartbeat(1800)
         telemetry.sync()  # the event lands via the unified emitter's drain
         db_conn.rollback()  # fresh snapshot — the emitter wrote on its own connection
         with db_conn.cursor() as cur:
             cur.execute(
                 "SELECT EXTRACT(EPOCH FROM (heartbeat_paused_until - now())) "
                 "FROM agents_meta WHERE id = %s",
-                (ava.self.AGENT_ID,),
+                (meiva.self.AGENT_ID,),
             )
             window_row = cur.fetchone()
             cur.execute(
                 "SELECT duration_s FROM heartbeat_pause_log WHERE agent_id = %s",
-                (ava.self.AGENT_ID,),
+                (meiva.self.AGENT_ID,),
             )
             trail_rows = cur.fetchall()
         assert window_row is not None
@@ -474,7 +474,7 @@ class TestPauseHeartbeat:
             obj = _json.loads(line)
             if (
                 obj.get("event_name") == "heartbeat_paused"
-                and obj.get("agent_id") == ava.self.AGENT_ID
+                and obj.get("agent_id") == meiva.self.AGENT_ID
                 and obj.get("category") == "telemetry"
             ):
                 event_row = obj
@@ -508,13 +508,13 @@ class TestPauseHeartbeat:
         )
         emitted_events.clear()  # spawning the agent above emitted its own events
         with pytest.raises(ValueError, match=r"greater than 0|at most"):
-            ava.self.pause_heartbeat(bad)
+            meiva.self.pause_heartbeat(bad)
         unexpected = [name for name in emitted_events.names() if name != "sdk_call"]
         assert unexpected == [], f"invalid duration emitted {unexpected}"
         with db_conn.cursor() as cur:
             cur.execute(
                 "SELECT heartbeat_paused_until FROM agents_meta WHERE id = %s",
-                (ava.self.AGENT_ID,),
+                (meiva.self.AGENT_ID,),
             )
             row = cur.fetchone()
         assert row is not None
@@ -542,18 +542,18 @@ class TestPauseHeartbeat:
                     machine=machine_identity,
                 )
             )
-            ava.self.pause_heartbeat(3600)
+            meiva.self.pause_heartbeat(3600)
             with db_conn.cursor() as cur:
                 cur.execute(
                     "SELECT EXTRACT(EPOCH FROM (heartbeat_paused_until - now())) "
                     "FROM agents_meta WHERE id = %s",
-                    (ava.self.AGENT_ID,),
+                    (meiva.self.AGENT_ID,),
                 )
                 window_row = cur.fetchone()
             assert window_row is not None
             assert window_row[0] == pytest.approx(3600, abs=5)  # pyright: ignore[reportUnknownMemberType]
             with pytest.raises(ValueError, match=r"at most"):
-                ava.self.pause_heartbeat(3601)
+                meiva.self.pause_heartbeat(3601)
         finally:
             set_field("heartbeat_pause_max_seconds", original_limit)
 
@@ -579,11 +579,11 @@ class TestPauseHeartbeat:
                     machine=machine_identity,
                 )
             )
-            ava.self.pause_heartbeat(172800)
+            meiva.self.pause_heartbeat(172800)
         finally:
             set_field("heartbeat_pause_max_seconds", original_limit)
         with pytest.raises(ValueError, match=r"at most"):
-            ava.self.pause_heartbeat(172800)
+            meiva.self.pause_heartbeat(172800)
 
 
 class TestRestartCompletedMarker:
@@ -648,21 +648,21 @@ class TestRestartCompletedMarker:
 # user-facing gateway endpoint (POST /api/agents/{id}/terminate|restart) is kept.
 
 
-class TestAvaDBAutocommit:
-    def test_ava_db_recovers_after_sql_error(
+class TestMeivaDBAutocommit:
+    def test_meiva_db_recovers_after_sql_error(
         self,
         db_conn: psycopg.Connection,
     ) -> None:
-        """After an SQL error, ava.DB can still be used immediately — autocommit=True prevents the
+        """After an SQL error, meiva.DB can still be used immediately — autocommit=True prevents the
         connection from getting stuck in InFailedSqlTransaction state (otherwise one test throwing an
-        SQL error without rollback would cause subsequent tests using ava.DB to all cascade-fail,
+        SQL error without rollback would cause subsequent tests using meiva.DB to all cascade-fail,
         as encountered in the smoke flow).
         """
         # Deliberately trigger an SQL error
-        with pytest.raises(psycopg.errors.UndefinedTable), ava.DB.cursor() as cur:
+        with pytest.raises(psycopg.errors.UndefinedTable), meiva.DB.cursor() as cur:
             cur.execute("SELECT * FROM nonexistent_table_xyz")
 
-        # Immediately use ava.DB after the error — under autocommit the conn is back to IDLE, should not error again
-        with ava.DB.cursor() as cur:
+        # Immediately use meiva.DB after the error — under autocommit the conn is back to IDLE, should not error again
+        with meiva.DB.cursor() as cur:
             cur.execute("SELECT 1")
             assert cur.fetchone() == (1,)

@@ -22,7 +22,7 @@ from agent.graph.hooks.compact import COMPACT_MAX_ATTEMPTS, CompactionFailedErro
 from agent.impersonation_handoff import flush_checkpoint
 from agent.startup import wrap_saver_writes_with_nstep_interval
 from agent.tests.claim.test_inbound_ownership import agent_row
-from base.agents.context import AvaContext
+from base.agents.context import MeivaContext
 from base.agents.history.delta_read_compat import wrap_saver_reads_with_delta_reconstruction
 from base.agents.inbox.insert import insert_inbound_message
 from base.config import settings
@@ -65,7 +65,7 @@ async def prepare_graph(
     wrap_saver_writes_with_nstep_interval(saver, interval)
     # Delta write model (#3180): fold delta-written messages on read (daemon parity).
     wrap_saver_reads_with_delta_reconstruction(saver)
-    builder: Any = StateGraph(states.AgentState, context_schema=AvaContext)
+    builder: Any = StateGraph(states.AgentState, context_schema=MeivaContext)
     builder.add_node("claim", claim_node, destinations=("before_llm", "claim", "__end__"))
     builder.add_node("before_llm", model, destinations=("claim",))
     builder.add_edge(START, "claim")
@@ -107,7 +107,7 @@ def _build_host_driving_invoke_until_done(
     pool: AsyncConnectionPool[Any],
     saver: AsyncPostgresSaver,
     graph: Any,
-    ctx: AvaContext,
+    ctx: MeivaContext,
     monkeypatch: pytest.MonkeyPatch,
     *,
     database_gate: ProcessDbGate,
@@ -243,7 +243,7 @@ async def test_compaction_failure_is_visible_durable_and_recovers_on_new_inbound
     channel = f"{settings.data_plane.events_channel}:compact-proof:{agent}"
     publisher = AgentEventPublisher(redis, channel, agent_id=agent)
     turn_bus = EventBus(EventBusConfig(settings.data_plane.redis_url, channel))
-    ctx = AvaContext(
+    ctx = MeivaContext(
         ops_pool=aops_pool,
         event_publisher=publisher,
         llm=MagicMock(),

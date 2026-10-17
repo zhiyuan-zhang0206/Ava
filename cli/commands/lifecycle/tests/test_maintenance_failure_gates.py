@@ -1,10 +1,10 @@
 # pyright: reportUnknownArgumentType=warning
-"""No failure receipt gates the hold: `ava start` is the exit, with nothing to settle.
+"""No failure receipt gates the hold: `meiva start` is the exit, with nothing to settle.
 
 A continuation that failed during the drain is only logged and alerted by the
 agent host (`agent_continuation_lost`). The journal carries no receipt, so no gate
 refuses on one: the drain keeps waiting for a real continuation (and times out
-with the stall report), and `ava start` releases the hold and wakes every
+with the stall report), and `meiva start` releases the hold and wakes every
 restart pointer without inspecting any agent.
 """
 
@@ -92,7 +92,7 @@ def _pending_restart(
 
 
 class _StartHarness:
-    """`ava start` over a standing hold, with its release collaborators observable."""
+    """`meiva start` over a standing hold, with its release collaborators observable."""
 
     def __init__(
         self,
@@ -166,7 +166,7 @@ def test_start_releases_even_when_a_restart_pointer_is_gone(
     database_gate: ProcessDbGate,
     machine_identity: MachineIdentity,
 ) -> None:
-    """A restart pointer that is gone is not settled by `ava start`: the release
+    """A restart pointer that is gone is not settled by `meiva start`: the release
     proceeds on the hold alone, and the host's alert was the signal."""
     gone, gone_command = _pending_restart(
         db_conn, database_gate=database_gate, machine_identity=machine_identity

@@ -4,7 +4,7 @@ Locks the query contract of the sidebar stats card — pyright/tsc cannot catch
 drift between hard-coded `payload->>'X'` keys in SQL and emit site field names,
 these tests are the only defense.
 
-Runs on ava_test DB (real SQL): the window's telemetry rows are INSERTed into
+Runs on meiva_test DB (real SQL): the window's telemetry rows are INSERTed into
 `telemetry_events` (audit rows into `audit_events`), and the `agents` table's
 live_count is populated via INSERT of real rows.
 """

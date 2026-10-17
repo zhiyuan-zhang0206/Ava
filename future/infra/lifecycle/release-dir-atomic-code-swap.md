@@ -8,7 +8,7 @@
 
 ## Why this came up
 
-Ava runs on **pet machines** (laptops, small servers, cloud VPS), so the
+Meiva runs on **pet machines** (laptops, small servers, cloud VPS), so the
 container answer to safe upgrades — ship an immutable image, replace the whole
 machine — does not apply: you cannot rebuild a laptop per deploy. That pushed us to
 **in-place** `git checkout --force` + `uv sync`. The question is whether the
@@ -25,10 +25,10 @@ running processes import from**.
 - `cli/commands/_repo.py:repo_root()` = `Path(__file__).resolve().parents[2]` — the
   code root is "wherever the running `.py` lives." (This is *favorable* for releases;
   see below.)
-- The lazy-import drift hazard is already known: `ava start` is run as a **fresh
+- The lazy-import drift hazard is already known: `meiva start` is run as a **fresh
   subprocess** specifically to avoid mixing pre-pull imported modules with
   post-pull lazy imports.
-- **Residual footgun = the orchestrator itself.** `ava update --local` runs in a
+- **Residual footgun = the orchestrator itself.** `meiva update --local` runs in a
   detached session on the *old* interpreter while it rewrites its own directory
   underneath it. Any lazy import / subprocess call it makes after the checkout sees
   new code. This is the "self-upgrade across a commit that deletes a CLI subcommand
@@ -36,7 +36,7 @@ running processes import from**.
 
 ## What release-swap buys — and what it does not
 
-Mechanism: one `~/ava-releases/<sha>/` per commit (git worktree, shared `.git`
+Mechanism: one `~/meiva-releases/<sha>/` per commit (git worktree, shared `.git`
 objects), each with its own `.venv`; a `current` symlink points at the active
 release; **processes cd into the release's realpath (not through the symlink)** so a
 running process's files never change underneath it. Upgrade = build new release →
@@ -69,14 +69,14 @@ orchestration's complexity.
   `node_modules`/`.next` or can it symlink the previous release's?" Backend-only
   changes (the common case) reuse the prior frontend build.
 - **New layer:** release creation + atomic symlink flip (via `rename`) + keep-last-K
-  GC. `~/.ava/` (pidfiles, machine state, memory pool) already lives outside the repo,
+  GC. `~/.meiva/` (pidfiles, machine state, memory pool) already lives outside the repo,
   so it is release-independent — no change.
 
 ## Options (for when this is picked up)
 
 1. **80/20 — orchestrator snapshot only.** Don't convert the system to release
-   dirs. Just have `ava update` `git worktree add` a throwaway worktree at the *old*
-   HEAD and run the detached `ava update --local` from there, so the orchestrator's
+   dirs. Just have `meiva update` `git worktree add` a throwaway worktree at the *old*
+   HEAD and run the detached `meiva update --local` from there, so the orchestrator's
    files never change under it; the main repo still checks out in place. Touches only
    where `spawn_rollout` launches the session. Kills the one footgun that has actually
    bitten, an order of magnitude cheaper than the full system.

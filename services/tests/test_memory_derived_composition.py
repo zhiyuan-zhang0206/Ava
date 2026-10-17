@@ -97,7 +97,7 @@ def test_entry_shares_gate_and_closes_pipeline_before_hard_exit(
     factory()
     gates = [call.kwargs["gate"] for call in create.call_args_list]
     assert all(gate is gates[0] for gate in gates)
-    assert gates[0].application_name() == f"ava:{logging.call_args.kwargs['name']}:v7"
+    assert gates[0].application_name() == f"meiva:{logging.call_args.kwargs['name']}:v7"
     assert logging.call_args.kwargs["image"] is capture.return_value
     assert logging.call_args.kwargs["producer"]() is build.return_value
     if "database" in work_inputs[0]:

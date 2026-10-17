@@ -5,13 +5,13 @@ Where `memory_index_note` (this plugin's `notes.py`) keeps the standing index
 *rest* of the pool: before a turn woken by new inbound, it searches the pool with
 the recent conversation as the query and injects the notes the gateway's ranking
 scores at or above `memory_recall_inject_threshold`, as a system-styled note.
-The search is the same one `ava.memory.search` runs -- vector retrieval of the
+The search is the same one `meiva.memory.search` runs -- vector retrieval of the
 best chunk of each candidate note, then a decision model that scores every chunk's
 relevance to the conversation -- so recall holds no model call of its own and no
 relevance judgement of its own. Each injected note carries its pool-relative
 path, its frontmatter description (empty when absent, never synthesized from
 title/body), its score and the passage that matched. The agent sees relevant
-durable notes surface on their own, without having to call `ava.memory.search`.
+durable notes surface on their own, without having to call `meiva.memory.search`.
 
 A removable layer: gated by the agent's `passive_memory_recall_enabled` slice field (default
 on), and a no-op whenever the search does not come back with results -- index
@@ -34,7 +34,7 @@ from langchain_core.messages import AnyMessage, HumanMessage
 
 from agent.graph.recall.conversation_query import build_conversation_query
 from agent.messages import NoteTag, system_note_message
-from base.agents.context import AvaContext
+from base.agents.context import MeivaContext
 from base.agents.context.gateway_client import memory_search as memory_client
 from base.api_contracts.agent_contract import GatewayUnavailable, IndexerUnavailable
 from base.host.env.agent_slices import AgentSlices
@@ -49,7 +49,7 @@ from base.paths import memory_dir
 _FRAMING = (
     "Memory notes related to the current conversation, retrieved "
     "automatically, each with the passage that matched and its relevance score. "
-    "These point into your note pool at ava.memory.PATH -- read a path in full "
+    "These point into your note pool at meiva.memory.PATH -- read a path in full "
     "when it looks relevant."
 )
 
@@ -67,7 +67,7 @@ class PassiveRecall(NamedTuple):
 
 
 async def _search_or_none(
-    query: str, k: int, *, exclude: Collection[str], deadline: float, ctx: AvaContext
+    query: str, k: int, *, exclude: Collection[str], deadline: float, ctx: MeivaContext
 ) -> list[memory_client.MemorySearchResult] | None:
     """The `k` best results outside `exclude`, or None when the search is unavailable or failed.
 
@@ -169,7 +169,7 @@ async def passive_memory_recall(
     messages: Collection[AnyMessage],
     *,
     agent: AgentSlices,
-    context: AvaContext,
+    context: MeivaContext,
     injected_paths: Collection[str] = frozenset(),
 ) -> PassiveRecall | None:
     """Search the memory pool on the recent conversation and render the notes that

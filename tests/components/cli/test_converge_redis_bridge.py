@@ -119,7 +119,7 @@ def test_converge_retires_the_standalone_launchd_job_and_installed_copy(
     installed = home / "redis-bridge" / "relay.py"
     installed.parent.mkdir(parents=True)
     installed.write_text("# stale relay\n")
-    plist = tmp_path / "LaunchAgents" / "com.ava.redis-bridge.plist"
+    plist = tmp_path / "LaunchAgents" / "com.meiva.redis-bridge.plist"
     plist.parent.mkdir(parents=True)
     plist.write_text("stale plist")
     loaded = True
@@ -137,7 +137,7 @@ def test_converge_retires_the_standalone_launchd_job_and_installed_copy(
     monkeypatch.setattr(bridge, "launchctl", launchctl)
     ctx = ConvergeCtx(
         repo=tmp_path / "repo",
-        ava_home=home,
+        meiva_home=home,
         roles=None,
         config=command_runtime.config,
         machine=command_runtime.machine,
@@ -164,7 +164,7 @@ def test_retire_preserves_artifacts_when_launchd_job_does_not_exit(
     installed = home / "redis-bridge" / "relay.py"
     installed.parent.mkdir(parents=True)
     installed.write_text("# live relay\n")
-    plist = tmp_path / "LaunchAgents" / "com.ava.redis-bridge.plist"
+    plist = tmp_path / "LaunchAgents" / "com.meiva.redis-bridge.plist"
     plist.parent.mkdir(parents=True)
     plist.write_text("live plist")
 
@@ -205,7 +205,7 @@ def test_probe_uses_authenticated_redis_ping_through_bridge(
         return RedisBridgeEndpoint("10.64.0.7", 16380)
 
     monkeypatch.setattr(bridge, "redis_bridge_endpoint", _endpoint)
-    command_runtime.config.set_field("redis_url", "redis://ava:secret@127.0.0.1:16380/0")
+    command_runtime.config.set_field("redis_url", "redis://meiva:secret@127.0.0.1:16380/0")
     monkeypatch.setattr("redis.Redis.from_url", _from_url)
 
     status = bridge.probe_redis_bridge(
@@ -215,7 +215,7 @@ def test_probe_uses_authenticated_redis_ping_through_bridge(
     assert status.serving
     assert calls == [
         (
-            "redis://ava:secret@10.64.0.7:16380/0",
+            "redis://meiva:secret@10.64.0.7:16380/0",
             {"socket_connect_timeout": 3.0, "socket_timeout": 3.0},
         )
     ]
@@ -241,7 +241,7 @@ def test_probe_fails_when_ping_through_the_bridge_fails(
         return RedisBridgeEndpoint("10.64.0.7", 16380)
 
     monkeypatch.setattr(bridge, "redis_bridge_endpoint", _endpoint)
-    command_runtime.config.set_field("redis_url", "redis://ava:secret@127.0.0.1:16380/0")
+    command_runtime.config.set_field("redis_url", "redis://meiva:secret@127.0.0.1:16380/0")
     monkeypatch.setattr("redis.Redis.from_url", lambda *_a, **_kw: _DeadClient())  # pyright: ignore[reportUnknownArgumentType]
 
     status = bridge.probe_redis_bridge(
@@ -260,8 +260,8 @@ def test_probe_reports_unconfigured_when_registry_record_is_missing(
 ) -> None:
     monkeypatch.setattr(bridge.sys, "platform", "darwin")
     command_runtime.config.set_field("cluster_secret", "cluster-secret")
-    command_runtime.config.set_field("db_url", "postgresql://ava@127.0.0.1:6433/ava")
-    command_runtime.config.set_field("redis_url", "redis://ava:secret@127.0.0.1:6380/0")
+    command_runtime.config.set_field("db_url", "postgresql://meiva@127.0.0.1:6433/meiva")
+    command_runtime.config.set_field("redis_url", "redis://meiva:secret@127.0.0.1:6380/0")
 
     def _missing_record(_home: Path) -> None:
         return None
@@ -314,8 +314,8 @@ def test_remote_relay_does_not_read_machine_host(
     def forbidden_host() -> str:
         pytest.fail("A remote relay must not read machine identity")
 
-    command_runtime.config.set_field("db_url", "postgresql://ava@192.0.2.10:6433/ava")
-    command_runtime.config.set_field("redis_url", "redis://ava:secret@127.0.0.1:6380/0")
+    command_runtime.config.set_field("db_url", "postgresql://meiva@192.0.2.10:6433/meiva")
+    command_runtime.config.set_field("redis_url", "redis://meiva:secret@127.0.0.1:6380/0")
     monkeypatch.setattr(command_runtime.machine, "host", forbidden_host)
     monkeypatch.setattr(bridge.sys, "platform", "darwin")
     status = bridge.probe_redis_bridge(
@@ -357,11 +357,11 @@ def test_probe_uses_each_owners_live_url_and_recorded_port(
     monkeypatch.setattr(bridge.sys, "platform", "darwin")
     monkeypatch.setattr("redis.Redis.from_url", from_url)
     for index, command in enumerate((command_runtime, second)):
-        command.config.set_field("db_url", "postgresql://ava@127.0.0.1:6433/ava")
+        command.config.set_field("db_url", "postgresql://meiva@127.0.0.1:6433/meiva")
         command.config.set_field("cluster_secret", "bearer")
         command.config.set_field("machine_host", f"10.64.0.{index + 7}")
         command.config.set_field(
-            "redis_url", f"redis://ava:secret{index}@127.0.0.1:{17380 + index}/0"
+            "redis_url", f"redis://meiva:secret{index}@127.0.0.1:{17380 + index}/0"
         )
         command.machine.reset()
         home = tmp_path / str(index)
@@ -376,13 +376,13 @@ def test_probe_uses_each_owners_live_url_and_recorded_port(
         status = bridge.probe_redis_bridge(home, machine=command.machine, config=command.config)
         assert status.endpoint == f"10.64.0.{index + 7}:{17380 + index}"
         assert status.serving
-    command_runtime.config.set_field("redis_url", "redis://ava:changed@127.0.0.1:17380/1")
+    command_runtime.config.set_field("redis_url", "redis://meiva:changed@127.0.0.1:17380/1")
     assert bridge.probe_redis_bridge(
         tmp_path / "0", machine=command_runtime.machine, config=command_runtime.config
     ).serving
     assert urls == [
-        "redis://ava:secret0@10.64.0.7:17380/0",
-        "redis://ava:secret1@10.64.0.8:17381/0",
-        "redis://ava:changed@10.64.0.7:17380/1",
+        "redis://meiva:secret0@10.64.0.7:17380/0",
+        "redis://meiva:secret1@10.64.0.8:17381/0",
+        "redis://meiva:changed@10.64.0.7:17380/1",
     ]
     assert closed == urls

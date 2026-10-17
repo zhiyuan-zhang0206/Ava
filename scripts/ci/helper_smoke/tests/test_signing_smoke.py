@@ -10,7 +10,7 @@ from scripts.ci.helper_smoke import signing_smoke as smoke
     [
         (0, 'Executable=/x\n# designated => cdhash H"ab"', "cdhash", None),
         (1, "code object is not signed at all", "cdhash", "designated requirement readback failed"),
-        (0, "identifier com.ava.helper", "cdhash", "readback has no 'cdhash'"),
+        (0, "identifier com.meiva.helper", "cdhash", "readback has no 'cdhash'"),
         (
             0,
             "<key>com.apple.security.automation.apple-events</key>",

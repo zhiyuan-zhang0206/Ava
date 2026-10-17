@@ -51,12 +51,12 @@ def test_cli_first_event_reaches_otlp_before_exit(
     if mode == "unavailable":
         server.shutdown()
         server.server_close()
-    env = {key: value for key, value in os.environ.items() if not key.startswith("AVA_")}
+    env = {key: value for key, value in os.environ.items() if not key.startswith("MEIVA_")}
     env.update(
-        AVA_HOME=str(tmp_path / "home"),
-        AVA_CONFIG_FETCH="skip",
-        AVA_TELEMETRY_OTLP_ENABLED="true",
-        AVA_TELEMETRY_OTLP_ENDPOINT=f"http://127.0.0.1:{server.server_address[1]}",
+        MEIVA_HOME=str(tmp_path / "home"),
+        MEIVA_CONFIG_FETCH="skip",
+        MEIVA_TELEMETRY_OTLP_ENABLED="true",
+        MEIVA_TELEMETRY_OTLP_ENDPOINT=f"http://127.0.0.1:{server.server_address[1]}",
     )
     child = subprocess.run(  # noqa: S603 — fixed program and this checkout's interpreter
         [sys.executable, "-I", str(_CHILD), mode],

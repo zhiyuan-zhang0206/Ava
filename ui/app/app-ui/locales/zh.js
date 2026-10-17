@@ -1,12 +1,12 @@
-// Ava app UI locale copy — zh.
+// Meiva app UI locale copy — zh.
 // Loaded by index.html; the page picks the matching one via navigator.language.
 // English strings are also the static HTML defaults; this file is the canonical
 // copy so the page can switch without touching markup.
-window.AVA_APP_I18N = window.AVA_APP_I18N || {};
-window.AVA_APP_I18N['zh'] =
+window.MEIVA_APP_I18N = window.MEIVA_APP_I18N || {};
+window.MEIVA_APP_I18N['zh'] =
 {
-  "connectTitle": "连接到 Ava",
-  "connectIntro": "填写 Ava 服务器地址；密钥可选，填了即可直接登录",
+  "connectTitle": "连接到 Meiva",
+  "connectIntro": "填写 Meiva 服务器地址；密钥可选，填了即可直接登录",
   "serverLabel": "服务器地址",
   "serverPlaceholder": "主机或 http://主机:端口",
   "secretLabel": "集群密钥",
@@ -42,10 +42,10 @@ window.AVA_APP_I18N['zh'] =
   "openDownloadPage": "打开下载页",
   "checkingUpdates": "正在检查更新…",
   "updateCurrent": "当前已是最新构建。",
-  "updateAvailable": "有新版本 Ava {version}（构建 {build}）。",
+  "updateAvailable": "有新版本 Meiva {version}（构建 {build}）。",
   "updateCheckFailed": "检查更新失败。",
   "updateDownloading": "正在下载并校验更新…",
   "updateInstallerOpened": "已打开系统安装程序。",
-  "updatePermissionRequired": "请在系统设置中允许 Ava 安装未知应用，然后重试。",
+  "updatePermissionRequired": "请在系统设置中允许 Meiva 安装未知应用，然后重试。",
   "updateInstallFailed": "更新安装失败。"
 };

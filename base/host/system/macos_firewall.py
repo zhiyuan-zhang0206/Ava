@@ -3,7 +3,7 @@
 ## The defect this observes (issue #949)
 
 macOS's Application Firewall (ALF) allows incoming connections per *binary*, and
-every binary Ava serves an off-box port from is one macOS considers unknown:
+every binary Meiva serves an off-box port from is one macOS considers unknown:
 
     $ codesign -dv .../uv/python/cpython-3.12.11-macos-aarch64-none/bin/python3.12
     Identifier=-
@@ -15,7 +15,7 @@ interpreter is neither. So it needs an explicit rule — and the rule is stored
 against the path it was added with, while every path here is **version-stamped**:
 
     ~/.local/share/uv/python/cpython-3.12.11-macos-aarch64-none/bin/python3.12
-    ~/.ava/runtime/pg/17.11.0/bin/postgres
+    ~/.meiva/runtime/pg/17.11.0/bin/postgres
 
 A `uv python` bump (or a `PG_VERSION` bump) therefore does not invalidate the
 rule so much as *orphan* it: the rule still names the old path, the process now
@@ -27,7 +27,7 @@ process is wrong.
 ## Why repair is unprivileged-first, and why it verifies
 
 On macOS 15.3.1 the three manifest mutations (`--add`, `--unblockapp`, and
-`--remove`) exit 0 as the ordinary Ava user, so converge calls
+`--remove`) exit 0 as the ordinary Meiva user, so converge calls
 `socketfilterfw` directly first. But an exit code of 0 does **not** mean a rule
 persisted. The ALF daemon on macOS 15.3.1 deduplicates its rule store by the
 binary's bundle identifier: an `--add` for a path whose identifier already has
@@ -46,8 +46,8 @@ Other macOS releases may reject an unprivileged mutation outright. That
 platform difference degrades through two bounded fallbacks: retry the same
 command with `sudo -n`, then report the exact manual `sudo` command when that
 also fails. `sudo -n` never opens a password prompt, so an unattended
-`ava start` cannot hang. An older host can optionally retain the narrow
-`AVA_FIREWALL` sudoers grant; without it, converge reports but does not crash.
+`meiva start` cannot hang. An older host can optionally retain the narrow
+`MEIVA_FIREWALL` sudoers grant; without it, converge reports but does not crash.
 Queries (`--getglobalstate` and `--listapps`) remain unprivileged on every
 supported path.
 
@@ -194,7 +194,7 @@ def allowlisted_paths(*, host: Host) -> dict[str, bool] | None:
 
     None when the list cannot be read. Note the list also contains Apple's own
     built-in service entries (`/usr/sbin/smbd`, `/usr/libexec/sharingd`, …), which
-    is harmless here: this is only ever consulted for membership of paths Ava owns.
+    is harmless here: this is only ever consulted for membership of paths Meiva owns.
     """
     out = query("--listapps", host=host)
     if out is None:
@@ -219,7 +219,7 @@ def _covered(binary: Path, rules: dict[str, bool]) -> bool:
     """Does an Allow rule cover `binary`, named either literally or by its real path?
 
     Both forms are accepted because both are legitimately how a rule gets written,
-    and the paths Ava resolves are layers of symlink over a versioned target:
+    and the paths Meiva resolves are layers of symlink over a versioned target:
     `$(brew --prefix pgbouncer)/bin/pgbouncer` is the stable
     `/opt/homebrew/opt/pgbouncer/…` symlink onto a versioned Cellar path, and
     `.venv/bin/python` is a symlink onto the uv interpreter. An operator (or
@@ -227,9 +227,9 @@ def _covered(binary: Path, rules: dict[str, bool]) -> bool:
 
     Accepting either is the asymmetry worth choosing deliberately. A false *alarm*
     is expensive — it prints a scary block on a host that is fine, on every
-    `ava start`, until an operator learns to ignore this step, at which point the
+    `meiva start`, until an operator learns to ignore this step, at which point the
     real occurrence is invisible too. A false *silence* costs one off-box
-    reachability failure, which `ava firewall status` diagnoses with this same
+    reachability failure, which `meiva firewall status` diagnoses with this same
     audit. So when the evidence is ambiguous, stay quiet.
     """
     if rules.get(str(binary), False):
@@ -291,13 +291,13 @@ class ManifestEntry:
 
     ``paths`` are glob patterns (``~`` expanded at resolve time) that point at
     the executables ALF must allow; every one is written as a glob because every
-    Ava-managed path is version-stamped (`Cellar/pgbouncer/1.25.1/`,
+    Meiva-managed path is version-stamped (`Cellar/pgbouncer/1.25.1/`,
     `runtime/pg/17.11.0/`, `uv/python/cpython-3.12.12-.../`). ``machine`` filters
     the entry to one machine (the configured machine name, e.g. "my-mac");
     None applies to every macOS host. ``purpose`` is operator-facing context for
     why the binary accepts inbound traffic. The filter exists for user
     applications an operator decided to allow inbound on a specific machine —
-    Ava's own stack is unfiltered.
+    Meiva's own stack is unfiltered.
     """
 
     id: str
@@ -306,7 +306,7 @@ class ManifestEntry:
     machine: str | None = None
 
 
-# The whitelist Ava converges every macOS host to. Captured from a macOS
+# The whitelist Meiva converges every macOS host to. Captured from a macOS
 # host's manual allowlist: Apple's own signed
 # entries (syslogd, sshd, cupsd, smbd, /usr/bin/python3, ...) are deliberately
 # absent — ALF auto-allows them and never prompts for them. Resolving the globs
@@ -317,21 +317,21 @@ FIREWALL_MANIFEST: tuple[ManifestEntry, ...] = (
     ManifestEntry(
         "uv interpreter",
         ("~/.local/share/uv/python/*/bin/python3.*",),
-        "Runs Ava Python services that accept inbound connections",
+        "Runs Meiva Python services that accept inbound connections",
     ),
     ManifestEntry(
         "prod venv interpreter",
-        ("~/.ava/source/.venv/bin/python3*",),
+        ("~/.meiva/source/.venv/bin/python3*",),
         "Covers the production virtualenv's listener entry points",
     ),
     ManifestEntry(
         "dev clone venv interpreter",
-        ("~/Ava/.venv/bin/python3*",),
+        ("~/Meiva/.venv/bin/python3*",),
         "Covers development virtualenv listener entry points",
     ),
     ManifestEntry(
         "vendored postgres",
-        ("~/.ava/runtime/pg/*/bin/postgres",),
+        ("~/.meiva/runtime/pg/*/bin/postgres",),
         "Accepts Postgres clients on gateway hosts",
     ),
     ManifestEntry(
@@ -380,19 +380,19 @@ FIREWALL_MANIFEST: tuple[ManifestEntry, ...] = (
     ManifestEntry(
         "grafana",
         (
-            "~/.ava/lgtm/native/grafana-home/bin/grafana",
+            "~/.meiva/lgtm/native/grafana-home/bin/grafana",
             "/opt/homebrew/Cellar/grafana/*/bin/grafana",
         ),
         "Serves Grafana dashboards",
     ),
     ManifestEntry(
         "loki",
-        ("~/.ava/lgtm/native/bin/loki",),
+        ("~/.meiva/lgtm/native/bin/loki",),
         "Accepts Loki telemetry",
     ),
     ManifestEntry(
         "otel collector",
-        ("~/.ava/otel-collector/otelcol-contrib",),
+        ("~/.meiva/otel-collector/otelcol-contrib",),
         "Accepts OTLP telemetry",
     ),
     # (An operator can add machine-scoped entries for their own apps; see the
@@ -409,8 +409,8 @@ FIREWALL_LEGACY_FAMILY: tuple[str, ...] = ("~/Library/Android/sdk/platform-tools
 def _machine_name(configured: str | None, *, host: Host) -> str:
     """This host's stable machine identifier; never raises.
 
-    the ``configured`` name (``AVA_MACHINE_NAME``, None when unset) is the
-    authoritative source. When it is unset the host is not yet a configured Ava
+    the ``configured`` name (``MEIVA_MACHINE_NAME``, None when unset) is the
+    authoritative source. When it is unset the host is not yet a configured Meiva
     unit, so fall back to the normalized ComputerName, then the bare hostname —
     a fresh machine can still be matched by an operator who names entries after
     either.
@@ -603,7 +603,7 @@ def sudo_grant_installed(*, host: Host) -> bool:
         return False
     if proc.returncode != 0:
         return False
-    return "AVA_FIREWALL" in proc.stdout
+    return "MEIVA_FIREWALL" in proc.stdout
 
 
 @dataclass(frozen=True)

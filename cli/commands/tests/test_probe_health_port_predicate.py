@@ -39,7 +39,7 @@ def test_the_covered_entries_are_the_standard_daemons_and_the_gate() -> None:
 
 def test_the_gate_is_covered_because_it_declares_a_home_healthz() -> None:
     gate = _by_session()["gate"]
-    assert gate.curl_url is not None and gate.curl_url.endswith("/__ava/healthz")
+    assert gate.curl_url is not None and gate.curl_url.endswith("/__meiva/healthz")
     assert gate.health_name is None
     assert gate.home_healthz is True
 

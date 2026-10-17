@@ -10,14 +10,14 @@ loop):
   become the reference, so the fixed head never counts as material. After
   that, once the provider-reported `input_tokens` exceed those at the
   segment's previous cut by
-  `chunk_threshold` (`AVA_UNDERSTANDING_CHUNK_RATIO` x the agent model's soft compaction threshold), enqueue
+  `chunk_threshold` (`MEIVA_UNDERSTANDING_CHUNK_RATIO` x the agent model's soft compaction threshold), enqueue
   `[cut index, request length)` and return the `compact` update that moves
   the cut. A failed enqueue leaves the cut where it was, so the next turn
   covers the same stretch again.
 - `enqueue_closing_chunk` — at compaction: the segment's remainder from the
   last cut to its end, tied to the boundary checkpoint that holds the segment.
 
-Both are best-effort and silent when `AVA_UNDERSTANDING_ENABLED` is off; neither
+Both are best-effort and silent when `MEIVA_UNDERSTANDING_ENABLED` is off; neither
 may fail the agent's turn.
 """
 
@@ -158,7 +158,7 @@ _NEWEST_CHECKPOINT_TS = (
 
 
 def _read_time(message: AnyMessage) -> datetime | None:
-    """When the model read `message` (`ava_picked_up_at`, else `ava_created_at`) as an aware
+    """When the model read `message` (`meiva_picked_up_at`, else `meiva_created_at`) as an aware
     time; None for a missing, unparsable or timezone-less stamp (an old message)."""
     stamp = message_read_time(message)
     if not stamp:

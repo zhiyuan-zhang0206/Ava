@@ -44,10 +44,10 @@ def load_installed_runtime(home: Path, source: Path) -> None:
     # A copied operator script must not import its containing development tree.
     sys.path.insert(0, str(source))
     from base.host.env.dotenv_boot import launcher_context, skip_config_fetch
-    from base.paths.home import resolve_ava_home
+    from base.paths.home import resolve_meiva_home
 
-    if resolve_ava_home().expanduser().resolve() != home:
-        raise RuntimeError("--home must match this operator's AVA_HOME")
+    if resolve_meiva_home().expanduser().resolve() != home:
+        raise RuntimeError("--home must match this operator's MEIVA_HOME")
     if launcher_context() is not None:
         raise RuntimeError("run as a local operator without a launcher credential delivery")
     skip_config_fetch()

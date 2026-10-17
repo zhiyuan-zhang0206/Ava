@@ -24,7 +24,7 @@ from base.db.code_version_gate import ProcessDbGate
 
 
 def test_gateway_url_comes_from_settings(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    monkeypatch.setenv("AVA_HOME", str(tmp_path))
+    monkeypatch.setenv("MEIVA_HOME", str(tmp_path))
     (tmp_path / "gateway_url").write_text("http://from-file:8000")
     monkeypatch.setattr(settings.gateway, "gateway_url", "http://from-env:8000/")
     assert machines.gateway_url(settings.gateway.gateway_url) == "http://from-env:8000"
@@ -109,9 +109,9 @@ def test_register_self_station_only_composes_row(
 def test_register_self_co_located_station_composes_with_gateway(
     machine_setup: MachineSetup, database_gate: ProcessDbGate
 ) -> None:
-    machine_setup(name="combo", role="gateway", home="~/.ava_gateway")
+    machine_setup(name="combo", role="gateway", home="~/.meiva_gateway")
     machine_setup.register(machines_test_db(database_gate=database_gate), url="http://gw:8000")
-    machine_setup(name="combo", role="observability-station", home="~/.ava_station")
+    machine_setup(name="combo", role="observability-station", home="~/.meiva_station")
     machine_setup.register(machines_test_db(database_gate=database_gate), url=None)
     gateway_url, role, _desc, stopped_at = read_machine("combo")
     assert role == ["gateway", "observability-station"]
@@ -129,11 +129,13 @@ def _read_stopped_at(name: str):
 def test_mark_stopping_stamps_then_register_clears(
     machine_setup: MachineSetup, database_gate: ProcessDbGate
 ) -> None:
-    machine_setup(name="test-stopping", role="agent-runner", home="~/.ava")
+    machine_setup(name="test-stopping", role="agent-runner", home="~/.meiva")
     machine_setup.register(machines_test_db(database_gate=database_gate), url=None)
     assert _read_stopped_at("test-stopping") is None
 
-    machines.mark_stopping(machines_test_db(database_gate=database_gate), "test-stopping", "~/.ava")
+    machines.mark_stopping(
+        machines_test_db(database_gate=database_gate), "test-stopping", "~/.meiva"
+    )
     assert _read_stopped_at("test-stopping") is not None
 
     machine_setup.register(machines_test_db(database_gate=database_gate), url=None)
@@ -201,11 +203,11 @@ def test_list_agent_runners_includes_all_runners(
 def test_list_agent_runners_excludes_intentionally_stopped(
     machine_setup: MachineSetup, database_gate: ProcessDbGate
 ) -> None:
-    machine_setup(name="running", role="agent-runner", home="~/.ava")
+    machine_setup(name="running", role="agent-runner", home="~/.meiva")
     machine_setup.register(machines_test_db(database_gate=database_gate), url="http://running:9000")
-    machine_setup(name="stopped", role="agent-runner", home="~/.ava")
+    machine_setup(name="stopped", role="agent-runner", home="~/.meiva")
     machine_setup.register(machines_test_db(database_gate=database_gate), url="http://stopped:9000")
-    machines.mark_stopping(machines_test_db(database_gate=database_gate), "stopped", "~/.ava")
+    machines.mark_stopping(machines_test_db(database_gate=database_gate), "stopped", "~/.meiva")
 
     assert machines.list_agent_runners(machines_test_db(database_gate=database_gate)) == [
         ("running", "http://running:9000")
@@ -215,11 +217,11 @@ def test_list_agent_runners_excludes_intentionally_stopped(
 def test_list_stopped_agent_runners_is_the_exact_complement(
     machine_setup: MachineSetup, database_gate: ProcessDbGate
 ) -> None:
-    machine_setup(name="running", role="agent-runner", home="~/.ava")
+    machine_setup(name="running", role="agent-runner", home="~/.meiva")
     machine_setup.register(machines_test_db(database_gate=database_gate), url="http://running:9000")
-    machine_setup(name="stopped", role="agent-runner", home="~/.ava")
+    machine_setup(name="stopped", role="agent-runner", home="~/.meiva")
     machine_setup.register(machines_test_db(database_gate=database_gate), url="http://stopped:9000")
-    machines.mark_stopping(machines_test_db(database_gate=database_gate), "stopped", "~/.ava")
+    machines.mark_stopping(machines_test_db(database_gate=database_gate), "stopped", "~/.meiva")
 
     assert machines.list_stopped_agent_runners(machines_test_db(database_gate=database_gate)) == [
         ("stopped", "http://stopped:9000")
@@ -234,9 +236,9 @@ def test_list_stopped_agent_runners_is_the_exact_complement(
 def test_list_agent_runners_excludes_staging(
     machine_setup: MachineSetup, database_gate: ProcessDbGate
 ) -> None:
-    machine_setup(name="prod", role="agent-runner", home="~/.ava")
+    machine_setup(name="prod", role="agent-runner", home="~/.meiva")
     machine_setup.register(machines_test_db(database_gate=database_gate), url="http://prod:9000")
-    machine_setup(name="stage", role="agent-runner", home="~/.ava")
+    machine_setup(name="stage", role="agent-runner", home="~/.meiva")
     machine_setup.register(machines_test_db(database_gate=database_gate), url="http://stage:9000")
 
     assert (
@@ -292,9 +294,9 @@ def _read_pause(name: str) -> tuple:
 def test_pause_sets_latch_and_excludes_from_fanout(
     machine_setup: MachineSetup, database_gate: ProcessDbGate
 ) -> None:
-    machine_setup(name="prod", role="agent-runner", home="~/.ava")
+    machine_setup(name="prod", role="agent-runner", home="~/.meiva")
     machine_setup.register(machines_test_db(database_gate=database_gate), url="http://prod:9000")
-    machine_setup(name="away", role="agent-runner", home="~/.ava")
+    machine_setup(name="away", role="agent-runner", home="~/.meiva")
     machine_setup.register(machines_test_db(database_gate=database_gate), url="http://away:9000")
 
     assert (
@@ -318,7 +320,7 @@ def test_pause_sets_latch_and_excludes_from_fanout(
 def test_register_self_does_not_clear_pause(
     machine_setup: MachineSetup, database_gate: ProcessDbGate
 ) -> None:
-    machine_setup(name="away", role="agent-runner", home="~/.ava")
+    machine_setup(name="away", role="agent-runner", home="~/.meiva")
     machine_setup.register(machines_test_db(database_gate=database_gate), url="http://away:9000")
     machines.pause(machines_test_db(database_gate=database_gate), "away", reason="away")
 
@@ -339,7 +341,7 @@ def test_register_self_does_not_clear_pause(
 def test_resume_clears_latch_and_restores_fanout(
     machine_setup: MachineSetup, database_gate: ProcessDbGate
 ) -> None:
-    machine_setup(name="away", role="agent-runner", home="~/.ava")
+    machine_setup(name="away", role="agent-runner", home="~/.meiva")
     machine_setup.register(machines_test_db(database_gate=database_gate), url="http://away:9000")
     machines.pause(machines_test_db(database_gate=database_gate), "away", reason="away")
 
@@ -354,7 +356,7 @@ def test_resume_clears_latch_and_restores_fanout(
 def test_pause_resume_idempotency(
     machine_setup: MachineSetup, database_gate: ProcessDbGate
 ) -> None:
-    machine_setup(name="away", role="agent-runner", home="~/.ava")
+    machine_setup(name="away", role="agent-runner", home="~/.meiva")
     machine_setup.register(machines_test_db(database_gate=database_gate), url="http://away:9000")
 
     assert machines.pause(machines_test_db(database_gate=database_gate), "away") is True
@@ -382,7 +384,7 @@ def test_pause_unknown_machine_returns_false(
 def test_is_paused_reads_the_latch(
     machine_setup: MachineSetup, database_gate: ProcessDbGate
 ) -> None:
-    machine_setup(name="away", role="agent-runner", home="~/.ava")
+    machine_setup(name="away", role="agent-runner", home="~/.meiva")
     machine_setup.register(machines_test_db(database_gate=database_gate), url="http://away:9000")
 
     assert machines.is_paused(machines_test_db(database_gate=database_gate), "away") is False
@@ -397,9 +399,9 @@ def test_is_paused_reads_the_latch(
 def test_pause_independent_of_staging_and_stop(
     machine_setup: MachineSetup, database_gate: ProcessDbGate
 ) -> None:
-    machine_setup(name="prod", role="agent-runner", home="~/.ava")
+    machine_setup(name="prod", role="agent-runner", home="~/.meiva")
     machine_setup.register(machines_test_db(database_gate=database_gate), url="http://prod:9000")
-    machine_setup(name="away", role="agent-runner", home="~/.ava")
+    machine_setup(name="away", role="agent-runner", home="~/.meiva")
     machine_setup.register(machines_test_db(database_gate=database_gate), url="http://away:9000")
 
     machines.set_staging(machines_test_db(database_gate=database_gate), "away", is_staging=True)
@@ -422,11 +424,11 @@ def test_pause_independent_of_staging_and_stop(
 def test_colocated_units_compose_union_and_ops_dial(
     machine_setup: MachineSetup, database_gate: ProcessDbGate
 ) -> None:
-    machine_setup(name="test-host", role="gateway", home="~/.ava_gateway")
+    machine_setup(name="test-host", role="gateway", home="~/.meiva_gateway")
     machine_setup.register(
         machines_test_db(database_gate=database_gate), url="http://test-host:8000"
     )
-    machine_setup(name="test-host", role="agent-runner", home="~/.ava")
+    machine_setup(name="test-host", role="agent-runner", home="~/.meiva")
     machine_setup.register(
         machines_test_db(database_gate=database_gate), url="http://localhost:8600"
     )
@@ -443,16 +445,16 @@ def test_colocated_units_compose_union_and_ops_dial(
 def test_colocated_stop_one_unit_retracts_only_its_caps(
     machine_setup: MachineSetup, database_gate: ProcessDbGate
 ) -> None:
-    machine_setup(name="test-host", role="gateway", home="~/.ava_gateway")
+    machine_setup(name="test-host", role="gateway", home="~/.meiva_gateway")
     machine_setup.register(
         machines_test_db(database_gate=database_gate), url="http://test-host:8000"
     )
-    machine_setup(name="test-host", role="agent-runner", home="~/.ava")
+    machine_setup(name="test-host", role="agent-runner", home="~/.meiva")
     machine_setup.register(
         machines_test_db(database_gate=database_gate), url="http://localhost:8600"
     )
 
-    machines.mark_stopping(machines_test_db(database_gate=database_gate), "test-host", "~/.ava")
+    machines.mark_stopping(machines_test_db(database_gate=database_gate), "test-host", "~/.meiva")
 
     gateway_url, role, _desc, stopped_at = read_machine("test-host")
     assert role == ["gateway"]
@@ -464,17 +466,17 @@ def test_colocated_stop_one_unit_retracts_only_its_caps(
 def test_colocated_restart_unit_recomposes_union(
     machine_setup: MachineSetup, database_gate: ProcessDbGate
 ) -> None:
-    machine_setup(name="test-host", role="gateway", home="~/.ava_gateway")
+    machine_setup(name="test-host", role="gateway", home="~/.meiva_gateway")
     machine_setup.register(
         machines_test_db(database_gate=database_gate), url="http://test-host:8000"
     )
-    machine_setup(name="test-host", role="agent-runner", home="~/.ava")
+    machine_setup(name="test-host", role="agent-runner", home="~/.meiva")
     machine_setup.register(
         machines_test_db(database_gate=database_gate), url="http://localhost:8600"
     )
-    machines.mark_stopping(machines_test_db(database_gate=database_gate), "test-host", "~/.ava")
+    machines.mark_stopping(machines_test_db(database_gate=database_gate), "test-host", "~/.meiva")
 
-    machine_setup(name="test-host", role="agent-runner", home="~/.ava")
+    machine_setup(name="test-host", role="agent-runner", home="~/.meiva")
     machine_setup.register(
         machines_test_db(database_gate=database_gate), url="http://localhost:8600"
     )

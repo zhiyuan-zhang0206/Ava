@@ -1,5 +1,5 @@
 "tests.path_scoped.integration_tests" = ["test_core.py"]
 "tests.fixtures.unit.gateway" = ["test_external_integration_agent.py"]
-"ava.tests.fixtures.model_owner" = ["."]
+"meiva.tests.fixtures.model_owner" = ["."]
 "base.packages.tests.model_catalog" = ["."]
 "base.config.tests.config_authority" = ["."]

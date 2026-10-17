@@ -5,7 +5,7 @@ exports = ["capture_inputs.py", "units.py"]
 
 [debt.first-party-patch]
 "test_birth_config.py#monkeypatch.setattr base.config.settings.lm.llm_model" = 1
-"test_log_sink.py#monkeypatch.setattr base.paths.ava_home" = 1
+"test_log_sink.py#monkeypatch.setattr base.paths.meiva_home" = 1
 "test_uploads.py#monkeypatch.setattr base.cluster.machine.gateway_api_base" = 2
 "test_uploads.py#monkeypatch.setattr base.config.settings.data_plane.cluster_secret" = 1
 "test_uploads.py#monkeypatch.setattr base.host.net.http_dial.get" = 3

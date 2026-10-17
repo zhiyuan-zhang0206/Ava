@@ -2,7 +2,7 @@
 
 // The fleet Inbox -- one panel, one stream. The supervisor's single surface for
 // "what did the org surface to me": every OPEN notice, whether it needs a
-// response (ava.ui.notify(require_response=True) -- the decision worklist) or is
+// response (meiva.ui.notify(require_response=True) -- the decision worklist) or is
 // an FYI (require_response=False -- ambient awareness). The two used to be split
 // across a Decisions and a Reviews tab; they are the same thing (a notification
 // is a queue entry), so they share one master-detail column now.
@@ -121,7 +121,7 @@ export const InboxQueue = memo(function InboxQueue({
     return m;
   }, [agents]);
 
-  // Each agent's single live page (ava.ui.show), indexed by agent_id — the inbox
+  // Each agent's single live page (meiva.ui.show), indexed by agent_id — the inbox
   // surfaces a direct entry to it. One fetch of GET /api/pages kept live by SSE
   // (useAllPages), so a many-agent queue never fans out per-row requests.
   const allPages = useAllPages();

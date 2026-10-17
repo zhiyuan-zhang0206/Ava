@@ -28,9 +28,9 @@ from agent.hooks.understanding_chunks import due_chunk_update
 from agent.llm.usage import log_llm_usage
 from agent.nodes import AFTER_EXEC, BEFORE_EXEC
 from agent.state_channels import CircuitState
-from base.agents.context import AvaContext, agent_id_from_config
+from base.agents.context import MeivaContext, agent_id_from_config
 from base.agents.history.timeline_inputs import TimelineReadInputs
-from base.agents.messages.kwargs import read_ava_kwargs
+from base.agents.messages.kwargs import read_meiva_kwargs
 from base.db.transaction import async_write_transaction
 from base.events.live.projection import TokenUsage
 from base.events.live.publisher import AgentEventPublisher
@@ -76,16 +76,16 @@ def _finalize_turn_observability(
     *,
     catalog: ModelCatalog,
 ) -> None:
-    kw = read_ava_kwargs(final_msg)
-    kw["ava_created_at"] = datetime.now(UTC).isoformat()
+    kw = read_meiva_kwargs(final_msg)
+    kw["meiva_created_at"] = datetime.now(UTC).isoformat()
     reasoning_ms_by_block = handler.reasoning_ms_by_block
     if reasoning_ms_by_block:
-        kw["ava_reasoning_ms_by_block"] = {
+        kw["meiva_reasoning_ms_by_block"] = {
             str(block_idx): ms for block_idx, ms in reasoning_ms_by_block.items()
         }
     code_ms_by_block = handler.code_ms_by_block
     if code_ms_by_block:
-        kw["ava_code_ms_by_block"] = {
+        kw["meiva_code_ms_by_block"] = {
             str(block_idx): ms for block_idx, ms in code_ms_by_block.items()
         }
     log_llm_usage(
@@ -115,7 +115,7 @@ def _finalize_turn_observability(
 
 async def llm_node(
     state: _state.AgentState,
-    runtime: Runtime[AvaContext],
+    runtime: Runtime[MeivaContext],
     config: RunnableConfig,
     *,
     ledger: LlmLedger,
@@ -162,7 +162,7 @@ def _enforce_retry_budget(attempt: Attempt, *, read_lm: Callable[[str], Any]) ->
 
 
 def _note_failed_attempt(
-    exc: BaseException, attempt: Attempt, runtime: Runtime[AvaContext], agent_id: int
+    exc: BaseException, attempt: Attempt, runtime: Runtime[MeivaContext], agent_id: int
 ) -> None:
     runtime.context.turn_progress.mark(agent_id)
     if isinstance(exc, Exception):
@@ -187,10 +187,10 @@ def _note_failed_attempt(
             setattr(exc, RETRY_REMAINING_ATTR, remaining_seconds)
 
 
-# ava:ref agent/graph/llm/docs/turn-records.ava.okf.md#turn-end-owner
+# meiva:ref agent/graph/llm/docs/turn-records.meiva.okf.md#turn-end-owner
 async def llm_attempt(
     state: _state.AgentState,
-    runtime: Runtime[AvaContext],
+    runtime: Runtime[MeivaContext],
     config: RunnableConfig,
     attempt: Attempt,
     ledger: LlmLedger,
@@ -330,7 +330,7 @@ def _silent_idle_command(
     )
 
 
-async def persist_last_active(ctx: AvaContext, agent_id: int, text: str) -> None:
+async def persist_last_active(ctx: MeivaContext, agent_id: int, text: str) -> None:
     ctx.turn_progress.mark(agent_id)
     if ctx.ops_pool is None:
         return
@@ -361,7 +361,7 @@ async def persist_last_active(ctx: AvaContext, agent_id: int, text: str) -> None
 
 async def _llm_node_impl(
     state: _state.AgentState,
-    runtime: Runtime[AvaContext],
+    runtime: Runtime[MeivaContext],
     config: RunnableConfig,
     ledger: LlmLedger,
 ) -> Command[LlmGoto]:

@@ -2,7 +2,7 @@
 
 ## Context
 
-Ava's stack is deliberately heavyweight: every cluster (including each dev
+Meiva's stack is deliberately heavyweight: every cluster (including each dev
 worktree) runs its own Postgres 17 + Redis 8.2 instance, every agent carries a
 LangGraph checkpoint, the frontend is a full Next.js build, and — macOS has no
 fork-zygote — every spawned agent is its own OS process rather than a thread
@@ -22,20 +22,20 @@ Accept the heavy dependency stack, and invest in independent memory-reclaim
 layers instead of trimming it. Verified against the code, the layers are:
 
 1. **Hibernation** (flagship) — an agent idle past
-   `AVA_HIBERNATE_IDLE_THRESHOLD_SECONDS` (default 450s) with no pending
+   `MEIVA_HIBERNATE_IDLE_THRESHOLD_SECONDS` (default 450s) with no pending
    inbound gets its process killed outright, not suspended; a later inbound
    relaunches it (p50 919ms / p90 1.4s). This is the layer that turns the
    per-agent resident cost above into zero between wakes.
    `decisions/2026-07-20-agent-hibernation.md`.
 2. **A heartbeat that feeds hibernation instead of racing it** —
-   `AVA_HEARTBEAT_IDLE_THRESHOLD_SECONDS` (default 300s) sits below
+   `MEIVA_HEARTBEAT_IDLE_THRESHOLD_SECONDS` (default 300s) sits below
    hibernation's 450s by design, so a normally-idling agent is nudged awake
    before it is ever swap-out eligible; hibernation's dominant reclaim case is
    instead agents that paused their own heartbeat, which sit at 0.5-12.5%
    duty cycle depending on pause length — near-total reclaim for the whole
    pause. `decisions/2026-06-22-heartbeat-opt-out-over-escalation.md`.
 3. **A warm-pool floor so reclaim doesn't fight reuse** —
-   `AVA_HIBERNATE_MIN_ACTIVE` (default 100) exempts a host's N
+   `MEIVA_HIBERNATE_MIN_ACTIVE` (default 100) exempts a host's N
    most-recently-active agents from swap-out regardless of idle time, a
    per-host (not cluster-wide) knob sized to that box's own RAM.
    `decisions/2026-07-21-hibernate-warm-pool-floor.md`.
@@ -53,12 +53,12 @@ layers instead of trimming it. Verified against the code, the layers are:
    after it), but does not eagerly connect to every configured MCP server;
    each server connection opens only on that tool's first call, with a 24h
    on-disk tool-schema cache avoiding repeat discovery round trips.
-   `okf/mcps.ava.okf.md`.
+   `okf/mcps.meiva.okf.md`.
 7. **A fixed, small per-agent connection budget** — 2 pooled Postgres
    connections (shared with the LangGraph checkpoint saver) + one Redis
    subscription, with pgbouncer transaction pooling in front of the cluster's
    Postgres so connection count doesn't scale 1:1 with fleet size even before
-   hibernation reclaims the agent entirely. `agent/db.ava.okf.md`.
+   hibernation reclaims the agent entirely. `agent/db.meiva.okf.md`.
 
 The full list with the exact config defaults each cites is maintained in
 [`conventions/runbook.md`](../../../conventions/runbook.md) (`Deployment

@@ -37,6 +37,8 @@ from scripts.ci.pull_requests.tests.test_ci_monitor import has_workflows as has_
 from scripts.ci.pull_requests.tests.test_ci_monitor import no_sleep as no_sleep
 from scripts.ci.pull_requests.tests.test_ci_monitor import poll as poll
 
+_RN = status.DEFAULT_REPO[18:]
+
 
 def test_runs_probe_reads_only_incomplete_runs() -> None:
     """The jq the probe sends filters on `status != completed` — a finished run
@@ -249,10 +251,7 @@ def test_wait_merge_trunk_submits_and_lands_when_green(no_sleep, poll, monkeypat
     # then wait for the queue to land it.
     assert (
         ci_utils.main(
-            ["1243", "--merge"],
-            host=gh_runner(gh_calls),
-            clock=no_sleep,
-            open_url=open_url,
+            ["1243", "--merge"], host=gh_runner(gh_calls), clock=no_sleep, open_url=open_url
         )
         == 0
     )
@@ -260,7 +259,7 @@ def test_wait_merge_trunk_submits_and_lands_when_green(no_sleep, poll, monkeypat
     assert requests[0].get_header("X-api-token") == "test-token"
     assert requests[0].data is not None
     assert json.loads(cast(bytes, requests[0].data)) == {
-        "repo": {"host": "github.com", "owner": "zhiyuan-zhang0206", "name": "Ava"},
+        "repo": {"host": "github.com", "owner": "zhiyuan-zhang0206", "name": _RN},
         "pr": {"number": 1243},
         "targetBranch": "main",
         "priority": 100,
@@ -691,7 +690,7 @@ def test_queue_status_prints_state_and_items(monkeypatch, capsys) -> None:
     assert requests[0].full_url == "https://api.trunk.io/v1/getQueue"
     assert requests[0].get_header("X-api-token") == "test-token"
     assert json.loads(cast(bytes, requests[0].data)) == {
-        "repo": {"host": "github.com", "owner": "zhiyuan-zhang0206", "name": "Ava"},
+        "repo": {"host": "github.com", "owner": "zhiyuan-zhang0206", "name": _RN},
         "targetBranch": "main",
     }
 
@@ -755,7 +754,7 @@ def test_evict_success_exits_zero(monkeypatch, capsys) -> None:
     assert "PR #1877 cancelled from the Trunk merge queue" in capsys.readouterr().err
     assert requests[0].full_url == "https://api.trunk.io/v1/cancelPullRequest"
     assert json.loads(cast(bytes, requests[0].data)) == {
-        "repo": {"host": "github.com", "owner": "zhiyuan-zhang0206", "name": "Ava"},
+        "repo": {"host": "github.com", "owner": "zhiyuan-zhang0206", "name": _RN},
         "pr": {"number": 1877},
         "targetBranch": "main",
     }

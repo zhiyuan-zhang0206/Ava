@@ -3,7 +3,7 @@
 A worktree removal is silent about what it kills: any live session or process
 whose cwd (or interpreter) lies under the worktree loses its floor the moment
 the checkout's `.venv` disappears. The prod instance (issue #194): schedule 1
-was running from `~/.ava/.worktrees/u1a-dark-tokens` on a runner host — the
+was running from `~/.meiva/.worktrees/u1a-dark-tokens` on a runner host — the
 gateway that launched it had been started from the worktree, so the schedule
 session anchored there; routine post-merge cleanup would have killed a
 production schedule with no warning and no obviously-broken signal afterwards
@@ -33,7 +33,7 @@ from typing import cast
 
 import psutil
 
-from base.paths.home import resolve_ava_home
+from base.paths.home import resolve_meiva_home
 from base.sessions.pty import client
 from base.sessions.pty.paths import service_socket_path
 
@@ -72,7 +72,7 @@ def _under(path: str | None, target: Path, *, fold: bool) -> bool:
     A resolved-string prefix alone is spelling-sensitive: `worktree.sh`
     derives its target from bash's logical `pwd` while psutil / the pty
     records report the physical spelling, and on a case-insensitive filesystem
-    `.../ava/...` and `.../Ava/...` name the same directory — the miss read as
+    `.../meiva/...` and `.../Meiva/...` name the same directory — the miss read as
     "no anchor" (fail-open, task #3707 QA). Walk the candidate's ancestors and
     compare inodes instead; a candidate that cannot be stat'ed (deleted, not
     materialized) falls back to the resolved-string compare — casefolded
@@ -177,7 +177,7 @@ def find_live_anchors(path: Path, *, run: Path | None = None) -> list[str]:
     """Human-readable list of live things anchored under `path`.
 
     `run` overrides the run directory holding the pty-sessions socket (tests); it
-    defaults to `$AVA_HOME/run` (else `~/.ava/run`). The scan only reads: the home is
+    defaults to `$MEIVA_HOME/run` (else `~/.meiva/run`). The scan only reads: the home is
     resolved, never created, repaired or chmodded. Process scanning excludes the
     invoking job tree: the caller's chain (issue #3685) and its process group,
     because the check is run by the cleanup from inside the target; a genuinely
@@ -185,5 +185,5 @@ def find_live_anchors(path: Path, *, run: Path | None = None) -> list[str]:
     """
     target = path.resolve()
     fold = _folds_case(target)
-    run_dir = run if run is not None else resolve_ava_home() / "run"
+    run_dir = run if run is not None else resolve_meiva_home() / "run"
     return _pty_anchors(run_dir, target, fold=fold) + _process_anchors(target, fold=fold)

@@ -15,8 +15,7 @@ from agent.graph.llm.node import llm_attempt
 from agent.graph.llm_errors import LlmLedger
 from agent.hooks.tests.fakes import make_fake_ops_pool
 from agent.state import AgentState
-from ava.tests.fixtures.pin_agent import hosted_resources as hosted_resources
-from base.agents.context import AvaContext
+from base.agents.context import MeivaContext
 from base.clock import Clock
 from base.config.tests.configuration import defaults
 from base.db import Database
@@ -26,6 +25,7 @@ from base.host.env.agent_slices import AgentSlices
 from base.lm.catalog import ModelCatalog
 from base.log.tests.log_records import LogRecords
 from base.native_process.turn_identity import HostedTurnResources
+from meiva.tests.fixtures.pin_agent import hosted_resources as hosted_resources
 
 _CONFIG: RunnableConfig = {"configurable": {"thread_id": "1"}}
 
@@ -36,9 +36,9 @@ def _make_runtime(
     *,
     model_catalog: ModelCatalog,
     database_gate: ProcessDbGate,
-) -> Runtime[AvaContext]:
+) -> Runtime[MeivaContext]:
     llm.bind_tools.return_value = llm
-    ctx = AvaContext(
+    ctx = MeivaContext(
         hosted_resources=hosted_resources,
         ops_pool=make_fake_ops_pool(),
         llm=llm,

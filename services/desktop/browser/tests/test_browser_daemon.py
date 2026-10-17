@@ -20,14 +20,14 @@ from base.host.system.tests.fake_commands import fake_host
 
 def test_assert_capable_raises_reason_with_tag(monkeypatch: pytest.MonkeyPatch) -> None:
     """assert_browser_capable raises the browser_incapability reason, prefixed
-    with the ava-browser tag, so a launch on an incapable host dies loudly with
-    the same wording `ava status` shows."""
+    with the meiva-browser tag, so a launch on an incapable host dies loudly with
+    the same wording `meiva status` shows."""
 
     def fake_browser_incapability(_chrome: str | None, *, host: Host) -> str | None:
         return "no display (headless server)"
 
     monkeypatch.setattr(bd, "browser_incapability", fake_browser_incapability)  # pyright: ignore[reportUnknownArgumentType]
-    with pytest.raises(RuntimeError, match=r"ava-browser: no display"):
+    with pytest.raises(RuntimeError, match=r"meiva-browser: no display"):
         bd.assert_browser_capable(host=fake_host())
 
 

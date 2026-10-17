@@ -111,7 +111,7 @@ def _assert_external_sdk_call(
     delivered: list[dict[str, Any]], mirror: list[dict[str, Any]]
 ) -> None:
     """Check every public entry preserves its borrower and exact mirror identity."""
-    # ava_code's files.read wrapper enters the public cwd.get helper as well.
+    # meiva_code's files.read wrapper enters the public cwd.get helper as well.
     expected = Counter({"files.read": 1, "cwd.get": 1})
     assert Counter(event["attributes"]["fn"] for event in delivered) == expected, delivered
     mirrored = [row for row in mirror if row["event_name"] == "sdk_call"]
@@ -135,14 +135,14 @@ def test_external_cli_tail_sdk_call_reaches_receiver_once_before_exit(
     env = os.environ.copy()
     env.update(
         {
-            "AVA_HOME": str(home),
-            "AVA_PROCESS_PROFILE": "agent",
-            "AVA_CONFIG_FETCH": "skip",
-            "AVA_TELEMETRY_OTLP_ENDPOINT": f"http://127.0.0.1:{otlp_receiver.server_address[1]}",
-            "AVA_TELEMETRY_OTLP_ENABLED": "true",
+            "MEIVA_HOME": str(home),
+            "MEIVA_PROCESS_PROFILE": "agent",
+            "MEIVA_CONFIG_FETCH": "skip",
+            "MEIVA_TELEMETRY_OTLP_ENDPOINT": f"http://127.0.0.1:{otlp_receiver.server_address[1]}",
+            "MEIVA_TELEMETRY_OTLP_ENABLED": "true",
         }
     )
-    env.pop("AVA_LOG_DIR", None)
+    env.pop("MEIVA_LOG_DIR", None)
     proc = subprocess.run(  # noqa: S603 — fixed argv: our own interpreter and this test's child
         [sys.executable, "-I", "-X", "utf8", str(_CHILD), str(sample)],
         capture_output=True,

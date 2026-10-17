@@ -69,7 +69,7 @@ def test_human_section_names_the_phase_and_the_exit(
     assert "operation=local" in out
     assert "driver" not in out
     assert "failures" not in out
-    assert "`ava start`" in out
+    assert "`meiva start`" in out
 
 
 def test_human_section_reports_an_unreadable_journal(

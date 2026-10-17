@@ -1,4 +1,4 @@
-"""`ava start` probes its daemon health ports before it binds them.
+"""`meiva start` probes its daemon health ports before it binds them.
 
 The defect these cover (issue #977): a health port was treated as a per-CLUSTER
 fact, but the collision domain is one MACHINE's localhost namespace. Two
@@ -57,7 +57,7 @@ pytestmark = pytest.mark.real_health_port_gate
 
 
 def _healthz_spec(service: str, port: int) -> ServiceSpec:
-    """A daemon whose probe target is an Ava `/healthz` — i.e. a daemon health port."""
+    """A daemon whose probe target is an Meiva `/healthz` — i.e. a daemon health port."""
     return ServiceSpec(
         session=service,
         cmd="x",
@@ -81,8 +81,8 @@ def _other_endpoint_spec(service: str, url: str) -> ServiceSpec:
 
 
 _FOREIGN = (
-    "identity mismatch on http://localhost:8103/healthz: home='/home/ava/.ava' != "
-    "'/home/other/.ava' — another unit's daemon holds this port"
+    "identity mismatch on http://localhost:8103/healthz: home='/home/meiva/.meiva' != "
+    "'/home/other/.meiva' — another unit's daemon holds this port"
 )
 
 
@@ -117,7 +117,7 @@ def test_a_foreign_units_daemon_on_a_health_port_is_a_conflict(
 
 
 def test_our_own_running_daemon_is_not_a_conflict(monkeypatch: pytest.MonkeyPatch) -> None:
-    """The idempotent case. `ava start` over a healthy host re-probes every port
+    """The idempotent case. `meiva start` over a healthy host re-probes every port
     it is about to use and finds its own daemons — a start that refused here
     would make restart impossible on exactly the hosts that are working."""
 
@@ -255,7 +255,7 @@ def test_start_refuses_and_launches_nothing(
     )
     assert launched == []
     message = "".join(capsys.readouterr())
-    assert "/home/ava/.ava" in message
+    assert "/home/meiva/.meiva" in message
     assert "Stop the listed daemon" in message
     assert "--disable-service agent-host" in message
 

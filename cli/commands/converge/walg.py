@@ -1,7 +1,7 @@
-"""Converge step: install and validate WAL-G when AVA_WALG_CONFIG_FILE switches it on.
+"""Converge step: install and validate WAL-G when MEIVA_WALG_CONFIG_FILE switches it on.
 
 Runs before Postgres starts (right after its runtime step), so a broken
-configuration fails `ava start` here instead of becoming a Postgres whose archive
+configuration fails `meiva start` here instead of becoming a Postgres whose archive
 command can never succeed. With the key unset every part of this is a no-op: a
 development home installs nothing and registers nothing.
 """
@@ -26,9 +26,9 @@ def converge_walg(ctx: ConvergeCtx) -> None:
         return
     if ctx.read_config().view.data_plane.is_remote:
         raise RuntimeError(
-            "AVA_WALG_CONFIG_FILE is set but this cluster's Postgres is remote-managed: "
+            "MEIVA_WALG_CONFIG_FILE is set but this cluster's Postgres is remote-managed: "
             "WAL archiving needs the locally launched Postgres (unset the key)"
         )
     ensure_walg_binary()
     walg_config.load_walg_config(path_reader=lambda: ctx.read_config().view.walg.walg_config_file)
-    ensure_private_dir(ctx.ava_home / "backups" / "walg")
+    ensure_private_dir(ctx.meiva_home / "backups" / "walg")

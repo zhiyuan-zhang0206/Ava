@@ -51,7 +51,7 @@ def test_child_name_in_plain_prose_passes() -> None:
 def test_cross_module_reference_passes() -> None:
     out = _module_violations(
         '''
-        """Persistent sessions. For one-shot commands use `ava.shell.run`."""
+        """Persistent sessions. For one-shot commands use `meiva.shell.run`."""
 
         def new(): ...
         '''
@@ -159,30 +159,30 @@ def _write(path: Path, source: str) -> None:
 
 
 def test_discover_agent_surface_modules(tmp_path: Path) -> None:
-    ava_dir = tmp_path / "ava"
+    meiva_dir = tmp_path / "meiva"
 
-    _write(ava_dir / "__init__.py", '__all_for_ava__ = ["files", "shell"]\n')
-    _write(ava_dir / "files.py", '"""Files stub."""\n')
-    _write(ava_dir / "shell" / "__init__.py", '"""Shell namespace."""\n')
+    _write(meiva_dir / "__init__.py", '__all_for_meiva__ = ["files", "shell"]\n')
+    _write(meiva_dir / "files.py", '"""Files stub."""\n')
+    _write(meiva_dir / "shell" / "__init__.py", '"""Shell namespace."""\n')
     _write(
-        ava_dir / "shell" / "sessions.py",
+        meiva_dir / "shell" / "sessions.py",
         '''
-        __all_for_ava__ = ["new"]
+        __all_for_meiva__ = ["new"]
 
 
         def new():
             """Start a session."""
         ''',
     )
-    _write(ava_dir / "framework_core.py", '"""Framework module with a public name."""\n')
-    _write(ava_dir / "_internal.py", '"""Private framework module."""\n')
-    _write(ava_dir / "_x.py", "__all_for_ava__: list[str] = []\n")
+    _write(meiva_dir / "framework_core.py", '"""Framework module with a public name."""\n')
+    _write(meiva_dir / "_internal.py", '"""Private framework module."""\n')
+    _write(meiva_dir / "_x.py", "__all_for_meiva__: list[str] = []\n")
     _write(
-        ava_dir / "mcps_like.py",
+        meiva_dir / "mcps_like.py",
         """
         class P:
             @property
-            def __all_for_ava__(self):
+            def __all_for_meiva__(self):
                 ...
         """,
     )
@@ -190,18 +190,18 @@ def test_discover_agent_surface_modules(tmp_path: Path) -> None:
     surface = discover_agent_surface_modules(tmp_path)
 
     expected = {
-        (ava_dir / "__init__.py").resolve(),
-        (ava_dir / "files.py").resolve(),
-        (ava_dir / "shell" / "__init__.py").resolve(),
-        (ava_dir / "shell" / "sessions.py").resolve(),
-        (ava_dir / "_x.py").resolve(),
-        (ava_dir / "mcps_like.py").resolve(),
+        (meiva_dir / "__init__.py").resolve(),
+        (meiva_dir / "files.py").resolve(),
+        (meiva_dir / "shell" / "__init__.py").resolve(),
+        (meiva_dir / "shell" / "sessions.py").resolve(),
+        (meiva_dir / "_x.py").resolve(),
+        (meiva_dir / "mcps_like.py").resolve(),
     }
     assert surface == expected
 
 
 def test_top_level_surface_raises_without_marker(tmp_path: Path) -> None:
-    _write(tmp_path / "ava" / "__init__.py", '"""No marker declared here."""\n')
+    _write(tmp_path / "meiva" / "__init__.py", '"""No marker declared here."""\n')
 
     with pytest.raises(ValueError):
         top_level_surface(tmp_path)
@@ -211,27 +211,29 @@ def test_is_in_scope_consults_provided_surface_set(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.chdir(tmp_path)
-    surface = {(tmp_path / "ava" / "files.py").resolve()}
+    surface = {(tmp_path / "meiva" / "files.py").resolve()}
 
-    assert is_in_scope(Path("ava/files.py"), set(), surface) is True
-    assert is_in_scope(Path("ava/framework_core.py"), set(), surface) is False
+    assert is_in_scope(Path("meiva/files.py"), set(), surface) is True
+    assert is_in_scope(Path("meiva/framework_core.py"), set(), surface) is False
 
 
 def test_is_in_scope_plugin_paths_unchanged(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.chdir(tmp_path)
-    namespace_helper = (tmp_path / "ava_builtins/plugins/x/_walk.py").resolve()
+    namespace_helper = (tmp_path / "meiva_builtins/plugins/x/_walk.py").resolve()
     plugin_namespace_files = {namespace_helper}
 
     assert (
-        is_in_scope(Path("ava_builtins/plugins/x/plugin.py"), plugin_namespace_files, set()) is True
+        is_in_scope(Path("meiva_builtins/plugins/x/plugin.py"), plugin_namespace_files, set())
+        is True
     )
     assert (
-        is_in_scope(Path("ava_builtins/plugins/x/_walk.py"), plugin_namespace_files, set()) is True
+        is_in_scope(Path("meiva_builtins/plugins/x/_walk.py"), plugin_namespace_files, set())
+        is True
     )
     assert (
-        is_in_scope(Path("ava_builtins/plugins/x/other_helper.py"), plugin_namespace_files, set())
+        is_in_scope(Path("meiva_builtins/plugins/x/other_helper.py"), plugin_namespace_files, set())
         is False
     )
 
@@ -241,8 +243,8 @@ def test_real_repo_surface_excludes_underscore_and_includes_init_modules() -> No
 
     surface = discover_agent_surface_modules(repo_root)
 
-    assert (repo_root / "ava/agents/__init__.py").resolve() in surface
-    assert (repo_root / "ava/shell/__init__.py").resolve() in surface
-    assert (repo_root / "ava/sdk_surface/agent_identity.py").resolve() not in surface
-    assert (repo_root / "ava/sdk_surface/wraps.py").resolve() not in surface
+    assert (repo_root / "meiva/agents/__init__.py").resolve() in surface
+    assert (repo_root / "meiva/shell/__init__.py").resolve() in surface
+    assert (repo_root / "meiva/sdk_surface/agent_identity.py").resolve() not in surface
+    assert (repo_root / "meiva/sdk_surface/wraps.py").resolve() not in surface
     assert (repo_root / "base/packages/plugins/loading/plugin_loader.py").resolve() not in surface

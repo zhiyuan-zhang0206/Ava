@@ -20,7 +20,7 @@ every hosted birth ran under a row lock on `deployment_state`:
 [The release/image path was removed](../release/2026-09-30-remove-release-image-path.md).
 No production code writes the record any more, so admission takes the NULL
 branch. The only remaining way to defer a birth was the 60-second
-lease that `ava cluster recover` claims, and that command exists only to clear
+lease that `meiva cluster recover` claims, and that command exists only to clear
 a lease the removed rollouts left behind. What the fence still cost was a
 `FOR UPDATE` on the single `deployment_state` row in every hosted admission on
 every machine, a cross-machine round trip and a cluster-wide serialization

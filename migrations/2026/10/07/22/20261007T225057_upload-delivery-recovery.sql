@@ -34,4 +34,4 @@ CREATE TABLE upload_delivery_copies (
     PRIMARY KEY (batch_id, storage_machine, unit_home)
 );
 COMMENT ON TABLE upload_delivery_batches IS 'Retained source acceptance, physical receiving quota and original inbound outcome; no TTL or mutable target FK.';
-COMMENT ON TABLE upload_delivery_copies IS 'Retained immutable copy intent and physical-root reservation; AVA_HOME is target identity, not quota partition.';
+COMMENT ON TABLE upload_delivery_copies IS 'Retained immutable copy intent and physical-root reservation; MEIVA_HOME is target identity, not quota partition.';

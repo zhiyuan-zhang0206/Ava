@@ -32,7 +32,7 @@ def serve_generation(seed_write_generation: Callable[[Path], Any]) -> Callable[[
     """Make `home` a local gateway home keeping an active generation (never served)."""
 
     def serve(home: Path) -> None:
-        upsert_env(home / ".env", {"AVA_DB_URL": str(config.settings.data_plane.db_url)})
+        upsert_env(home / ".env", {"MEIVA_DB_URL": str(config.settings.data_plane.db_url)})
         seed_write_generation(home)
 
     return serve
@@ -48,15 +48,15 @@ def test_bootstrap_values_use_env_aliases_and_skip_unset(
         plugin_cluster_config=plugin_bootstrap_config(),
     )
     # DB/Redis URLs are required (always set in test env) → present, keyed by alias.
-    assert "AVA_DB_URL" in vals
-    assert "AVA_REDIS_URL" in vals
+    assert "MEIVA_DB_URL" in vals
+    assert "MEIVA_REDIS_URL" in vals
     # The served DB URL is the credential-free endpoint; only the host may be
     # rewritten for a remote runner.
     expected = str(config.settings.data_plane.db_url)
     reachable = self_machine_host()
     if not is_loopback_host(reachable):
         expected = url_with_host(expected, reachable)
-    served, owner = urlsplit(vals["AVA_DB_URL"]), urlsplit(expected)
+    served, owner = urlsplit(vals["MEIVA_DB_URL"]), urlsplit(expected)
     assert (served.username, served.password) == (owner.username, None)
     assert served.hostname == owner.hostname
     assert served.port == owner.port
@@ -74,9 +74,9 @@ def test_bootstrap_excludes_machine_local_fields(bootstrap_authority: ConfigAuth
         plugin_cluster_config=plugin_bootstrap_config(),
     )
     for excluded in (
-        "AVA_MACHINE_NAME",
-        "AVA_GATEWAY_URL",
-        "AVA_GATEWAY_PIDFILE",
+        "MEIVA_MACHINE_NAME",
+        "MEIVA_GATEWAY_URL",
+        "MEIVA_GATEWAY_PIDFILE",
     ):
         assert excluded not in vals
 
@@ -88,10 +88,10 @@ def test_bootstrap_serves_explicit_set_to_empty(
     bootstrap_authority: ConfigAuthority,
 ) -> None:
     """A field explicitly set to empty on the gateway (e.g.
-    AVA_SKILLS_TO_INJECT_INTO_SYSTEM_PROMPT="" exported by the bench
+    MEIVA_SKILLS_TO_INJECT_INTO_SYSTEM_PROMPT="" exported by the bench
     entrypoint) is served as ALIAS="" rather than dropped. Dropping it would
     silently revert the recipient to the field default — a bench agent then
-    got the default skill index back and crashed on the disabled ava.skills
+    got the default skill index back and crashed on the disabled meiva.skills
     (issue #948)."""
     monkeypatch.setattr(dotenv_file, "unit_home", lambda: tmp_path)  # no .env overrides
     serve_generation(tmp_path)
@@ -102,7 +102,7 @@ def test_bootstrap_serves_explicit_set_to_empty(
         provider_key_envs=(binding.key_env for binding in build_model_catalog().bindings.values()),
         plugin_cluster_config=plugin_bootstrap_config(),
     )
-    assert vals["AVA_SKILLS_TO_INJECT_INTO_SYSTEM_PROMPT"] == ""
+    assert vals["MEIVA_SKILLS_TO_INJECT_INTO_SYSTEM_PROMPT"] == ""
 
 
 def test_bootstrap_still_skips_none(
@@ -122,7 +122,7 @@ def test_bootstrap_still_skips_none(
         provider_key_envs=(binding.key_env for binding in build_model_catalog().bindings.values()),
         plugin_cluster_config=plugin_bootstrap_config(),
     )
-    assert "AVA_TRACE_RETENTION_DAYS" not in vals
+    assert "MEIVA_TRACE_RETENTION_DAYS" not in vals
 
 
 def test_bootstrap_fields_are_valid_field_names() -> None:
@@ -162,7 +162,7 @@ def test_bootstrap_includes_all_required_fields(bootstrap_authority: ConfigAutho
 
 @pytest.mark.usefixtures("served_gateway_home")
 def test_bootstrap_serves_no_daemon_health_port(bootstrap_authority: ConfigAuthority) -> None:
-    """No `AVA_*_HEALTH_PORT` travels from the gateway to a runner.
+    """No `MEIVA_*_HEALTH_PORT` travels from the gateway to a runner.
 
     A port block is a property of the CLUSTER while the collision domain is one
     MACHINE's localhost namespace; serving these made two agent-runners of the
@@ -198,7 +198,7 @@ def test_bootstrap_serves_no_daemon_health_port(bootstrap_authority: ConfigAutho
 # A remote agent-runner materializes the payload and dials the URLs it got; a
 # loopback host would make it dial ITSELF. The gateway's own .env keeps
 # 127.0.0.1 (it dials itself over loopback), so the swap happens at serve time
-# when the gateway has a non-loopback reachable host (AVA_MACHINE_HOST).
+# when the gateway has a non-loopback reachable host (MEIVA_MACHINE_HOST).
 
 
 def test_bootstrap_serves_reachable_host_for_loopback_urls(
@@ -222,7 +222,7 @@ def test_bootstrap_serves_reachable_host_for_loopback_urls(
         provider_key_envs=(binding.key_env for binding in build_model_catalog().bindings.values()),
         plugin_cluster_config=plugin_bootstrap_config(),
     )
-    served_db, served_redis = urlsplit(vals["AVA_DB_URL"]), urlsplit(vals["AVA_REDIS_URL"])
+    served_db, served_redis = urlsplit(vals["MEIVA_DB_URL"]), urlsplit(vals["MEIVA_REDIS_URL"])
     # host swapped to the reachable address; port + database kept verbatim
     assert served_db.hostname == "10.0.0.3"
     assert served_redis.hostname == "10.0.0.3"
@@ -250,7 +250,7 @@ def test_bootstrap_keeps_loopback_when_gateway_is_single_box(
         provider_key_envs=(binding.key_env for binding in build_model_catalog().bindings.values()),
         plugin_cluster_config=plugin_bootstrap_config(),
     )
-    served, owner = urlsplit(vals["AVA_DB_URL"]), urlsplit(config.settings.data_plane.db_url)
+    served, owner = urlsplit(vals["MEIVA_DB_URL"]), urlsplit(config.settings.data_plane.db_url)
     assert (served.username, served.password) == (owner.username, None)
     assert served.hostname == owner.hostname
     assert served.port == owner.port
@@ -270,17 +270,17 @@ def test_bootstrap_keeps_existing_reachable_url_host(
     monkeypatch.setattr(config.settings.general, "machine_host", "10.0.0.3")
     dp = config.settings.data_plane
     # parts-built, scanner-safe (same convention as cli/commands/converge/tests/test_converge.py)
-    host_url = f"postgresql://ava_main:{'sek'}@10.0.0.2:5433/ava_main"
+    host_url = f"postgresql://meiva_main:{'sek'}@10.0.0.2:5433/meiva_main"
     monkeypatch.setattr(dp, "db_url", host_url)
-    upsert_env(tmp_path / ".env", {"AVA_DB_URL": host_url})
+    upsert_env(tmp_path / ".env", {"MEIVA_DB_URL": host_url})
 
     vals = config.bootstrap_config_values(
         bootstrap_authority,
         provider_key_envs=(binding.key_env for binding in build_model_catalog().bindings.values()),
         plugin_cluster_config=plugin_bootstrap_config(),
     )
-    served, owner = urlsplit(vals["AVA_DB_URL"]), urlsplit(host_url)
-    assert (served.username, served.password) == ("ava_main", None)
+    served, owner = urlsplit(vals["MEIVA_DB_URL"]), urlsplit(host_url)
+    assert (served.username, served.password) == ("meiva_main", None)
     assert served.hostname == owner.hostname
     assert served.port == owner.port
     assert served.path == owner.path

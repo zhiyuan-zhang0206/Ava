@@ -3,9 +3,9 @@
 ## Context
 
 The 2026-07 knowledge-graph refresh surfaced how far plugins reach into the
-core namespace: `ava_fleet` provides the whole `ava.tasks` registry and injects
-members into `ava.self` / `ava.ui`; `ava_code` provides `ava.cwd` and wraps
-seven SDK functions guarded by a hard "sole wrapper of `ava.files.read`"
+core namespace: `meiva_fleet` provides the whole `meiva.tasks` registry and injects
+members into `meiva.self` / `meiva.ui`; `meiva_code` provides `meiva.cwd` and wraps
+seven SDK functions guarded by a hard "sole wrapper of `meiva.files.read`"
 assert. This raised three questions: is namespace penetration erosion of the
 single-namespace design, where exactly is the plugin/core boundary, and what
 mechanism should plugin extension use.
@@ -19,14 +19,14 @@ themselves, the data plane — and context compaction: context windows are
 physics, not a model weakness, which is why compact was deliberately promoted
 from plugin to `agent/hooks/compact.py`). Plugins are also the sanctioned
 quarantine zone for shims that would violate core philosophy if they lived in
-core (`ava_syntax_fix` vs "no fallbacks for model mistakes"): the shim is
+core (`meiva_syntax_fix` vs "no fallbacks for model mistakes"): the shim is
 tolerable because it is removable. Quarantine is a philosophy exemption, not
 a quality exemption — a live shim is maintained at full standard, and every
 shim must measure its own obsolescence (fire-rate telemetry per model; a rate
 near zero is the empirical strip signal).
 
 **Injection is the design.** Adding members via `register_namespace_member`
-is intended, not erosion: agents see one `ava.*`, operators strip capability
+is intended, not erosion: agents see one `meiva.*`, operators strip capability
 blocks.
 
 **Wrapping stays, and becomes a first-class stack.** Wrappers are
@@ -34,7 +34,7 @@ Turing-complete Python and that is the point — a schema'd hook registry would
 limit extensions to anticipated shapes, contradicting code-as-action. What
 changes is that the stack stops being a folkway:
 
-1. A registration primitive replaces bare setattr (`ava.extend.wrap(target,
+1. A registration primitive replaces bare setattr (`meiva.extend.wrap(target,
    fn)` shape). It does not constrain what the wrapper does; it makes the
    stack enumerable, deterministic, and kills the exclusivity assert (which
    was compensating for the missing primitive). Wrappers compose in
@@ -48,7 +48,7 @@ changes is that the stack stops being a folkway:
 4. No precedence tiers (before/around/after) until a real collision between
    two plugins exists.
 
-Accepted cost: "what does `ava.files.read` do here" becomes a runtime
+Accepted cost: "what does `meiva.files.read` do here" becomes a runtime
 question. The introspectable stack is the mitigation — it also lets
 plugin-injection documentation be generated mechanically instead of
 hand-maintained in two drifting trees.
@@ -65,8 +65,8 @@ hand-maintained in two drifting trees.
 ## Consequences
 
 Design detail in `future/plugin-extension-api.md` (since removed — the
-primitive shipped; see `ava/_extend.py`): the wrap primitive and
-its home (`ava/_extend.py`), removability CI, a plugins test root, narrowing
-the import-linter exemption (its original justification — `ava_compact`'s
+primitive shipped; see `meiva/_extend.py`): the wrap primitive and
+its home (`meiva/_extend.py`), removability CI, a plugins test root, narrowing
+the import-linter exemption (its original justification — `meiva_compact`'s
 intentional cycle with the agent kernel — expired when compact moved into
 core), and shim fire-rate telemetry.

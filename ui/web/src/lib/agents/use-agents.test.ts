@@ -22,7 +22,7 @@ function row(agent_id: number, status: AgentRow["status"] = "idling"): AgentRow 
     highest_notice_priority: null, unread_notice_count: 0, heartbeat_paused_until: null, liveness_state: "online" };
 }
 const MOCK_AGENTS = [row(1, "running"), row(2)];
-const ACTIVE_ID_KEY = "ava.active.agent_id";
+const ACTIVE_ID_KEY = "meiva.active.agent_id";
 let _qc: QueryClient;
 const noop = () => undefined;
 function wrapper({ children }: { children: React.ReactNode }) {

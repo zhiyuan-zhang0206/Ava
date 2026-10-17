@@ -3,11 +3,11 @@
 
 Production runs the server from this exact tree (`base.cluster.dataplane.runtime_binaries`);
 a CI job that tests against an apt build instead is testing a different Postgres. Each
-pytest session redirects `AVA_HOME` to a temp home, so the tree is built once per job under
+pytest session redirects `MEIVA_HOME` to a temp home, so the tree is built once per job under
 a stable home and exported as `CI_VENDORED_RUNTIME_ROOT`; `tests/fixtures/env_bootstrap.py`
 symlinks it into every session's home.
 
-Usage: `vendor_pg_runtime.py <github-env-file>`, with `AVA_HOME` naming the stable home to
+Usage: `vendor_pg_runtime.py <github-env-file>`, with `MEIVA_HOME` naming the stable home to
 build under. Idempotent: a restored cache makes both ensures no-ops.
 """
 

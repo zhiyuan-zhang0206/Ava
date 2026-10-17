@@ -15,7 +15,7 @@ def short_tmp() -> Iterator[Path]:
     """A short-path scratch directory for unix sockets and process trees."""
     # `/tmp` keeps the socket path short on the POSIX platforms this suite runs
     # on; the system temp dir (e.g. a per-user sandbox) can be far longer.
-    directory = Path(tempfile.mkdtemp(prefix="ava-root-", dir="/tmp"))
+    directory = Path(tempfile.mkdtemp(prefix="meiva-root-", dir="/tmp"))
     try:
         yield directory
     finally:

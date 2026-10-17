@@ -6,38 +6,38 @@ internal data plane always authenticates, whatever the bearer
 
 | Authority | Holder | Purpose |
 |---|---|---|
-| `AVA_CLUSTER_SECRET` | Gateway only | Human/operator bearer for the gateway API and frontend login (never served by bootstrap, never held by a remote unit); required on every gateway home, so the user-facing API and `/ops` always authenticate (listener reach follows `AVA_MACHINE_HOST`: loopback-only unless a private-network address is declared) |
-| `AVA_API_TOKEN` (launch environment; also `$AVA_HOME/run/ava-root/manifests.json`, 0600) | Each launched service, admitted operator processes | The write generation's machine API token of the process's class: the gateway admits the active generation's tokens, a unit's `/ops` its generation's two; delivered to every launched service. The manifest copy is root's own record of what it launched — it persists until the next start rewrites it, and is inert once a release fence revokes the generation |
-| `$AVA_HOME/backups/logical-backup.passphrase` (0600) | Gateway home | The logical-backup passphrase: minted and pinned at birth (a home born earlier carries `sha256(secret)`, pinned once), never derived and never changed by a secret rotation ([decision](../../decisions/data/backup/2026-09-28-backup-passphrase-minted-at-birth.md)); **backup-critical**: it is the only key to every logical backup |
+| `MEIVA_CLUSTER_SECRET` | Gateway only | Human/operator bearer for the gateway API and frontend login (never served by bootstrap, never held by a remote unit); required on every gateway home, so the user-facing API and `/ops` always authenticate (listener reach follows `MEIVA_MACHINE_HOST`: loopback-only unless a private-network address is declared) |
+| `MEIVA_API_TOKEN` (launch environment; also `$MEIVA_HOME/run/meiva-root/manifests.json`, 0600) | Each launched service, admitted operator processes | The write generation's machine API token of the process's class: the gateway admits the active generation's tokens, a unit's `/ops` its generation's two; delivered to every launched service. The manifest copy is root's own record of what it launched — it persists until the next start rewrites it, and is inert once a release fence revokes the generation |
+| `$MEIVA_HOME/backups/logical-backup.passphrase` (0600) | Gateway home | The logical-backup passphrase: minted and pinned at birth (a home born earlier carries `sha256(secret)`, pinned once), never derived and never changed by a secret rotation ([decision](../../decisions/data/backup/2026-09-28-backup-passphrase-minted-at-birth.md)); **backup-critical**: it is the only key to every logical backup |
 | OS user over the owner-only socket (`peer`) | Gateway host | Postgres administrator: provisioning, migrations (acting as the NOLOGIN schema owner), grants, the authority invariant |
-| OS user mapped to `ava_monitor` (`peer map=ava_monitor`) | Gateway host's OTel collector | Password-less statistics reader (`pg_read_all_stats`, CONNECT); not a write generation, so no credential exists |
-| `$AVA_HOME/db-authority/` (0700; files 0600) | Gateway home | `ledger.json` (owner, groups, active generation), `generations/0.json` (the write generation's two logins with passwords and SCRAM verifiers, and its two machine API tokens), `pooler-admin.json` (PgBouncer admin console `ava_pooler_admin`) |
-| `$AVA_HOME/db-authority/` (0700; files 0600) | Remote agent-runner home | `unit.json` (the installed runner login of one generation, bound to this unit and the served endpoint, with its API admission: the runner API token, the gateway token's digest and the telemetry token) |
-| `AVA_REDIS_ADMIN_PASSWORD` | Gateway only | Redis `default` user and `requirepass` |
-| `AVA_REDIS_PASSWORD` | Gateway file; embedded in `AVA_REDIS_URL` | Redis ACL runtime user |
-| `AVA_RUNNER_DB_PASSWORD` | Remote-managed planes only | The provider-provisioned `ava_runner` login the gateway-local launcher projects for agents (never served by bootstrap) |
+| OS user mapped to `meiva_monitor` (`peer map=meiva_monitor`) | Gateway host's OTel collector | Password-less statistics reader (`pg_read_all_stats`, CONNECT); not a write generation, so no credential exists |
+| `$MEIVA_HOME/db-authority/` (0700; files 0600) | Gateway home | `ledger.json` (owner, groups, active generation), `generations/0.json` (the write generation's two logins with passwords and SCRAM verifiers, and its two machine API tokens), `pooler-admin.json` (PgBouncer admin console `meiva_pooler_admin`) |
+| `$MEIVA_HOME/db-authority/` (0700; files 0600) | Remote agent-runner home | `unit.json` (the installed runner login of one generation, bound to this unit and the served endpoint, with its API admission: the runner API token, the gateway token's digest and the telemetry token) |
+| `MEIVA_REDIS_ADMIN_PASSWORD` | Gateway only | Redis `default` user and `requirepass` |
+| `MEIVA_REDIS_PASSWORD` | Gateway file; embedded in `MEIVA_REDIS_URL` | Redis ACL runtime user |
+| `MEIVA_RUNNER_DB_PASSWORD` | Remote-managed planes only | The provider-provisioned `meiva_runner` login the gateway-local launcher projects for agents (never served by bootstrap) |
 
 A local plane's `.env` carries only the credential-free database endpoint
 (`postgresql://<owner>@host:port/<db>`). The schema owner is `NOLOGIN` without
-a password. Every application login is the home's one write generation: `ava_g0_gateway`
-and `ava_g0_runner`, which inherit the `NOLOGIN` groups `ava_gateway` /
-`ava_runner` and own nothing (`base/cluster/authority/`).
+a password. Every application login is the home's one write generation: `meiva_g0_gateway`
+and `meiva_g0_runner`, which inherit the `NOLOGIN` groups `meiva_gateway` /
+`meiva_runner` and own nothing (`base/cluster/authority/`).
 
 Delivery:
 
 - The root launcher puts each DB-using service's class login into that
-  service's launch environment (`AVA_DB_URL` plus the non-secret
-  `AVA_DB_GENERATION`); gateway-profile services get the gateway login, runner
+  service's launch environment (`MEIVA_DB_URL` plus the non-secret
+  `MEIVA_DB_GENERATION`); gateway-profile services get the gateway login, runner
   and agent processes the runner login. The launch digest binds the generation
   number and credential digest, never a password. The same login also lands at
-  rest, 0600, in `$AVA_HOME/run/ava-root/manifests.json` — root's own launched-unit
+  rest, 0600, in `$MEIVA_HOME/run/meiva-root/manifests.json` — root's own launched-unit
   record, rewritten on the next start.
-- An operator process on the gateway home (the `ava` CLI, a script, an OS job)
+- An operator process on the gateway home (the `meiva` CLI, a script, an OS job)
   receives the gateway login only while it runs the home's admitted runtime:
   the source checkout the home was born from. Anything else keeps the
   credential-free endpoint and its first dial fails with
   `NoDatabaseAuthorityError`.
-- Bootstrap serves no database credential: its `AVA_DB_URL` is the
+- Bootstrap serves no database credential: its `MEIVA_DB_URL` is the
   credential-free endpoint (a remote-managed provider URL loses its password). A remote
   agent-runner's root launcher delivers its installed unit capability to every
   runner-class service, and an admitted operator process on that home consumes
@@ -46,15 +46,15 @@ Delivery:
   reacquire the current generation. Bootstrap never serves the human secret
   either, and the fetch authenticates with the unit's API token.
 
-Agents never receive an admin password, `AVA_REDIS_PASSWORD` as a standalone
+Agents never receive an admin password, `MEIVA_REDIS_PASSWORD` as a standalone
 variable, or a gateway-class login. Agent-profile startup at the default home
 rejects a loopback non-runner URL on a cluster with a human secret.
 
 ## Homes born before this model
 
 A home born before the data plane always authenticated has empty Redis
-credentials, a LOGIN schema owner, a LOGIN `ava_runner`, trust `pg_hba` lines
-and no database authority ledger. `ava start` refuses it before any native
+credentials, a LOGIN schema owner, a LOGIN `meiva_runner`, trust `pg_hba` lines
+and no database authority ledger. `meiva start` refuses it before any native
 effect, and `scripts/data_plane_ops/rotate_data_plane_secrets.py` refuses it too; nothing
 converts it. Re-birth it as a new home.
 
@@ -62,8 +62,8 @@ Verify that a home carries no retired credential key without printing
 credentials:
 
 ```bash
-grep -E '^(AVA_DB_ADMIN_PASSWORD|AVA_RUNNER_DB_PASSWORD|AVA_REDIS_ADMIN_PASSWORD|AVA_REDIS_PASSWORD)=' "$AVA_HOME/.env" | cut -d= -f1
-ava status
+grep -E '^(MEIVA_DB_ADMIN_PASSWORD|MEIVA_RUNNER_DB_PASSWORD|MEIVA_REDIS_ADMIN_PASSWORD|MEIVA_REDIS_PASSWORD)=' "$MEIVA_HOME/.env" | cut -d= -f1
+meiva status
 ```
 
 Only the two Redis key names may print; do not echo values, paste URLs into
@@ -91,12 +91,12 @@ process context (not an agent shell). It defaults to dry-run and has no
 `--scope runner` rotates the Redis ACL runtime password; the default is both.
 After runner scope, restart the gateway and every enrolled runner so each
 reloads its Redis URL. Each execute writes a 0600 recovery file beneath
-`$AVA_HOME/backups/secret-rotation/`; on failure, re-run the exact printed
+`$MEIVA_HOME/backups/secret-rotation/`; on failure, re-run the exact printed
 `--execute --resume <state-file>` command rather than editing one side by hand.
 
 ## Emergency bearer rotation
 
-`AVA_CLUSTER_SECRET` does not rotate with the data plane, and machine callers
+`MEIVA_CLUSTER_SECRET` does not rotate with the data plane, and machine callers
 never hold it. Rotate it only for a confirmed leak:
 
 ```bash

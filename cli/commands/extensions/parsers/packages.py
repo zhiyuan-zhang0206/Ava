@@ -1,4 +1,4 @@
-"""`ava packages` — the per-machine package refresh surface.
+"""`meiva packages` — the per-machine package refresh surface.
 
 Builders plus their `_h_*` handlers. Handlers lazy-import their `cmd_*`
 implementation from ``cli.commands`` so parser building never loads Settings
@@ -59,7 +59,7 @@ def _h_packages_policy(args: argparse.Namespace) -> int:
 
     if args.update_mode is None and args.check_every is None:
         print(
-            "ava: pass --update-mode and/or --check-every — a policy needs at least one field",
+            "meiva: pass --update-mode and/or --check-every — a policy needs at least one field",
             file=sys.stderr,
         )
         return 2

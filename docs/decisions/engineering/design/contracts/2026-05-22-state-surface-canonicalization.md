@@ -7,7 +7,7 @@
 > (the later, 2026-05-30 direction).
 >
 > What survived and still governs: the **four-quadrant frame** (mutability ×
-> scope ⇒ storage) and the "`~/.ava/` must be wipe-and-replay safe" rule. What
+> scope ⇒ storage) and the "`~/.meiva/` must be wipe-and-replay safe" rule. What
 > the reconciliation overturned: plugin enable/config is **per-machine local**,
 > not cluster-wide DB state (so migration step 4 "config → DB" is **reversed** —
 > see the Reconciliation section), and the overlay legitimately holds
@@ -35,20 +35,20 @@ holds):
   Q4 → DB.
 - **"No third place" → "no *ungoverned* place."** The overlay legitimately holds
   per-host facts that *do* affect behavior: machine identity, local config, and
-  **registry-tracked external installs** (`~/.ava/installed.json`,
-  `shared/install_registry.py`). The bug was never "a file under `~/.ava/`
+  **registry-tracked external installs** (`~/.meiva/installed.json`,
+  `shared/install_registry.py`). The bug was never "a file under `~/.meiva/`
   affects behavior"; it was **leaked repo content / untracked dirs** (the manual
-  `dup` plugin, the stale `~/.ava/skills/` repo copies). Repo-shipped
+  `dup` plugin, the stale `~/.meiva/skills/` repo copies). Repo-shipped
   skills/plugins ride `git pull` and load from the repo; the overlay is reserved
   for what the install registry tracks. The skill-scanner overlay reservation
   (surface only registry-listed overlay skills) already enforces this.
-- **Net rule, reconciled:** `~/.ava/` = per-host **identity + local config +
+- **Net rule, reconciled:** `~/.meiva/` = per-host **identity + local config +
   registry-tracked external installs + regenerable cache**; the **repo** holds
   code (incl. repo-shipped skills/plugins/MCP); the **DB** holds genuinely
   cluster-wide runtime state. Memory stays the deliberate git-synced exception.
   The directory must still be `rm -rf`-and-replay safe — only identity is
   irrecoverable (a one-line `machine_name` / `machine_serve_*` / `.env`), the rest
-  self-heals on `ava start` (or re-install from the recorded source).
+  self-heals on `meiva start` (or re-install from the recorded source).
 
 Per-step status of the original migration plan is annotated inline below.
 
@@ -57,7 +57,7 @@ Per-step status of the original migration plan is annotated inline below.
 WSL agent-runner could not start agents. `shared/plugins_config.py:load()` raised
 `DanglingPlugin` for an external plugin named `dup`. The chain:
 
-1. Someone manually created `~/.ava/plugins/dup/` on the gateway host —
+1. Someone manually created `~/.meiva/plugins/dup/` on the gateway host —
    a stub with one line, `__description__ = 'dup plugin'`.
 2. Gateway's `load()` auto-merge added `dup: {enabled: true}` to the central DB
    row.
@@ -72,7 +72,7 @@ silently rather than loudly.
 
 ## The four-quadrant inventory
 
-Every piece of state in Ava sits on two axes:
+Every piece of state in Meiva sits on two axes:
 
 - **Mutability**: changed only via git commit (edit-time), or via API/SDK/UI at
   runtime?
@@ -88,34 +88,34 @@ Each quadrant admits a clean storage choice:
 
 - **Q1**: a tiny per-host file or env var. `machine_serve_gateway` /
   `machine_serve_agent_runner`, `machine_name`, `.env` (secrets).
-- **Q2**: the git tree, `<repo>/`. Synced via `ava update` (gateway) and
-  `ava update-self` (agent-runner).
+- **Q2**: the git tree, `<repo>/`. Synced via `meiva update` (gateway) and
+  `meiva update-self` (agent-runner).
 - **Q3**: per-host filesystem, regenerable. `logs/`, `*.pid`, `*.sock`,
   `milvus-data/`, etc.
 - **Q4**: central Postgres. Plugin enable flags, runtime config overrides,
   agent state, inbound messages, schedules, etc.
 
-## What is broken: `~/.ava/` holds Q2 and Q4 things
+## What is broken: `~/.meiva/` holds Q2 and Q4 things
 
-Walking the actual `~/.ava/` tree on both hosts:
+Walking the actual `~/.meiva/` tree on both hosts:
 
 | Path | True category | Today's storage | Failure mode |
 |------|---------------|-----------------|--------------|
-| `~/.ava/plugins/<external>/` | Q2 (code) | Q3 (per-host fs, no sync) | **This week's incident.** DB references a plugin name; some host lacks the file → `DanglingPlugin` on startup. |
-| `~/.ava/configs/<plugin>/config.json` | Q4 (cluster state) | Q3 (per-host fs) | UI edits gateway's copy; agent-runner agents read stale local copy. Silent drift. |
-| `~/.ava/skills/<user>/` | Q2 (code) | Q3 | Gateway has 7 user skills; agent-runner has none. `ava.skills.<name>` resolves differently per host. |
-| `~/.ava/mcp.json` | Q2 or Q4 | Q3 | Only gateway has it. Agents on agent-runner call into `ava.mcps.*` with an empty registry. |
-| `~/.ava/monitors/<id>.py` | Cache of DB `monitors.code` | Dual-written | Monitor cannot migrate between hosts. "Source of truth" ambiguous. |
-| `~/.ava/memory/` | Q4, document-shaped | Per-host git branch + merger agent | Works, via a fifth sync mechanism unique to this surface. |
-| `~/.ava/swebench-repos/` | Bench-specific | Gateway only | Acceptable today (bench is gateway-only); needs an explicit "gateway-only by convention" tag. |
+| `~/.meiva/plugins/<external>/` | Q2 (code) | Q3 (per-host fs, no sync) | **This week's incident.** DB references a plugin name; some host lacks the file → `DanglingPlugin` on startup. |
+| `~/.meiva/configs/<plugin>/config.json` | Q4 (cluster state) | Q3 (per-host fs) | UI edits gateway's copy; agent-runner agents read stale local copy. Silent drift. |
+| `~/.meiva/skills/<user>/` | Q2 (code) | Q3 | Gateway has 7 user skills; agent-runner has none. `meiva.skills.<name>` resolves differently per host. |
+| `~/.meiva/mcp.json` | Q2 or Q4 | Q3 | Only gateway has it. Agents on agent-runner call into `meiva.mcps.*` with an empty registry. |
+| `~/.meiva/monitors/<id>.py` | Cache of DB `monitors.code` | Dual-written | Monitor cannot migrate between hosts. "Source of truth" ambiguous. |
+| `~/.meiva/memory/` | Q4, document-shaped | Per-host git branch + merger agent | Works, via a fifth sync mechanism unique to this surface. |
+| `~/.meiva/swebench-repos/` | Bench-specific | Gateway only | Acceptable today (bench is gateway-only); needs an explicit "gateway-only by convention" tag. |
 
 ## Diagnosis: five sync mechanisms, no rule
 
-Ava currently uses five different mechanisms to keep state coherent across
+Meiva currently uses five different mechanisms to keep state coherent across
 hosts:
 
 1. Central DB (Postgres rows, read/write via `psycopg`).
-2. Git tree, bulk-synced via `ava update*`.
+2. Git tree, bulk-synced via `meiva update*`.
 3. Git tree, per-host with a merger agent (memory only).
 4. **Nothing** — per-host fs treated as authoritative ("just write it locally
    and hope").
@@ -135,8 +135,8 @@ diverge.
 > legitimately holds registry-tracked external installs (a governed third
 > location). Kept as the original framing.
 
-> `~/.ava/` is per-host **cache + identity**, not a source of truth. The
-> directory should be deletable with `rm -rf` and self-heal on `ava start`.
+> `~/.meiva/` is per-host **cache + identity**, not a source of truth. The
+> directory should be deletable with `rm -rf` and self-heal on `meiva start`.
 > Only (Q1) machine identity and (Q3) regenerable cache live there.
 >
 > Any fact that the agent or framework reads to decide behavior lives in
@@ -157,7 +157,7 @@ reconciled answer for the per-host case):
 2. Must **all hosts** agree on it? *Yes* → DB layer. *No, it's per-host* →
    local overlay (identity / local config / registry-tracked install), not DB.
 
-Memory (`~/.ava/memory/`) remains a deliberate exception — document
+Memory (`~/.meiva/memory/`) remains a deliberate exception — document
 collaboration genuinely benefits from git's revision/branch/merge primitives,
 and async sync is acceptable for notes. It must be marked as an exception,
 not treated as the seed of a third general category.
@@ -167,28 +167,28 @@ not treated as the seed of a third general category.
 Status annotations (2026-06-01) reflect the reconciliation above.
 
 1. **MCP config** → **partly landed.** Resolved not by moving the file but by the
-   Layer I MCP loader (`ava/_mcp_config.py:load_mcp_config`) merging machine
-   `mcp.json` + plugin-bundled `.mcp.json`, plus the `ava mcp` CLI. Per-host MCP
+   Layer I MCP loader (`meiva/_mcp_config.py:load_mcp_config`) merging machine
+   `mcp.json` + plugin-bundled `.mcp.json`, plus the `meiva mcp` CLI. Per-host MCP
    availability is intended (the decentralized model — `browser-use` lives where
    it's installed), not drift. Remaining shape in
    [`mcp-scope-and-bundling.md`](../../../../../future/infra/extensions/mcp-scope-and-bundling.md).
-2. **External plugins** (`~/.ava/plugins/`) → **reframed, not deleted.** The
+2. **External plugins** (`~/.meiva/plugins/`) → **reframed, not deleted.** The
    overlay is the *intended* home for **registry-tracked external installs**
    (decentralized-install pieces A/B landed: `installed.json` +
-   `ava plugins install` + Claude Code plugin materialization). Only *leaked repo
+   `meiva plugins install` + Claude Code plugin materialization). Only *leaked repo
    copies / untracked dirs* (the `dup` incident) are the bug, and the audit shows
-   the overlay is clean today. Repo-shipped plugins still live in `<repo>/ava_builtins/plugins/`.
-3. **User skills** (`~/.ava/skills/`) → **done for the leak; reframed for installs.**
+   the overlay is clean today. Repo-shipped plugins still live in `<repo>/meiva_builtins/plugins/`.
+3. **User skills** (`~/.meiva/skills/`) → **done for the leak; reframed for installs.**
    Leaked repo skill copies removed; the skill-scanner overlay reservation surfaces
    only registry-listed overlay skills. Repo-shipped skills stay in the repo;
    externally-installed skills are registry-tracked in the overlay (intended).
-4. **Plugin runtime config** (`~/.ava/configs/<n>/config.json`) → **REVERSED.**
+4. **Plugin runtime config** (`~/.meiva/configs/<n>/config.json`) → **REVERSED.**
    This draft proposed moving config *into* Postgres; the decentralized model goes
    the opposite way — plugin enable/config is **per-machine local**, and the
    long-term target is to **remove** the DB config tables (`plugins_config_overrides`
    removed — migration 0035; `runtime_config_overrides` retired 2026-06-08 — config is
    now single-source in `.env`;
-   the emptied table is dropped in a later expand-contract migration). So `~/.ava/configs/`
+   the emptied table is dropped in a later expand-contract migration). So `~/.meiva/configs/`
    on disk is aligned with the target, not a defect; the "one switch for many
    machines" convenience becomes a frontend online-aggregation concern. See
    [`decentralized-install-and-config.md`](../../../../../future/infra/extensions/decentralized-install-and-config.md)
@@ -204,8 +204,8 @@ What we gain:
 
 - Zero cross-host drift for facts. Drift is only possible for caches, which by
   definition do not affect behavior.
-- `~/.ava/` becomes wipe-and-replay safe — disaster recovery on a single host
-  reduces to `rm -rf ~/.ava && ava start`.
+- `~/.meiva/` becomes wipe-and-replay safe — disaster recovery on a single host
+  reduces to `rm -rf ~/.meiva && meiva start`.
 - New contributors no longer need to learn "which paths are git, which are DB,
   which are orphan."
 - Fail-fast semantics on plugin loading recover their original meaning
@@ -214,7 +214,7 @@ What we gain:
 What we give up:
 
 - Local prototyping of a plugin or skill requires a git commit. There is no
-  "drop a file in `~/.ava/plugins/`" path. Given the project is single-author
+  "drop a file in `~/.meiva/plugins/`" path. Given the project is single-author
   and worktree-based, the cost is one commit per experiment.
 - Runtime config edits remain non-hot-reload (agent restart still required).
   This was already the case — moving storage from disk to DB does not change
@@ -223,7 +223,7 @@ What we give up:
 ## Open questions
 
 - **Migration of existing disk images.** Each host today has its own
-  `~/.ava/configs/<plugin>/config.json`. Which host's copy seeds the DB?
+  `~/.meiva/configs/<plugin>/config.json`. Which host's copy seeds the DB?
   Recommended: gateway wins, agent-runner diff logged to console for review.
 - **Plugin runtime config edit UX.** Today the UI is implicitly per-host
   (because the file is per-host). Centralizing means edits propagate at next
@@ -233,7 +233,7 @@ What we give up:
 - **MCP servers that genuinely vary per host.** If a future MCP server binds
   to a gateway-only resource, the registry needs a `primary_only: true` flag
   analogous to the bench repos convention.
-- **`~/.ava/.env`.** Secrets are arguably Q4 but kept out of DB for
+- **`~/.meiva/.env`.** Secrets are arguably Q4 but kept out of DB for
   blast-radius reasons. Status quo (manual sync, gateway-authoritative) is
   acceptable; out of scope for this proposal.
 
@@ -245,10 +245,10 @@ What we give up:
 - `shared/plugin_config_registry.py` — `bind_from_disk()` **stays** disk-backed
   (reconciled: config is per-machine local; the earlier `bind_from_db()` plan is
   reversed).
-- `shared/install_registry.py` + `~/.ava/installed.json` — the governed overlay
+- `shared/install_registry.py` + `~/.meiva/installed.json` — the governed overlay
   registry the reconciled rule rests on.
-- `ava/skills.py` — repo + registry-tracked overlay skill sources (the overlay
+- `meiva/skills.py` — repo + registry-tracked overlay skill sources (the overlay
   reservation that fixed the leaked-skill drift).
-- `ava/mcps.py:60-74` — `mcp.json` path resolution, to migrate.
-- `ava/monitor.py:44-47` — `_monitors_dir()` cache, to mark non-authoritative.
-- `okf/skills.ava.okf.md` — the skills dual-source loading description, to update.
+- `meiva/mcps.py:60-74` — `mcp.json` path resolution, to migrate.
+- `meiva/monitor.py:44-47` — `_monitors_dir()` cache, to mark non-authoritative.
+- `okf/skills.meiva.okf.md` — the skills dual-source loading description, to update.

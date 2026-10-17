@@ -3,14 +3,14 @@
 Locks in the "server raise X → handler encodes typed envelope + reason → SDK parse → reconstruct X"
 end-to-end invariant.
 
-Every AvaAgentError subclass is parametrized to run two assertions:
+Every MeivaAgentError subclass is parametrized to run two assertions:
   1. **handler encoding correct**: register handler on an isolated FastAPI app + a synthetic
      endpoint that raises cls; TestClient hits it; checks the typed envelope plus
      body.reason==cls.reason / body.detail matches the raised message
   2. **SDK reconstruction correct**: feed a synthetic httpx.Response to gateway_client.
      raise_from_response; checks the raised exception is the same cls + same message
 
-When adding a new AvaAgentError subclass, must also add it to EXCEPTION_BY_REASON — this test
+When adding a new MeivaAgentError subclass, must also add it to EXCEPTION_BY_REASON — this test
 auto-parametrizes and won't miss coverage.
 """
 
@@ -24,8 +24,12 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from base.agents.context.gateway_client.transport import raise_from_response
-from base.api_contracts.agent_contract import EXCEPTION_BY_REASON, AgentLaunchFailed, AvaAgentError
-from gateway.http.middleware.error_handlers import ava_agent_error_handler
+from base.api_contracts.agent_contract import (
+    EXCEPTION_BY_REASON,
+    AgentLaunchFailed,
+    MeivaAgentError,
+)
+from gateway.http.middleware.error_handlers import meiva_agent_error_handler
 
 # Untyped fixtures and helper calls throughout: the call-site rules stay at warning for this file.
 # pyright: reportUnknownMemberType = warning
@@ -41,10 +45,10 @@ def test_handler_emits_expected_wire(reason, cls):
     """Server-side: handler encodes the full envelope plus SDK wire reason."""
     app = FastAPI()
     # FastAPI's add_exception_handler second parameter is typed as ExceptionHandler
-    # (Exception input); our handler input is an AvaAgentError subtype — pyright
+    # (Exception input); our handler input is an MeivaAgentError subtype — pyright
     # considers it invariant-narrowed and disallows it. Runtime dispatch uses the registered
     # exception type, so it's actually safe.
-    app.add_exception_handler(AvaAgentError, ava_agent_error_handler)  # type: ignore[arg-type]
+    app.add_exception_handler(MeivaAgentError, meiva_agent_error_handler)  # type: ignore[arg-type]
 
     @app.get("/_raise")
     def _raise():

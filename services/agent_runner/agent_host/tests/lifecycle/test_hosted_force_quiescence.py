@@ -20,8 +20,7 @@ from agent.db import has_pending_interrupt
 from agent.graph.exec._subprocess import run_in_subprocess
 from agent.ownership import hosted
 from agent.tests.claim.test_inbound_ownership import agent_row, insert
-from ava.tests.fixtures.pin_agent import exec_context as ctx_of
-from base.agents.context import AvaContext
+from base.agents.context import MeivaContext
 from base.agents.incarnation.hosted_force import original_host_force
 from base.cluster.machine import MachineIdentity
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
@@ -32,6 +31,7 @@ from base.events.live.bus import EventBus
 from base.lm.catalog import ModelCatalog
 from base.native_process.turn_identity import HostedTurnResources
 from base.packages.composer_commands import CommandCatalog
+from meiva.tests.fixtures.pin_agent import exec_context as ctx_of
 from ops.agents.resurrection_retry import ResurrectSettlementDeferredError
 from ops.agents.wake import resurrect_agent
 from ops.lifecycle.termination import force_terminate_transaction
@@ -220,7 +220,7 @@ async def _prove_successor_ignores_old_cancel(
         await scheduler.aclose()
 
 
-def _exec_context(hosted: AvaContext) -> AvaContext:
+def _exec_context(hosted: MeivaContext) -> MeivaContext:
     """The fake host is SQL-only; exec keeps the test SDK clients and actual custody."""
     context = replace(
         ctx_of(hosted.require_identity().agent_id),
@@ -275,7 +275,7 @@ async def test_force_waits_for_real_work_and_delayed_cancel_cannot_hit_successor
                 "from pathlib import Path\nimport time\n"
                 f"Path({str(marker)!r}).touch()\n"
                 f"while not Path({str(release_file)!r}).exists(): time.sleep(0.01)\n",
-                _exec_context(cast(AvaContext, kwargs["context"])),
+                _exec_context(cast(MeivaContext, kwargs["context"])),
                 asyncio.Event(),
                 20,
                 exec_dir=tmp_path,

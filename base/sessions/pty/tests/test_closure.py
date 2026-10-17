@@ -29,7 +29,9 @@ def leaders() -> Iterator[list[subprocess.Popen[bytes]]]:
 def _session(leaders: list[subprocess.Popen[bytes]]) -> closure.Target:
     process = subprocess.Popen(["sleep", "300"], start_new_session=True)
     leaders.append(process)
-    return closure.Target("ava-test-best-effort", OwnedProcess.capture(psutil.Process(process.pid)))
+    return closure.Target(
+        "meiva-test-best-effort", OwnedProcess.capture(psutil.Process(process.pid))
+    )
 
 
 def test_idle_shell_closes_without_claiming_all_descendants_gone(
@@ -125,8 +127,8 @@ def test_wire_outcome_round_trips_known_survivors() -> None:
     shell = OwnedProcess(4242, 12.5, 987654)
     job = OwnedProcess(4243, 12.75, None)
     outcome = closure.Outcome(
-        (closure.ClosedSession("ava-agent-1-shell-1-wire", shell, ((4243, "sleep"),)),),
-        (closure.Survivor("ava-agent-1-shell-1-wire", job, "job"),),
+        (closure.ClosedSession("meiva-agent-1-shell-1-wire", shell, ((4243, "sleep"),)),),
+        (closure.Survivor("meiva-agent-1-shell-1-wire", job, "job"),),
     )
     assert closure.Outcome.from_wire(outcome.to_wire()) == outcome
 

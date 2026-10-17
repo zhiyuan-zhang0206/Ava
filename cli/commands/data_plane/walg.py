@@ -1,4 +1,4 @@
-"""`ava backup walg`: check that WAL-G can work, run the daily tick, restore, show what it is doing."""
+"""`meiva backup walg`: check that WAL-G can work, run the daily tick, restore, show what it is doing."""
 
 from __future__ import annotations
 
@@ -103,11 +103,11 @@ def cmd_walg_restore(
         return config.view.walg.walg_config_file
 
     if not walg_config.enabled(path_reader=path_reader):
-        print("WAL-G is off (AVA_WALG_CONFIG_FILE is not set); nothing to restore from")
+        print("WAL-G is off (MEIVA_WALG_CONFIG_FILE is not set); nothing to restore from")
         return 1
     binary_problem = walg_binary.installed_problem()
     if binary_problem is not None:
-        print(f"restore failed: {binary_problem} (ava converge installs it)", file=sys.stderr)
+        print(f"restore failed: {binary_problem} (meiva converge installs it)", file=sys.stderr)
         return 1
     try:
         walg_config.load_walg_config(path_reader=path_reader)
@@ -166,7 +166,7 @@ def _postgres_lines(*, path_reader: Callable[[], Path | None]) -> list[str]:
     )
     return [
         f"postgres: archive_mode={state.archive_mode}"
-        + (" (differs from the configuration: ava stop, then ava start)" if differs else ""),
+        + (" (differs from the configuration: meiva stop, then meiva start)" if differs else ""),
         f"archiver: archived={state.archived_count} failed={state.failed_count} "
         f"failing_now={state.failing_now}, {pending}",
     ]
@@ -226,7 +226,7 @@ def cmd_walg_status() -> int:
 
     path = walg_config.configured_path(path_reader=path_reader)
     if path is None:
-        print("WAL-G archiving is off (AVA_WALG_CONFIG_FILE is not set)")
+        print("WAL-G archiving is off (MEIVA_WALG_CONFIG_FILE is not set)")
         return 0
     binary_problem = walg_binary.installed_problem()
     print(f"binary: {binary_problem or f'pinned wal-g {walg_binary.WALG_VERSION}'}")
@@ -257,6 +257,6 @@ def warn_archive_inactive(*, path_reader: Callable[[], Path | None]) -> None:
         print(
             "  ! WAL archiving is configured but this Postgres is not running with the "
             "configured archive settings (it kept its previous launch arguments): run "
-            "`ava stop` and `ava start` to activate it",
+            "`meiva stop` and `meiva start` to activate it",
             file=sys.stderr,
         )

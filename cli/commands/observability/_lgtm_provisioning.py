@@ -3,7 +3,7 @@
 Split out of ``observability.lgtm_native`` when the runtime-rendered dashboard (S3) pushed
 that module over the per-file line ceiling. Every provisioning file is
 copied VERBATIM under the content-hash user-edit guard — except
-``dashboards/ava-ops-main.json``, which is generated from the metric
+``dashboards/meiva-ops-main.json``, which is generated from the metric
 registries through ``base.packages.dashboard_supply``.
 """
 
@@ -25,10 +25,10 @@ from .observatory_urls import atomic_write
 # The one provisioning file converge generates instead of copying verbatim
 # (task #3697 S3): rendered from the metric registries, so plugin
 # installs/uninstalls move its panels without hand edits.
-_RENDERED_DASHBOARD_REL = "dashboards/ava-ops-main.json"
+_RENDERED_DASHBOARD_REL = "dashboards/meiva-ops-main.json"
 
 
-def _render_ava_ops_dashboard(
+def _render_meiva_ops_dashboard(
     dest: Path,
     hashes_path: Path,
     key: str,
@@ -36,7 +36,7 @@ def _render_ava_ops_dashboard(
     database_factory: DatabaseFactory,
     producer: Callable[[], EventPipeline],
 ) -> None:
-    """Render the ava-ops dashboard into the native provisioning tree.
+    """Render the meiva-ops dashboard into the native provisioning tree.
 
     Task #3697 slice S3: the dashboard's provisioning content is generated
     from the metric registries (core + plugin suppliers) instead of copied
@@ -46,7 +46,7 @@ def _render_ava_ops_dashboard(
     Grafana restart fingerprint stable); a differing render replaces the file
     atomically, WITHOUT the user-edit guard the verbatim copies have — the file
     is derived state with no hand-edit contract, and the guard turned a file
-    written outside converge (`ava lgtm render --force` leaves the sidecar
+    written outside converge (`meiva lgtm render --force` leaves the sidecar
     behind) into a dashboard frozen at that render across every later rollout.
     A render failure keeps the previous file and emits a warning event — a
     dashboard must never fail converge.
@@ -57,7 +57,7 @@ def _render_ava_ops_dashboard(
         rendered, failed = render_dashboard_json(database_factory())
     except Exception as exc:
         print(
-            f"  ! lgtm native: ava-ops dashboard render failed ({exc}); keeping the previous file",
+            f"  ! lgtm native: meiva-ops dashboard render failed ({exc}); keeping the previous file",
             file=sys.stderr,
         )
         telemetry.emit(
@@ -82,7 +82,7 @@ def _render_ava_ops_dashboard(
     dest.parent.mkdir(parents=True, exist_ok=True)
     atomic_write(dest, rendered)
     _record_rendered_hash(hashes_path, key, digest)
-    print(f"  lgtm native: ava-ops dashboard re-rendered (sha256 {digest[:12]})")
+    print(f"  lgtm native: meiva-ops dashboard re-rendered (sha256 {digest[:12]})")
 
 
 def _record_rendered_hash(hashes_path: Path, key: str, digest: str) -> None:
@@ -109,7 +109,7 @@ def render_provisioning(
     """Render the Grafana provisioning tree into the native config dir.
 
     Every provisioning file (datasources, alert rules, READMEs) is copied
-    VERBATIM — except ``dashboards/ava-ops-main.json``, which is generated
+    VERBATIM — except ``dashboards/meiva-ops-main.json``, which is generated
     from the metric registries (task #3697 S3) — the datasource and webhook
     URLs are Grafana-native $__env{} references resolved from the process
     env (runtime.env), so the checkout file is always a valid configuration
@@ -118,7 +118,7 @@ def render_provisioning(
     user-modification guard (web-sources precedent): a file the user
     hand-edited since the last converge write is warned about and preserved,
     never overwritten. Grafana reads this rendered tree via
-    {{AVA_PROVISIONING_PATH}} — the deployment state is decoupled from the
+    {{MEIVA_PROVISIONING_PATH}} — the deployment state is decoupled from the
     source checkout, so a rollout that swaps the checkout cannot feed the
     running instance a half-rendered tree.
     """
@@ -153,7 +153,7 @@ def render_provisioning(
     # source template to vanish, so it stays in the rendered set even when
     # generation fails (the previous file must survive).
     rendered_relative.add(_RENDERED_DASHBOARD_REL)
-    _render_ava_ops_dashboard(
+    _render_meiva_ops_dashboard(
         dest_dir / _RENDERED_DASHBOARD_REL,
         hashes_path,
         _RENDERED_DASHBOARD_REL,

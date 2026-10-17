@@ -13,7 +13,7 @@ from base.host.db_authority import delivery, unit
 from base.host.db_authority.api import API_TOKEN_ENV
 from base.host.env import dotenv_boot
 
-ENDPOINT = "postgresql://ava@10.0.0.7:6433/ava"
+ENDPOINT = "postgresql://meiva@10.0.0.7:6433/meiva"
 MACHINE = "mini"
 HUMAN = "gateway-human-secret-" + "s" * 32
 
@@ -76,13 +76,13 @@ def runner_boot(
     afterwards."""
     saved = dict(os.environ)
     env_file = runner_home / ".env"
-    env_file.write_text("AVA_MACHINE_SERVE_AGENT_RUNNER=true\n")
-    monkeypatch.setenv("AVA_HOME", str(runner_home))
+    env_file.write_text("MEIVA_MACHINE_SERVE_AGENT_RUNNER=true\n")
+    monkeypatch.setenv("MEIVA_HOME", str(runner_home))
     for key in (
-        "AVA_PROCESS_PROFILE",
+        "MEIVA_PROCESS_PROFILE",
         dotenv_boot.LAUNCHER_PROFILE_ENV_KEY,
         delivery.GENERATION_ENV,
-        "AVA_DB_URL",
+        "MEIVA_DB_URL",
         API_TOKEN_ENV,
     ):
         os.environ.pop(key, None)

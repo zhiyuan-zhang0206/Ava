@@ -16,7 +16,7 @@ projection. Capability/scope metadata validates those consumption choices.
 ``env_keep_set(role)`` and ``env_authority_drop_set(role)`` supply dotenv_boot's
 set-membership projections. Native delivery uses
 ``base.sessions.env_forwarding.forward_env_dict``; secrets never ride argv.
-Current structure: base/host/env/docs/registry.ava.okf.md.
+Current structure: base/host/env/docs/registry.meiva.okf.md.
 """
 
 from __future__ import annotations
@@ -33,7 +33,7 @@ from base.host.env.config_lite_table import (
 )
 
 # The process-profile roles `child_env` / the authority projections accept —
-# the existing AVA_PROCESS_PROFILE vocabulary (base/config/profiles.py), not
+# the existing MEIVA_PROCESS_PROFILE vocabulary (base/config/profiles.py), not
 # a new enum.
 ProcessRole = Literal["gateway", "agent", "runner"]
 
@@ -79,8 +79,8 @@ HOST_PASSTHROUGH_KEYS = frozenset(row.key for row in _HOST_PASSTHROUGH_ROWS)
 # is the operator's tool for keeping loopback and the private network direct.
 #
 # Values are machine-local by construction — the parent environment is the only
-# source (an exporting shell, or `$AVA_HOME/.env` / `mirror.env`, which
-# `load_ava_env` loads into os.environ before any child env is built), so no
+# source (an exporting shell, or `$MEIVA_HOME/.env` / `mirror.env`, which
+# `load_meiva_env` loads into os.environ before any child env is built), so no
 # repo file ever carries an address. Copied non-empty only, like the display
 # passthroughs above.
 _NETWORK_PROXY_ROWS = tuple(
@@ -113,20 +113,20 @@ def network_proxy_configured() -> bool:
 # The per-agent config overlay / birth stamp travel in env vars as JSON (never
 # argv — issue #974: argv is world-readable via `ps`). Not Settings fields:
 # they are process-bound carriers the exec launcher writes and child boot consumes.
-AGENT_CONFIG_OVERLAY_ENV = "AVA_AGENT_CONFIG_OVERLAY"
-AGENT_BIRTH_CONFIG_ENV = "AVA_AGENT_BIRTH_CONFIG"
+AGENT_CONFIG_OVERLAY_ENV = "MEIVA_AGENT_CONFIG_OVERLAY"
+AGENT_BIRTH_CONFIG_ENV = "MEIVA_AGENT_BIRTH_CONFIG"
 # Service birth snapshots are delivered per unit, never inherited by its parent.
-SERVICE_PLUGIN_CONFIG_ENV = "AVA_SERVICE_PLUGIN_CONFIG"
+SERVICE_PLUGIN_CONFIG_ENV = "MEIVA_SERVICE_PLUGIN_CONFIG"
 # Cluster policy travels through the existing authenticated bootstrap snapshot.
-PLUGIN_CLUSTER_CONFIG_ENV = "AVA_PLUGIN_CLUSTER_CONFIG"
+PLUGIN_CLUSTER_CONFIG_ENV = "MEIVA_PLUGIN_CLUSTER_CONFIG"
 # The Redis ACL runtime password is a file-only data-plane credential like the
 # runner database password. derive_env emits it and process isolation strips it.
-REDIS_PASSWORD_ENV = "AVA_REDIS_PASSWORD"  # noqa: S105 — env key, not a credential
+REDIS_PASSWORD_ENV = "MEIVA_REDIS_PASSWORD"  # noqa: S105 — env key, not a credential
 
-# The home is not a Settings field (`base.paths.home.resolve_ava_home`
+# The home is not a Settings field (`base.paths.home.resolve_meiva_home`
 # reads it before Settings exists): it is the one variable every descendant
 # inherits, so a process tree that set it keeps every child on the same home.
-AVA_HOME_ENV = "AVA_HOME"
+MEIVA_HOME_ENV = "MEIVA_HOME"
 
 # Non-Settings guide keys an agent process needs before Settings: the TLS bundle
 # for the config fetch on corp-MITM hosts, plus the two JSON carriers above, all
@@ -162,7 +162,7 @@ _PASSTHROUGH_ROWS = (
 # ── Health ports: service -> env-var alias (a derived view of Settings) ──
 
 # The health-port services (one Settings field each: `<svc>_health_port`,
-# alias `AVA_<SVC>_HEALTH_PORT`, scope=host). Adding a daemon with a health
+# alias `MEIVA_<SVC>_HEALTH_PORT`, scope=host). Adding a daemon with a health
 # port = one line here + the field in base/config/domains/services/settings.py; every
 # consumer (derive_env, daemon.health, start, dotenv_boot's force set) follows
 # automatically.
@@ -197,7 +197,7 @@ def health_port_env_aliases() -> dict[str, str]:
 # Consumption-matrix declarations by FIELD NAME (alias renames follow; a missing
 # field is a KeyError — fail-fast, not a silent empty set).
 # Machine-identity fields: a unit's identity is a per-unit fact — it must come
-# from the unit's own .env / $AVA_HOME files, never from a parent process env.
+# from the unit's own .env / $MEIVA_HOME files, never from a parent process env.
 # The Redis executable selection is also home-owned: inheriting it would make
 # a sibling unit start a different server merely because of its caller.
 _IDENTITY_FIELDS = frozenset(
@@ -234,13 +234,13 @@ _DERIVED_FIELDS = frozenset(
         "events_channel",
     }
 )
-ADMIN_DATA_PLANE_ALIASES = frozenset({"AVA_REDIS_ADMIN_PASSWORD", REDIS_PASSWORD_ENV})
+ADMIN_DATA_PLANE_ALIASES = frozenset({"MEIVA_REDIS_ADMIN_PASSWORD", REDIS_PASSWORD_ENV})
 
 
 def _scope_aliases(*scopes: str) -> frozenset[str]:
     """Env aliases of every field whose scope is one of `scopes`.
 
-    Reads the boot-lite static index, not the live registry: `load_ava_env`
+    Reads the boot-lite static index, not the live registry: `load_meiva_env`
     runs these projections before Settings exists, and the registry build would
     drag pydantic + all sub-models into every boot (#3621; index-vs-registry
     equality locked by tests/components/base/test_config_lite_table.py)."""
@@ -288,10 +288,10 @@ def env_identity_keys() -> frozenset[str]:
 def derived_env_keys() -> frozenset[str]:
     """The exact set of env-var names `derive_env()` produces — the
     cluster-isolation keys. A subprocess started for a cluster strips these
-    from the inherited environment so the cluster's own $AVA_HOME/.env is
+    from the inherited environment so the cluster's own $MEIVA_HOME/.env is
     authoritative; otherwise the parent process (which imported base.config
     and thereby loaded its own prod .env into os.environ) would leak prod
-    AVA_DB_URL / AVA_REDIS_URL into the child."""
+    MEIVA_DB_URL / MEIVA_REDIS_URL into the child."""
     return (
         frozenset(FIELD_ALIASES[n] for n in _DERIVED_FIELDS)
         | frozenset(health_port_env_aliases().values())
@@ -303,21 +303,21 @@ def derived_env_keys() -> frozenset[str]:
 def session_forward_keys() -> frozenset[str]:
     """The daemon/session child allowlist (settings half) — the host-scope
     settings aliases (machine identity, per-unit health ports, the gateway URL
-    the fetch dials), plus AVA_HOME. No
-    cluster-scope value, no agent-scope knob, no non-modeled AVA_* identity
-    (audit F-s3-4: the old denylist forwarded AVA_AGENT_ID into daemon
+    the fetch dials), plus MEIVA_HOME. No
+    cluster-scope value, no agent-scope knob, no non-modeled MEIVA_* identity
+    (audit F-s3-4: the old denylist forwarded MEIVA_AGENT_ID into daemon
     sessions). The ambient passthroughs
     (DISPLAY/WAYLAND_DISPLAY/HOME/USER/LOGNAME) and the temp-dir vars are applied by
     `child_env`, not part of this set. A new host-scope field is forwarded
     automatically."""
-    return _scope_aliases("host") | {AVA_HOME_ENV}
+    return _scope_aliases("host") | {MEIVA_HOME_ENV}
 
 
 @lru_cache(maxsize=1)
 def launch_input_keys() -> frozenset[str]:
     """The env keys a root generation's launch digest binds, and nothing else.
 
-    Declared launch inputs: the host-scope settings (AVA_HOME, machine
+    Declared launch inputs: the host-scope settings (MEIVA_HOME, machine
     identity, health ports, the admitted service PATH), PATH and VIRTUAL_ENV as
     the delivery rebuilds them from the runtime. The ambient host facts `child_env`
     copies from whoever launched it (display, HOME/USER/LOGNAME, temp dirs,
@@ -327,19 +327,19 @@ def launch_input_keys() -> frozenset[str]:
     for the same launch. Positive list: a key a delivery adds later stays out
     of the digest until it is declared here.
     """
-    return _scope_aliases("host") | {AVA_HOME_ENV} | _OS_CANONICAL_KEYS
+    return _scope_aliases("host") | {MEIVA_HOME_ENV} | _OS_CANONICAL_KEYS
 
 
 # ── Projections ──
 
 
 def _require_role(role: ProcessRole) -> None:
-    """Fail fast on a role outside the AVA_PROCESS_PROFILE vocabulary — the
+    """Fail fast on a role outside the MEIVA_PROCESS_PROFILE vocabulary — the
     role axis of the env projections is that vocabulary, not a new enum."""
     if role not in ("gateway", "agent", "runner"):
         raise ValueError(
             f"unknown process role {role!r} — must be one of gateway/agent/runner "
-            f"(the AVA_PROCESS_PROFILE vocabulary)"
+            f"(the MEIVA_PROCESS_PROFILE vocabulary)"
         )
 
 
@@ -364,7 +364,7 @@ def child_env(role: Literal["gateway", "runner"]) -> dict[str, str]:
     """The parent->child env dict a daemon / session child of `role` receives.
 
     POSITIVE allowlist, not a drop list (Task #856 Phase C, audit F-s3-4): a
-    non-modeled knob (AVA_AGENT_ID, ...) or agent-scope override never rides a
+    non-modeled knob (MEIVA_AGENT_ID, ...) or agent-scope override never rides a
     daemon session. `gateway` and `runner` (daemons belong to those profiles)
     get the same session view; an agent process has no forwarding view (it is
     launched with the launcher's own environment).

@@ -16,13 +16,13 @@ exports = ["test_weixin_adapter.py", "test_weixin_chat_identity.py", "weixin_nat
 "test_feishu_adapter.py#monkeypatch.delenv os.environ.HTTPS_PROXY" = 1
 "test_feishu_adapter.py#monkeypatch.setenv os.environ.ALL_PROXY" = 1
 "test_feishu_adapter.py#monkeypatch.setenv os.environ.HTTPS_PROXY" = 3
-"test_feishu_owner_seed.py#monkeypatch.setenv os.environ.AVA_HOME" = 7
-"test_im_bridge_telegram.py#monkeypatch.setenv os.environ.AVA_HOME" = 1
-"test_segment_retry_safety.py#monkeypatch.setenv os.environ.AVA_HOME" = 1
-"test_services_weixin_adapter.py#monkeypatch.setenv os.environ.AVA_HOME" = 1
-"test_telegram_adapter.py#monkeypatch.setenv os.environ.AVA_HOME" = 1
-"test_weixin_adapter.py#monkeypatch.setenv os.environ.AVA_HOME" = 2
-"weixin_native.py#monkeypatch.setenv os.environ.AVA_HOME" = 1
+"test_feishu_owner_seed.py#monkeypatch.setenv os.environ.MEIVA_HOME" = 7
+"test_im_bridge_telegram.py#monkeypatch.setenv os.environ.MEIVA_HOME" = 1
+"test_segment_retry_safety.py#monkeypatch.setenv os.environ.MEIVA_HOME" = 1
+"test_services_weixin_adapter.py#monkeypatch.setenv os.environ.MEIVA_HOME" = 1
+"test_telegram_adapter.py#monkeypatch.setenv os.environ.MEIVA_HOME" = 1
+"test_weixin_adapter.py#monkeypatch.setenv os.environ.MEIVA_HOME" = 2
+"weixin_native.py#monkeypatch.setenv os.environ.MEIVA_HOME" = 1
 
 [debt.first-party-patch]
 "test_feishu_worker_exit.py#assignment services.entrypoints.im_bridge.daemon.run" = 1

@@ -30,23 +30,23 @@ def _tools(path: Path, version: str) -> Path:
 def _home(path: Path, selected: Path | None) -> Path:
     path.mkdir()
     content = (
-        "AVA_DB_URL=postgresql://unused@127.0.0.1:1/unused\nAVA_REDIS_URL=redis://127.0.0.1:1\n"
+        "MEIVA_DB_URL=postgresql://unused@127.0.0.1:1/unused\nMEIVA_REDIS_URL=redis://127.0.0.1:1\n"
     )
     if selected is not None:
-        content += f"AVA_REDIS_BIN_DIR='{selected}'\n"
+        content += f"MEIVA_REDIS_BIN_DIR='{selected}'\n"
     (path / ".env").write_text(content)
     return path
 
 
 def _probe(home: Path, system_bin: Path, *, inherited: str = "") -> dict[str, Any]:
-    # Explicitly isolated config; no Ava imports in this child can dial production.
+    # Explicitly isolated config; no Meiva imports in this child can dial production.
     env = {
         "HOME": str(home.parent),
         "PATH": str(system_bin),
-        "AVA_HOME": str(home),
-        "AVA_CONFIG_FETCH": "skip",
-        "AVA_PROCESS_PROFILE": "gateway",
-        "AVA_REDIS_BIN_DIR": inherited,
+        "MEIVA_HOME": str(home),
+        "MEIVA_CONFIG_FETCH": "skip",
+        "MEIVA_PROCESS_PROFILE": "gateway",
+        "MEIVA_REDIS_BIN_DIR": inherited,
     }
     result = subprocess.run(  # noqa: S603 — fixed interpreter and test-owned source/config.
         [sys.executable, str(Path(__file__).with_name("child_redis_probe.py"))],
@@ -107,9 +107,9 @@ def test_directory_setting_rejects_ambient_path_interpretation(value: str) -> No
 
     with pytest.raises(ValidationError, match="absolute directory"):
         DataPlaneSettings(
-            AVA_DB_URL="postgresql://unused@127.0.0.1:1/unused",
-            AVA_REDIS_URL="redis://127.0.0.1:1",
-            AVA_REDIS_BIN_DIR=value,
+            MEIVA_DB_URL="postgresql://unused@127.0.0.1:1/unused",
+            MEIVA_REDIS_URL="redis://127.0.0.1:1",
+            MEIVA_REDIS_BIN_DIR=value,
         )
 
 
@@ -125,7 +125,7 @@ def test_config_is_local_writable_and_not_a_runner_bootstrap_fact(
     )
     assert field.scope == "host"
     assert field.writable and not field.remote_writable
-    assert field.env_var == "AVA_REDIS_BIN_DIR"
+    assert field.env_var == "MEIVA_REDIS_BIN_DIR"
     assert "redis_bin_dir" not in BOOTSTRAP_FIELDS
 
 
@@ -144,10 +144,10 @@ def test_local_config_write_only_changes_target_home(
     assert config_cli.cmd_config_set(["redis_bin_dir=relative/bin"], None, local=True) == 1
     assert (target / ".env").read_bytes() == target_bytes
     assert config_cli.cmd_config_set([f"redis_bin_dir={selected}"], None, local=True) == 0
-    assert dotenv_file.read_env_aliases()["AVA_REDIS_BIN_DIR"] == str(selected)
+    assert dotenv_file.read_env_aliases()["MEIVA_REDIS_BIN_DIR"] == str(selected)
     capsys.readouterr()
     assert config_cli.cmd_config_get("redis_bin_dir", None, local=True) == 0
     assert str(selected) in capsys.readouterr().out
     assert config_cli.cmd_config_unset(["redis_bin_dir"], None, local=True) == 0
-    assert "AVA_REDIS_BIN_DIR" not in dotenv_file.read_env_aliases()
+    assert "MEIVA_REDIS_BIN_DIR" not in dotenv_file.read_env_aliases()
     assert (sibling / ".env").read_bytes() == sibling_bytes

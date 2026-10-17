@@ -15,10 +15,10 @@ from base.cluster.transport_encryption import (
 
 def test_test_cluster_declares_transport_encryption() -> None:
     """The suite's secret-bearing e2e ops daemon binds off-box."""
-    assert os.environ["AVA_TRANSPORT_ENCRYPTION"] == "overlay"
+    assert os.environ["MEIVA_TRANSPORT_ENCRYPTION"] == "overlay"
     assert (
-        "AVA_TRANSPORT_ENCRYPTION=overlay"
-        in (Path(os.environ["AVA_HOME"]) / ".env").read_text().splitlines()
+        "MEIVA_TRANSPORT_ENCRYPTION=overlay"
+        in (Path(os.environ["MEIVA_HOME"]) / ".env").read_text().splitlines()
     )
 
 
@@ -37,7 +37,7 @@ def test_undeclared_transport_encryption_refuses_off_box_bind() -> None:
         verify_transport_encryption_declaration("0.0.0.0", "", authenticated=True)  # noqa: S104 — test input
 
     message = str(exc.value)
-    assert "AVA_TRANSPORT_ENCRYPTION" in message
+    assert "MEIVA_TRANSPORT_ENCRYPTION" in message
     assert "tls, mtls, overlay" in message
     assert "docs/conventions/runbook.md" in message
 

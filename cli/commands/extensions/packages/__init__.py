@@ -1,4 +1,4 @@
-"""`ava packages` — the per-machine package refresh surface.
+"""`meiva packages` — the per-machine package refresh surface.
 
 `status` is read-only: it joins the install registry (schema v2) with the
 derived host version and each package's declared manifest range, so the
@@ -52,9 +52,9 @@ def _package_root(pkg: InstalledPackage) -> Path | None:
     from base import paths
 
     root = {
-        "skill": paths.skills_dir(paths.ava_home()) / pkg.name,
+        "skill": paths.skills_dir(paths.meiva_home()) / pkg.name,
         "plugin": paths.plugins_dir() / pkg.name,
-        "mcp": paths.mcps_dir(paths.ava_home()) / pkg.name,
+        "mcp": paths.mcps_dir(paths.meiva_home()) / pkg.name,
     }.get(pkg.type)
     if root is None or not root.is_dir():
         return None
@@ -66,7 +66,7 @@ def _read_declared_range(pkg: InstalledPackage) -> tuple[dict[str, object] | Non
 
     Reads the LIVE copy on this machine (what would actually load), not the
     source tree: a skill package carries its optional manifest beside SKILL.md
-    (`ava-plugin.json`, the same format/validator as plugins). A manifest that
+    (`meiva-plugin.json`, the same format/validator as plugins). A manifest that
     fails validation is reported as an error value instead of raising — status
     must never fail on the state it reports.
     """
@@ -174,7 +174,7 @@ def _status_payload(
         "host": {
             "version": host_bare,
             "display": host_display,
-            "home": str(paths.ava_home()),
+            "home": str(paths.meiva_home()),
             "registry_schema": registry.version,
         },
         "channels": {
@@ -231,7 +231,7 @@ def _print_rows(rows: list[_Row]) -> None:
 
 
 def cmd_packages_status(*, config: ConfigBoot, json_output: bool = False) -> int:
-    """`ava packages status [--json]` — host version, channels, and per-package
+    """`meiva packages status [--json]` — host version, channels, and per-package
     channel/policy/applied-rev/last-result/declared-range. Read-only."""
     import json
 
@@ -253,7 +253,7 @@ def cmd_packages_status(*, config: ConfigBoot, json_output: bool = False) -> int
         return 0
 
     print(
-        f"[ava packages status] host {host_display} · home {paths.ava_home()} "
+        f"[meiva packages status] host {host_display} · home {paths.meiva_home()} "
         f"· registry v{registry.version}"
     )
     if registry.channels:
@@ -289,7 +289,7 @@ def cmd_packages_refresh(
     json_output: bool = False,
     from_job: bool = False,
 ) -> int:
-    """`ava packages refresh [--check] [--package NAME] [--json]
+    """`meiva packages refresh [--check] [--package NAME] [--json]
     [--from-job]` — check the channels and apply due updates to this machine's
     skill packages. The same code path serves the OS job (`--from-job`); manual
     runs work regardless of cadence. Returns 1 only when the registry is
@@ -321,11 +321,11 @@ def cmd_packages_refresh(
         print(json.dumps(payload, indent=2))
         return 0
     if not report.ran:
-        print(f"[ava packages refresh] skipped: {report.skip_reason}")
+        print(f"[meiva packages refresh] skipped: {report.skip_reason}")
         return 1 if (report.skip_reason or "").startswith("registry unreadable") else 0
     suffix = " (check only)" if check_only else ""
     head = f" · {report.channel_line}" if report.channel_line else ""
-    print(f"[ava packages refresh]{suffix}{head}")
+    print(f"[meiva packages refresh]{suffix}{head}")
     for item in report.items:
         print(f"  {item.kind:<6} {item.name:<30} {item.channel:<5} {item.mode:<7} {item.result}")
     for note in report.notes:
@@ -372,7 +372,7 @@ def _swap_trees_with_prev(skills: Path, name: str, skip: frozenset[tuple[str, ..
 
 
 def cmd_packages_rollback(name: str) -> int:
-    """`ava packages rollback <name>` — restore the package's previous
+    """`meiva packages rollback <name>` — restore the package's previous
     tree (the `.<name>.prev` kept by the last successful apply), swapping it with
     the current one. A differing local copy is replaced and reported. The channel
     watermark (`applied_rev`) is left where it was: a later refresh applies only
@@ -383,24 +383,24 @@ def cmd_packages_rollback(name: str) -> int:
     try:
         registry = install_registry.load()
     except install_registry.InstallRegistryError as exc:
-        print(f"[ava packages rollback] registry unreadable: {exc}", file=sys.stderr)
+        print(f"[meiva packages rollback] registry unreadable: {exc}", file=sys.stderr)
         return 1
     row = next((p for p in registry.packages if match_key(p.name) == match_key(name)), None)
     if row is None:
-        print(f"[ava packages rollback] no tracked package named '{name}'", file=sys.stderr)
+        print(f"[meiva packages rollback] no tracked package named '{name}'", file=sys.stderr)
         return 1
     if row.type != "skill":
         print(
-            f"[ava packages rollback] '{row.name}' is a {row.type} package; P1 rollback covers skills only",
+            f"[meiva packages rollback] '{row.name}' is a {row.type} package; P1 rollback covers skills only",
             file=sys.stderr,
         )
         return 1
-    skills = paths.skills_dir(paths.ava_home())
+    skills = paths.skills_dir(paths.meiva_home())
     dest = skills / row.name
     prev = skills / f".{row.name}.prev"
     if not prev.is_dir():
         print(
-            f"[ava packages rollback] no previous tree at {prev} (nothing applied yet?)",
+            f"[meiva packages rollback] no previous tree at {prev} (nothing applied yet?)",
             file=sys.stderr,
         )
         return 1
@@ -408,7 +408,7 @@ def cmd_packages_rollback(name: str) -> int:
     recorded = row.installed_hash or row.content_hash
     if dest.exists() and install_registry.copy_changed(dest, recorded, skip_subtrees=skip):
         print(
-            f"[ava packages rollback] '{row.name}': current copy differs from the last "
+            f"[meiva packages rollback] '{row.name}': current copy differs from the last "
             "applied content; replacing it"
         )
     dest = _swap_trees_with_prev(skills, row.name, skip)
@@ -422,7 +422,7 @@ def cmd_packages_rollback(name: str) -> int:
             fresh.updated_at = stamp
             fresh.update.last_apply_at = stamp
             fresh.update.last_result = "rolled_back: previous tree restored"
-    print(f"[ava packages rollback] '{row.name}': previous tree restored -> {dest}")
+    print(f"[meiva packages rollback] '{row.name}': previous tree restored -> {dest}")
     print("  active on the next skill scan.")
     return 0
 
@@ -441,7 +441,7 @@ def _policy_interval(update_mode: str | None, check_every: str | None) -> int | 
 def cmd_packages_policy(
     name: str, *, config: ConfigBoot, update_mode: str | None = None, check_every: str | None = None
 ) -> int:
-    """`ava packages policy <name> [--update-mode auto|notify|off]
+    """`meiva packages policy <name> [--update-mode auto|notify|off]
     [--check-every 24h]` — record an explicit policy decision on the row; explicit
     values survive every refresh pass (only None fields are resolved from
     settings)."""
@@ -450,21 +450,23 @@ def cmd_packages_policy(
     try:
         interval = _policy_interval(update_mode, check_every)
     except ValueError as exc:
-        print(f"[ava packages policy] {exc}", file=sys.stderr)
+        print(f"[meiva packages policy] {exc}", file=sys.stderr)
         return 1
     try:
         registry = install_registry.load()
     except install_registry.InstallRegistryError as exc:
-        print(f"[ava packages policy] registry unreadable: {exc}", file=sys.stderr)
+        print(f"[meiva packages policy] registry unreadable: {exc}", file=sys.stderr)
         return 1
     row = next((p for p in registry.packages if match_key(p.name) == match_key(name)), None)
     if row is None:
-        print(f"[ava packages policy] no tracked package named '{name}'", file=sys.stderr)
+        print(f"[meiva packages policy] no tracked package named '{name}'", file=sys.stderr)
         return 1
     with install_registry.mutate() as reg:
         fresh = next((p for p in reg.packages if match_key(p.name) == match_key(row.name)), None)
         if fresh is None:
-            print(f"[ava packages policy] '{row.name}' vanished from the registry", file=sys.stderr)
+            print(
+                f"[meiva packages policy] '{row.name}' vanished from the registry", file=sys.stderr
+            )
             return 1
         if update_mode is not None:
             fresh.update.mode = cast("UpdateMode", update_mode)
@@ -482,6 +484,6 @@ def _print_policy(updated: InstalledPackage, *, config: ConfigBoot) -> None:
     if policy.mode == "off":
         note = "  (off — checks and applies are skipped)"
     print(
-        f"[ava packages policy] '{updated.name}': mode={policy.mode} "
+        f"[meiva packages policy] '{updated.name}': mode={policy.mode} "
         f"interval={policy.interval_seconds}s channel={policy.channel or '-'}{note}"
     )
