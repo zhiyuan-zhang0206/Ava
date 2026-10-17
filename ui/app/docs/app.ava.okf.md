@@ -110,6 +110,18 @@ group is absent, while manual dispatch may still produce unsigned evidence.
 `scripts/codegen/build_app_update_manifest.py` emits signed updater entries only, and
 the mutable `app-latest` release carries the stable `latest.json` endpoint.
 
+Android installs compare `versionCode`, so `release-android.yml` injects one
+through a Tauri `--config` overlay and pins `autoIncrementVersionCode` off:
+`versionCode = 1_000_000 + github.run_number`, which strictly increases across
+builds (and stays above the 4002 the old semver derivation produced for 0.4.2)
+while the human `versionName` changes only at milestones. The same overlay
+sets `versionName` from `Cargo.toml`. The build reads the number back out
+of the built APK with `aapt2`, then the mutable `android-latest` prerelease
+carries `android-latest.json` next to the APK — `{versionCode, versionName,
+apkUrl, sha256, commit, builtAt}`, the client update contract. `android-v*`
+tags still publish their own immutable release without the manifest, and
+`workflow_dispatch` accepts `dry_run` to build without replacing the channel.
+
 ## Limits
 
 The Android foreground service keeps the process resident but notification SSE
