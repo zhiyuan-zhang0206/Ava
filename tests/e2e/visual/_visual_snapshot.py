@@ -8,6 +8,7 @@ import pytest
 from playwright.sync_api import Page
 
 SNAPSHOT_ROOT = Path(__file__).parent / "__snapshots__"
+# meiva:ref tests/e2e/visual/docs/visual-regression-gate.meiva.okf.md#visual-diff-sensitivity-floor
 MAX_DIFF_PIXEL_RATIO = 0.001
 _CHANNEL_DELTA_THRESHOLD = 16
 # meiva:ref tests/e2e/visual/docs/visual-regression-gate.meiva.okf.md#settled-frame-capture
