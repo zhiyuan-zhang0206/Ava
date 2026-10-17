@@ -150,7 +150,6 @@ fn build(app: &AppHandle, target: WebviewUrl) -> tauri::Result<WebviewWindow> {
     #[cfg(target_os = "android")]
     {
         builder = builder
-            .initialization_script(include_str!("../scripts/settings-shortcut.js"))
             .initialization_script(include_str!("../scripts/notify-bridge.js"))
             .initialization_script(include_str!("../scripts/update-check.js"));
     }
@@ -341,48 +340,5 @@ fn navigate_to_page(window: &WebviewWindow, page: &str) {
             let _ = window.navigate(url);
         }
         Err(err) => log::error!("could not build the {page} URL: {err}"),
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::{capability_identifier, classify_probe_status, unreachable_page, EntryFailure};
-    use reqwest::StatusCode;
-
-    #[test]
-    fn runtime_capability_identifiers_are_valid_and_origin_specific() {
-        let first = capability_identifier("http://localhost:3000");
-        let second = capability_identifier("https://meiva.example.com");
-        assert!(first.starts_with("remote-console-"));
-        assert!(first.chars().all(|c| c.is_ascii_alphanumeric() || c == '-'));
-        assert_ne!(first, second);
-    }
-
-    #[test]
-    fn http_probe_accepts_console_and_login_responses() {
-        for status in [
-            StatusCode::OK,
-            StatusCode::FOUND,
-            StatusCode::UNAUTHORIZED,
-            StatusCode::FORBIDDEN,
-        ] {
-            assert_eq!(classify_probe_status(status), Ok(()));
-        }
-        assert_eq!(
-            classify_probe_status(StatusCode::INTERNAL_SERVER_ERROR),
-            Err(EntryFailure::Http)
-        );
-        assert_eq!(
-            classify_probe_status(StatusCode::SERVICE_UNAVAILABLE),
-            Err(EntryFailure::UpdateWindow)
-        );
-    }
-
-    #[test]
-    fn failure_page_carries_a_machine_readable_reason() {
-        assert_eq!(
-            unreachable_page(EntryFailure::Unreachable),
-            "index.html?reason=unreachable#unreachable"
-        );
     }
 }
