@@ -1,7 +1,7 @@
 exports = ["branch_protection.py", "module_moves.py"]
 
 [uses]
-"tests" = ["branch_protection.py", "impact_census.py", "module_moves.py", "sdk_usage.py", "where_used.py", "where_used_scan.py"]
+"tests" = ["branch_protection.py", "impact_census.py", "module_moves.py", "schema_drift.py", "sdk_usage.py", "where_used.py", "where_used_scan.py"]
 "where_used.py" = ["module_moves.py", "where_used_scan.py"]
 
 [external]
