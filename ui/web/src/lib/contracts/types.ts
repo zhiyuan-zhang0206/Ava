@@ -487,6 +487,11 @@ export interface NoticePostedEvent extends BaseEvent {
 export interface NoticeResolvedEvent extends BaseEvent {
   readonly role: "notice_resolved";
   readonly notice_id: number;
+  readonly resolution?: string | null;
+  readonly require_response?: boolean | null;
+  readonly age_seconds?: number | null;
+  readonly had_reply?: boolean | null;
+  readonly superseded_by?: number | null;
 }
 export interface TaskCreatedEvent extends BaseEvent {
   readonly role: "task_created";
