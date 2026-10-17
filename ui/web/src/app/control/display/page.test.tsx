@@ -148,53 +148,58 @@ describe("DisplaySettingsPage", () => {
     expect(toggle?.getAttribute("aria-checked")).toBe("false");
   });
 
-  it("renders the Timeline defaults toggle", async () => {
+  it("renders the timeline details modes", async () => {
     renderPage();
 
     await waitFor(() => {
-      expect(screen.getByText("Collapse details by default")).toBeTruthy();
+      expect(screen.getByText("Timeline details")).toBeTruthy();
     });
+    expect(screen.getByRole<HTMLInputElement>("radio", { name: "Collapse all blocks" }).checked).toBe(true);
   });
 
-  // display.expand_runs_mode default "none" (user ruling 2026-09-17): an
-  // unset user collapses details by default. The row inverts the stored
-  // setting's polarity, so the switch reads ON — and turning it off must
-  // write "all" (the pre-existing write inverted polarity vs the row,
-  // leaving this switch a dead no-op; regression-locked here).
-  it("collapses details by default when the setting is unset, and turning the switch off writes 'all'", async () => {
+  it("renders no details selection while the settings row is still loading", async () => {
+    vi.mocked(api.getSettings).mockReturnValue(new Promise<never>(() => undefined));
     renderPage();
 
-    const label = await screen.findByText("Collapse details by default");
-    const row = label.parentElement?.parentElement?.parentElement;
-    const toggle = row?.querySelector<HTMLButtonElement>('[role="switch"]');
-    expect(toggle?.getAttribute("aria-checked")).toBe("true");
+    await waitFor(() => {
+      expect(screen.queryByText("Timeline details")).toBeNull();
+    });
+    expect(screen.queryByRole("radio", { name: "Collapse all blocks" })).toBeNull();
+  });
 
-    fireEvent.click(toggle!);
+  it("writes the details mode picked in settings", async () => {
+    renderPage();
+
+    fireEvent.click(await screen.findByRole("radio", { name: "Expand all blocks" }));
     await waitFor(() => {
       expect(api.putSetting).toHaveBeenCalledWith("display.expand_runs_mode", "all");
     });
   });
 
-  it("stored 'all' reads the row as off; turning the switch on writes 'none'", async () => {
+  it("re-applies the current mode when it is picked again", async () => {
+    renderPage();
+
+    fireEvent.click(await screen.findByRole("radio", { name: "Collapse all blocks" }));
+    await waitFor(() => {
+      expect(api.putSetting).toHaveBeenCalledWith("display.expand_runs_mode", "none");
+    });
+  });
+
+  it("reads a stored details mode back into the row", async () => {
     vi.mocked(api.getSettings).mockResolvedValue({
       settings: [
         {
           key: "display.expand_runs_mode",
-          value: "all",
+          value: "last",
           updated_at: "2026-09-01T00:00:00Z",
         },
       ],
     });
     renderPage();
 
-    const label = await screen.findByText("Collapse details by default");
-    const row = label.parentElement?.parentElement?.parentElement;
-    const toggle = row?.querySelector<HTMLButtonElement>('[role="switch"]');
-    expect(toggle?.getAttribute("aria-checked")).toBe("false");
-
-    fireEvent.click(toggle!);
+    const radio = await screen.findByRole("radio", { name: "Last block only" });
     await waitFor(() => {
-      expect(api.putSetting).toHaveBeenCalledWith("display.expand_runs_mode", "none");
+      expect((radio as HTMLInputElement).checked).toBe(true);
     });
   });
 

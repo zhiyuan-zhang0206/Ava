@@ -618,15 +618,16 @@ export const TimelineView = memo(function TimelineView({
     setActiveStuckChildId(null);
   }
 
-  const resetToken = useContentToggleReset((s) => s.resetToken);
-  const [prevResetToken, setPrevResetToken] = useState(resetToken);
-  if (prevResetToken !== resetToken) {
-    setPrevResetToken(resetToken);
+  const resetPending = useContentToggleReset((s) => s.resetPending);
+  const consumeReset = useContentToggleReset((s) => s.consumeReset);
+  useLayoutEffect(() => {
+    if (!resetPending) return;
+    consumeReset();
     setOverrides(new Set());
     setTurnOverrides(new Map());
     setActiveStuckHeaderId(null);
     setActiveStuckChildId(null);
-  }
+  }, [resetPending, consumeReset]);
 
   useLayoutEffect(() => {
     updateStuckHeader();

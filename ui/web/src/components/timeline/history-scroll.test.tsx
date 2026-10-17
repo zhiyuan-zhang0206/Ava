@@ -18,7 +18,8 @@ vi.mock("@/lib/state/use-user-settings", () => ({
 }));
 vi.mock("@/lib/layout/content-toggle-store", () => ({
   useContentToggle: () => ({ detailsMode: "all", isLoading: false }),
-  useContentToggleReset: (selector: (state: { resetToken: number }) => unknown) => selector({ resetToken: 0 }),
+  useContentToggleReset: (selector: (state: { resetPending: boolean; consumeReset: () => void }) => unknown) =>
+    selector({ resetPending: false, consumeReset: vi.fn() }),
 }));
 vi.mock("../content/markdown", () => ({ ChatMarkdown: ({ content }: { content: string }) => <div>{content}</div> }));
 vi.mock("../ui/scroll-area", () => ({

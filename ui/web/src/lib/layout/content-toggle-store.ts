@@ -50,21 +50,17 @@ export function useContentToggle(): ContentToggleState {
 }
 
 
-// Same-mode re-pick reset (user ruling 2026-08-06): picking the CURRENT
-// details mode again must re-apply it — e.g. in None mode the user may have
-// manually expanded some blocks, and re-picking None must collapse them all
-// again. A plain `setDetailsMode(sameValue)` writes the same DB setting and
-// never fires (the mode does not change), so the selector bumps this token on
-// EVERY user selection; TimelineView clears its per-item/per-turn overrides
-// whenever the token moves.
+// meiva:ref ui/web/src/docs/frontend-components/home-shell-chrome/home-shell-chrome.meiva.okf.md#details-mode-owner
 import { create } from "zustand";
 
 interface ContentToggleResetState {
-  resetToken: number;
+  resetPending: boolean;
   bumpReset: () => void;
+  consumeReset: () => void;
 }
 
 export const useContentToggleReset = create<ContentToggleResetState>((set) => ({
-  resetToken: 0,
-  bumpReset: () => set((s) => ({ resetToken: s.resetToken + 1 })),
+  resetPending: false,
+  bumpReset: () => set({ resetPending: true }),
+  consumeReset: () => set({ resetPending: false }),
 }));

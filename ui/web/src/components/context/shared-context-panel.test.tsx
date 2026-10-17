@@ -25,6 +25,7 @@ vi.mock("@/components/notifications/open-notice-detail", () => ({
 vi.mock("@/lib/notifications/use-notices", () => ({ dropOpenNotices: vi.fn() }));
 vi.mock("@/lib/inspector/inspector-widgets", () => ({ fleetNoticeHref: (id: number) => `/fleet?notice=${id}` }));
 
+import { BAR_DIVIDER_CLASS, BAR_HEIGHT_CLASS } from "@/lib/layout/layout";
 import type { NoticeItem } from "@/lib/contracts/types";
 import type { useToUser } from "@/lib/context/use-to-user";
 import { SharedContextPanel } from "./shared-context-panel";
@@ -98,6 +99,15 @@ it("keeps the notice area inside the document body", () => {
   const body = screen.getByTestId("shared-document");
   expect(body.contains(screen.getByTestId("notice-detail"))).toBe(true);
   expect(screen.getByText("needsReply")).toBeTruthy();
+});
+
+it("uses the shared column title bar for the notice header", () => {
+  renderPanel({ notices: [notice()] });
+  const tokens = screen.getByTestId("notice-bar").className.split(/\s+/);
+  expect(tokens).toEqual(expect.arrayContaining(["relative", BAR_HEIGHT_CLASS]));
+  expect(tokens).toEqual(expect.arrayContaining(BAR_DIVIDER_CLASS.split(" ")));
+  expect(tokens).not.toContain("border-b");
+  expect(screen.getByRole("region", { name: "notification" }).className.split(/\s+/)).not.toContain("border-b");
 });
 
 it("closes the reading view from the mobile header", () => {
