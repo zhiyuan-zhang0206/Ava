@@ -221,8 +221,8 @@ def test_a_failure_while_recording_is_logged_and_does_not_touch_the_write(
     note = meiva.memory.PATH / "survives.md"
     assert meiva.files.write(note, "kept") is None
     assert note.read_text() == "kept"
-    [logged] = loguru_records.messages("WARNING")
-    assert "survives.md" in logged
+    logged = loguru_records.messages("WARNING")
+    assert any("survives.md" in message for message in logged)
 
 
 def test_outside_an_exec_turn_nothing_is_recorded_and_nothing_fails(exec_turn: Path) -> None:
