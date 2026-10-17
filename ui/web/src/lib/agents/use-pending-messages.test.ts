@@ -6,6 +6,7 @@ import { withoutTimelineDuplicates } from "./use-pending-messages";
 function pending(over: Partial<PendingInbound> & { id: number }): PendingInbound {
   return {
     source: "user",
+    sender: "user",
     content: "hello",
     images: null,
     created_at: "2026-09-16T00:00:00Z",
