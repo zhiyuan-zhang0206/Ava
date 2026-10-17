@@ -67,3 +67,40 @@ grading a snapshot as a finished episode is what produced the "never terminated"
 bucket; on existing samples about a quarter of records move from scored to
 unknown, which is the intent rather than a regression. `unknown_reason` is
 exactly `no_telemetry`, `no_task`, `no_terminal`, or None.
+
+## unknown label
+
+`label.label(rec)` still owns the outcome tier, but `evidence_grade` gates it:
+`none` or `partial` evidence is `unknown`, because the dataset cannot tell a
+broken run from an unobserved one. The gate wins over `failed` / `fumbled`, and a
+record with no `evidence_grade` key takes the rule label exactly as before.
+
+```meiva-contract
+id = "unknown-label"
+kind = "invariant"
+code = ["meiva_builtins/skills/platform/meiva-self-evolution/scripts/label.py:<module>"]
+tests = [
+  "meiva_builtins/skills/platform/meiva-self-evolution/tests/test_self_evolution_label.py::test_complete_evidence_without_negatives_is_ok",
+  "meiva_builtins/skills/platform/meiva-self-evolution/tests/test_self_evolution_label.py::test_complete_evidence_keeps_the_fumble_threshold",
+  "meiva_builtins/skills/platform/meiva-self-evolution/tests/test_self_evolution_label.py::test_missing_evidence_is_unknown_even_with_exec_failures",
+  "meiva_builtins/skills/platform/meiva-self-evolution/tests/test_self_evolution_label.py::test_partial_evidence_is_unknown",
+  "meiva_builtins/skills/platform/meiva-self-evolution/tests/test_self_evolution_label.py::test_record_without_a_grade_keeps_the_rule_label",
+]
+statement = """
+`label.label` returns `unknown` when the record carries an `evidence_grade` other than `complete`, and otherwise defers to `_rule_label`, whose tiers are unchanged: `failed` when the run terminated with no output and no side-channel delivery, or ended on a failed exec; `fumbled` when it crossed a re-prompt, correction, peer-feedback, scaled exec-failure or compaction threshold; `ok` when no negative signal fired. A record without an `evidence_grade` key takes `_rule_label` directly, so older datasets keep their labels, and `LABELS` lists all four tiers.
+"""
+```
+
+The contract statement is the tier definition; in one line: `unknown` is neither
+success nor failure, and `ok` means no objective failure signal, not high
+quality. The tier reads fields directly (not `.get`), so a missing one fails
+fast; `evidence_grade` is the one optional key.
+
+### Downstream
+
+`mine.BAD_LABELS` and `label.REGRESSION_LABELS` both stay `("failed", "fumbled")`:
+`unknown` carries no attributable signal, so it never enters a failure cluster,
+never triggers the scan's ALERT exit, and never appears in its "worth mining"
+list — unknown-only windows exit 0. The scan still reports all four buckets plus
+the unknown reason split. Turning a high unknown share into a data-quality alert
+is a separate coverage sentinel.

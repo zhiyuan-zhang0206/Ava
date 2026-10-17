@@ -1,31 +1,10 @@
-"""Rule-based outcome label for one collected agent-run trace record.
-
-Pure function, no LLM and no DB. `label(rec)` reads only fields that
-`collect.py` assembles onto every record and returns one of three tiers:
-
-    failed   the run visibly broke: it terminated without producing any
-             output, or its last code execution failed and never recovered.
-    fumbled  the run got there but messily: the user had to correct or
-             re-prompt two or more times, another agent had to step in with
-             corrective feedback, some code execution failed mid-run, or the
-             context was compacted repeatedly.
-    ok       none of the above negative signals fired.
-
-`ok` means "no objective failure signal", NOT "high quality" — the absolute
-quality of an organic run cannot be measured without ground truth, so this
-labeler deliberately only detects visible breakage. `failed` / `fumbled` are
-the records worth mining for skill/plugin regressions.
-
-The record fields consumed here are a hard contract with collect.py; they are
-indexed directly (not `.get`) so a missing field fails fast rather than
-silently mislabeling.
-"""
-
+# meiva:ref meiva_builtins/skills/platform/meiva-self-evolution/docs/evidence-block-and-grading.meiva.okf.md#unknown-label
 from __future__ import annotations
 
 from typing import Any
 
-LABELS = ("ok", "fumbled", "failed")
+LABELS = ("ok", "fumbled", "failed", "unknown")
+REGRESSION_LABELS = ("failed", "fumbled")
 
 # Thresholds — a run is "fumbled" once any single signal crosses these.
 FUMBLE_MIN_REPROMPTS = 2
@@ -35,7 +14,15 @@ FUMBLE_TURNS_PER_EXEC_FAILURE = 10
 
 
 def label(rec: dict[str, Any]) -> str:
-    """Classify one trace record into ok / fumbled / failed."""
+    grade = rec.get("evidence_grade")
+    if grade is None:
+        return _rule_label(rec)
+    if grade != "complete":
+        return "unknown"
+    return _rule_label(rec)
+
+
+def _rule_label(rec: dict[str, Any]) -> str:
     if _is_failed(rec):
         return "failed"
     if _is_fumbled(rec):
