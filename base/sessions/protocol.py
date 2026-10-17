@@ -117,6 +117,10 @@ class SessionBackend(abc.ABC):
         """The live session's persisted generation, when this backend has one."""
         return None
 
+    # meiva:ref base/sessions/docs/host-generation.meiva.okf.md#host-generation
+    def host_generation(self) -> str | None:
+        return None
+
     def session_log_path(self, name: str) -> Path | None:  # noqa: ARG002 — no log file for this backend
         """The file **this backend** redirects a session's output to, or None when it
         keeps no such file.

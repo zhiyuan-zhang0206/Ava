@@ -33,6 +33,9 @@ class _FakeBackend:
     def session_generation(self, name: str) -> str | None:
         return self.generations.get(name)
 
+    def host_generation(self) -> str | None:
+        return "host-a"
+
     def new_session(self, name: str, cmd: str, cwd: object, *, env: dict[str, object]) -> bool:
         return True
 

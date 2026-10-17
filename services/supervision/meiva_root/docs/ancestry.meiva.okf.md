@@ -50,3 +50,10 @@ statement = "The root supervisor reads the helper marker its spawning helper sta
 code = ["services/supervision/meiva_root/helper_chain.py:HelperChainWatch.run"]
 tests = ["services/supervision/meiva_root/tests/test_helper_chain.py::test_retires_on_the_confirming_broken_reading", "services/supervision/meiva_root/tests/test_helper_chain.py::test_a_single_broken_reading_does_not_retire", "services/supervision/meiva_root/tests/test_meiva_root_daemon.py::test_retires_when_the_helper_ancestry_is_gone"]
 ```
+
+Retiring on a replaced helper is one instance of the rule every generated tree
+follows: a component is never retried inside its own container generation, and a
+replacement generation is one new chance for the supervisor to rebuild it. The
+schedule manager applies the same rule when its session host is replaced — see
+[[base/sessions/docs/host-generation.meiva.okf.md|session host generation]] and
+[[services/wake/schedule_manager/docs/host-replacement.meiva.okf.md|host replacement]].

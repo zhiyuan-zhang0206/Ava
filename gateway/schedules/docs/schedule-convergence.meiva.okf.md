@@ -59,10 +59,11 @@ only if the row remains enabled at that desired revision. A delayed obsolete
 launch executes no script. Admission occurs before user code, so a quickly
 completed process remains applied even if its manager died before recording the
 launch. Retrying an unacknowledged applied completed/error revision does not
-rerun it. A missing started process is marked error and is not automatically recreated,
-including after manager or PTY service restart. Losing a launch before script
-execution is an accepted cost of this admission rule. Explicit start/restart
-creates a new revision and can intentionally execute the script again.
+rerun it. A missing started process is relaunched only when its launch belonged to a
+replaced generation of the session host; any other silent death is marked error
+and is not automatically recreated, including after a manager restart. Losing a launch before script execution is an accepted cost of
+this admission rule. Explicit start/restart creates a new revision and can
+intentionally execute the script again.
 
 Reconcile also discovers pending revisions. It always reads current desired
 state rather than replaying an old request's enabled/config payload. Maintenance
@@ -84,3 +85,10 @@ before a pending versioned live session can be safely adopted.
 
 Schedule resource creation has separate fingerprint-only receipts; see
 [[gateway/routers/docs/resource-creation.meiva.okf.md]].
+
+## Host replacement
+
+A launch belongs to the generation of the session host that served it; a
+replacement host gives an enabled running schedule one relaunch without a new
+desired revision, and a silent death inside one generation stays an error. See
+[[services/wake/schedule_manager/docs/host-replacement.meiva.okf.md|host replacement]].

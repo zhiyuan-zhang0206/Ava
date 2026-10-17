@@ -126,6 +126,20 @@ class ScheduleConvergenceAbandoned(TypedDict):
     blocked_seconds: float
 
 
+class ScheduleAutoRestart(TypedDict):
+    schedule_id: int
+    previous_generation: str
+    current_generation: str
+    restarts_in_window: int
+
+
+class ScheduleAutoRestartSuppressed(TypedDict):
+    schedule_id: int
+    previous_generation: str
+    current_generation: str
+    restarts_in_window: int
+
+
 class MaintenanceHoldOverdue(TypedDict):
     """`maintenance_hold_overdue` payload — services/supervision/healthchecks/maintenance_hold.py.
 
@@ -356,6 +370,20 @@ EVENTS: dict[str, EventSpec] = {
         payload=ScheduleConvergenceAbandoned,
         tier="anomaly",
         site="services/wake/schedule_manager/manager.py:_give_up telemetry.emit",
+    ),
+    "schedule_auto_restart": telemetry_event(
+        "schedule_auto_restart",
+        "a schedule's session host was replaced (host reboot, deploy stop/start, pty-sessions service restart) and the manager relaunched the schedule once in the new generation; a second silent death inside the same generation stays a terminal error",
+        payload=ScheduleAutoRestart,
+        tier="anomaly",
+        site="services/wake/schedule_manager/manager.py:_reclaim_after_host_replacement telemetry.emit",
+    ),
+    "schedule_auto_restart_suppressed": telemetry_event(
+        "schedule_auto_restart_suppressed",
+        "a schedule's session host was replaced again after the schedule already used the configured automatic relaunches of the rolling window; the schedule is recorded as an error and waits for an explicit restart",
+        payload=ScheduleAutoRestartSuppressed,
+        tier="anomaly",
+        site="services/wake/schedule_manager/manager.py:_emit_auto_restart_suppressed telemetry.emit",
     ),
     "maintenance_hold_overdue": telemetry_event(
         "maintenance_hold_overdue",

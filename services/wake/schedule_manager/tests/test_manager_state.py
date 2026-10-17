@@ -20,6 +20,8 @@ from base.telemetry.tests.capture.event_capture import emitted_events as emitted
 class _FakeBackend:
     def __init__(self) -> None:
         self.live: list[str] = []
+        self.created: list[str] = []
+        self.epoch: str | None = "host-a"
 
     def list_sessions(self, prefix: str = "") -> list[str]:
         return [s for s in self.live if s.startswith(prefix)]
@@ -29,6 +31,9 @@ class _FakeBackend:
 
     def session_generation(self, name: str) -> str | None:
         return None
+
+    def host_generation(self) -> str | None:
+        return self.epoch
 
     def new_session(self, name: str, cmd: str, cwd: object, *, env: dict[str, object]) -> bool:
         self.live.append(name)
@@ -63,6 +68,7 @@ def fake_session(
         _self: object, name: str, cmd: str, cwd: object, *, env: dict[str, object]
     ) -> bool:
         launched.append(int(str(env["MEIVA_SCHEDULE_ID"])))
+        backend.created.append(name)
         backend.live.append(name)
         return True
 
@@ -237,9 +243,159 @@ def test_a_launch_is_claimed_once(
     sid = _insert(db_conn, "claim-once")
     mgr = sm.ScheduleManager(pool)
 
-    assert mgr._claim_launch(sid, 0) is True
-    assert mgr._claim_launch(sid, 0) is False
+    assert mgr._claim_launch(sid, 0, "host-a") is True
+    assert mgr._claim_launch(sid, 0, "host-a") is False
     _end_backoff(db_conn, sid)
-    assert mgr._claim_launch(sid, 0) is False
-    assert sm.ScheduleManager(pool)._claim_launch(sid, 0) is False
+    assert mgr._claim_launch(sid, 0, "host-a") is False
+    assert sm.ScheduleManager(pool)._claim_launch(sid, 0, "host-a") is False
     assert _backoff_state(db_conn, sid) == (1, False)
+
+
+def _insert_running(conn: psycopg.Connection, name: str, *, generation: str | None) -> int:
+    with conn.cursor() as cur:
+        cur.execute(
+            "INSERT INTO schedules (name, script, command, enabled, status, launch_count, "
+            "launch_generation) VALUES (%s, 'x', 'python schedule.py', true, 'running', 1, %s) "
+            "RETURNING id",
+            (name, generation),
+        )
+        row = cur.fetchone()
+    conn.commit()
+    assert row is not None
+    return row[0]
+
+
+def _state(conn: psycopg.Connection, sid: int) -> tuple[str, str | None, int]:
+    row = conn.execute(
+        "SELECT status, launch_generation, launch_count FROM schedules WHERE id = %s", (sid,)
+    ).fetchone()
+    assert row is not None
+    return row[0], row[1], row[2]
+
+
+def _attributes(events: EmittedEvents) -> list[dict[str, object]]:
+    return [dict(event.attributes) for event in events]
+
+
+def test_a_replaced_session_host_relaunches_the_schedule_once(
+    db_conn: psycopg.Connection,
+    pool: ConnectionPool,
+    fake_session: tuple[_FakeBackend, list[int]],
+    emitted_events: EmittedEvents,
+) -> None:
+    backend, _launched = fake_session
+    sid = _insert_running(db_conn, "host-wave", generation="host-a")
+    backend.epoch = "host-b"
+
+    sm.ScheduleManager(pool).reconcile()
+
+    assert _state(db_conn, sid) == ("running", "host-b", 1)
+    assert backend.created == [session_name(f"schedule-{sid}")]
+    assert emitted_events.names() == ["schedule_auto_restart"]
+    assert _attributes(emitted_events) == [
+        {
+            "schedule_id": sid,
+            "previous_generation": "host-a",
+            "current_generation": "host-b",
+            "restarts_in_window": 1,
+        }
+    ]
+
+
+def test_a_second_silent_death_in_the_same_generation_is_terminal(
+    db_conn: psycopg.Connection, pool: ConnectionPool, fake_session: tuple[_FakeBackend, list[int]]
+) -> None:
+    backend, _launched = fake_session
+    sid = _insert_running(db_conn, "host-wave-then-dies", generation="host-a")
+    manager = sm.ScheduleManager(pool)
+    backend.epoch = "host-b"
+    manager.reconcile()
+    assert _state(db_conn, sid)[0] == "running"
+
+    backend.live.clear()
+    manager.reconcile()
+
+    assert _state(db_conn, sid)[:2] == ("error", "host-b")
+    assert len(backend.created) == 1
+
+
+def test_an_unreachable_session_host_marks_nothing_lost(
+    db_conn: psycopg.Connection, pool: ConnectionPool, fake_session: tuple[_FakeBackend, list[int]]
+) -> None:
+    backend, _launched = fake_session
+    sid = _insert_running(db_conn, "host-absent", generation="host-a")
+    backend.epoch = None
+
+    sm.ScheduleManager(pool).reconcile()
+
+    assert _state(db_conn, sid) == ("running", "host-a", 1)
+    assert backend.created == []
+    still_clocked = db_conn.execute(
+        "SELECT not_live_since IS NULL FROM schedules WHERE id = %s", (sid,)
+    ).fetchone()
+    assert still_clocked == (True,)
+
+
+def test_an_attempt_from_before_the_column_is_not_relaunched(
+    db_conn: psycopg.Connection, pool: ConnectionPool, fake_session: tuple[_FakeBackend, list[int]]
+) -> None:
+    backend, _launched = fake_session
+    sid = _insert_running(db_conn, "host-unknown-attempt", generation=None)
+    backend.epoch = "host-b"
+
+    sm.ScheduleManager(pool).reconcile()
+
+    assert _state(db_conn, sid)[0] == "error"
+    assert backend.created == []
+
+
+def test_the_window_cap_stops_relaunching_a_host_that_keeps_restarting(
+    db_conn: psycopg.Connection,
+    pool: ConnectionPool,
+    fake_session: tuple[_FakeBackend, list[int]],
+    emitted_events: EmittedEvents,
+) -> None:
+    backend, _launched = fake_session
+    sid = _insert_running(db_conn, "host-storm", generation="gen-0")
+    manager = sm.ScheduleManager(pool)
+
+    for index in range(sm.auto_restart_max_per_window()):
+        backend.epoch = f"gen-{index + 1}"
+        manager.reconcile()
+        assert _state(db_conn, sid)[0] == "running"
+        backend.live.clear()
+
+    backend.epoch = "gen-final"
+    manager.reconcile()
+
+    assert _state(db_conn, sid)[0] == "error"
+    assert len(backend.created) == sm.auto_restart_max_per_window()
+    assert emitted_events.names() == [
+        *(["schedule_auto_restart"] * sm.auto_restart_max_per_window()),
+        "schedule_auto_restart_suppressed",
+    ]
+    suppressed = _attributes(emitted_events)[-1]
+    assert suppressed["previous_generation"] == f"gen-{sm.auto_restart_max_per_window()}"
+    assert suppressed["current_generation"] == "gen-final"
+    assert suppressed["restarts_in_window"] == sm.auto_restart_max_per_window()
+
+
+def test_a_refused_launch_does_not_consume_the_auto_restart_budget(
+    db_conn: psycopg.Connection,
+    pool: ConnectionPool,
+    fake_session: tuple[_FakeBackend, list[int]],
+    emitted_events: EmittedEvents,
+) -> None:
+    backend, _launched = fake_session
+    sid = _insert_running(db_conn, "host-gated", generation="host-a")
+    backend.epoch = "host-b"
+    manager = sm.ScheduleManager(pool)
+    start_serving.begin_start()
+
+    for _ in range(sm.auto_restart_max_per_window() + 2):
+        manager.reconcile()
+
+    assert _state(db_conn, sid)[0] == "running"
+    assert backend.created == []
+    assert "schedule_auto_restart" not in emitted_events.names()
+    assert "schedule_auto_restart_suppressed" not in emitted_events.names()

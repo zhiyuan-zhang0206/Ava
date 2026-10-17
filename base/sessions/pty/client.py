@@ -168,6 +168,14 @@ def has_session(name: str) -> bool:
         return False
 
 
+# meiva:ref base/sessions/pty/docs/pty_sessions/host-generation.meiva.okf.md#service-host-generation
+def host_generation(*, socket_path: Path | None = None) -> str | None:
+    try:
+        return cast("str | None", request("ping", socket_path=socket_path).get("host_generation"))
+    except ServiceDownError:
+        return None
+
+
 def list_sessions(
     prefix: str = "", *, socket_path: Path | None = None, include_initial_command: bool = False
 ) -> list[SessionInfo]:
