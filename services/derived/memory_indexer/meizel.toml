@@ -1,12 +1,13 @@
-exports = ["backends", "chunking.py", "config.py", "daemon.py", "embeddings", "rerank.py", "tests"]
+exports = ["backends", "chunking.py", "config.py", "daemon.py", "embeddings", "patrol_status.py", "rerank.py", "tests"]
 
 [uses]
 "chunking.py" = ["backends"]
 "config.py" = ["embeddings"]
-"daemon.py" = ["backends", "chunking.py", "config.py", "embeddings"]
+"daemon.py" = ["backends", "chunking.py", "config.py", "embeddings", "patrol_status.py"]
 "memory_search_reconcile.py" = ["backends", "embeddings"]
+"patrol_status.py" = ["config.py"]
 "rerank.py" = ["backends", "chunking.py"]
-"tests" = ["backends", "chunking.py", "config.py", "daemon.py", "memory_search_reconcile.py", "rerank.py"]
+"tests" = ["backends", "chunking.py", "config.py", "daemon.py", "memory_search_reconcile.py", "patrol_status.py", "rerank.py"]
 
 [debt.private-name]
 "daemon.py -> chunking.py#_file_rows" = 1

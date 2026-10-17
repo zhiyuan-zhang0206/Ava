@@ -198,7 +198,7 @@ def test_readonly_connection_mismatch_is_reported_without_traceback(
 
     err = capsys.readouterr().err
     assert "schema mismatch" in err
-    assert "indexer daemon's cold-start reconcile" in err
+    assert "next patrol (15 minutes by default) repairs the backend" in err
     assert "Traceback" not in err
 
 

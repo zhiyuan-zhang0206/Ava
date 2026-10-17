@@ -52,10 +52,6 @@ def test_reconcile_embed_error_truncates_and_returns_false(
     *,
     machine_identity: MachineIdentity,
 ) -> None:
-    """Error semantics preserved from the pre-chunking reconcile (one
-    try/except): an EmbeddingAPIError skips the remaining chunks and is logged
-    with its error repr — never raised — so the daemon keeps running and
-    the return value signals that a follow-up pass is needed."""
     root = tmp_path / "watched"
     root.mkdir()
     for i in range(6):
@@ -93,14 +89,15 @@ def test_reconcile_embed_error_truncates_and_returns_false(
                 liveness,
                 machine=machine_identity,
                 config=indexer_config,
+                status=daemon.PatrolStatus(retry_limit=indexer_config.retry_limit),
             )
             is False
         )
 
     assert calls == [2]  # first chunk failed -> remaining chunks never ran (as before)
     expected = (
-        f"reconcile embed failed: {EmbeddingAPIError('embed boom')!r}"
-        " — index remains incomplete; explicit rebuild required"
+        f"patrol embed failed: {EmbeddingAPIError('embed boom')!r}"
+        " — 6 path(s) still behind; the next pass retries"
     )
     assert expected in caplog.text
     assert liveness.is_alive()
@@ -434,57 +431,3 @@ def test_complete_file_still_commits_when_another_fails(
     meta = backend.all_meta()
     assert str(complete.resolve()) in meta
     assert str(partial.resolve()) not in meta
-
-
-async def test_failed_drain_batch_stays_incomplete_until_a_new_file_event(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-    store_backend: StoreBackend,
-    *,
-    machine_identity: MachineIdentity,
-) -> None:
-    import asyncio
-    import queue
-
-    file = tmp_path / "failed.md"
-    file.write_text("old content")
-    daemon.process_paths(
-        store_backend,
-        {file.resolve()},
-        FakeProvider(),
-        Liveness(600),
-        machine=machine_identity,
-        config=MemoryIndexerConfig(),
-    )
-    old_meta = store_backend.all_meta()[str(file.resolve())]
-    file.write_text("new content")
-    dirty: queue.Queue[Path] = queue.Queue()
-    dirty.put(file)
-    ticks = 0
-
-    class FailingOnce(FakeProvider):
-        def embed_batch(self, texts: list[str]) -> np.ndarray:
-            if ticks == 1:
-                raise EmbeddingAPIError("temporarily unavailable")
-            return super().embed_batch(texts)
-
-    async def poll(_delay: float) -> None:
-        nonlocal ticks
-        ticks += 1
-        if ticks == 3:
-            assert store_backend.all_meta()[str(file.resolve())] == old_meta
-            dirty.put(file)  # A genuine new event is allowed to update the index.
-        if ticks == 4:
-            raise asyncio.CancelledError
-
-    monkeypatch.setattr(daemon.asyncio, "sleep", poll)
-    with pytest.raises(asyncio.CancelledError):
-        await daemon.drain_loop(
-            store_backend,
-            dirty,
-            Liveness(600),
-            FailingOnce(),
-            machine=machine_identity,
-            config=MemoryIndexerConfig(),
-        )
-    assert store_backend.all_meta()[str(file.resolve())][1] == content_hash("new content")
