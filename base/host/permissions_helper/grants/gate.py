@@ -90,15 +90,6 @@ class GateReport:
                 rows.append(status.item)
         return tuple(rows)
 
-    def features_missing(self, feature: str) -> tuple[PermissionItem, ...]:
-        from base.host.permissions_helper.grants.catalog import items_for_feature
-
-        return tuple(
-            item
-            for item in items_for_feature(feature)
-            if self.grant_for(item.id) in BLOCKING_GRANTS
-        )
-
 
 def evaluate(
     result: ProbeResult, *, deferred: bool = False, now: datetime | None = None

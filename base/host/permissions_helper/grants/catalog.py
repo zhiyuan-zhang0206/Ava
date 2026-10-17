@@ -33,7 +33,6 @@ class PermissionItem:
     pane: str
     verify: str
     services: tuple[str, ...] = ()
-    features: tuple[str, ...] = ()
     required: bool = True
     helper_restart: bool = False
 
@@ -57,7 +56,6 @@ FOLDER_ITEMS: tuple[PermissionItem, ...] = (
         pane="Privacy_FilesAndFolders",
         verify="Finder shows Meiva's folder row as enabled in Files and Folders.",
         services=("kTCCServiceSystemPolicyDesktopFolder",),
-        features=("files.desktop",),
         home_subpath="Desktop",
     ),
     PermissionItem(
@@ -69,7 +67,6 @@ FOLDER_ITEMS: tuple[PermissionItem, ...] = (
         pane="Privacy_FilesAndFolders",
         verify="Finder shows Meiva's folder row as enabled in Files and Folders.",
         services=("kTCCServiceSystemPolicyDocumentsFolder",),
-        features=("files.documents",),
         home_subpath="Documents",
     ),
     PermissionItem(
@@ -81,7 +78,6 @@ FOLDER_ITEMS: tuple[PermissionItem, ...] = (
         pane="Privacy_FilesAndFolders",
         verify="Finder shows Meiva's folder row as enabled in Files and Folders.",
         services=("kTCCServiceSystemPolicyDownloadsFolder",),
-        features=("files.downloads",),
         home_subpath="Downloads",
     ),
 )
@@ -104,7 +100,6 @@ AUTOMATION_ITEMS: tuple[PermissionItem, ...] = tuple(
         pane="Privacy_Automation",
         verify=f"Privacy & Security > Automation lists Meiva with {app} ticked.",
         services=("kTCCServiceAppleEvents",),
-        features=("computer.focus_app", "computer.list_windows"),
     )
     for suffix, app in AUTOMATION_TARGETS
 )
@@ -118,7 +113,6 @@ SCREEN_ITEM = PermissionItem(
     pane="Privacy_ScreenCapture",
     verify="Meiva is listed and ticked in Screen & System Audio Recording.",
     services=("kTCCServiceScreenCapture",),
-    features=("computer.snapshot", "computer.screenshot", "computer.screencapture_window"),
     helper_restart=True,
 )
 
@@ -131,13 +125,6 @@ ACCESSIBILITY_ITEM = PermissionItem(
     pane="Privacy_Accessibility",
     verify="Meiva is listed and ticked in Accessibility.",
     services=("kTCCServiceAccessibility",),
-    features=(
-        "computer.click",
-        "computer.type",
-        "computer.key",
-        "computer.scroll",
-        "computer.ax_tree",
-    ),
 )
 
 DESKTOP_ITEMS: tuple[PermissionItem, ...] = (SCREEN_ITEM, ACCESSIBILITY_ITEM)
@@ -214,12 +201,3 @@ PREFLIGHT_SERVICES: tuple[str, ...] = tuple(
 )
 
 ITEMS_BY_ID: dict[str, PermissionItem] = {item.id: item for item in CATALOG}
-
-FEATURES: dict[str, tuple[str, ...]] = {
-    feature: tuple(item.id for item in CATALOG if feature in item.features)
-    for feature in sorted({feature for item in CATALOG for feature in item.features})
-}
-
-
-def items_for_feature(feature: str) -> tuple[PermissionItem, ...]:
-    return tuple(ITEMS_BY_ID[item_id] for item_id in FEATURES.get(feature, ()))
