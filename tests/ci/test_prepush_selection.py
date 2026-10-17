@@ -12,6 +12,7 @@ import json
 import os
 import re
 import shlex
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -26,6 +27,7 @@ FRESHNESS = ROOT / "scripts/provision/prepush_freshness.py"
 IF_CHANGED = ROOT / "scripts/hooks/prepush-if-changed.sh"
 PRECOMMIT_ESLINT = ROOT / "scripts/hooks/precommit-eslint.sh"
 SELECTOR = ROOT / "scripts/provision/prepush_frontend.py"
+MODULE = ROOT / "scripts/provision/prepush_branch_diff.py"
 
 
 def _init_probe_repo(path: Path) -> None:
@@ -90,6 +92,9 @@ def test_branch_lint_runs_whatever_the_load_and_without_a_lock(tmp_path: Path) -
         f"#!{sys.executable}\nimport json, sys\njson.dump(sys.argv[1:], open({str(argv_log)!r}, 'w'))\n"
     )
     fake.chmod(0o755)
+    (repo / ".venv/bin/python").symlink_to(sys.executable)
+    (repo / "scripts/provision").mkdir(parents=True)
+    shutil.copy(MODULE, repo / "scripts/provision/prepush_branch_diff.py")
     result = subprocess.run(
         ["bash", str(BRANCH_LINT)],
         cwd=repo,
@@ -102,7 +107,8 @@ def test_branch_lint_runs_whatever_the_load_and_without_a_lock(tmp_path: Path) -
     assert result.returncode == 0, result.stderr
     assert "SKIPPED" not in result.stderr
     assert json.loads(argv_log.read_text()) == [
-        "run", "--hook-stage", "pre-commit", "--from-ref", base_sha, "--to-ref", "HEAD",
+        "run", "--color", "never", "--hook-stage", "pre-commit", "--from-ref", base_sha,
+        "--to-ref", "HEAD",
     ]  # fmt: skip
 
 
