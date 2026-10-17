@@ -274,6 +274,36 @@ def ensure_accessibility(ctx: ConvergeCtx) -> None:
     print(f"  ! {status.headline}: {status.diagnostic}", file=sys.stderr)
 
 
+def ensure_permissions_onboarding(ctx: ConvergeCtx) -> None:
+    from base.host.system.probes import permissions_helper_incapability
+
+    if (
+        not ctx.read_config().view.services.permissions_helper_enabled
+        or permissions_helper_incapability(host=ctx.host) is not None
+    ):
+        return
+    from base.host.permissions_helper.grants import checklist, gate
+    from services.desktop.permissions_helper import onboarding
+
+    first_run = gate.read_record() is None
+    interactive = first_run and sys.stdin.isatty() and sys.stdout.isatty()
+    report = onboarding.onboard(interactive=interactive) if interactive else onboarding.check()
+    if report.state in (gate.GateState.COMPLETE, gate.GateState.NOT_APPLICABLE):
+        return
+    if interactive:
+        print(checklist.render_text(report), file=sys.stderr)
+        return
+    print(f"  ! {checklist.headline(report)}", file=sys.stderr)
+    summary = onboarding.missing_summary(report)
+    if summary:
+        print(f"    {summary}", file=sys.stderr)
+    print(
+        "    Run `meiva permissions status` for the checklist, or `meiva permissions"
+        " onboard` with someone at the machine to request what is still askable.",
+        file=sys.stderr,
+    )
+
+
 def warn_untracked_migrations(ctx: ConvergeCtx) -> None:  # noqa: ARG001
     """Operator-visible warning when migrations/ holds files git does not track.
 
@@ -424,6 +454,10 @@ CONVERGE_STEPS: tuple[ConvergeStep, ...] = (
     # INSTALL_PYTHON or a missing stage silently disables local checks).
     # Drift is detected, never repaired here.
     ConvergeStep("local Git hook pointers", ensure_local_git_hooks),
+    ConvergeStep(
+        "permissions onboarding (first run)",
+        ensure_permissions_onboarding,
+    ),
     ConvergeStep(
         "screen capture availability",
         ensure_screen_capture,

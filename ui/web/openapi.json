@@ -2732,6 +2732,102 @@
         }
       }
     },
+    "/api/host/permissions": {
+      "get": {
+        "summary": "Get Host Permissions",
+        "description": "Read this host's macOS authorization matrix with a live probe and return\nthe one-page checklist (why each grant matters, where the click goes, how\nto confirm it). `state` is complete / action_required / deferred /\nunavailable / not_applicable.",
+        "operationId": "get_host_permissions_api_host_permissions_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HostPermissionsPayload"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/host/permissions/recheck": {
+      "post": {
+        "summary": "Recheck Host Permissions",
+        "description": "Probe again and return the same payload. The checklist's Re-check button\nuses this so an already-open page does not have to trust what it rendered.",
+        "operationId": "recheck_host_permissions_api_host_permissions_recheck_post",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HostPermissionsPayload"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/host/permissions/request": {
+      "post": {
+        "summary": "Request Host Permissions",
+        "description": "Run the first-run pass: request every missing grant a dialog can still\nresolve, then re-read the matrix. Requires confirm_user_present -- a\npending dialog blocks synthesized input machine-wide until answered.",
+        "operationId": "request_host_permissions_api_host_permissions_request_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/HostPermissionsRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HostPermissionsPayload"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/host/permissions/defer": {
+      "post": {
+        "summary": "Defer Host Permissions",
+        "description": "Record the user's \"later\". Nothing becomes granted: the host keeps its\nrestricted state and the next start asks again.",
+        "operationId": "defer_host_permissions_api_host_permissions_defer_post",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HostPermissionsPayload"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/keyed/v1/agents/{agent_id}/pages": {
       "post": {
         "summary": "Post Guarded Page Register",
@@ -11991,6 +12087,71 @@
         "title": "HeartbeatLastPause",
         "description": "The agent's most recent heartbeat pause — when it last opted out of idle\ncheck-ins and the length it asked for. Sourced from the newest\ndurable heartbeat_pause_log row within the last 24 hours; None when no\npause exists in that display window. `at` is when the pause was requested; `duration_s` is the\nrequested window in seconds (the agent's `pause_heartbeat(duration)` arg)."
       },
+      "HostPermissionsPayload": {
+        "properties": {
+          "state": {
+            "type": "string",
+            "title": "State"
+          },
+          "headline": {
+            "type": "string",
+            "title": "Headline"
+          },
+          "checked_at": {
+            "type": "string",
+            "title": "Checked At"
+          },
+          "diagnostic": {
+            "type": "string",
+            "title": "Diagnostic",
+            "default": ""
+          },
+          "helper_reachable": {
+            "type": "boolean",
+            "title": "Helper Reachable"
+          },
+          "required_total": {
+            "type": "integer",
+            "title": "Required Total"
+          },
+          "required_missing": {
+            "type": "integer",
+            "title": "Required Missing"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/PermissionItemRow"
+            },
+            "type": "array",
+            "title": "Items"
+          }
+        },
+        "type": "object",
+        "required": [
+          "state",
+          "headline",
+          "checked_at",
+          "helper_reachable",
+          "required_total",
+          "required_missing",
+          "items"
+        ],
+        "title": "HostPermissionsPayload"
+      },
+      "HostPermissionsRequest": {
+        "properties": {
+          "confirm_user_present": {
+            "type": "boolean",
+            "title": "Confirm User Present",
+            "description": "The caller attests a person is at the machine. Required: a pending permission dialog blocks synthesized input machine-wide until answered."
+          }
+        },
+        "type": "object",
+        "required": [
+          "confirm_user_present"
+        ],
+        "title": "HostPermissionsRequest"
+      },
       "ImageUrlContentBlock": {
         "properties": {
           "type": {
@@ -15082,6 +15243,79 @@
         ],
         "title": "PendingInbound",
         "description": "One queued inbound (status='pending', kind='chat') — element of\nGET /api/agents/{id}/pending.\n\nThese have not been claimed by the agent yet, so they are absent from\nthe timeline snapshot; the web UI shows them as a compact strip above\nthe composer. `source` disambiguates origin (user / agent:N /\nwatcher:N / ...) so the UI can label who queued it.\n\n`images` carries the image reference urls of a multimodal inbound (None\nwhen the message has no image) — the same gateway-relative upload urls\nthe timeline renders for a claimed message, so the strip shows\nthumbnails with one contract."
+      },
+      "PermissionItemRow": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "title": {
+            "type": "string",
+            "title": "Title"
+          },
+          "group": {
+            "type": "string",
+            "title": "Group"
+          },
+          "state": {
+            "type": "string",
+            "title": "State"
+          },
+          "state_label": {
+            "type": "string",
+            "title": "State Label"
+          },
+          "mode": {
+            "type": "string",
+            "title": "Mode"
+          },
+          "why": {
+            "type": "string",
+            "title": "Why"
+          },
+          "jump": {
+            "type": "string",
+            "title": "Jump"
+          },
+          "verify": {
+            "type": "string",
+            "title": "Verify"
+          },
+          "restart": {
+            "type": "string",
+            "title": "Restart"
+          },
+          "required": {
+            "type": "boolean",
+            "title": "Required"
+          },
+          "blocking": {
+            "type": "boolean",
+            "title": "Blocking"
+          },
+          "detail": {
+            "type": "string",
+            "title": "Detail",
+            "default": ""
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "title",
+          "group",
+          "state",
+          "state_label",
+          "mode",
+          "why",
+          "jump",
+          "verify",
+          "restart",
+          "required",
+          "blocking"
+        ],
+        "title": "PermissionItemRow"
       },
       "PluginMetricResult": {
         "properties": {

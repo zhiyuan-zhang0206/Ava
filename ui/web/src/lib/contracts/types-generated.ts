@@ -863,6 +863,70 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/host/permissions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["get_host_permissions_api_host_permissions_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/host/permissions/recheck": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["recheck_host_permissions_api_host_permissions_recheck_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/host/permissions/request": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["request_host_permissions_api_host_permissions_request_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/host/permissions/defer": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["defer_host_permissions_api_host_permissions_defer_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/keyed/v1/agents/{agent_id}/pages": {
         parameters: {
             query?: never;
@@ -2871,6 +2935,19 @@ export interface components {
             at: string;
             duration_s: number;
         };
+        HostPermissionsPayload: {
+            state: string;
+            headline: string;
+            checked_at: string;
+            diagnostic: string;
+            helper_reachable: boolean;
+            required_total: number;
+            required_missing: number;
+            items: components["schemas"]["PermissionItemRow"][];
+        };
+        HostPermissionsRequest: {
+            confirm_user_present: boolean;
+        };
         ImageUrlContentBlock: {
             type: "image_url";
             image_url: components["schemas"]["ImageUrlRef"];
@@ -3348,6 +3425,21 @@ export interface components {
             content: string;
             images: string[] | null;
             created_at: string;
+        };
+        PermissionItemRow: {
+            id: string;
+            title: string;
+            group: string;
+            state: string;
+            state_label: string;
+            mode: string;
+            why: string;
+            jump: string;
+            verify: string;
+            restart: string;
+            required: boolean;
+            blocking: boolean;
+            detail: string;
         };
         PluginMetricResult: {
             name: string;
@@ -5678,6 +5770,94 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_host_permissions_api_host_permissions_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HostPermissionsPayload"];
+                };
+            };
+        };
+    };
+    recheck_host_permissions_api_host_permissions_recheck_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HostPermissionsPayload"];
+                };
+            };
+        };
+    };
+    request_host_permissions_api_host_permissions_request_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["HostPermissionsRequest"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HostPermissionsPayload"];
+                };
+            };
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    defer_host_permissions_api_host_permissions_defer_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HostPermissionsPayload"];
                 };
             };
         };

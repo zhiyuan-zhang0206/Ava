@@ -1,4 +1,4 @@
-exports = ["commands.py", "configuration", "fleet_graph.py", "fleet_tokens.py", "frontend_telemetry.py", "grafana.py", "guide.py", "insights.py", "memory.py", "page_acceptance.py", "pages.py", "receipts", "settings.py", "shell.py", "tasks.py", "upload"]
+exports = ["commands.py", "configuration", "fleet_graph.py", "fleet_tokens.py", "frontend_telemetry.py", "grafana.py", "guide.py", "insights.py", "memory.py", "page_acceptance.py", "pages.py", "receipts", "settings.py", "shell.py", "tasks.py", "upload", "host_permissions.py"]
 
 [uses]
 "fleet_graph.py" = ["fleet_tokens.py"]

@@ -12,6 +12,49 @@ inventory what is missing with side-effect-free preflight queries, trigger each
 remaining request in sequence, let the user click through, and finish with a
 verdict matrix.
 
+## First-run gate (the product path)
+
+The one-pass tool above is an operator command: someone has to know to run it.
+The first-run gate is the product's own answer, so a host never discovers a
+missing grant in the middle of a task.
+
+- **One catalog.** `base/host/permissions_helper/grants/catalog.py` describes every
+  authorization Meiva can need: which process holds it, what it unlocks, whether
+  a dialog can still grant it, which System Settings pane holds it, and how to
+  confirm it. The CLI, the converge step, the gateway endpoint and the console
+  section all read it; no other file spells a TCC service or a "why" line.
+- **One probe.** `base/host/permissions_helper/grants/probe.py` reads the matrix through a
+  helper-spawned child (`children/preflight.py`). `--check` and the gate call the
+  same function, so the tool and the product cannot disagree about a host.
+- **One state machine.** `base/host/permissions_helper/grants/gate.py` turns one probe into
+  `complete` / `action_required` / `deferred` / `unavailable` /
+  `not_applicable` plus the per-item evidence. `denied` and `not_determined`
+  block completion; `unknown` (an Automation row nothing has attempted yet) does
+  not. A deferred host stays in the restricted family -- "later" is recorded, it
+  is never a grant.
+- **One surface.** `meiva permissions status` prints the checklist and exits 1
+  while anything is missing; `meiva permissions onboard` raises the dialogs a
+  person can still answer and then re-probes; `meiva permissions defer` records
+  "later"; `meiva permissions restart-helper` restarts the helper so a fresh
+  Screen Recording grant is re-read. The console renders the same rows at
+  Control -> Permissions (`GET /api/host/permissions`) and keeps a banner up
+  while `state` is restricted.
+
+Rules the implementation keeps:
+
+- **A state always comes from a fresh probe.** The record under
+  `$MEIVA_HOME/permissions_onboarding.json` is the last observation plus the
+  user's "later" flag; it is written from a probe and never read as evidence.
+- **No dialog without a human.** `onboard` refuses to request unless its caller
+  says a person is at the machine (`--confirm-user-present` on the tool, the
+  button click on the API, a TTY on the CLI/converge). A pending dialog blocks
+  synthesized input machine-wide until it is answered.
+- **A request is not its own evidence.** After requesting, the gate re-probes;
+  a child that reports "granted" while the system still denies stays denied.
+- **First converge asks, later converges remind.** The converge step requests
+  only when no record exists yet (the install-time case) and prints the checklist
+  then; afterwards it re-reads and points at `meiva permissions status`.
+
 ## Why before the flip
 
 `MEIVA_PERMISSIONS_HELPER_SPAWN` (host scope, default off) routes service,
@@ -67,6 +110,28 @@ attestation, and there is no automatic fill path (a launch only checks). A
 panel fill raises the same extended-group dialogs as the CLI, `icloud`
 included: its prompt writes no `PROMPTING` line, so verify it by screenshot
 (see the archive below).
+
+
+## The full matrix
+
+| Authorization | TCC service / row | Holder | First request today | Programmatic request | Manual only | Helper restart |
+|---|---|---|---|---|---|---|
+| Screen Recording (incl. ScreenCaptureKit) | `kTCCServiceScreenCapture` | helper | helper start (`registerPermissions`) + first capture | one-time prompt at helper start (`CGRequestScreenCaptureAccess`) | **yes** once denied -- System Settings > Screen Recording | **yes** |
+| Accessibility | `kTCCServiceAccessibility` | helper | helper start + first click/keystroke | one-time prompt at helper start (`AXIsProcessTrustedWithOptions`) | **yes** once denied | no (read live per call) |
+| Desktop / Documents / Downloads folders | `kTCCServiceSystemPolicy{Desktop,Documents,Downloads}Folder` | helper | first folder operation by whichever workflow needed it | yes -- helper-spawned child lists the folder | after a denial | no |
+| Automation (Finder, Terminal, System Events, Safari, Chrome) | `kTCCServiceAppleEvents` per target | helper | first AppleEvent to that app | yes -- one benign `get version` event per app | after a denial | no |
+| App data | `kTCCServiceSystemPolicyAppData` | helper | -- (no shipped feature uses it) | experimental (`--fill-pending`) | -- | no |
+| Media & Apple Music / Photos | `kTCCServiceMediaLibrary`, `kTCCServicePhotos` | helper | -- | experimental (`--fill-pending`) | -- | no |
+| iCloud Drive | `kTCCServiceFileProviderDomain`, `kTCCServiceUbiquity` | helper | -- | experimental (`--fill-pending`) | -- | no |
+| Full Disk Access | `kTCCServiceSystemPolicyAllFiles` | helper | never requested | no (read-only by decision) | always | no |
+| Developer Tools | `kTCCServiceDeveloperTool` | helper | never requested | no (read-only by decision) | always | no |
+| Notifications | -- (Tauri app bundle) | app | Android only (`request_notification_permission_async`) | n/a on macOS today | -- | no |
+| Camera / Microphone | -- | -- | not used by any shipped feature | -- | -- | -- |
+
+Reading the last three rows: Meiva raises no macOS notification authorization
+today (in-product notices are web UI), and nothing captures camera or
+microphone; `scripts/host_ops/tcc/preauth.sh` reports them only because it
+inventories the whole TCC database.
 
 ## Tiers (design v1)
 

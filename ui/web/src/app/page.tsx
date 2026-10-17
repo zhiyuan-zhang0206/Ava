@@ -14,6 +14,7 @@ import { CodeHighlighterPreloader } from "@/components/content/code-highlighter-
 import { ErrorBoundary } from "@/components/connection/error-boundary";
 import { Composer } from "@/components/conversation/composer";
 import { ContentToggle } from "@/components/content/content-toggle";
+import { PermissionBanner } from "@/components/permissions/permission-banner";
 import { HeaderBar } from "@/components/shell/header-bar";
 import { HomeLayout } from "@/components/shell/home-layout";
 import { InspectorPanelSkeleton } from "@/components/inspector/inspector-panel-skeleton";
@@ -58,9 +59,12 @@ export default function HomePage() {
   );
 
   return (
-    <main id="main-content" className={cn(FLEX, FLEX_1, MIN_H_0)}>
+    <main id="main-content" className={cn(FLEX_COL, FLEX_1, MIN_H_0)}>
       <CodeHighlighterPreloader />
-      <HomeShell showError={showError} />
+      <PermissionBanner />
+      <div className={cn(FLEX, FLEX_1, MIN_H_0)}>
+        <HomeShell showError={showError} />
+      </div>
     </main>
   );
 }

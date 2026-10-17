@@ -57,7 +57,8 @@
     "status-gateway": "Gateway",
     "ops-metrics": "Metrics (Grafana)",
     "alerts": "Alerts",
-    "app": "App"
+    "app": "App",
+    "permissions": "Permissions"
   },
   "title": "Control",
   "backToAgents": "Back to agents",
@@ -65,5 +66,26 @@
   "app": "App",
   "appDescription": "Settings of the Meiva app on this device: server address and updates.",
   "appOpenSettings": "Open app settings",
-  "appOpenSettingsFailed": "The app did not open its settings page."
+  "appOpenSettingsFailed": "The app did not open its settings page.",
+  "permissionsDescription": "What this machine grants Meiva's desktop helper, what it still lacks, and where each missing toggle lives. Read from the system on every check.",
+  "permissions": {
+    "loading": "Reading this host's authorizations…",
+    "unreadable": "Could not read this host's authorizations.",
+    "notApplicable": "This host has no macOS authorizations to check.",
+    "recheck": "Re-check",
+    "request": "Request missing grants",
+    "requestHint": "Raises the permission dialogs a person at this machine can still answer.",
+    "later": "Do it later",
+    "deferred": "Recorded. Nothing was granted; the next start asks again.",
+    "optional": "optional",
+    "openSettings": "Open System Settings",
+    "nothingToDo": "Nothing to do.",
+    "checkedAt": "checked {at}",
+    "missingCount": "({missing} of {total} required missing)",
+    "openChecklist": "View checklist",
+    "columnPermission": "Permission",
+    "columnState": "State",
+    "columnWhy": "Why Meiva needs it",
+    "columnFix": "How to grant it"
+  }
 }
