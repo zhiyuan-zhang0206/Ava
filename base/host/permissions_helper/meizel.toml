@@ -1,5 +1,6 @@
-exports = ["client.py", "client_stateful.py"]
+exports = ["client.py", "client_stateful.py", "grants", "wire.py"]
 
 [uses]
 "client.py" = ["client_stateful.py", "wire.py"]
 "client_stateful.py" = ["wire.py"]
+"grants" = ["client.py", "wire.py"]

@@ -57,7 +57,8 @@
     "status-gateway": "网关",
     "ops-metrics": "指标 (Grafana)",
     "alerts": "告警",
-    "app": "应用"
+    "app": "应用",
+    "permissions": "权限"
   },
   "title": "控制台",
   "backToAgents": "返回对话",
@@ -65,5 +66,26 @@
   "app": "应用",
   "appDescription": "本机上 Meiva 应用的设置：服务器地址与更新。",
   "appOpenSettings": "打开应用设置",
-  "appOpenSettingsFailed": "应用没有打开设置页。"
+  "appOpenSettingsFailed": "应用没有打开设置页。",
+  "permissionsDescription": "这台机器已经授予 Meiva 桌面助手哪些权限、还缺哪些、每一项该去系统设置的哪里打开。每次检查都直接读取系统状态。",
+  "permissions": {
+    "loading": "正在读取这台机器的授权状态…",
+    "unreadable": "无法读取这台机器的授权状态。",
+    "notApplicable": "这台机器没有需要检查的 macOS 授权。",
+    "recheck": "重新检查",
+    "request": "申请缺失权限",
+    "requestHint": "会弹出本机用户还能回答的授权对话框。",
+    "later": "稍后再说",
+    "deferred": "已记录。这不代表已授权；下次启动仍会提示。",
+    "optional": "可选",
+    "openSettings": "打开系统设置",
+    "nothingToDo": "无需处理。",
+    "checkedAt": "检查于 {at}",
+    "missingCount": "（{total} 项必需要中缺 {missing} 项）",
+    "openChecklist": "查看清单",
+    "columnPermission": "权限",
+    "columnState": "状态",
+    "columnWhy": "为什么需要",
+    "columnFix": "如何授予"
+  }
 }
