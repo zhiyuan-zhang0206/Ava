@@ -1,5 +1,10 @@
 {
   "agent_id": 7,
   "role": "notice_resolved",
-  "notice_id": 7
+  "notice_id": 7,
+  "resolution": "answered",
+  "require_response": true,
+  "age_seconds": 900,
+  "had_reply": true,
+  "superseded_by": null
 }
