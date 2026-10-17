@@ -68,6 +68,7 @@ async def _run_patrol(
     status: _RecordingStatus,
     clock: _Clock,
     machine: MachineIdentity,
+    root: Path,
 ) -> None:
     with pytest.raises(asyncio.CancelledError):
         await daemon.patrol_loop(
@@ -79,6 +80,7 @@ async def _run_patrol(
             status=status,
             clock=clock.monotonic,
             wait=clock.wait,
+            root=root,
         )
 
 
@@ -123,6 +125,7 @@ async def test_a_changed_note_waits_for_the_next_patrol_without_a_file_event(
         status=status,
         clock=clock,
         machine=machine_identity,
+        root=tmp_path,
     )
 
     assert status.passes == [(1.0, True), (101.0, True)]
@@ -149,6 +152,7 @@ async def test_a_failed_pass_retries_with_backoff_then_marks_over_limit(
         status=status,
         clock=clock,
         machine=machine_identity,
+        root=tmp_path,
     )
 
     assert status.passes == [
@@ -185,6 +189,7 @@ async def test_health_lag_clears_once_a_retry_succeeds(
         status=status,
         clock=clock,
         machine=machine_identity,
+        root=tmp_path,
     )
 
     assert status.passes == [(1.0, False), (61.0, True)]
@@ -296,3 +301,39 @@ def test_navigation_files_stay_out_of_the_index(
         config=MemoryIndexerConfig(),
     )
     assert store_backend.all_meta() == {}
+
+
+def test_a_vanished_root_fails_the_pass_instead_of_emptying_the_index(
+    tmp_path: Path,
+    store_backend: StoreBackend,
+    *,
+    machine_identity: MachineIdentity,
+) -> None:
+    note = tmp_path / "note.md"
+    note.write_text("note")
+    daemon.process_paths(
+        store_backend,
+        {note.resolve()},
+        FakeProvider(),
+        Liveness(liveness_timeout()),
+        machine=machine_identity,
+        config=MemoryIndexerConfig(),
+    )
+    indexed = store_backend.all_meta()
+    assert list(indexed) == [str(note.resolve())]
+    status = PatrolStatus(retry_limit=3)
+
+    complete = daemon.reconcile(
+        store_backend,
+        FakeProvider(),
+        Liveness(liveness_timeout()),
+        machine=machine_identity,
+        config=MemoryIndexerConfig(),
+        status=status,
+        root=tmp_path / "gone",
+    )
+
+    assert complete is False
+    assert store_backend.all_meta() == indexed, "a vanished root must not prune the index"
+    assert status.pending == 1
+    assert status.lag()["last_success_at"] is None

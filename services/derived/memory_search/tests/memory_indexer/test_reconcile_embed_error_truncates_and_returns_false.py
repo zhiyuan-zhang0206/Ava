@@ -90,6 +90,7 @@ def test_reconcile_embed_error_truncates_and_returns_false(
                 machine=machine_identity,
                 config=indexer_config,
                 status=daemon.PatrolStatus(retry_limit=indexer_config.retry_limit),
+                root=root,
             )
             is False
         )

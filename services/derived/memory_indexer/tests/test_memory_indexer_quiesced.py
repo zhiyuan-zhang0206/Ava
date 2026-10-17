@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+from pathlib import Path
 from unittest.mock import Mock
 
 import numpy as np
@@ -52,6 +53,7 @@ class _EmptyBackend:
 @pytest.mark.parametrize("quiesced", [True, False])
 async def test_a_quiesced_unit_runs_no_patrol_pass(
     monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
     quiesced: bool,
     *,
     machine_identity: MachineIdentity,
@@ -69,6 +71,7 @@ async def test_a_quiesced_unit_runs_no_patrol_pass(
             status=status,
             clock=lambda: 0.0,
             wait=asyncio.sleep,
+            root=tmp_path,
         )
     )
     try:
