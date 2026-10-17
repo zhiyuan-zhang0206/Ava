@@ -230,6 +230,15 @@ def _poll_until(condition: Callable[[], bool], seconds: float) -> None:
         time.sleep(0.3)
 
 
+def _poll_log(path: Path, ready: Callable[[str], bool], seconds: float = 0.0) -> str:
+    deadline = time.time() + seconds
+    while True:
+        text = path.read_text()
+        if ready(text) or time.time() >= deadline:
+            return text
+        time.sleep(0.05)
+
+
 def _assert_completion_notice_argv(argv: list[str], handle: Any) -> None:
     assert argv[0] == "agents"
     assert argv[1] == "send"
@@ -261,7 +270,8 @@ def test_run_background_e2e_notice_log_and_close(
     _poll_until(argv_file.exists, 15)
     assert argv_file.exists(), "completion notice never fired"
 
-    assert "hello-bg" in Path(handle.output_path).read_text()
+    log = _poll_log(Path(handle.output_path), lambda text: "hello-bg" in text)
+    assert "hello-bg" in log, log
     _assert_completion_notice_argv(argv_file.read_text().splitlines(), handle)
 
     # Default keep=False: the session closes unconditionally after the notice
@@ -280,7 +290,8 @@ def test_run_background_e2e_notice_log_and_close(
     try:
         _poll_until(argv_file.exists, 10)
         assert argv_file.exists(), "notice waited for the grandchild holding stdout"
-        assert "started" in Path(held.output_path).read_text()
+        held_log = _poll_log(Path(held.output_path), lambda text: "started" in text)
+        assert "started" in held_log, held_log
     finally:
         with contextlib.suppress(Exception):
             meiva.shell.sessions.kill(held.session_id)
@@ -389,7 +400,8 @@ def test_background_long_paths_during_shell_startup(
     _poll_until(argv_file.exists, 15)
     assert argv_file.exists(), meiva.shell.sessions.capture(handle.session_id, lines=30)
     _assert_completion_notice_argv(argv_file.read_text().splitlines(), handle)
-    assert Path(handle.output_path).read_text().strip() == "long-bg"
+    log = _poll_log(Path(handle.output_path), lambda text: text.strip() == "long-bg")
+    assert log.strip() == "long-bg", log
     _poll_until(lambda: handle.session_id not in meiva.shell.sessions.list(), 10)
     assert handle.session_id not in meiva.shell.sessions.list()
     assert not Path(handle.output_path).with_suffix(".sh").exists()
