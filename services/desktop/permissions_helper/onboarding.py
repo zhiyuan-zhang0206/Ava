@@ -55,6 +55,7 @@ def local_host() -> GateHost:
     )
 
 
+# meiva:ref services/desktop/permissions_helper/docs/onboarding.meiva.okf.md#request-is-not-evidence
 def check(
     *,
     host: GateHost | None = None,
@@ -77,6 +78,7 @@ def check(
     return report
 
 
+# meiva:ref services/desktop/permissions_helper/docs/onboarding.meiva.okf.md#no-dialog-without-a-human
 def onboard(
     *,
     interactive: bool,

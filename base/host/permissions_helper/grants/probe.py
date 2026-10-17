@@ -116,6 +116,7 @@ def read_result(path: Path) -> str | None:
         return None
 
 
+# meiva:ref base/host/permissions_helper/grants/docs/grants.meiva.okf.md#one-probe-for-every-surface
 def run_preflight(
     client: HelperChannel,
     *,

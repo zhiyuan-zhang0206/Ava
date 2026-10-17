@@ -91,6 +91,7 @@ class GateReport:
         return tuple(rows)
 
 
+# meiva:ref base/host/permissions_helper/grants/docs/grants.meiva.okf.md#live-probe-only
 def evaluate(
     result: ProbeResult, *, deferred: bool = False, now: datetime | None = None
 ) -> GateReport:
@@ -195,6 +196,7 @@ def write_record(record: OnboardingRecord, path: Path | None = None) -> None:
     target.write_text(record.to_json())
 
 
+# meiva:ref base/host/permissions_helper/grants/docs/grants.meiva.okf.md#deferred-is-not-a-grant
 def mark_deferred(*, now: datetime | None = None, path: Path | None = None) -> OnboardingRecord:
     record = read_record(path)
     if record is None:
