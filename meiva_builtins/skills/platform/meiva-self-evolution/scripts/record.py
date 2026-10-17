@@ -1,4 +1,5 @@
 # meiva:ref meiva_builtins/skills/platform/meiva-self-evolution/docs/meiva-self-evolution.meiva.okf.md#record-assembly
+# meiva:ref meiva_builtins/skills/platform/meiva-self-evolution/docs/evidence-block-and-grading.meiva.okf.md#evidence-block-and-grading
 from __future__ import annotations
 
 import ast
@@ -212,23 +213,21 @@ def _task_prompt(
     user_messages: list[str],
     agent_messages: list[dict[str, Any]],
     inbounds: list[dict[str, Any]],
-) -> str:
-    task_prompt = user_messages[0] if user_messages else ""
-    if not task_prompt.strip() and spawner.startswith("agent:"):
+) -> tuple[str, str]:
+    if user_messages and user_messages[0].strip():
+        return user_messages[0], "user"
+    if spawner.startswith("agent:"):
         spawner_messages = [
             message
             for message in agent_messages
             if message["source"] == spawner and message["is_in_collection_window"]
         ]
-        if spawner_messages:
-            task_prompt = spawner_messages[0]["content"]
-    if not task_prompt.strip():
-        system_messages = [
-            message["content"] for message in inbounds if message["source"] == "system"
-        ]
-        if system_messages:
-            task_prompt = system_messages[0]
-    return task_prompt
+        if spawner_messages and spawner_messages[0]["content"].strip():
+            return spawner_messages[0]["content"], "spawner"
+    system_messages = [message["content"] for message in inbounds if message["source"] == "system"]
+    if system_messages and system_messages[0].strip():
+        return system_messages[0], "system"
+    return "", "none"
 
 
 def _peer_feedback(spawner: str, agent_messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -316,6 +315,57 @@ def _leak_fields(code_bodies: list[str], agent_id: int, leak_paths: LeakPaths) -
     }
 
 
+_NO_TASK_RECEIPTS: dict[str, int] = {"note": 0, "status": 0, "results": 0, "state_changes": 0}
+
+
+def _grade(ev: dict[str, Any]) -> tuple[str, str | None]:
+    if ev["telemetry_events"] == 0:
+        return "none", "no_telemetry"
+    if ev["tokens_in"] + ev["tokens_out"] == 0:
+        return "none", "no_telemetry"
+    if ev["task_prompt_chars"] == 0:
+        return "partial", "no_task"
+    if ev["terminal_status"] != "terminated":
+        return "partial", "no_terminal"
+    return "complete", None
+
+
+def _evidence_block(
+    events: list[tuple],
+    log_events: list[tuple],
+    inbounds: list[dict[str, Any]],
+    stats: _EventStats,
+    *,
+    status: str | None,
+    task_prompt: str,
+    prompt_source: str,
+    final_output: str,
+    task_receipts: dict[str, int] | None,
+) -> dict[str, Any]:
+    receipts = task_receipts if task_receipts is not None else _NO_TASK_RECEIPTS
+    return {
+        "telemetry_events": len(events),
+        "audit_events": len(log_events),
+        "tokens_in": stats.tokens_in,
+        "tokens_out": stats.tokens_out,
+        "turns": stats.turns,
+        "task_prompt_chars": len(task_prompt.strip()),
+        "prompt_source": prompt_source,
+        "final_output_chars": len(final_output.strip()),
+        "terminal_status": status,
+        "inbound_total": len(inbounds),
+        "inbound_claimed": sum(1 for message in inbounds if message.get("claimed")),
+        "task_updates": {
+            "note": receipts["note"],
+            "status": receipts["status"],
+            "results": receipts["results"],
+        },
+        "task_state_changes": receipts["state_changes"],
+        "exec_ok": stats.exec_ok,
+        "exec_failed": stats.exec_failed,
+    }
+
+
 def build_record(
     agent_id: int,
     week: str,
@@ -326,11 +376,12 @@ def build_record(
     *,
     database: Database,
     leak_paths: LeakPaths | None = None,
+    task_receipts: dict[str, int] | None = None,
 ) -> dict[str, Any]:
     spawner, status, last_message_text = meta
 
     user_messages, agent_messages = _per_agent_messages(inbounds)
-    task_prompt = _task_prompt(spawner, user_messages, agent_messages, inbounds)
+    task_prompt, prompt_source = _task_prompt(spawner, user_messages, agent_messages, inbounds)
 
     corrections = [m for m in user_messages[1:] if _detect_correction(m)]
     followup_prompts = [m for m in user_messages[1:] if not _detect_correction(m)]
@@ -373,5 +424,18 @@ def build_record(
     }
     if leak_paths is not None:
         record.update(_leak_fields(stats.code_bodies, agent_id, leak_paths))
+    record["evidence"] = _evidence_block(
+        events,
+        log_events,
+        inbounds,
+        stats,
+        status=status,
+        task_prompt=task_prompt,
+        prompt_source=prompt_source,
+        final_output=record["final_output"],
+        task_receipts=task_receipts,
+    )
+    record["evidence_grade"], record["unknown_reason"] = _grade(record["evidence"])
+    record["schema_version"] = 2
     record["label"] = label(record)
     return record

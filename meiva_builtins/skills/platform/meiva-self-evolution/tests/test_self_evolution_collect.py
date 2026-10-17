@@ -17,6 +17,7 @@ import httpx
 import psycopg
 import pytest
 from langchain_core.messages import HumanMessage
+from psycopg.types.json import Jsonb
 
 from base.config import settings
 from base.db import Database
@@ -743,3 +744,35 @@ def test_build_record_well_formed_rows_report_zero_skipped(
     assert rec["plugins_activated_skipped"] == 0
     assert rec["plugins_activated"] == {"meiva_code/hooks/before_exec": 1}
     assert capsys.readouterr().out == ""
+
+
+def test_task_receipts_by_agent_counts_notes_states_and_changes(
+    collect_mod: Any, db_conn: psycopg.Connection
+) -> None:
+    receipts = [
+        (7001, 501, "k1", {"note": "still working"}),
+        (7001, 501, "k2", {"note": "still working"}),
+        (7001, 501, "k3", {"status": "in_progress"}),
+        (7001, 501, "k4", {"status": "done"}),
+        (7001, 501, "k5", {"status": "done"}),
+        (7001, 501, "k6", {"results": "shipped"}),
+        (7001, 501, "k7", {"status": "in_progress"}),
+        (7001, 502, "k8", {"status": "done", "note": "closed"}),
+        (7002, 503, "k9", {"note": "unrelated actor"}),
+    ]
+    with db_conn.cursor() as cur:
+        for offset, (actor, task_id, key, request) in enumerate(receipts):
+            cur.execute(
+                "INSERT INTO task_update_receipts "
+                "(actor_agent_id, task_id, operation_key, request, accepted_at) "
+                "VALUES (%s, %s, %s, %s, now() + %s * interval '1 second')",
+                (actor, task_id, key, Jsonb(request), offset),
+            )
+    db_conn.commit()
+
+    with db_conn.cursor() as cur:
+        counts = collect_mod._task_receipts_by_agent(cur, [7001, 7002, 7999])
+
+    assert counts[7001] == {"note": 2, "status": 5, "results": 1, "state_changes": 3}
+    assert counts[7002] == {"note": 1, "status": 0, "results": 0, "state_changes": 0}
+    assert 7999 not in counts
