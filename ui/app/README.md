@@ -113,7 +113,8 @@ cargo test
 cargo check --target aarch64-linux-android
 cd ../../..
 .venv/bin/pytest tests/ui/test_android_overlay.py \
-  scripts/codegen/tests/test_build_app_update_manifest.py -q
+  scripts/codegen/tests/test_build_app_update_manifest.py \
+  scripts/codegen/tests/test_build_android_release.py -q
 ```
 
 Tags matching `app-v<major>.<minor>.<patch>` drive
@@ -121,3 +122,10 @@ Tags matching `app-v<major>.<minor>.<patch>` drive
 in `latest.json` only when its Tauri signature exists. Tag builds fail unless
 updater and Apple signing credentials are present; manual dispatch keeps
 the explicit unsigned validation path without publishing a GitHub Release.
+
+Android builds from `.github/workflows/release-android.yml` inject
+`versionCode = 1_000_000 + run_number` (rule and manifest:
+`scripts/codegen/build_android_release.py`), read it back out of the APK, and
+publish `android-latest.json` beside the APK in the mutable `android-latest`
+prerelease. `workflow_dispatch` takes a `dry_run` input that builds without
+touching that channel.
