@@ -134,7 +134,7 @@ def patch_manifest(manifest_xml: str) -> str:
 
 _MAIN_ACTIVITY_MARKER = "// Meiva system-bar insets overlay."
 
-# meiva:ref ui/app/docs/app.meiva.okf.md#android-system-bar-insets
+# meiva:ref ui/app/docs/android-shell-chrome.meiva.okf.md#android-system-bar-insets
 _MAIN_ACTIVITY_INSETS = """
     {marker}
     val meivaContent = findViewById<View>(android.R.id.content)
