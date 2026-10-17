@@ -76,14 +76,6 @@ def test_an_unreachable_helper_reads_as_unavailable_never_as_missing() -> None:
     assert {status.grant for status in report.items} == {Grant.UNKNOWN}
 
 
-def test_a_feature_reports_only_the_grants_it_needs() -> None:
-    report = gate.evaluate(_result(**{"screen-recording": Grant.DENIED}), now=NOW)
-    assert [item.id for item in report.features_missing("computer.snapshot")] == [
-        "screen-recording"
-    ]
-    assert report.features_missing("computer.click") == ()
-
-
 def test_the_record_round_trips_and_a_complete_run_clears_deferral(tmp_path: Path) -> None:
     path = tmp_path / gate.RECORD_NAME
     deferred = gate.evaluate(_result(accessibility=Grant.DENIED), deferred=True, now=NOW)

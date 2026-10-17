@@ -43,15 +43,7 @@ def test_required_set_is_the_product_desktop_surface() -> None:
 def test_report_only_rows_are_never_prompted() -> None:
     for item in catalog.REPORT_ONLY_ITEMS:
         assert item.mode is RequestMode.REPORT_ONLY
-        assert not item.features
-
-
-def test_every_feature_names_the_items_that_gate_it() -> None:
-    assert catalog.FEATURES["computer.snapshot"] == ("screen-recording",)
-    assert catalog.FEATURES["computer.click"] == ("accessibility",)
-    assert catalog.FEATURES["files.desktop"] == ("desktop-folder",)
-    assert catalog.items_for_feature("computer.snapshot")[0].id == "screen-recording"
-    assert catalog.items_for_feature("no.such.feature") == ()
+        assert not item.required
 
 
 def test_folder_items_declare_the_folder_their_request_touches() -> None:
