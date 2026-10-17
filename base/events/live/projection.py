@@ -504,6 +504,11 @@ class NoticeResolved(_Base):
 
     role: Literal["notice_resolved"] = "notice_resolved"
     notice_id: int
+    resolution: str | None = None
+    require_response: bool | None = None
+    age_seconds: int | None = None
+    had_reply: bool | None = None
+    superseded_by: int | None = None
 
 
 class TaskCreated(_Base):
