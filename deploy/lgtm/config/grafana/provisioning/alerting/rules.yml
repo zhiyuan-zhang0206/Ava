@@ -3838,7 +3838,7 @@ groups:
         condition: D
         for: 10m
         keepFiringFor: *recovery-window
-        missing_series_evals_to_resolve: *fast-missing-evals
+        missing_series_evals_to_resolve: &slow-missing-evals 2
         noDataState: OK
         execErrState: OK
         labels:
@@ -3909,7 +3909,7 @@ groups:
         condition: D
         for: 5m
         keepFiringFor: *recovery-window
-        missing_series_evals_to_resolve: &slow-missing-evals 2
+        missing_series_evals_to_resolve: *slow-missing-evals
         noDataState: OK
         execErrState: OK
         labels:
