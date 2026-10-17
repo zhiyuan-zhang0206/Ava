@@ -78,3 +78,12 @@ column references; body bugs surface only when the trigger actually
 fires (a wrong `NEW.agent_id` reference
 in #369's rename slipped past lint + pytest + apply-time validation,
 caught only by real cross-machine force-terminate in prod).
+
+## Schema drift
+
+`scripts/audit/schema_drift.py` compares a live database's public columns with
+`db/schema.sql` and reports every extra or missing table and column with a class
+— a designed runtime object (checkpoint tables, `telemetry_events` partitions)
+or unexplained residue. Run it before writing a migration for an object you
+cannot find in the baseline, and after an upgrade:
+[schema drift audit](../../scripts/audit/docs/schema-drift.meiva.okf.md).
